@@ -283,3 +283,90 @@ def test_миграция_новостей_перечислена_в_старт�
     from pathlib import Path
     текст = Path("app/database.py").read_text(encoding="utf-8")
     assert "for stmt in MARKET_NEWS_MIGRATION_DDL:" in текст
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_связи_считаются_по_совместным_упоминаниям(auth_client, db):
+    """Связь — наблюдение: пара участников из одного материала, с примерами.
+
+    Число без материалов было бы утверждением об отношениях, которого данные не
+    дают: двое в одном тексте могут быть поставкой, а могут — абзацами обзора.
+    """
+    from app.models import MarketActor, MarketNews, MarketNewsMention
+    from datetime import datetime, timezone
+
+    cid = (await db.execute(select(Company.id).where(Company.slug == "gig"))).scalar_one()
+    общий = {"company_id": str(cid)}
+    завод = MarketActor(company_id=cid, kind="vendor", name="QA Завод Инверторов")
+    db.add(завод)
+    сеть = MarketOperator(company_id=cid, name="QA Сеть Связей", relation="competitor")
+    db.add(сеть)
+    await db.flush()
+
+    for i in range(2):
+        n = MarketNews(company_id=cid, title=f"QA связь {i}",
+                       url=f"https://example.ru/link-{i}", url_key=f"qa-link-{i}",
+                       status="kept", channel="manual",
+                       published_at=datetime.now(timezone.utc))
+        db.add(n)
+        await db.flush()
+        db.add(MarketNewsMention(company_id=cid, news_id=n.id, role="vendor",
+                                 name=завод.name, actor_id=завод.id))
+        db.add(MarketNewsMention(company_id=cid, news_id=n.id, role="operator",
+                                 name=сеть.name, operator_id=сеть.id))
+    await db.commit()
+
+    связи = (await auth_client.get("/api/market/news/links", params=общий)).json()["links"]
+    наша = [l for l in связи
+            if {l["a"]["name"], l["b"]["name"]} == {завод.name, сеть.name}]
+    assert наша, "пара из одного материала и есть связь"
+    assert наша[0]["news"] == 2
+    assert len(наша[0]["examples"]) == 2, "связь показывает, из чего собрана"
+    assert {наша[0]["a"]["role"], наша[0]["b"]["role"]} == {"vendor", "operator"}
+
+    # Разрез по участникам: кто действует и сколько про него писали.
+    уч = (await auth_client.get("/api/market/news/participants", params=общий)).json()
+    по_имени = {p["name"]: p for p in уч["participants"]}
+    assert по_имени[завод.name]["news"] == 2
+    assert по_имени[завод.name]["roleLabel"] == "производитель оборудования"
+    assert уч["byRole"]["vendor"] >= 2
+
+    # Лента умеет показать только материалы этого участника.
+    лента = (await auth_client.get("/api/market/news",
+                                   params={**общий, "mention": завод.name})).json()
+    assert лента["total"] == 2
+    assert all(any(a["name"] == завод.name for a in n["actors"]) for n in лента["news"])
+
+    # И только материалы, где вообще есть производитель.
+    по_роли = (await auth_client.get("/api/market/news",
+                                     params={**общий, "role": "vendor"})).json()
+    assert по_роли["total"] >= 2
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_справочник_участников_и_перечитывание(auth_client, db):
+    """Завели производителя — материалы о нём узнают без нового обхода."""
+    from app.models import MarketNews
+    from datetime import datetime, timezone
+
+    cid = (await db.execute(select(Company.id).where(Company.slug == "gig"))).scalar_one()
+    общий = {"company_id": str(cid)}
+    db.add(MarketNews(company_id=cid, title="QA Ромашка Электро поставит станции",
+                      url="https://example.ru/qa-romashka", url_key="qa-romashka",
+                      status="kept", channel="manual",
+                      published_at=datetime.now(timezone.utc)))
+    await db.commit()
+
+    создан = await auth_client.post("/api/market/news/actors", params=общий, json={
+        "name": "Ромашка Электро", "kind": "vendor", "aliases": ["ромашка-электро"]})
+    assert создан.status_code == 201, создан.text
+    # Повтор по имени — отказ: два написания одной компании рвут связи.
+    assert (await auth_client.post("/api/market/news/actors", params=общий, json={
+        "name": "ромашка электро", "kind": "vendor"})).status_code == 409
+
+    итог = (await auth_client.post("/api/market/news/rescan", params=общий)).json()
+    assert итог["added"] >= 1, "существующий материал узнал нового участника"
+
+    справочник = (await auth_client.get("/api/market/news/actors", params=общий)).json()
+    наш = next(a for a in справочник["actors"] if a["name"] == "Ромашка Электро")
+    assert наш["mentions"] >= 1 and наш["kindLabel"] == "производитель оборудования"

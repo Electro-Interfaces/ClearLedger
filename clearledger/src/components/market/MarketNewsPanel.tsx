@@ -42,7 +42,13 @@ import {
   NewsBrief, NewsCard, NewsHero, NewsRow, StripTitle,
 } from './MarketNewsFeed'
 import {
-  createMarketNews, createMarketNewsSource, fetchMarketNews, getMarketNewsSettings,
+  ActorsAdmin, LinkRow, NoActors, ParticipantRow, RoleFilter,
+} from './MarketNewsActors'
+import {
+  createMarketActor, createMarketNews, createMarketNewsSource, fetchMarketNews,
+  getMarketLinks, getMarketNewsSettings, getMarketParticipants, listMarketActors,
+  patchMarketActor, rescanMarketMentions,
+  ACTOR_KIND_LABEL,
   listMarketNews, listMarketNewsSources, listMarketOperators, patchMarketNews,
   patchMarketNewsSource, presetMarketNewsSources, putMarketNewsSettings,
   NEWS_CHANNEL_LABEL, NEWS_SOURCE_KIND_LABEL, NEWS_STATUS_LABEL, NEWS_TOPIC_LABEL,
@@ -51,6 +57,8 @@ import {
 
 const ВИДЫ = [
   { k: 'feed', label: 'Лента' },
+  { k: 'actors', label: 'Участники' },
+  { k: 'links', label: 'Связи' },
   { k: 'review', label: 'Разбор' },
   { k: 'admin', label: 'Управление' },
 ] as const
@@ -227,17 +235,26 @@ export function MarketNewsPanel() {
   const [адресИсточника, setАдресИсточника] = useState('')
   const [рубрикаИсточника, setРубрикаИсточника] = useState('auto')
   const [слова, setСлова] = useState<{ include: string; exclude: string } | null>(null)
+  // Разрезы по участникам: роль, выбранный участник и окно наблюдения.
+  const [роль, setРоль] = useState('all')
+  const [участник, setУчастник] = useState('')
+  const [окно, setОкно] = useState('180')
+  const [имяУчастника, setИмяУчастника] = useState('')
+  const [видУчастника, setВидУчастника] = useState('vendor')
+  const [псевдонимы, setПсевдонимы] = useState('')
 
   const лента = useQuery({
-    queryKey: ['market-news', companyId, подача, тема, оператор, поиск],
+    queryKey: ['market-news', companyId, подача, тема, оператор, поиск, участник, роль],
     queryFn: () => listMarketNews(companyId, {
       status: подача === 'review' ? 'new' : ('feed' as never),
       ...(тема === 'all' ? {} : { topic: тема }),
       ...(оператор === 'all' ? {} : { operator_id: оператор }),
       ...(поиск.trim() ? { q: поиск.trim() } : {}),
+      ...(участник ? { mention: участник } : {}),
+      ...(роль === 'all' ? {} : { role: роль }),
       limit: 100,
     }),
-    enabled: !!companyId && подача !== 'admin',
+    enabled: !!companyId && (подача === 'feed' || подача === 'review'),
   })
   const источники = useQuery({
     queryKey: ['market-news-sources', companyId],
@@ -247,6 +264,26 @@ export function MarketNewsPanel() {
   const настройки = useQuery({
     queryKey: ['market-news-settings', companyId],
     queryFn: () => getMarketNewsSettings(companyId),
+    enabled: !!companyId && подача === 'admin',
+  })
+  const участники = useQuery({
+    queryKey: ['market-news-participants', companyId, роль, окно],
+    queryFn: () => getMarketParticipants(companyId, {
+      ...(роль === 'all' ? {} : { role: роль }), days: Number(окно),
+    }),
+    enabled: !!companyId && подача === 'actors',
+  })
+  const связи = useQuery({
+    queryKey: ['market-news-links', companyId, роль, участник, окно],
+    queryFn: () => getMarketLinks(companyId, {
+      ...(роль === 'all' ? {} : { role: роль }),
+      ...(участник ? { name: участник } : {}), days: Number(окно),
+    }),
+    enabled: !!companyId && подача === 'links',
+  })
+  const справочник = useQuery({
+    queryKey: ['market-actors', companyId],
+    queryFn: () => listMarketActors(companyId),
     enabled: !!companyId && подача === 'admin',
   })
   const операторы = useQuery({
@@ -291,6 +328,27 @@ export function MarketNewsPanel() {
       patchMarketNewsSource(companyId, id, body),
     onSuccess: освежить,
   })
+  const освежитьРазрезы = () => {
+    qc.invalidateQueries({ queryKey: ['market-news-participants', companyId] })
+    qc.invalidateQueries({ queryKey: ['market-news-links', companyId] })
+    qc.invalidateQueries({ queryKey: ['market-actors', companyId] })
+  }
+  const датьУчастника = useMutation({
+    mutationFn: () => createMarketActor(companyId, {
+      name: имяУчастника, kind: видУчастника,
+      aliases: псевдонимы.split(',').map((w) => w.trim()).filter(Boolean),
+    }),
+    onSuccess: () => { setИмяУчастника(''); setПсевдонимы(''); освежитьРазрезы() },
+  })
+  const правкаУчастника = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
+      patchMarketActor(companyId, id, body),
+    onSuccess: освежитьРазрезы,
+  })
+  const перечитать = useMutation({
+    mutationFn: () => rescanMarketMentions(companyId),
+    onSuccess: () => { освежитьРазрезы(); освежить() },
+  })
   const сохранитьСловарь = useMutation({
     mutationFn: () => putMarketNewsSettings(companyId, {
       include_words: (слова?.include ?? '').split('\n').map((w) => w.trim()).filter(Boolean),
@@ -317,6 +375,8 @@ export function MarketNewsPanel() {
   const ops = (операторы.data?.operators ?? []).map((o) => ({ id: o.id, name: o.name }))
   const byTopic = лента.data?.byTopic ?? {}
   const результат = обход.data
+  const связиРоли = Object.fromEntries(
+    (связи.data?.links ?? []).flatMap((l) => [l.a.role, l.b.role]).map((r) => [r, 1]))
   const отборов = [тема !== 'all', оператор !== 'all', !!поиск.trim()].filter(Boolean).length
   const список = источники.data?.sources ?? []
   // Поля словаря показывают действующий отбор: свой, если он задан, иначе встроенный.
@@ -362,7 +422,7 @@ export function MarketNewsPanel() {
             </span>
           )}
           <span className="ml-auto flex flex-wrap items-center gap-2" data-export-ignore>
-            {подача !== 'admin' && (
+            {(подача === 'feed' || подача === 'review') && (
               <>
                 {/* Поля отбора занимали полосу над лентой и отодвигали новости за
                     край экрана: в свёрнутом виде кнопка называет число действующих
@@ -447,7 +507,67 @@ export function MarketNewsPanel() {
         </p>
       )}
 
-      {подача === 'admin' ? (
+      {(подача === 'actors' || подача === 'links') && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3">
+            <RoleFilter value={роль} counts={участники.data?.byRole ?? связиРоли}
+              onChange={setРоль} />
+            <Input value={участник} onChange={(e) => setУчастник(e.target.value)}
+              placeholder="Участник: «Парус электро»" className="h-8 w-[220px] text-xs" />
+            <Select value={окно} onValueChange={setОкно}>
+              <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30">за месяц</SelectItem>
+                <SelectItem value="90">за три месяца</SelectItem>
+                <SelectItem value="180">за полгода</SelectItem>
+                <SelectItem value="365">за год</SelectItem>
+              </SelectContent>
+            </Select>
+            {(роль !== 'all' || участник) && (
+              <Button size="sm" variant="ghost" className="h-7 text-xs"
+                onClick={() => { setРоль('all'); setУчастник('') }}>Сбросить</Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {подача === 'actors' ? (
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto">
+          {участники.isLoading && (
+            <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden /> Считаем участников…
+            </p>
+          )}
+          {!участники.isLoading && (участники.data?.participants.length ?? 0) === 0 && (
+            <NoActors kind="participants" />
+          )}
+          {(участники.data?.participants ?? [])
+            .filter((p) => !участник || p.name.toLowerCase().includes(участник.toLowerCase()))
+            .map((p) => (
+              <ParticipantRow key={`${p.role}:${p.name}`} p={p}
+                onNews={(имя) => { setУчастник(имя); setПодача('feed') }}
+                onLinks={(имя) => { setУчастник(имя); setПодача('links') }} />
+            ))}
+        </div>
+      ) : подача === 'links' ? (
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto">
+          {связи.isLoading && (
+            <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden /> Ищем связи…
+            </p>
+          )}
+          {!связи.isLoading && (связи.data?.links.length ?? 0) === 0 && <NoActors kind="links" />}
+          {(связи.data?.links ?? []).map((l) => (
+            <LinkRow key={`${l.a.name}|${l.b.name}`} l={l}
+              onNews={(имя) => { setУчастник(имя); setПодача('feed') }} />
+          ))}
+          {(связи.data?.total ?? 0) > (связи.data?.links.length ?? 0) && (
+            <p className="p-2 text-xs text-muted-foreground">
+              Показаны первые {связи.data?.links.length} из {связи.data?.total} связей.
+            </p>
+          )}
+        </div>
+      ) : подача === 'admin' ? (
         <div className="min-h-0 flex-1 space-y-3 overflow-auto">
           <Card>
             <CardContent className="space-y-3 p-3">
@@ -534,6 +654,36 @@ export function MarketNewsPanel() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardContent className="flex flex-wrap items-end gap-2 p-3">
+              <Input value={имяУчастника} onChange={(e) => setИмяУчастника(e.target.value)}
+                placeholder="Участник рынка: «Парус электро»" className="h-8 w-[260px] text-xs" />
+              <Select value={видУчастника} onValueChange={setВидУчастника}>
+                <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ACTOR_KIND_LABEL).map(([k, label]) => (
+                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input value={псевдонимы} onChange={(e) => setПсевдонимы(e.target.value)}
+                placeholder="Как ещё пишут, через запятую: Парус-электро, ПАРУС ЭЛЕКТРО"
+                className="h-8 w-[380px] text-xs" />
+              <Button size="sm" disabled={!имяУчастника || датьУчастника.isPending}
+                onClick={() => датьУчастника.mutate()}>Добавить участника</Button>
+              {датьУчастника.isError && (
+                <span role="alert" className="text-xs text-destructive">
+                  {(датьУчастника.error as Error).message}
+                </span>
+              )}
+            </CardContent>
+          </Card>
+
+          <ActorsAdmin actors={справочник.data?.actors ?? []} loading={справочник.isLoading}
+            onPatch={(id, body) => правкаУчастника.mutate({ id, body })}
+            onRescan={() => перечитать.mutate()} rescanning={перечитать.isPending}
+            rescanResult={перечитать.data} />
 
           {список.length === 0 && !источники.isLoading && (
             <p className="p-2 text-sm text-muted-foreground">

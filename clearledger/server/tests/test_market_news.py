@@ -310,3 +310,78 @@ def test_регион_подставляется_только_со_словом_
     assert "region" not in suggest_links(текст, [], [], регионы)
     assert suggest_links("В Амурской области открыли станцию", [], [], регионы)["region"] == "Амурская"
     assert suggest_links("Станция в Московской области", [], [], регионы)["region"] == "Московская"
+
+
+def test_состав_участников_а_не_одна_привязка():
+    """Рынок читается связями: в материале бывает и завод, и сеть, и ведомство.
+
+    Роль берётся из реестра, а не из текста: оператор остаётся оператором, даже
+    если в новости он назван «компанией».
+    """
+    from types import SimpleNamespace as N
+    from app.services.market_news import actors_in_text
+    ops = [N(id="1", name="Ситроникс Электро", short_name="Sitronics", is_platform=False),
+           N(id="2", name="ItCharge", short_name=None, is_platform=True)]
+    pls = [N(id="3", brand="Яндекс Заправки", app="Яндекс Заправки", developer="Яндекс",
+             player_class="зарядная сеть / агрегатор"),
+           N(id="4", brand="Атом", app="Атом", developer="Кама", player_class="автопроизводитель")]
+    acs = [N(id="5", kind="vendor", name="Парус электро", aliases=["парус-электро"])]
+
+    состав = actors_in_text(
+        "«Парус электро» поставит инверторы сети Ситроникс Электро, сообщили в Минэнерго",
+        ops, pls, acs)
+    роли = {m["role"]: m["name"] for m in состав}
+    assert роли["vendor"] == "Парус электро"
+    assert роли["operator"] == "Ситроникс Электро"
+    assert роли["state"] == "Минэнерго России"
+    assert all(m["matched"] for m in состав), "по какому написанию узнали — обязательно"
+
+    # Платформа отличается от сети: разговор с ней идёт про протоколы, а не про тариф.
+    только_платформа = actors_in_text("Станции работают на системе ItCharge", ops, pls, acs)
+    assert только_платформа[0]["role"] == "platform"
+
+    # Класс приложения задаёт роль игрока.
+    авто = actors_in_text("Электромобиль Атом получил новую зарядку", ops, pls, acs)
+    assert авто[0]["role"] == "automaker"
+
+
+def test_имя_узнаётся_целым_словом():
+    """Подстрока ловит «Волт» внутри «вольтаж» и подписывает новость чужой сетью."""
+    from types import SimpleNamespace as N
+    from app.services.market_news import actors_in_text
+    ops = [N(id="1", name="Волт", short_name=None, is_platform=False)]
+    assert actors_in_text("Измеряется вольтаж аккумулятора", ops, [], []) == []
+    assert actors_in_text("Сеть «Волт» открыла станцию", ops, [], [])[0]["name"] == "Волт"
+
+
+def test_псевдоним_справочника_работает_как_имя():
+    """«Парус-электро» и «Парус электро» — одна компания, иначе связь распадётся."""
+    from types import SimpleNamespace as N
+    from app.services.market_news import actors_in_text
+    acs = [N(id="5", kind="vendor", name="Парус электро",
+             aliases=["парус-электро", "parus electro"])]
+    for написание in ("Парус-электро выпустил", "Компания Parus Electro представила"):
+        найдено = actors_in_text(написание, [], [], acs)
+        assert найдено and найдено[0]["name"] == "Парус электро"
+
+
+def test_одна_компания_в_двух_реестрах_не_двое():
+    """«РусГидро» (сеть) и «ЭЗС РусГидро» (приложение) — один участник.
+
+    Иначе разрез показывает связь компании с самой собой — это и случилось на
+    живых данных 28.10.2026.
+    """
+    from types import SimpleNamespace as N
+    from app.services.market_news import actors_in_text
+    ops = [N(id="10", name="РусГидро", short_name=None, is_platform=False)]
+    pls = [N(id="11", brand="ЭЗС РусГидро", app="ЭЗС РусГидро", developer=None,
+             operator_id="10", player_class="зарядная сеть / агрегатор")]
+    состав = actors_in_text("РусГидро открыла станции, приложение ЭЗС РусГидро обновилось",
+                            ops, pls, [])
+    assert [m["role"] for m in состав] == ["operator"], "приложение той же сети — не второй участник"
+
+    # Независимый агрегатор остаётся отдельным участником.
+    чужой = [N(id="12", brand="Яндекс Заправки", app="Яндекс Заправки", developer="Яндекс",
+               operator_id=None, player_class="зарядная сеть / агрегатор")]
+    пара = actors_in_text("РусГидро и Яндекс Заправки договорились", ops, чужой, [])
+    assert {m["role"] for m in пара} == {"operator", "aggregator"}

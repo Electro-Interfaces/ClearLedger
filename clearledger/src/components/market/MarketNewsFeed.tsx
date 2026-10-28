@@ -170,6 +170,17 @@ export function NewsCard({ n }: { n: MarketNewsItem }) {
             {n.snippet}
           </span>
         )}
+        {n.actors.length > 0 && (
+          <span className="mt-2 flex flex-wrap gap-1">
+            {n.actors.slice(0, 4).map((a) => (
+              <span key={`${a.role}:${a.name}`}
+                className="rounded-md border border-border px-1.5 py-0.5 text-xs
+                           text-muted-foreground">
+                {a.name}
+              </span>
+            ))}
+          </span>
+        )}
         <span className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-3 text-xs
                          text-muted-foreground">
           <span className="font-medium text-foreground/80">{n.sourceName ?? 'источник не указан'}</span>

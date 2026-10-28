@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, func, or_ as sa_or, select
+from sqlalchemy import String, and_, case, cast, func, or_ as sa_or, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -28,7 +28,8 @@ from app.database import get_db
 from app.net_guard import assert_external_host
 from app.services.mapping import canon_city, canon_region
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
-                        MarketNews, MarketNewsSettings, MarketNewsSource,
+                        MarketActor, MarketNews, MarketNewsMention,
+                        MarketNewsSettings, MarketNewsSource,
                         MarketPlayer, MarketRegionStat, MarketShop,
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
@@ -5167,6 +5168,8 @@ async def list_news(
     topic: str | None = Query(None),
     operator_id: uuid.UUID | None = Query(None),
     region: str | None = Query(None),
+    mention: str | None = Query(None, description="материалы, где назван этот участник"),
+    role: str | None = Query(None, description="материалы с участником такой роли"),
     q: str | None = Query(None, description="поиск по заголовку"),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
@@ -5200,6 +5203,18 @@ async def list_news(
         base = base.where(MarketNews.operator_id == operator_id)
     if region:
         base = base.where(MarketNews.region == region)
+    if mention or role:
+        # Разрез по участнику рынка, а не по тексту: «что писали про этот завод»
+        # и «где вообще появляются производители» — два разных вопроса, и второй
+        # по заголовку не ищется.
+        м = select(MarketNewsMention.news_id).where(MarketNewsMention.company_id == cid)
+        if mention:
+            м = м.where(MarketNewsMention.name.ilike(f"%{mention.strip()}%"))
+        if role:
+            if role not in MENTION_ROLES:
+                raise HTTPException(422, "Роль участника вне списка")
+            м = м.where(MarketNewsMention.role == role)
+        base = base.where(MarketNews.id.in_(м))
     if q and q.strip():
         base = base.where(MarketNews.title.ilike(f"%{q.strip()}%"))
     if date_from:
@@ -5214,6 +5229,15 @@ async def list_news(
         base.order_by(MarketNews.published_at.desc().nullslast(),
                       MarketNews.retrieved_at.desc(), MarketNews.id)
         .offset(offset).limit(limit))).scalars().all()
+
+    состав: dict[str, list[dict[str, str]]] = {}
+    if rows:
+        for n_id, r, nm in (await db.execute(
+            select(MarketNewsMention.news_id, MarketNewsMention.role, MarketNewsMention.name)
+            .where(MarketNewsMention.news_id.in_([n.id for n in rows]))
+            .order_by(MarketNewsMention.role))).all():
+            состав.setdefault(str(n_id), []).append(
+                {"role": r, "roleLabel": ROLE_LABEL.get(r, r), "name": nm})
 
     ops = {str(o.id): o.name for o in (await db.execute(
         select(MarketOperator).where(MarketOperator.company_id == cid))).scalars().all()}
@@ -5246,6 +5270,7 @@ async def list_news(
             "siteId": str(n.site_id) if n.site_id else None,
             "region": n.region, "city": n.city,
             "suggested": n.suggested, "linkedBy": n.linked_by,
+            "actors": состав.get(str(n.id), []),
             "leadId": str(n.lead_id) if n.lead_id else None,
             "note": n.note, "author": n.author_name,
         } for n in rows],
@@ -5329,3 +5354,289 @@ async def patch_news(
     news.author_name = news.author_name or user.name
     await db.commit()
     return {"ok": True}
+
+
+# ===========================================================================
+# Участники рынка в новостях: состав, связи и справочник
+# ===========================================================================
+# Маркетинг читает рынок связями: завод и сеть в одном материале, сеть и
+# ведомство, агрегатор и банк. Одна привязка «чья новость» на этот вопрос не
+# отвечает, поэтому у новости столько упоминаний, сколько в ней участников.
+#
+# Связь здесь — НАБЛЮДЕНИЕ, а не утверждение об отношениях: она считается по
+# частоте совместных появлений и всегда показывает, из каких материалов собрана.
+
+
+ACTOR_KINDS = {"vendor", "service", "state", "utility", "other"}
+MENTION_ROLES = {"operator", "platform", "vendor", "aggregator", "automaker",
+                 "bank", "service", "state", "utility", "other"}
+
+ROLE_LABEL = {
+    "operator": "сеть ЭЗС", "platform": "платформа и процессинг",
+    "vendor": "производитель оборудования", "aggregator": "агрегатор и приложение",
+    "automaker": "автопроизводитель", "bank": "банк и финтех",
+    "service": "сервис и монтаж", "state": "государство и регулятор",
+    "utility": "энергетика и сети", "other": "прочее",
+}
+
+
+class ActorIn(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    kind: str = "vendor"
+    aliases: list[str] | None = None
+    site_url: str | None = Field(default=None, max_length=300)
+    inn: str | None = Field(default=None, max_length=20)
+    note: str | None = None
+
+
+class ActorPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    kind: str | None = None
+    aliases: list[str] | None = None
+    site_url: str | None = Field(default=None, max_length=300)
+    confirmed: bool | None = None
+    note: str | None = None
+
+
+@router.get("/news/actors")
+async def list_actors(
+    company_id: str = Query(...),
+    kind: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Справочник участников, которых нет в реестрах сетей и приложений.
+
+    Производителей оборудования в продукте не было вовсе: поле `vendor` у точек
+    рынка пустое у всех записей. Их имена приходят из новостей, поэтому рядом с
+    каждым показано, сколько раз он упомянут, — пустая карточка в справочнике
+    означает, что участник заведён, но в потоке не встречается.
+    """
+    cid = await _member(company_id, user, db)
+    q = select(MarketActor).where(MarketActor.company_id == cid)
+    if kind:
+        q = q.where(MarketActor.kind == kind)
+    rows = (await db.execute(q.order_by(MarketActor.kind, MarketActor.name))).scalars().all()
+    счёт = dict((a, int(c)) for a, c in (await db.execute(
+        select(MarketNewsMention.actor_id, func.count())
+        .where(MarketNewsMention.company_id == cid, MarketNewsMention.actor_id.is_not(None))
+        .group_by(MarketNewsMention.actor_id))).all())
+    return {"actors": [{
+        "id": str(a.id), "name": a.name, "kind": a.kind,
+        "kindLabel": ROLE_LABEL.get(a.kind, a.kind),
+        "aliases": list(a.aliases or []), "siteUrl": a.site_url, "inn": a.inn,
+        "confirmed": a.confirmed, "note": a.note,
+        "mentions": счёт.get(a.id, 0),
+    } for a in rows], "kinds": sorted(ACTOR_KINDS), "roleLabels": ROLE_LABEL}
+
+
+@router.post("/news/actors", status_code=status.HTTP_201_CREATED)
+async def create_actor(
+    company_id: str = Query(...), body: ActorIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Завести участника рынка: производителя, сервис, ведомство, энергетику."""
+    cid = await _member(company_id, user, db)
+    if body.kind not in ACTOR_KINDS:
+        raise HTTPException(422, "Вид участника вне списка")
+    есть = (await db.execute(select(MarketActor).where(
+        MarketActor.company_id == cid,
+        func.lower(MarketActor.name) == body.name.strip().lower()))).scalar_one_or_none()
+    if есть is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"«{есть.name}» уже в справочнике")
+    actor = MarketActor(company_id=cid, confirmed=True,
+                        **{**body.model_dump(), "name": body.name.strip()})
+    db.add(actor)
+    await db.commit()
+    return {"id": str(actor.id)}
+
+
+@router.patch("/news/actors/{actor_id}")
+async def patch_actor(
+    actor_id: uuid.UUID, company_id: str = Query(...), body: ActorPatch = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Поправить участника: имя, вид, написания, подтверждение кандидата."""
+    cid = await _member(company_id, user, db)
+    actor = (await db.execute(select(MarketActor).where(
+        MarketActor.id == actor_id, MarketActor.company_id == cid))).scalar_one_or_none()
+    if actor is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Участник не найден")
+    data = body.model_dump(exclude_unset=True)
+    if "kind" in data and data["kind"] not in ACTOR_KINDS:
+        raise HTTPException(422, "Вид участника вне списка")
+    for k, v in data.items():
+        setattr(actor, k, v)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/news/participants")
+async def news_participants(
+    company_id: str = Query(...),
+    role: str | None = Query(None),
+    days: int = Query(90, ge=1, le=730),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Кто действует на рынке по новостям: участники, роли и темы их материалов.
+
+    Это разрез не по новостям, а по людям рынка: сколько раз компанию назвали,
+    в каких темах и когда о ней писали в последний раз. Молчание тоже факт —
+    сеть, о которой полгода ничего, ведёт себя иначе, чем сеть в заголовках.
+    """
+    cid = await _member(company_id, user, db)
+    с_даты = datetime.now(timezone.utc) - timedelta(days=days)
+    q = (select(MarketNewsMention.role, MarketNewsMention.name,
+                func.count(func.distinct(MarketNewsMention.news_id)),
+                func.max(MarketNews.published_at),
+                # В PostgreSQL нет `min(uuid)`: идентификатор берём как текст —
+                # он нужен лишь как ссылка на карточку участника.
+                func.min(cast(MarketNewsMention.operator_id, String)),
+                func.min(cast(MarketNewsMention.actor_id, String)),
+                func.min(cast(MarketNewsMention.player_id, String)))
+         .join(MarketNews, MarketNews.id == MarketNewsMention.news_id)
+         .where(MarketNewsMention.company_id == cid,
+                MarketNews.status != "noise",
+                sa_or(MarketNews.published_at.is_(None), MarketNews.published_at >= с_даты))
+         .group_by(MarketNewsMention.role, MarketNewsMention.name))
+    if role:
+        q = q.where(MarketNewsMention.role == role)
+    rows = (await db.execute(q)).all()
+
+    темы: dict[tuple[str, str], dict[str, int]] = {}
+    for r, n, t, c in (await db.execute(
+        select(MarketNewsMention.role, MarketNewsMention.name, MarketNews.topic, func.count())
+        .join(MarketNews, MarketNews.id == MarketNewsMention.news_id)
+        .where(MarketNewsMention.company_id == cid, MarketNews.status != "noise")
+        .group_by(MarketNewsMention.role, MarketNewsMention.name, MarketNews.topic))).all():
+        темы.setdefault((r, n), {})[t] = int(c)
+
+    участники = [{
+        "role": role_, "roleLabel": ROLE_LABEL.get(role_, role_), "name": name,
+        "news": int(cnt), "lastAt": last.isoformat() if last else None,
+        "operatorId": op, "actorId": ac, "playerId": pl,
+        "byTopic": темы.get((role_, name), {}),
+    } for role_, name, cnt, last, op, ac, pl in rows]
+    участники.sort(key=lambda x: (-x["news"], x["name"]))
+    по_ролям: dict[str, int] = {}
+    for u in участники:
+        по_ролям[u["role"]] = по_ролям.get(u["role"], 0) + u["news"]
+    return {"participants": участники, "byRole": по_ролям,
+            "roleLabels": ROLE_LABEL, "days": days}
+
+
+@router.get("/news/links")
+async def news_links(
+    company_id: str = Query(...),
+    role: str | None = Query(None, description="одна из сторон связи этой роли"),
+    name: str | None = Query(None, description="связи конкретного участника"),
+    days: int = Query(180, ge=1, le=730),
+    min_news: int = Query(1, ge=1, le=50),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Связи участников: кто с кем встречается в одних материалах.
+
+    Связь — наблюдение, а не утверждение об отношениях: «Парус электро» и
+    «Росатом» в одном тексте могут быть поставкой, а могут — двумя абзацами
+    обзора. Поэтому рядом с числом всегда перечислены материалы, из которых
+    связь сложилась, и человек решает сам.
+    """
+    cid = await _member(company_id, user, db)
+    с_даты = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(MarketNewsMention.news_id, MarketNewsMention.role, MarketNewsMention.name,
+               MarketNews.title, MarketNews.published_at)
+        .join(MarketNews, MarketNews.id == MarketNewsMention.news_id)
+        .where(MarketNewsMention.company_id == cid,
+               MarketNews.status != "noise",
+               sa_or(MarketNews.published_at.is_(None), MarketNews.published_at >= с_даты))
+    )).all()
+
+    по_новостям: dict[uuid.UUID, dict[str, Any]] = {}
+    for news_id, r, n, title, when in rows:
+        d = по_новостям.setdefault(news_id, {"title": title, "when": when, "кто": []})
+        d["кто"].append((r, n))
+
+    def одно_лицо(a: tuple[str, str], b: tuple[str, str]) -> bool:
+        """Одна компания под двумя именами связью не считается.
+
+        «РусГидро» в реестре сетей и «ЭЗС РусГидро» в реестре приложений — это
+        один участник, и пара из них говорила бы о связи с самим собой.
+        """
+        x, y = a[1].lower().replace("ё", "е"), b[1].lower().replace("ё", "е")
+        return x in y or y in x
+
+    пары: dict[tuple[tuple[str, str], tuple[str, str]], dict[str, Any]] = {}
+    for d in по_новостям.values():
+        уникальные = sorted(set(d["кто"]))
+        for i, a in enumerate(уникальные):
+            for b in уникальные[i + 1:]:
+                if одно_лицо(a, b):
+                    continue
+                ключ = (a, b)
+                п = пары.setdefault(ключ, {"news": 0, "examples": []})
+                п["news"] += 1
+                if len(п["examples"]) < 5:
+                    п["examples"].append({
+                        "title": d["title"],
+                        "publishedAt": d["when"].isoformat() if d["when"] else None})
+
+    links = [{
+        "a": {"role": a[0], "roleLabel": ROLE_LABEL.get(a[0], a[0]), "name": a[1]},
+        "b": {"role": b[0], "roleLabel": ROLE_LABEL.get(b[0], b[0]), "name": b[1]},
+        "news": v["news"], "examples": v["examples"],
+    } for (a, b), v in пары.items() if v["news"] >= min_news]
+    if role:
+        links = [l for l in links if role in (l["a"]["role"], l["b"]["role"])]
+    if name:
+        игла = name.strip().lower()
+        links = [l for l in links
+                 if игла in l["a"]["name"].lower() or игла in l["b"]["name"].lower()]
+    links.sort(key=lambda l: (-l["news"], l["a"]["name"], l["b"]["name"]))
+    return {"links": links[:300], "total": len(links), "days": days,
+            "roleLabels": ROLE_LABEL}
+
+
+@router.post("/news/rescan")
+async def rescan_mentions(
+    company_id: str = Query(...),
+    limit: int = Query(300, ge=1, le=2000),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Перечитать состав участников у уже собранных новостей.
+
+    Нужна после правки справочника: завели производителя — материалы, где он
+    назван, должны о нём узнать, не дожидаясь нового обхода.
+    """
+    cid = await _member(company_id, user, db)
+    operators = list((await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all())
+    players = list((await db.execute(select(MarketPlayer).where(
+        MarketPlayer.company_id == cid))).scalars().all())
+    actors = list((await db.execute(select(MarketActor).where(
+        MarketActor.company_id == cid))).scalars().all())
+    news = (await db.execute(select(MarketNews).where(MarketNews.company_id == cid)
+                             .order_by(MarketNews.published_at.desc().nullslast())
+                             .limit(limit))).scalars().all()
+
+    было = {}
+    for n_id, role, name in (await db.execute(
+        select(MarketNewsMention.news_id, MarketNewsMention.role, MarketNewsMention.name)
+        .where(MarketNewsMention.company_id == cid))).all():
+        было.setdefault(n_id, set()).add((role, name))
+
+    добавлено = 0
+    for n in news:
+        текст = f"{n.title} {n.snippet or ''}"
+        for м in market_news.actors_in_text(текст, operators, players, actors):
+            if (м["role"], м["name"]) in было.get(n.id, set()):
+                continue
+            db.add(MarketNewsMention(
+                company_id=cid, news_id=n.id, role=м["role"], name=м["name"][:200],
+                matched=(м["matched"] or "")[:200],
+                operator_id=uuid.UUID(м["operator_id"]) if м.get("operator_id") else None,
+                player_id=uuid.UUID(м["player_id"]) if м.get("player_id") else None,
+                actor_id=uuid.UUID(м["actor_id"]) if м.get("actor_id") else None,
+                linked_by="auto"))
+            добавлено += 1
+    await db.commit()
+    return {"news": len(news), "added": добавлено}

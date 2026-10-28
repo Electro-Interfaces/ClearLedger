@@ -41,7 +41,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MarketNews, MarketNewsSource, MarketOperator, MarketPlayer, Region
+from app.models import (MarketActor, MarketNews, MarketNewsMention, MarketNewsSource,
+                        MarketOperator, MarketPlayer, Region)
 
 TIMEOUT = httpx.Timeout(25.0)
 UA = "ElsyPlusMarket/1.0 (+https://rushydro.dataworker.ru)"
@@ -475,6 +476,8 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
         MarketOperator.company_id == cid))).scalars().all())
     players = list((await db.execute(select(MarketPlayer).where(
         MarketPlayer.company_id == cid))).scalars().all())
+    actors = list((await db.execute(select(MarketActor).where(
+        MarketActor.company_id == cid))).scalars().all())
     regions = [r for (r,) in (await db.execute(select(Region.name).where(
         Region.company_id == cid))).all() if r]
 
@@ -567,7 +570,7 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                 key = it["key"] or normalize_url(it["url"])
                 text = f"{it['title']} {it.get('snippet') or ''}"
                 hints = suggest_links(text, operators, players, regions)
-                db.add(MarketNews(
+                новость = MarketNews(
                     company_id=cid, source_id=src.id,
                     title=it["title"][:500], url=it["url"][:900], url_key=key,
                     snippet=it.get("snippet"),
@@ -590,7 +593,19 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                     suggested=hints or None, linked_by="auto",
                     raw={"guid": it.get("guid"), "rawTitle": it.get("raw_title"),
                          "feed": feed_url, "media": it.get("media") or "article"},
-                ))
+                )
+                db.add(новость)
+                # Идентификатор нужен сразу: упоминания пишутся той же сессией.
+                await db.flush()
+                # Состав участников материала — по нему строятся связи «кто с кем».
+                for м in actors_in_text(text, operators, players, actors):
+                    db.add(MarketNewsMention(
+                        company_id=cid, news_id=новость.id, role=м["role"],
+                        name=м["name"][:200], matched=(м["matched"] or "")[:200],
+                        operator_id=uuid.UUID(м["operator_id"]) if м.get("operator_id") else None,
+                        player_id=uuid.UUID(м["player_id"]) if м.get("player_id") else None,
+                        actor_id=uuid.UUID(м["actor_id"]) if м.get("actor_id") else None,
+                        linked_by="auto"))
                 added += 1
                 fresh += 1
             stat["added"] = fresh
@@ -598,3 +613,117 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
             per_source_stat.append(stat)
     await db.commit()
     return {"added": added, "sources": per_source_stat, "sinceDays": since_days}
+
+
+# ─────────────────── Участники рынка в тексте новости ───────────────────
+#
+# Маркетингу нужна не одна привязка «чья новость», а состав участников: рынок
+# читается связями — завод и сеть в одном материале, сеть и ведомство, агрегатор
+# и банк. Поэтому из текста достаются ВСЕ узнанные имена с их ролями.
+
+# Ведомства и регуляторы: список конечный и меняется редко, поэтому он в коде —
+# в отличие от производителей, которых ведёт человек в справочнике участников.
+STATE_ACTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Минэнерго России", ("минэнерго",)),
+    ("Минпромторг России", ("минпромторг",)),
+    ("Минтранс России", ("минтранс",)),
+    ("Минэкономразвития России", ("минэкономразвития",)),
+    ("Правительство России", ("правительство рф", "правительство россии",
+                              "кабмин", "постановление правительства")),
+    ("ФАС России", ("фас россии", "антимонопольн")),
+    ("Росстандарт", ("росстандарт",)),
+    ("Ростехнадзор", ("ростехнадзор",)),
+    ("Госдума", ("госдума", "государственная дума")),
+    ("Правительство Москвы", ("правительство москвы", "дептранс", "мэр москвы")),
+    ("Правительство Московской области", ("минэнерго подмосковья",
+                                          "правительство подмосковья")),
+)
+
+# Слова, по которым в тексте узнаётся роль неизвестного пока участника. Нужны не
+# для привязки, а для подсказки «заведите его в справочник»: производителей у нас
+# в реестре нет вовсе, и первыми их именами делятся именно новости.
+ROLE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("vendor", ("производител", "завод", "выпустил", "изготовител", "поставит оборудование",
+                "отечественн", "импортозамещ", "локализац")),
+    ("service", ("сервисн", "обслуживан", "монтаж", "подрядчик", "эксплуатирующ")),
+    ("state", ("министерств", "ведомств", "правительств", "регулятор", "надзор")),
+    ("utility", ("энергосбыт", "сетевая компания", "электросет", "энергосистем")),
+)
+
+# Класс игрока из реестра приложений → роль в раскладе рынка.
+PLAYER_ROLE = {
+    "зарядная сеть / агрегатор": "aggregator",
+    "поиск АЗС": "aggregator",
+    "сеть АЗС (своё приложение)": "aggregator",
+    "топливный процессинг": "platform",
+    "мойки и мультисервис": "other",
+    "автопроизводитель": "automaker",
+    "банк / финтех": "bank",
+}
+
+
+def _found(text: str, variants: Iterable[str]) -> str | None:
+    """Нашлось ли имя целым словом. Подстрока ловит «Волт» внутри «вольтаж»."""
+    for v in variants:
+        if len(v) < 4:
+            continue
+        if re.search(rf"(?<![а-яa-z0-9]){re.escape(v)}(?![а-яa-z0-9])", text):
+            return v
+    return None
+
+
+def actors_in_text(text: str, operators: list[Any], players: list[Any],
+                   actors: list[Any]) -> list[dict[str, Any]]:
+    """Все узнанные участники рынка с ролями — состав новости, а не одна привязка.
+
+    Роль берётся из реестра, а не из текста: оператор остаётся оператором, даже
+    если в материале он назван «компанией». Текст решает только одно — кто в нём
+    присутствует.
+    """
+    t = (text or "").lower().replace("ё", "е")
+    out: list[dict[str, Any]] = []
+    видели: set[str] = set()
+
+    def добавить(role: str, name: str, matched: str, **ids: Any) -> None:
+        ключ = f"{role}:{name.lower()}"
+        if ключ in видели:
+            return
+        видели.add(ключ)
+        out.append({"role": role, "name": name, "matched": matched, **ids})
+
+    for op in operators:
+        v = _found(t, _name_variants(op.name) | _name_variants(op.short_name or ""))
+        if v:
+            добавить("platform" if getattr(op, "is_platform", False) else "operator",
+                     op.name, v, operator_id=str(op.id))
+    # Оператор, уже найденный по сети, не повторяется приложением: «РусГидро» и
+    # «ЭЗС РусГидро» — одна компания в двух реестрах, и пара из них дала бы связь
+    # с самой собой (замечание на живых данных 28.10.2026).
+    свои_операторы = {m.get("operator_id") for m in out if m.get("operator_id")}
+    for pl in players:
+        if getattr(pl, "operator_id", None) and str(pl.operator_id) in свои_операторы:
+            continue
+        имя = pl.brand or pl.app
+        v = _found(t, _name_variants(имя or "") | _name_variants(pl.developer or ""))
+        if v:
+            добавить(PLAYER_ROLE.get(pl.player_class or "", "aggregator"),
+                     имя or pl.app, v, player_id=str(pl.id))
+    for ac in actors:
+        псевдонимы = set(ac.aliases or [])
+        v = _found(t, _name_variants(ac.name) | {a.lower() for a in псевдонимы})
+        if v:
+            добавить(ac.kind, ac.name, v, actor_id=str(ac.id))
+    for имя, варианты in STATE_ACTORS:
+        v = _found(t, варианты)
+        if v:
+            добавить("state", имя, v)
+    return out
+
+
+def role_hint(text: str) -> str | None:
+    """Какая роль звучит в тексте — подсказка для незаведённого участника."""
+    t = (text or "").lower().replace("ё", "е")
+    for role, words in ROLE_HINTS:
+        if any(w in t for w in words):
+            return role
+    return None
