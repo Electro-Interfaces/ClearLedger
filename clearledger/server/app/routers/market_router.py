@@ -28,7 +28,7 @@ from app.database import get_db
 from app.net_guard import assert_external_host
 from app.services.mapping import canon_city, canon_region
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
-                        MarketNews, MarketNewsSource,
+                        MarketNews, MarketNewsSettings, MarketNewsSource,
                         MarketPlayer, MarketRegionStat, MarketShop,
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
@@ -4821,6 +4821,7 @@ async def ocm_import_network(
 class NewsSourceIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     kind: str = "search"
+    default_topic: str | None = None
     # Для `search` здесь поисковый запрос, для остальных — адрес ленты или страницы.
     url: str = Field(min_length=2, max_length=600)
     operator_id: uuid.UUID | None = None
@@ -4833,6 +4834,8 @@ class NewsSourceIn(BaseModel):
 class NewsSourcePatch(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     url: str | None = Field(default=None, max_length=600)
+    kind: str | None = None
+    default_topic: str | None = None
     active: bool | None = None
     is_profile: bool | None = None
     operator_id: uuid.UUID | None = None
@@ -4871,6 +4874,7 @@ class NewsPatch(BaseModel):
 
 
 NEWS_STATUS = {"new", "kept", "noise"}
+NEWS_SOURCE_KINDS = {"search", "search_wide", "rss", "page"}
 NEWS_TOPICS = {"opening", "price", "regulation", "tech", "deal", "other"}
 
 
@@ -4881,6 +4885,7 @@ def _news_source_row(s: MarketNewsSource, names: dict[str, str]) -> dict[str, An
         "operatorName": names.get(str(s.operator_id)) if s.operator_id else None,
         "playerId": str(s.player_id) if s.player_id else None,
         "vendor": s.vendor, "isProfile": s.is_profile, "active": s.active,
+        "defaultTopic": s.default_topic,
         "lastRunAt": s.last_run_at.isoformat() if s.last_run_at else None,
         "lastOkAt": s.last_ok_at.isoformat() if s.last_ok_at else None,
         "lastError": s.last_error, "foundTotal": s.found_total or 0, "note": s.note,
@@ -4924,10 +4929,12 @@ async def create_news_source(
     проверки форма источника работала бы сканером внутренней сети (`net_guard`).
     """
     cid = await _member(company_id, user, db)
-    if body.kind not in {"search", "rss", "page"}:
-        raise HTTPException(422, "Вид источника: search, rss или page")
+    if body.kind not in NEWS_SOURCE_KINDS:
+        raise HTTPException(422, "Вид источника: search, search_wide, rss или page")
+    if body.default_topic and body.default_topic not in NEWS_TOPICS:
+        raise HTTPException(422, "Рубрика источника вне списка тем")
     url = body.url.strip()
-    if body.kind != "search":
+    if not body.kind.startswith("search"):
         if not url.lower().startswith(("http://", "https://")):
             raise HTTPException(422, "Адрес ленты или страницы должен начинаться с http(s)://")
         assert_external_host(urlparse(url).hostname)
@@ -4957,11 +4964,69 @@ async def patch_news_source(
     data = body.model_dump(exclude_unset=True)
     if "url" in data and data["url"]:
         url = str(data["url"]).strip()
-        if src.kind != "search":
+        if not src.kind.startswith("search"):
             assert_external_host(urlparse(url).hostname)
         data["url"] = url
     for k, v in data.items():
         setattr(src, k, v)
+    await db.commit()
+    return {"ok": True}
+
+
+class NewsSettingsIn(BaseModel):
+    """Словари отбора и окно обхода — настройка пространства, а не константа."""
+    include_words: list[str] | None = None
+    exclude_words: list[str] | None = None
+    since_days: int | None = Field(default=None, ge=1, le=120)
+
+
+@router.get("/news/settings")
+async def get_news_settings(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Чем отбирается поток: слова темы, стоп-слова, окно обхода.
+
+    Отдаёт и встроенные словари: человек должен видеть, по чему отбор идёт
+    сейчас, а не пустые поля с неизвестным поведением.
+    """
+    cid = await _member(company_id, user, db)
+    st = (await db.execute(select(MarketNewsSettings).where(
+        MarketNewsSettings.company_id == cid))).scalar_one_or_none()
+    return {
+        "includeWords": list(st.include_words) if st and st.include_words else [],
+        "excludeWords": list(st.exclude_words) if st and st.exclude_words else [],
+        "sinceDays": st.since_days if st else market_news.SINCE_DAYS,
+        "defaultInclude": list(market_news.DEFAULT_INCLUDE),
+        "defaultExclude": list(market_news.DEFAULT_EXCLUDE),
+        "updatedAt": st.updated_at.isoformat() if st and st.updated_at else None,
+        "updatedBy": st.updated_by if st else None,
+        "topics": sorted(NEWS_TOPICS),
+        "kinds": sorted(NEWS_SOURCE_KINDS),
+    }
+
+
+@router.put("/news/settings")
+async def put_news_settings(
+    company_id: str = Query(...), body: NewsSettingsIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Сохранить словари и окно. Пустой список означает «вернуться к встроенным»."""
+    cid = await _member(company_id, user, db)
+    st = (await db.execute(select(MarketNewsSettings).where(
+        MarketNewsSettings.company_id == cid))).scalar_one_or_none()
+    if st is None:
+        st = MarketNewsSettings(company_id=cid)
+        db.add(st)
+    data = body.model_dump(exclude_unset=True)
+    if "include_words" in data:
+        st.include_words = [w.strip().lower() for w in (data["include_words"] or []) if w.strip()]
+    if "exclude_words" in data:
+        st.exclude_words = [w.strip().lower() for w in (data["exclude_words"] or []) if w.strip()]
+    if data.get("since_days"):
+        st.since_days = int(data["since_days"])
+    st.updated_at = datetime.now(timezone.utc)
+    st.updated_by = user.name
     await db.commit()
     return {"ok": True}
 
@@ -4995,7 +5060,8 @@ async def preset_news_sources(
     def добавить(title: str, url: str, **kw: Any) -> None:
         if url in было or not url:
             return
-        db.add(MarketNewsSource(company_id=cid, title=title[:200], kind="search",
+        kind = kw.pop("kind", "search")
+        db.add(MarketNewsSource(company_id=cid, title=title[:200], kind=kind,
                                 url=url[:600], **kw))
         было.add(url)
         добавлено.append(title)
@@ -5005,21 +5071,21 @@ async def preset_news_sources(
     # первоначальных формулировки давали НОЛЬ и в набор не попали — узкие связки
     # вроде «тариф зарядка подорожала ЭЗС» или «зарядные станции производство
     # инверторы платформа» выдают архив и товарные обзоры.
-    for title, query in (
+    for title, query, рубрика in (
         # 4 материала за 14 дней: открытия станций по городам.
-        ("Открытия и стройка ЭЗС", "зарядная станция электромобиля открыли"),
+        ("Открытия и стройка ЭЗС", "зарядная станция электромобиля открыли", "opening"),
         # 5 материалов: рейтинги, доли, аналитика рынка, решения по новостройкам.
-        ("Рынок зарядной инфраструктуры", "рынок зарядной инфраструктуры электромобилей России"),
+        ("Рынок зарядной инфраструктуры", "рынок зарядной инфраструктуры электромобилей России", "other"),
         # 3 материала: региональные программы и планы установки.
-        ("Регионы и программы установки", "электрозарядные станции регион программа установка"),
+        ("Регионы и программы установки", "электрозарядные станции регион программа установка", "opening"),
         # 3 материала, из них 2 именно о сделках: соглашения о развитии сети.
-        ("Сделки и соглашения", "зарядная инфраструктура партнёрство соглашение подписали"),
+        ("Сделки и соглашения", "зарядная инфраструктура партнёрство соглашение подписали", "deal"),
         # 2 материала: стоимость зарядки и тарифы операторов.
-        ("Цены и тарифы зарядки", "стоимость зарядки электромобиля тариф оператор"),
+        ("Цены и тарифы зарядки", "стоимость зарядки электромобиля тариф оператор", "price"),
         # 1 материал: проекты постановлений и господдержка.
-        ("Регулирование и господдержка", "зарядная инфраструктура постановление субсидия"),
+        ("Регулирование и господдержка", "зарядная инфраструктура постановление субсидия", "regulation"),
     ):
-        добавить(title, query)
+        добавить(title, query, default_topic=рубрика)
 
     if operators:
         сети = (await db.execute(
@@ -5082,7 +5148,14 @@ async def fetch_news(
     if not sources:
         return {"added": 0, "sources": [], "pending": 0,
                 "note": "Источники не настроены — добавьте ленту, запрос или страницу"}
-    итог = await market_news.collect(db, cid, sources, since_days=since_days)
+    st = (await db.execute(select(MarketNewsSettings).where(
+        MarketNewsSettings.company_id == cid))).scalar_one_or_none()
+    итог = await market_news.collect(
+        db, cid, sources,
+        since_days=since_days if since_days != market_news.SINCE_DAYS
+        else (st.since_days if st else since_days),
+        include=(st.include_words if st and st.include_words else None),
+        exclude=(st.exclude_words if st and st.exclude_words else None))
     итог["pending"] = max(0, int(всего) - len(sources))
     return итог
 
@@ -5160,6 +5233,8 @@ async def list_news(
         "news": [{
             "id": str(n.id), "title": n.title, "url": n.url, "snippet": n.snippet,
             "sourceName": n.source_name, "sourceId": str(n.source_id) if n.source_id else None,
+            "imageUrl": n.image_url,
+            "media": (n.raw or {}).get("media") or "article",
             "sourceTitle": srcs.get(str(n.source_id)) if n.source_id else None,
             "publishedAt": n.published_at.isoformat() if n.published_at else None,
             "retrievedAt": n.retrieved_at.isoformat() if n.retrieved_at else None,

@@ -4,7 +4,7 @@
  * Внешний мир вокруг сети: чужие станции, торговые центры, парковки, АЗС и наблюдения
  * по ним. Наши объекты сюда не копируются — карта складывается из двух реестров.
  */
-import { get as httpGet, post, patch } from './apiClient'
+import { get as httpGet, post, patch, put } from './apiClient'
 import { collectPages } from '@/lib/collectPages'
 
 /**
@@ -1232,7 +1232,8 @@ export const NEWS_CHANNEL_LABEL: Record<string, string> = {
 }
 
 export const NEWS_SOURCE_KIND_LABEL: Record<string, string> = {
-  search: 'Поисковый запрос',
+  search: 'Поисковый запрос (с обложками)',
+  search_wide: 'Широкий невод (только заголовки)',
   rss: 'Лента (RSS/Atom)',
   page: 'Страница новостей',
 }
@@ -1245,6 +1246,10 @@ export interface MarketNewsItem {
   sourceName: string | null
   sourceId: string | null
   sourceTitle: string | null
+  /** Обложка публикации (og:image издания). Пусто — карточка без картинки. */
+  imageUrl: string | null
+  /** article | video — видео помечается значком поверх обложки. */
+  media: string
   publishedAt: string | null
   retrievedAt: string | null
   channel: string
@@ -1284,6 +1289,8 @@ export interface MarketNewsSource {
   operatorName: string | null
   playerId: string | null
   vendor: string | null
+  /** Рубрика источника: сильнее словаря. Пусто — тема по заголовку. */
+  defaultTopic: string | null
   isProfile: boolean
   active: boolean
   lastRunAt: string | null
@@ -1327,6 +1334,26 @@ export const createMarketNewsSource = (companyId: string, body: Record<string, u
 export const patchMarketNewsSource = (companyId: string, sourceId: string, body: Record<string, unknown>) =>
   patch<{ ok: boolean }>(
     `/api/market/news/sources/${sourceId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+export interface MarketNewsSettings {
+  includeWords: string[]
+  excludeWords: string[]
+  sinceDays: number
+  /** Встроенные словари — показываем их, когда своих нет: отбор не бывает «никаким». */
+  defaultInclude: string[]
+  defaultExclude: string[]
+  updatedAt: string | null
+  updatedBy: string | null
+  topics: string[]
+  kinds: string[]
+}
+
+export const getMarketNewsSettings = (companyId: string) =>
+  httpGet<MarketNewsSettings>('/api/market/news/settings', { company_id: companyId })
+
+export const putMarketNewsSettings = (companyId: string, body: Record<string, unknown>) =>
+  put<{ ok: boolean }>(
+    `/api/market/news/settings?company_id=${encodeURIComponent(companyId)}`, body)
 
 /** Базовый набор источников: общий невод плюс компании нашего реестра. */
 export const presetMarketNewsSources = (companyId: string) =>

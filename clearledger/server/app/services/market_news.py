@@ -31,6 +31,7 @@ import re
 import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
+from html import unescape
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Iterable
@@ -44,7 +45,23 @@ from app.models import MarketNews, MarketNewsSource, MarketOperator, MarketPlaye
 
 TIMEOUT = httpx.Timeout(25.0)
 UA = "ElsyPlusMarket/1.0 (+https://rushydro.dataworker.ru)"
-SEARCH_BASE = "https://news.google.com/rss/search"
+# Браузерный User-Agent — только для страницы издания: часть сайтов отдаёт карточке
+# бота усечённую версию без og-разметки, и обложка тогда не находится.
+UA_PAGE = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/129.0 Safari/537.36")
+
+# Поисковые ленты. Их две, и они не равнозначны.
+#
+# Bing отдаёт ссылку через свой счётчик `apiclick.aspx`, но это ОБЫЧНЫЙ HTTP-редирект:
+# пройдя его, мы получаем адрес издания и можем забрать обложку, лид и видео из
+# og-разметки. Поэтому он основной — лента с картинками собирается только так.
+#
+# Google News даёт вчетверо больше материалов, но прячет адрес издания в зашифрованном
+# токене `CBMi…` (проверено 28.10.2026: старый приём с base64 больше не раскрывает его,
+# а переход ведёт на consent.google.com). Из него можно взять заголовок, издание и дату,
+# но ни обложки, ни прямой ссылки — поэтому он «широкий невод», а не лента.
+BING_BASE = "https://www.bing.com/news/search"
+GOOGLE_BASE = "https://news.google.com/rss/search"
 
 # Сколько лент тянем одновременно. Шесть — компромисс: тридцать источников
 # укладываются в несколько секунд, а прокси стека не получает залпом весь список.
@@ -144,9 +161,11 @@ def title_key(title: str) -> str:
     return re.sub(r"[^a-zа-я0-9 ]+", " ", t).strip()[:200]
 
 
-def search_url(query: str) -> str:
-    """Поисковая лента по запросу — широкий невод отрасли."""
-    return f"{SEARCH_BASE}?{urlencode({'q': query, 'hl': 'ru', 'gl': 'RU', 'ceid': 'RU:ru'})}"
+def search_url(query: str, kind: str = "search") -> str:
+    """Адрес поисковой ленты по запросу: Bing для ленты, Google для широкого невода."""
+    if kind == "search_wide":
+        return f"{GOOGLE_BASE}?{urlencode({'q': query, 'hl': 'ru', 'gl': 'RU', 'ceid': 'RU:ru'})}"
+    return f"{BING_BASE}?{urlencode({'q': query, 'format': 'RSS', 'setmkt': 'ru-RU'})}"
 
 
 def site_query(site_url: str | None, name: str | None = None) -> str | None:
@@ -210,7 +229,11 @@ def parse_feed(xml_text: str) -> list[dict[str, Any]]:
         snippet = _text(n.find("description")) or _text(n.find(f"{atom}summary"))
         if snippet.startswith("<a href") or snippet.lstrip().startswith("<"):
             snippet = re.sub(r"<[^>]+>", " ", snippet)
-        snippet = re.sub(r"\s+", " ", snippet).strip()
+        snippet = unescape(re.sub(r"\s+", " ", snippet)).strip()
+        # Поисковые ленты кладут в описание тот же заголовок со ссылкой: как лид это
+        # пустая строка, занимающая место в карточке.
+        if snippet and title_key(snippet).startswith(title_key(clean_title(title, src or None))[:60]):
+            snippet = ""
         out.append({
             "title": clean_title(title, src or None),
             "raw_title": title,
@@ -222,6 +245,8 @@ def parse_feed(xml_text: str) -> list[dict[str, Any]]:
             "sourceName": src or None,
             "publishedAt": published,
             "snippet": snippet[:1000] or None,
+            "image": None,
+            "media": "article",
         })
     return out
 
@@ -296,7 +321,8 @@ def suggest_links(text: str, operators: list[MarketOperator],
 
 
 async def get_page(url: str, client: httpx.AsyncClient,
-                   proxied: httpx.AsyncClient | None = None) -> httpx.Response:
+                   proxied: httpx.AsyncClient | None = None,
+                   ua: str = UA) -> httpx.Response:
     """Забрать страницу: сначала напрямую, при сетевом отказе — через прокси.
 
     Порядок именно такой. Прокси стека живёт на VPN-пире, и если сделать его
@@ -306,14 +332,14 @@ async def get_page(url: str, client: httpx.AsyncClient,
     то, что закрыто геоблокировкой.
     """
     try:
-        r = await client.get(url, headers={"User-Agent": UA}, follow_redirects=True)
+        r = await client.get(url, headers={"User-Agent": ua}, follow_redirects=True)
         r.raise_for_status()
         return r
     except (httpx.TransportError, httpx.HTTPStatusError) as direct_error:
         if proxied is None:
             raise
         try:
-            r = await proxied.get(url, headers={"User-Agent": UA}, follow_redirects=True)
+            r = await proxied.get(url, headers={"User-Agent": ua}, follow_redirects=True)
             r.raise_for_status()
             return r
         except Exception:
@@ -328,6 +354,54 @@ async def fetch_feed(url: str, client: httpx.AsyncClient,
     """Получить и разобрать ленту. Ошибка источника — факт для карточки, не исключение."""
     r = await get_page(url, client, proxied)
     return parse_feed(r.text)
+
+
+VIDEO_HOSTS = ("youtube.com", "youtu.be", "rutube.ru", "vk.com/video", "vkvideo.ru",
+               "dzen.ru/video", "m24.ru/videos", "smotrim.ru")
+
+
+def _meta(html: str, prop: str) -> str | None:
+    """Значение og-свойства. Порядок атрибутов у сайтов разный, ищем оба."""
+    for pattern in (rf'<meta[^>]+(?:property|name)=["\']{prop}["\'][^>]+content=["\']([^"\']*)["\']',
+                    rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{prop}["\']'):
+        m = re.search(pattern, html, re.I)
+        if m and m.group(1).strip():
+            return unescape(m.group(1).strip())
+    return None
+
+
+async def enrich(item: dict[str, Any], client: httpx.AsyncClient,
+                 proxied: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    """Дополнить материал обложкой, лидом и признаком видео со страницы издания.
+
+    Без этого лента нечитаема: заголовок и дата — это список, а не новости. Обложка
+    и первые строки берутся из og-разметки самой публикации, то есть из того, что
+    издание само показывает при репосте, — не из нашей догадки.
+
+    Попутно раскрывается адрес: Bing отдаёт ссылку через счётчик `apiclick.aspx`,
+    и без прохода по редиректу в карточке остался бы адрес поисковика, а не издания.
+    Неудача здесь не ошибка источника: материал остаётся в ленте без обложки.
+    """
+    try:
+        r = await get_page(item["url"], client, proxied, ua=UA_PAGE)
+    except Exception:  # noqa: BLE001 — обложка необязательна, материал важнее
+        return item
+    final = str(r.url)
+    if final and "bing.com" not in final and "news.google.com" not in final:
+        item["url"] = final
+        item["key"] = normalize_url(final)
+    html = r.text
+    item["image"] = _meta(html, "og:image") or _meta(html, "twitter:image") or item.get("image")
+    лид = _meta(html, "og:description") or _meta(html, "description")
+    if лид and title_key(лид) != title_key(item["title"]):
+        item["snippet"] = лид[:1000]
+    if _meta(html, "og:video") or _meta(html, "og:video:url") \
+            or any(h in final.lower() for h in VIDEO_HOSTS):
+        item["media"] = "video"
+    if not item.get("sourceName"):
+        item["sourceName"] = (_meta(html, "og:site_name")
+                              or urlparse(final).hostname or "").removeprefix("www.") or None
+    return item
 
 
 async def discover_feed(page_url: str, client: httpx.AsyncClient,
@@ -354,7 +428,9 @@ async def discover_feed(page_url: str, client: httpx.AsyncClient,
 
 
 async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSource],
-                  since_days: int = SINCE_DAYS, per_source: int = 40) -> dict[str, Any]:
+                  since_days: int = SINCE_DAYS, per_source: int = 40,
+                  include: Iterable[str] | None = None,
+                  exclude: Iterable[str] | None = None) -> dict[str, Any]:
     """Обойти источники и сложить новое в очередь разбора.
 
     Идемпотентно: ключ новости — приведённый адрес, повторный обход обновляет
@@ -391,7 +467,8 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
 
         async def забрать(src: MarketNewsSource) -> tuple[MarketNewsSource, str, Any]:
             """Лента источника или его ошибка. Исключение здесь — результат, не сбой."""
-            feed_url = src.url if src.kind != "search" else search_url(src.url)
+            feed_url = (search_url(src.url, src.kind)
+                        if src.kind in ("search", "search_wide") else src.url)
             async with gate:
                 try:
                     if src.kind == "page":
@@ -418,7 +495,9 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
             src.last_error = None
             src.last_ok_at = now
             src.found_total = (src.found_total or 0) + len(items)
-            fresh = 0
+            # Сначала отбираем кандидатов и только потом идём на страницы изданий:
+            # обогащать отброшенное — платить временем за то, что не покажем.
+            кандидаты: list[dict[str, Any]] = []
             for it in items[: max(1, per_source) * 3]:
                 when = it["publishedAt"]
                 if when is not None and when < cutoff:
@@ -429,17 +508,39 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                 tkey = title_key(it["title"])
                 if tkey and tkey in recent_titles:
                     continue
-                text = f"{it['title']} {it.get('snippet') or ''}"
-                if not relevant(text, src.is_profile):
+                if not relevant(f"{it['title']} {it.get('snippet') or ''}", src.is_profile,
+                                include or DEFAULT_INCLUDE, exclude or DEFAULT_EXCLUDE):
                     continue
+                known_keys.add(key)
+                if tkey:
+                    recent_titles.add(tkey)
+                кандидаты.append(it)
+                if len(кандидаты) >= per_source:
+                    break
+
+            # Обложка, лид и признак видео — только у поисковых лент: у собственной
+            # ленты издания медиа уже в элементе, а страница `page` ведёт на тот же сайт.
+            if src.kind == "search" and кандидаты:
+                async def обогатить(it: dict[str, Any]) -> dict[str, Any]:
+                    async with gate:
+                        return await enrich(it, client, proxied)
+                кандидаты = list(await asyncio.gather(*(обогатить(i) for i in кандидаты)))
+
+            fresh = 0
+            for it in кандидаты:
+                when = it["publishedAt"]
+                key = it["key"] or normalize_url(it["url"])
+                text = f"{it['title']} {it.get('snippet') or ''}"
                 hints = suggest_links(text, operators, players, regions)
                 db.add(MarketNews(
                     company_id=cid, source_id=src.id,
                     title=it["title"][:500], url=it["url"][:900], url_key=key,
                     snippet=it.get("snippet"), source_name=it.get("sourceName"),
+                    image_url=(it.get("image") or None),
                     published_at=when, retrieved_at=now,
-                    channel="search" if src.kind == "search" else src.kind,
-                    topic=topic_of(text),
+                    channel="search" if src.kind.startswith("search") else src.kind,
+                    # Рубрика источника сильнее словаря: ленту заводят ради темы.
+                    topic=src.default_topic or topic_of(text),
                     # Привязка источника сильнее словаря: лента оператора — его новости.
                     operator_id=src.operator_id or (
                         uuid.UUID(hints["operatorId"]) if hints.get("operatorId") else None),
@@ -448,15 +549,10 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                     region=hints.get("region"),
                     suggested=hints or None, linked_by="auto",
                     raw={"guid": it.get("guid"), "rawTitle": it.get("raw_title"),
-                         "feed": feed_url},
+                         "feed": feed_url, "media": it.get("media") or "article"},
                 ))
-                known_keys.add(key)
-                if tkey:
-                    recent_titles.add(tkey)
                 added += 1
                 fresh += 1
-                if fresh >= per_source:
-                    break
             stat["added"] = fresh
             stat["seen"] = len(items)
             per_source_stat.append(stat)
