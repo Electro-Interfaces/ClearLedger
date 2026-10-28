@@ -1225,3 +1225,24 @@ export const createSystemKey = (cid: string, consumer: string, scopes: KeyScope[
 
 export const revokeSystemKey = (cid: string, id: string) =>
   coreDel(`${КЛЮЧИ}/${encodeURIComponent(id)}?company_id=${encodeURIComponent(cid)}`)
+
+// SIP — управление на узле заказчика. Секрет передаётся только при сохранении, GET его не возвращает.
+export interface SipConfig {
+  provider: string; name: string; mode: 'registration' | 'ip'; host: string; port: number
+  transport: 'udp' | 'tcp' | 'tls'; username: string; authUsername: string; password?: string
+  domain: string; fromUser: string; proxy: string; contactUser: string; matches: string[]
+}
+export interface SipProfile {
+  id: string; endpoint: string; draft: Omit<SipConfig, 'password'> & { passwordConfigured: boolean }
+  applied: (Omit<SipConfig, 'password'> & { passwordConfigured: boolean }) | null; changed: boolean; status: string
+}
+export interface SipOperators {
+  revision: number; primary: string | null; items: SipProfile[]
+  operators: { id: string; name: string; help: string; docs: string | null; historyApi: string }[]
+  legacy: { endpoint: string; primary: boolean; readonly: true } | null
+}
+export const sipOperators = (cid: string) => дай<SipOperators>(cid, '/sip/operators')
+export const saveSipOperator = async (cid: string, id: string | null, revision: number, config: SipConfig) =>
+  (await запрос<SipOperators>(cid, '/sip/operators' + (id ? '/' + encodeURIComponent(id) : ''), { method: 'POST', body: { revision, config } })).data
+export const changeSipOperator = async (cid: string, id: string, revision: number, action: 'apply' | 'disable' | 'delete' | 'primary') =>
+  (await запрос<SipOperators>(cid, '/sip/operators/' + encodeURIComponent(id) + '/' + action, { method: 'POST', body: { revision } })).data

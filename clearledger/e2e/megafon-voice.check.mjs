@@ -46,7 +46,12 @@ export function FixtureCompanyProvider({ children }) {
 }`
 let server, browser, page, nodeRequests = 0, mode = 'normal'
 const errors = [], requests = [], screenshots = []
+let megafonNodeRequests = 0
 let liveRows = []
+const sipFixture = {revision:0,primary:null,items:[],legacy:{endpoint:'PJSIP/carrier',primary:true,readonly:true},operators:
+['mango','megafon','beeline','mts','other'].map((id,i)=>({id,name:['Mango Office','МегаФон','Билайн','МТС / Exolve','Другой SIP-оператор'][i],help:'Данные из кабинета оператора',docs:null,historyApi:i<2?'support':'unavailable'}))}
+let sipRejected=false
+
 const calls = Array.from({ length: 32 }, (_, index) => ({
   id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
   call_id: `synthetic-${index + 1}`, direction: index % 2 ? 'outbound' : 'inbound', missed: index % 3 === 0,
@@ -114,6 +119,23 @@ try {
   for (const pattern of ['**/voice/api/v1/**', '**/api/sso/token**']) {
     await context.route(pattern, route => {
       nodeRequests++
+      if(mode==='sip-operators') {
+        const request=route.request(),path=new URL(request.url()).pathname
+        if(path==='/api/sso/token') return route.fulfill({json:{token:'synthetic-voice-token',expires_in:300}})
+        if(path.endsWith('/me')) return route.fulfill({json:{companyId:'qa-company-a',sub:'qa-user',role:'admin',permissions:[]}})
+        if(path.includes('/sip/operators')) {
+          if(request.method()==='POST') {
+            const b=request.postDataJSON(); if (b.revision!==sipFixture.revision) return route.fulfill({status:409,json:{error:'sip_revision_conflict',detail:'Подключения изменились. Обновите список.'}})
+            if(path.endsWith('/apply')&&sipRejected) return route.fulfill({status:409,json:{error:'sip_calls_active',detail:'Дождитесь завершения звонков перед изменением линии.'}})
+            if(path.endsWith('/primary')) {sipFixture.primary=path.split('/').at(-2);sipFixture.legacy.primary=false}
+            else if(path.endsWith('/apply')) {sipFixture.items[0].applied={...sipFixture.items[0].draft};sipFixture.items[0].changed=false;sipFixture.items[0].status='registered'}
+            else {assert.equal(b.config.password,'SyntheticPassword!');const {password,...config}=b.config;sipFixture.items=[{id:'fixture-sip',endpoint:'ch_fixture',draft:{...config,passwordConfigured:true},applied:null,changed:true,status:'draft'}]}
+            sipFixture.revision++
+          }
+          return route.fulfill({json:sipFixture})
+        }
+        return route.fulfill({status:503,body:'Fixture: unrelated Node service unavailable'})
+      }
       if (mode === 'live-node') {
         const path = new URL(route.request().url()).pathname
         const body = path === '/api/sso/token' ? { token: 'synthetic-voice-token', expires_in: 300 }
@@ -136,10 +158,11 @@ try {
   }
   async function screenshot(name) {
     assert.equal(await page.locator('vite-error-overlay').count(), 0)
-    assert.ok((await page.locator('main').innerText()).length > 100)
+    assert.ok((await page.locator('body').innerText()).length > 100)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'Нет переполнения страницы')
     await page.screenshot({ path: join(artifacts, name), fullPage: false, animations: 'disabled' }); screenshots.push(name)
   }
+  if (!process.env.SIP_ONLY) {
   await page.goto(`${origin}/voice/megafon`)
   await page.getByRole('table', { name: 'Журнал звонков АТС' }).waitFor()
   assert.equal(new URL(page.url()).pathname, '/voice/megafon'); assert.match(await page.title(), /^Телефония · МегаФон ВАТС/)
@@ -221,7 +244,7 @@ try {
   await page.goto(`${origin}/voice/megafon?call=00000000-0000-4000-8000-999999999999`)
   await dialog.getByText('Звонок не найден', { exact: true }).waitFor()
   await dialog.getByRole('button', { name: 'К журналу' }).click()
-  const megafonNodeRequests = nodeRequests
+  megafonNodeRequests = nodeRequests
   assert.equal(megafonNodeRequests, 0)
   // Привычные разделы используют подключённую ВАТС, даже если Node недоступен.
   await page.goto(`${origin}/voice/calls`)
@@ -329,6 +352,50 @@ try {
   assert.equal(await page.getByRole('link', { name: 'Открыть историю', exact: true }).getAttribute('href'), '/voice/pbx?source=megafon')
   await page.screenshot({ path: join(artifacts, 'connections-mobile.png'), fullPage: false })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+  }
+  mode='sip-operators'
+  await page.setViewportSize({width:390,height:844})
+  await page.goto(`${origin}/voice/connections`)
+  const operators=page.getByRole('region',{name:'Операторы связи'})
+  await operators.getByRole('button',{name:'Добавить оператора',exact:true}).click()
+  const sipForm=page.getByRole('form',{name:'Настройка SIP-оператора'})
+  const picker=sipForm.getByLabel('Оператор',{exact:true})
+  await picker.waitFor()
+  assert.equal(await picker.locator('option').count(),5)
+  await picker.selectOption('beeline')
+  await sipForm.getByText(/отдельный API-адаптер этого оператора пока не подключён/).waitFor()
+  await sipForm.getByLabel('Название подключения',{exact:true}).fill('Билайн · тестовая линия')
+  await sipForm.getByLabel('SIP-сервер',{exact:true}).fill('sip.example.net')
+  await sipForm.getByLabel('SIP-логин',{exact:true}).fill('qa-account')
+  await sipForm.getByLabel('SIP-пароль',{exact:true}).fill('SyntheticPassword!')
+  await screenshot('sip-editor-mobile.png')
+  await page.setViewportSize({width:1440,height:1000});await screenshot('sip-editor-desktop.png')
+  await sipForm.getByRole('button',{name:'Сохранить черновик',exact:true}).click()
+  await operators.getByText('Билайн · тестовая линия',{exact:true}).waitFor()
+  assert.doesNotMatch(await page.locator('body').innerText(),/SyntheticPassword!/)
+  sipRejected=true
+  await operators.getByRole('button',{name:'Подключить',exact:true}).click()
+  await page.getByRole('button',{name:'Подтвердить',exact:true}).click()
+  await page.getByRole('alert').filter({hasText:'Дождитесь завершения звонков'}).waitFor()
+  sipRejected=false
+  await page.getByRole('button',{name:'Подтвердить',exact:true}).click()
+  await operators.getByText('Зарегистрирован',{exact:true}).waitFor()
+  await operators.getByRole('button',{name:'Для исходящих',exact:true}).click()
+  await page.getByRole('button',{name:'Подтвердить',exact:true}).click()
+  await operators.getByText('Линия для исходящих изменена.',{exact:true}).waitFor()
+  await screenshot('sip-connected-desktop.png')
+  await page.setViewportSize({width:390,height:844});await screenshot('sip-connected-mobile.png')
+  await operators.getByRole('button',{name:'Изменить',exact:true}).click()
+  await sipForm.getByLabel('Название подключения',{exact:true}).fill('Несохранённая правка')
+  sipFixture.revision++
+  await operators.getByRole('button',{name:'Проверить состояния',exact:true}).click()
+  await sipForm.getByRole('button',{name:'Сохранить черновик',exact:true}).click()
+  await page.getByRole('alert').filter({hasText:'Подключения изменились'}).waitFor()
+  assert.equal(sipFixture.items[0].draft.name,'Билайн · тестовая линия','Фоновое обновление не позволяет затереть чужую версию старой формой')
+  await sipForm.getByLabel('SIP-пароль',{exact:true}).fill('DiscardOnCompanyChange')
+  await page.getByRole('button',{name:'Сменить компанию в проверке',exact:true}).click()
+  await sipForm.waitFor({state:'detached'})
+  assert.equal(await page.locator('input[type=password]').count(),0,'Смена компании убирает форму и введённый пароль')
   assert.match(await readFile(join(appDir, 'src/App.tsx'), 'utf8'), /path: 'megafon', element: <LazyPage><MegafonVoicePage/)
   await writeFile(join(artifacts, 'result.json'), JSON.stringify({ passed: true, origin, viewports: ['1440x1000', '390x844'], megafonNodeRequests, otherVoiceNodeRequests: nodeRequests, errors, requestCount: requests.length, screenshots }, null, 2))
   process.stdout.write(`PASS: параметры, периоды, фильтры, пагинация, карточка/reload, состояния, company isolation, Node bypass; артефакты: ${artifacts}\n`)

@@ -65,7 +65,7 @@ export function VoiceLayout() {
   // Пути «Телефонии» — полноэкранные (`WORKSPACE_PATHS`): оболочка не прокручивает, прокрутка своя.
   // На телефоне запас снизу под нижнюю навигацию и плашку установки, как у «Трека» и «Конференций».
   const экран = (
-    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto"
+    <div key="voice-screen" className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       style={узкий ? { paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' } : undefined}>
       <VoiceDataSourceBar state={source} pathname={pathname} />
       {содержимое}

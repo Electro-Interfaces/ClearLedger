@@ -13,6 +13,7 @@ import { ApiError } from '@/services/apiClient'
 import * as links from '@/services/voiceConnectionsService'
 import * as voice from '@/services/voiceService'
 import { getPbxSources, SOURCE_NAMES } from '@/services/pbxVoiceService'
+import { SipOperators } from './SipOperators'
 import { Heading } from './parts'
 
 const SOURCE: Record<links.ConnectionSource, string> = {
@@ -104,7 +105,8 @@ export default function VoiceConnectionsPage() {
       <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}><RefreshCw data-icon="inline-start" />Обновить состояния</Button>
     </Heading>
     <Alert><Cable /><AlertTitle>Данные и голосовая линия подключаются отдельно</AlertTitle>
-      <AlertDescription>История МегаФона может загружаться при неподключённой голосовой линии узла. Связь КЦ с узлом подтверждает обмен событий; приём звонков требует отдельной настройки линии.</AlertDescription></Alert>
+      <AlertDescription>История ВАТС может загружаться при неподключённой голосовой линии узла. Связь КЦ с узлом подтверждает обмен событий; приём звонков требует отдельной настройки линии.</AlertDescription></Alert>
+    <SipOperators key={companyId} companyId={companyId} openHistory={provider => void settings(provider)} />
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <Shell title="АТС · история провайдера" description="Подключение API Mango или МегаФона для загрузки истории ВАТС."
         status={sources.error ? 'Нет подтверждения' : !history?.connector_id ? 'Подключение не создано' : !history.enabled ? 'Выключено' : history.has_error ? 'Ошибка обмена' : 'Подключение сохранено'}
@@ -171,7 +173,7 @@ export default function VoiceConnectionsPage() {
           <Detail name="Состояние транка">{health.data?.parts?.trunk?.state === 'up' ? 'На связи' : health.data?.parts?.trunk?.state === 'off' ? 'Выключен' : 'Не подтверждено'}</Detail>
         </dl>}
         {health.error ? <QueryError error={health.error} /> : null}
-        <p className="text-xs text-muted-foreground">Подключение транка и переключение номеров выполняются отдельным этапом. Этот экран показывает состояние; настройки ВАТС выбранного провайдера он не изменяет.</p>
+        <p className="text-xs text-muted-foreground">SIP-подключения настраиваются в разделе «Операторы связи» выше. Переключение входящих номеров выполняется также в кабинете оператора связи.</p>
       </Shell>
       <Shell title="Распознавание и подсказки" description="Обработка разговоров внутри узла компании." status={node.error ? 'Нет подтверждения' : node.data ? node.data.asr.ready ? 'Распознавание готово' : configured(node.data.asr.configured) : pending(node.isPending)}
         actions={<Button asChild size="sm" variant="outline"><Link to="/voice/enrichment">Настройки обработки</Link></Button>}>
