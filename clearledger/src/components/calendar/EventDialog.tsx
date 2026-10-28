@@ -22,9 +22,11 @@ import { useAuth } from '@/contexts/AuthContext'
 import { EventReminder } from './EventReminder'
 import {
   AlignLeft, Bell, BookmarkPlus, CalendarSearch, ChevronDown, Clock, Copy, Eye, LayoutTemplate,
-  ListPlus, Loader2, MapPin, Paperclip, Repeat, Tag, Users, Video, X,
+  ListPlus, Loader2, MapPin, Mic, Paperclip, Repeat, Sparkles, Tag, Users, Video, X,
 } from 'lucide-react'
 import { TagPicker } from '@/components/tags/PersonalTags'
+import { DictateButton } from '@/components/auditor/DictateButton'
+import * as auditor from '@/services/spaceAuditorService'
 import * as tagsService from '@/services/tagsService'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
@@ -214,6 +216,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [напомнитьЗа, setНапомнитьЗа] = useState<number | null>(null)
   // Мои теги новой встречи: id ещё нет, ставим сразу после сборки.
   const [тегиНовой, setТегиНовой] = useState<string[]>([])
+  // Распознавание речи стека (профиль `asr`): тот же, что у Аудитора. Нет его —
+  // микрофон стоит неактивным с объяснением, а не пропадает.
+  const здоровьеQ = useQuery({ queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false })
   const [cancelReason, setCancelReason] = useState('')
   // «Создать видеоконференцию»: ссылка появлялась только после «Начать
   // видеовстречу» в уже собранной встрече и в приглашение не попадала
@@ -780,7 +785,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     </Строка>
   ) : event?.series_id ? (
     <Строка icon={Repeat} label="Повторение">
-      <p className="pt-2 text-sm text-muted-foreground">Встреча из серии. Правки и отмена коснутся только её.</p>
+      <p className="pt-2 text-sm text-muted-foreground" title="Правки и отмена коснутся только этой встречи">Встреча из серии</p>
     </Строка>
   ) : null)
 
@@ -807,10 +812,19 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             {видеоИдёт && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Создать
           </Button>
         </div>
+      ) : !мой ? (
+        /* Участнику поле не нужно: вход — кнопкой наверху, здесь ссылка для гостя. */
+        <div className="flex min-h-9 items-center gap-1">
+          <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground" title={conference}>{conference}</span>
+          <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0"
+            title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
+            <Copy className="h-4 w-4" />
+          </Button>
+        </div>
       ) : (
         <div className="flex gap-2">
           <Input id={fieldId + '-conference'} aria-label="Ссылка на видеовстречу" className="min-w-0 flex-1 text-base sm:text-sm" value={conference}
-            onChange={(e) => setConference(e.target.value)} disabled={!мой} placeholder="https://…" />
+            onChange={(e) => setConference(e.target.value)} placeholder="https://…" />
           {conference.trim() && (
             <Button type="button" variant="outline" size="icon" className="shrink-0"
               title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
@@ -867,7 +881,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
         <option value="1440">За день</option>
       </select>
     </Строка>
-  ) : !новая && event!.status !== 'cancelled' && полно ? (
+  ) : !новая && event!.status !== 'cancelled' && полно && new Date(event!.starts_at).getTime() > Date.now() ? (
+    /* У прошедшей встречи напоминать не о чем: блок только удлинял карточку. */
     <Строка icon={Bell} label="Напоминание"><EventReminder companyId={companyId} event={event!} /></Строка>
   ) : null
 
@@ -927,7 +942,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   const кругБлок = полно && (!мой ? (
     <Строка icon={Eye} label="Кто видит встречу">
-      <p className="pt-2 text-sm">{КРУГИ.find((к) => к.key === visibility)?.label}<span className="text-muted-foreground"> · {КРУГИ.find((к) => к.key === visibility)?.hint}</span></p>
+      <p className="pt-2 text-sm" title={КРУГИ.find((к) => к.key === visibility)?.hint}>{КРУГИ.find((к) => к.key === visibility)?.label}</p>
     </Строка>
   ) : (
     <Строка icon={Eye} label="Кто видит встречу">
@@ -1005,7 +1020,17 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
           )}
           {подборБлок}
-        </> : <div className="space-y-1 pt-2 text-sm text-muted-foreground">{event!.attendees.map(attendee => <p key={attendee.user_id}>{attendee.name || 'Участник'} · {ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}{event!.conference_url && ведущий(attendee.user_id) ? ' · ведущий' : ''}</p>)}</div>}
+        </> : <div className="flex flex-wrap gap-1.5 pt-1">{event!.attendees.map(attendee => (
+          /* Участники плашками в строку: столбиком по человеку на строку карточка
+             уходила на второй экран (МАГ, 28.10.2026). Ответ — точкой и словом. */
+          <span key={attendee.user_id} className="inline-flex min-h-7 max-w-full items-center gap-1.5 rounded-full border border-border px-2 text-xs">
+            <span aria-hidden className={cn('size-2 shrink-0 rounded-full',
+              attendee.response === 'accepted' ? 'bg-emerald-500' : attendee.response === 'declined' ? 'bg-red-500'
+                : attendee.response === 'tentative' ? 'bg-amber-500' : 'bg-slate-400')} />
+            <span className="truncate">{attendee.name || 'Участник'}</span>
+            <span className="shrink-0 text-muted-foreground">{ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}{event!.conference_url && ведущий(attendee.user_id) ? ' · ведущий' : ''}</span>
+          </span>
+        ))}</div>}
       {!новая && мой && event!.attendees.length > 1 && (
         <p className="text-xs text-muted-foreground">
           {event!.attendees.map((a) => `${a.name || 'участник'} — ${ОТВЕТ_СЛОВОМ[a.response]}`).join(' · ')}
@@ -1045,11 +1070,10 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   /* По итогам встречи — поручение без исполнителя: на совещании решают ЧТО,
      а кто — часто позже. Оно попадает в «Разбор», ссылка на встречу остаётся. */
   const итогиБлок = !новая && event!.status !== 'cancelled' && (
-    <div className="space-y-1.5 border-t border-border pt-3">
-      <p className="text-xs font-medium text-muted-foreground">По итогам</p>
+    <div className="border-t border-border pt-3">
       <div className="flex items-center gap-1.5">
-        <Input value={итог} onChange={(e) => setИтог(e.target.value)} aria-label="Что решили сделать"
-          placeholder="Что решили сделать…" className="h-9 text-sm"
+        <Input value={итог} onChange={(e) => setИтог(e.target.value)} aria-label="По итогам: что решили сделать"
+          placeholder="По итогам: что решили сделать…" className="h-9 text-sm"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && итог.trim() && !поручить.isPending) поручить.mutate()
           }} />
@@ -1062,9 +1086,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     </div>
   )
 
+  /* Вход в видеовстречу и ссылка на карточку — наверху, под названием: за ними
+     открывают встречу, и искать их в подвале под всей формой нельзя (МАГ, 28.10.2026). */
   const ссылкиБлок = !новая && (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="sm" onClick={async () => {
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Button variant="outline" size="sm" className="order-2" onClick={async () => {
         try { await navigator.clipboard.writeText(new URL(eventHref, window.location.origin).href); toast.success('Ссылка на встречу скопирована') }
         catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
       }}>Ссылка на карточку</Button>
@@ -1072,12 +1098,12 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           ссылку (Zoom, Teams) открываем как есть. */}
       {event!.status !== 'cancelled' && (
         event!.conference_url && !/\/ledger-[0-9a-f]+/i.test(event!.conference_url)
-          ? (/^https?:\/\//i.test(event!.conference_url) && <Button variant="outline" size="sm" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-1.5 h-4 w-4" />Открыть видеовстречу</a></Button>)
-          : <Button variant="outline" size="sm" disabled={confBusy} onClick={войтиВВидеовстречу}>
+          ? (/^https?:\/\//i.test(event!.conference_url) && <Button size="sm" className="order-1" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-1.5 h-4 w-4" />Открыть видеовстречу</a></Button>)
+          : <Button size="sm" variant={event!.conference_url ? 'default' : 'outline'} className="order-1" disabled={confBusy} onClick={войтиВВидеовстречу}>
               <Video className="mr-1.5 h-4 w-4" />{event!.conference_url ? 'Войти в видеовстречу' : 'Начать видеовстречу'}
             </Button>
       )}
-      {subjectHref && <Button variant="ghost" size="sm" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
+      {subjectHref && <Button variant="ghost" size="sm" className="order-3" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
     </div>
   )
 
@@ -1125,11 +1151,40 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     </section>
   )
 
+  /* Справа от темы — голос и ИИ-агент (МАГ, 28.10.2026): тему диктуют, а агент
+     со временем будет заполнять и править карточку по описанию словами. */
   const названиеБлок = мой ? (
-    <Input id={fieldId + '-title'} aria-label="Тема встречи" maxLength={300} autoFocus={новая}
-      value={title} onChange={(e) => setTitle(e.target.value)}
-      placeholder="Тема рабочей встречи"
-      className="h-11 font-headline text-lg font-semibold md:text-lg" />
+    <div className="flex items-center gap-1.5">
+      <Input id={fieldId + '-title'} aria-label="Тема встречи" maxLength={300} autoFocus={новая}
+        value={title} onChange={(e) => setTitle(e.target.value)}
+        placeholder="Тема рабочей встречи"
+        className="h-11 min-w-0 flex-1 font-headline text-lg font-semibold md:text-lg" />
+      {здоровьеQ.data?.dictation ? (
+        <DictateButton title="Продиктовать тему"
+          onText={(слова) => setTitle((было) => (было.trim() ? `${было.trim()} ${слова}` : слова).slice(0, 300))} />
+      ) : (
+        <span title="Голосовой ввод: распознавание речи в этом пространстве не подключено">
+          <Button type="button" variant="outline" size="icon" disabled aria-label="Голосовой ввод недоступен">
+            <Mic className="size-4" />
+          </Button>
+        </span>
+      )}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" size="icon" aria-label="Заполнить карточку с ИИ-агентом"
+            title="Заполнить или поправить карточку с ИИ-агентом">
+            <Sparkles className="size-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-72 space-y-1 p-3 text-sm">
+          <p className="font-medium">ИИ-агент для встречи</p>
+          <p className="text-muted-foreground">
+            Опишите встречу словами — агент заполнит тему, время, участников и повестку или поправит
+            уже собранную карточку. Появится в следующих выпусках.
+          </p>
+        </PopoverContent>
+      </Popover>
+    </div>
   ) : null
 
   const отменённая = event?.status === 'cancelled' && (
@@ -1199,7 +1254,6 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   const подвал = <>
     {итогиБлок}
-    {ссылкиБлок}
     {служебныеБлок}
     {отменаБлок}
   </>
@@ -1212,7 +1266,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           // оно отрисовано вне панели и закрывается само.
           if (e.key === 'Escape' && панельRef.current?.contains(e.target as Node)) { e.stopPropagation(); onClose() }
         }}
-        className="absolute bottom-2 right-2 top-2 z-30 flex w-[min(460px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card"
+        className="absolute bottom-2 right-2 top-2 z-30 flex w-[min(560px,calc(100%-1rem))] 2xl:w-[min(600px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card"
         style={{ boxShadow: 'var(--shadow-large)' }}>
         <div className="flex items-start gap-2 px-4 pb-2 pt-4">
           <div className="min-w-0 flex-1">
@@ -1222,6 +1276,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             <X className="h-4 w-4" />
           </Button>
         </div>
+        {ссылкиБлок && <div className="px-4 pb-2">{ссылкиБлок}</div>}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4 pt-1">
           {отменённая}
           {ключи([...основное, ...люди_, ...подробности, ...после], 'p')}
@@ -1240,6 +1295,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
         </DialogHeader>
         {отменённая}
         {названиеБлок}
+        {ссылкиБлок}
 
         {/* На широком экране две колонки: слева что, когда и где, справа кто.
             Одной колонкой карточка уходила в три экрана прокрутки, и до

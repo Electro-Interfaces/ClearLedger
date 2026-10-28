@@ -90,6 +90,9 @@ export function PollPanel({ companyId, eventId, isOrganizer, durationMinutes = 6
 
   const идёт = q.data?.status === 'poll'
   const варианты = q.data?.options ?? []
+  // Участнику без открытого опроса делать нечего: рамка «Опрос не открыт»
+  // только удлиняла карточку (МАГ, 28.10.2026).
+  if (!идёт && !isOrganizer) return null
 
   return (
     <div className="space-y-2 rounded-md border border-border p-3">
