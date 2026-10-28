@@ -124,6 +124,8 @@ const RECHECK_LABEL: Record<string, string> = {
   no_links: 'строка пока не связана с договором',
 }
 
+export const recheckOutcome = (value: string): string => RECHECK_LABEL[value] ?? value
+
 /** Свидетельство повторной сверки, если оно вообще принято. */
 export function recheckLine(r: AccountingRecheck | null | undefined): string | null {
   if (!r) return null
@@ -133,7 +135,7 @@ export function recheckLine(r: AccountingRecheck | null | undefined): string | n
   }
   const блок = (r.open_questions ?? []).filter((q) => q.blocking)
   return 'Повторная сверка' + (r.checked_at ? ' ' + дата(r.checked_at) : '')
-    + (r.overall ? ': ' + (RECHECK_LABEL[r.overall] ?? r.overall) : '')
+    + (r.overall ? ': ' + recheckOutcome(r.overall) : '')
     + (блок.length ? '. Нерешённое: ' + блок.map((q) => q.label).join('; ') : '')
 }
 

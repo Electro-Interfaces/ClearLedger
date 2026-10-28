@@ -113,12 +113,29 @@ export interface AccountingRecord {
   links_count: number
   differences_count: number
   stale_count: number
+  rechecked_at?: string | null
+  recheck_overall?: string | null
   location_ids: string[]
   cards: AccountingCard[]
   card_labels: string[]
 }
 
+export interface AccountingRecheckCandidate {
+  contract_id: string
+  number: string
+  date: string
+  counterparty: string
+  axis_date: 'match' | 'mismatch' | 'no_data'
+}
+
 export interface AccountingRecordCard extends AccountingRecord {
+  recheck?: {
+    run_id: string
+    checked_at: string | null
+    overall: string
+    public_note: string
+    candidates_in_registry: AccountingRecheckCandidate[] | null
+  } | null
   source_side: {
     counterparty: string
     contract: string
@@ -310,7 +327,7 @@ export interface AccountingRecheck {
   open_questions: { code: string; label: string; reason: string; blocking: boolean }[]
   blocking_questions: string[]
   claims: { field: string; result: CompareResult }[]
-  candidates_in_registry: number
+  candidates_in_registry: AccountingRecheckCandidate[] | number | null
 }
 
 /** Почему реквизит не сверялся — показывается человеку, а не скрывается. */

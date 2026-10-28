@@ -10,6 +10,7 @@
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   AlertTriangle, ChevronDown, FileSpreadsheet, FileText, GitCompare, HelpCircle,
   Link2, Loader2, RefreshCcw, Unlink,
@@ -27,7 +28,7 @@ import { exportRows } from './analytics/exportRows'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import {
-  MATCHING_LABEL, VERIFICATION_LABEL, recheckLine, полеRU, сравнение,
+  MATCHING_LABEL, VERIFICATION_LABEL, recheckLine, recheckOutcome, дата as датаСверки, полеRU, сравнение,
 } from '@/lib/accountingMark'
 import {
   getAccountingRecord, getAccountingSummary, getAllAccountingRecords,
@@ -235,7 +236,9 @@ export function AccountingReviewPanel() {
           if (c === С.проверка) return <span className={cn('whitespace-normal text-xs',
             r.verification === 'differences' && 'font-semibold text-destructive',
             r.verification === 'stale' && 'font-medium text-amber-600 dark:text-amber-400',
-          )}>{пров(r)}</span>
+          )}>{пров(r)}{r.rechecked_at && <span className="mt-0.5 block text-muted-foreground">
+            Повторно {датаСверки(r.rechecked_at)}{r.recheck_overall ? ': ' + recheckOutcome(r.recheck_overall) : ''}
+          </span>}</span>
           if (c === С.карточки) return <span className="block whitespace-normal break-words text-xs">
             {r.card_labels.length ? r.card_labels.join('; ') : '—'}</span>
           if (c === С.основание) return <span className="block whitespace-normal break-words text-xs">{r.reason || '—'}</span>
@@ -294,12 +297,28 @@ function Стороны({ card, loading, error, onRetry }: {
         <Строчка label="Первичный документ" value="не предоставлен — наличие и подписание неизвестны" />
       </dl>
     </section>
+    {card.recheck && <section className="rounded-lg border border-border/60 p-3">
+      <h3 className="mb-2 text-sm font-semibold">Повторная сверка {датаСверки(card.recheck.checked_at)}</h3>
+      <p className="text-xs">{recheckOutcome(card.recheck.overall)}.</p>
+      {!!card.recheck.candidates_in_registry?.length && <div className="mt-2 text-xs">
+        <p className="text-muted-foreground">Похожие карточки найдены. Связь пока не установлена, её нужно проверить.</p>
+        <ul className="mt-1 space-y-1">{card.recheck.candidates_in_registry.map(c => <li key={c.contract_id}>
+          <Link className="text-primary underline underline-offset-2" to={'/contractors?sub=contracts&contract=' + c.contract_id}>
+            № {c.number || 'без номера'}{c.date ? ' от ' + датаСверки(c.date) : ''}
+          </Link>{c.counterparty ? ', ' + c.counterparty : ''}
+          {c.axis_date === 'mismatch' && <span className="text-destructive">. Дата расходится с отчётом</span>}
+          {c.axis_date === 'no_data' && <span className="text-muted-foreground">. Дату сравнить нельзя</span>}
+        </li>)}</ul>
+      </div>}
+    </section>}
     <section className="rounded-lg border border-border/60 p-3">
       <h3 className="mb-2 text-sm font-semibold">В пространстве</h3>
       {!card.links.length
         ? <p className="text-xs text-muted-foreground">
-            Карточка пространства не назначена. {card.candidates && card.candidates !== 'Не найдены'
-              ? 'Кандидаты: ' + card.candidates : 'Кандидаты не найдены.'}
+            Карточка пространства не назначена. {card.recheck?.candidates_in_registry?.length
+              ? 'Похожие карточки показаны в повторной сверке выше.'
+              : card.candidates && card.candidates !== 'Не найдены'
+                ? 'Кандидаты прежнего поиска: ' + card.candidates : 'Кандидаты не найдены.'}
           </p>
         : <div className="flex flex-col gap-3">{card.links.map((l) => <Связь key={l.entity_id + l.relation} link={l} />)}</div>}
     </section>
