@@ -21,8 +21,9 @@ import { useAuth } from '@/contexts/AuthContext'
 import { EventReminder } from './EventReminder'
 import {
   AlignLeft, Bell, BookmarkPlus, CalendarSearch, ChevronDown, Clock, Copy, Eye, LayoutTemplate,
-  ListPlus, Loader2, MapPin, Paperclip, Repeat, Users, Video, X,
+  ListPlus, Loader2, MapPin, Paperclip, Repeat, Tag, Users, Video, X,
 } from 'lucide-react'
+import { TagPicker } from '@/components/tags/PersonalTags'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { PollPanel } from '@/components/calendar/PollPanel'
@@ -775,6 +776,14 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     </Строка>
   )
 
+  /* Мои теги — личная пометка встречи: цвет в календаре, поиск и отбор. Ставит
+     любой, кто видит встречу, и видит только он сам (МАГ, 28.10.2026). */
+  const тегиБлок = !новая && (
+    <Строка icon={Tag} label="Мои теги">
+      <TagPicker companyId={companyId} targetRef={`event:${event!.id}`} />
+    </Строка>
+  )
+
   /* За сколько напомнить — при сборе встречи (вопрос МАГа 07.09.2026). У
      собранной встречи тем же занимается блок напоминания ниже. */
   const напоминаниеБлок = новая && мой && полно ? (
@@ -1111,7 +1120,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   </>
 
   const основное = [шаблоныБлок, времяБлок, повторБлок]
-  const подробности = [местоБлок, видеоБлок, описаниеБлок, материалыБлок, напоминаниеБлок]
+  const подробности = [местоБлок, видеоБлок, описаниеБлок, материалыБлок, тегиБлок, напоминаниеБлок]
   const люди_ = [кругБлок, участникиБлок]
   const после = [опросБлок, гостиБлок, предложенияБлок]
   const ключи = (блоки: ReactNode[], префикс: string) => блоки.map((б, i) => б ? <div key={префикс + i}>{б}</div> : null)

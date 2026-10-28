@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { AskSupportButton } from '@/components/support/AskSupportButton'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Button } from '@/components/ui/button'
+import { TagPicker } from '@/components/tags/PersonalTags'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -516,6 +517,10 @@ function DocCardContent({ id, companyId, onBack, onChanged, initialTab,
               Метки не загрузились · повторить
             </Button>
           )}
+        </div>
+        {/* Мои теги — личная пометка, в отличие от меток выше её видит только сам человек. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <TagPicker companyId={companyId} targetRef={`doc:${d.id}`} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

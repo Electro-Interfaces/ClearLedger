@@ -22,6 +22,8 @@ import { NotebookPen, Repeat, Video } from 'lucide-react'
 import type { CalendarEvent } from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
+import { tagTone } from '@/lib/tagTones'
+import type { PersonalTag } from '@/services/tagsService'
 import { dragTimes, eventDaySegment, layoutDayEvents } from '@/lib/calendarLayout'
 import { companyDayTime, companyMinutesNow, companyTime, isCompanyDay, isCompanyToday } from '@/lib/companyTime'
 
@@ -42,7 +44,7 @@ const МИН_МИНУТ = МИН_ВЫСОТА_PX / ЧАС_PX * 60
 const КРАЙ_PX = 6
 const часы = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 
-export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onAddAllDay, onDay, onMove, canMove }: {
+export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onAddAllDay, onDay, onMove, canMove, tagsOf }: {
   days: Date[]
   events: CalendarEvent[]
   tasks: SpaceTask[]
@@ -61,7 +63,11 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
   onMove?: (e: CalendarEvent, start: Date, end: Date) => void
   /** Можно ли её тянуть: свою, не отменённую. */
   canMove?: (e: CalendarEvent) => boolean
+  /** Мои теги встречи: первый красит плашку, имена — в подпись и подсказку. */
+  tagsOf?: (e: CalendarEvent) => PersonalTag[]
 }) {
+  const цвет = (e: CalendarEvent) => { const т = tagsOf?.(e)[0]; return т ? tagTone(т.color).plate : null }
+  const тегиСловами = (e: CalendarEvent) => { const т = tagsOf?.(e) ?? []; return т.length ? `, мои теги: ${т.map((x) => x.name).join(', ')}` : '' }
   const прокрутка = useRef<HTMLDivElement>(null)
 
   // Открываемся на рабочем дне, а не на полуночи: иначе человек каждый раз
@@ -201,8 +207,10 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                   className={cn('block w-full truncate rounded px-1 text-[12px]',
                     e.status === 'cancelled'
                       ? 'text-muted-foreground line-through'
+                      : цвет(e) ? cn('border text-foreground', цвет(e))
                       : foreign?.has(e.id) ? 'border border-border bg-background text-foreground hover:bg-accent'
-                        : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
+                        : 'bg-primary/15 text-foreground hover:bg-primary/25')}
+                  aria-label={`${e.title}${тегиСловами(e)}`}>
                   {e.title}
                 </button>
               ))}
@@ -313,7 +321,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                   return (
                     <button key={e.id} onClick={() => { if (!безКлика.current) onEvent(e) }}
                       onPointerDown={можно ? (ev) => начатьТягу(ev, e, индекс, startMinute, endMinute) : undefined}
-                      aria-label={`${e.title}, ${format(d, 'd MMMM', { locale: ru })}${continues ? ', продолжение' : ''}${ждёт ? ', ждёт вашего ответа' : ''}`}
+                      aria-label={`${e.title}, ${format(d, 'd MMMM', { locale: ru })}${continues ? ', продолжение' : ''}${ждёт ? ', ждёт вашего ответа' : ''}${тегиСловами(e)}`}
                       title={e.status === 'cancelled'
                         ? `Отменена${e.cancel_reason ? `: ${e.cancel_reason}` : ''}`
                         : ждёт ? `${e.title} — ждёт вашего ответа`
@@ -333,6 +341,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                           ? 'border-border bg-card text-muted-foreground line-through'
                           : e.my_response === 'declined'
                             ? 'border-border bg-card text-muted-foreground line-through'
+                            : цвет(e) ? cn('text-foreground', цвет(e))
                             : foreign?.has(e.id) ? 'border-border bg-background text-foreground hover:bg-accent'
                             : 'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25')}>
                       <span className="tabular-nums text-muted-foreground">
