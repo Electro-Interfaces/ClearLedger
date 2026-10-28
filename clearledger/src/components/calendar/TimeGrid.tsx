@@ -32,8 +32,13 @@ const ЧАСЫ = Array.from({ length: 24 }, (_, i) => i)
  *  помещается даже «10:00» и первая буква названия. Неделя на телефоне делит
  *  колонку в 89 px, и три одновременные встречи давали по 29 px. */
 const МИН_БЛОК_PX = 44
+/** Ниже этой высоты блок не рисуется: в него не влезает строка «09:04 Тема».
+ *  Раскладка считает короткую встречу такой же длины, иначе завершённые за
+ *  минуту конференции ложились текстом друг на друга (QA 28.10.2026). */
+const МИН_ВЫСОТА_PX = 18
+const МИН_МИНУТ = МИН_ВЫСОТА_PX / ЧАС_PX * 60
 
-export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onDay }: {
+export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onAddAllDay, onDay }: {
   days: Date[]
   events: CalendarEvent[]
   tasks: SpaceTask[]
@@ -45,6 +50,8 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
   draft?: { start: Date; end: Date; title: string } | null
   onEvent: (e: CalendarEvent) => void
   onAdd: (at: Date) => void
+  /** Клик по пустому месту ряда «весь день» — встреча на весь этот день. */
+  onAddAllDay?: (day: Date) => void
   onDay?: (day: Date) => void
 }) {
   const прокрутка = useRef<HTMLDivElement>(null)
@@ -78,8 +85,13 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
     return () => clearInterval(timer)
   }, [])
 
-  const вСетке = events.filter((e) => !e.all_day)
-  const сверху = events.filter((e) => e.all_day)
+  // Встреча от суток и длиннее — наверху, как всёдневная (так делают Google и
+  // Outlook): блоком через всю колонку она закрывала день, и клик по «пустому»
+  // месту открывал её вместо новой встречи (МАГ, 28.10.2026).
+  const сутки = (e: CalendarEvent) =>
+    new Date(e.ends_at).getTime() - new Date(e.starts_at).getTime() >= 86_400_000
+  const вСетке = events.filter((e) => !e.all_day && !сутки(e))
+  const сверху = events.filter((e) => e.all_day || сутки(e))
   // Пересчёт раз в минуту держит `сейчас`; минуты берутся по часам компании.
   const минутаСейчас = companyMinutesNow()
   const естьСегодня = days.some((d) => isCompanyToday(d))
@@ -96,7 +108,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
             aria-label={`Открыть ${format(d, 'd MMMM', { locale: ru })}`}
             className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left hover:bg-accent/50">
             <span className={cn('text-xs font-medium',
-              isCompanyToday(d) ? 'text-primary' : d.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>
+              isCompanyToday(d) ? 'text-primary' : 'text-muted-foreground')}>
               {format(d, 'EEEEEE', { locale: ru })}
             </span>
             <span className={cn('grid size-8 place-items-center rounded-full text-lg font-semibold tabular-nums',
@@ -123,7 +135,11 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
           const повторы = repeats.filter((r) => isCompanyDay(r.at, d))
           return (
             <div key={d.toISOString()}
-              className="min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5">
+              // Пустое место ряда — встреча на весь день, как клик по часу в сетке.
+              onClick={(ev) => { if (ev.target === ev.currentTarget) onAddAllDay?.(d) }}
+              title={onAddAllDay ? 'Нажмите на свободное место — встреча на весь день' : undefined}
+              className={cn('min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5',
+                onAddAllDay && 'cursor-pointer hover:bg-accent/40')}>
               {дневные.map((e) => (
                 <button key={e.id} onClick={() => onEvent(e)}
                   className={cn('block w-full truncate rounded px-1 text-[12px]',
@@ -148,7 +164,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                 </span>
               ))}
               {записи.length > 0 && (
-                <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground/70">
+                <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
                   <NotebookPen className="h-3 w-3 shrink-0" />{записи.length}
                 </span>
               )}
@@ -214,16 +230,16 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                     left: `${((группа.предел - 1) / группа.предел) * 100}%`,
                     width: `${(1 / группа.предел) * 100}%`,
                   }}
-                  className="absolute overflow-hidden rounded border border-dashed border-border bg-muted/60
+                  className="absolute overflow-hidden rounded border border-dashed border-border bg-card
                              px-1 py-0.5 text-left text-[12px] leading-tight text-muted-foreground hover:bg-accent">
                   +{группа.скрыто}
                 </button>
               ))}
               {видимые
-                .map(({ event: e, column: колонка, columns: всего, startMinute, endMinute, continues }) => {
+                .map(({ event: e, column: колонка, columns: всего, span: занято, startMinute, endMinute, continues }) => {
                   const н = new Date(e.starts_at)
                   const верх = startMinute / 60 * ЧАС_PX
-                  const высота = Math.max(18, (endMinute - startMinute) / 60 * ЧАС_PX)
+                  const высота = Math.max(МИН_ВЫСОТА_PX, (endMinute - startMinute) / 60 * ЧАС_PX)
                   // Ответ ещё не дан — пунктирная рамка: в сетке такие приглашения не
                   // отличались от принятых, и их пропускали (QA 27.10.2026).
                   const ждёт = e.my_response === 'pending' && e.status !== 'cancelled'
@@ -236,7 +252,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                       style={{
                         top: верх, height: высота,
                         left: `${(колонка / всего) * 100}%`,
-                        width: `${(1 / всего) * 100}%`,
+                        width: `${(Math.min(занято, всего - колонка) / всего) * 100}%`,
                       }}
                       className={cn('absolute overflow-hidden rounded border px-1 py-0.5 text-left text-[12px] leading-tight',
                         // Короткая встреча — время и тема одной строкой: переносом тема
@@ -244,9 +260,9 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                         высота < 34 && 'truncate whitespace-nowrap',
                         ждёт && 'border-dashed',
                         e.status === 'cancelled'
-                          ? 'border-border bg-muted/60 text-muted-foreground line-through'
+                          ? 'border-border bg-card text-muted-foreground line-through'
                           : e.my_response === 'declined'
-                            ? 'border-border bg-muted/40 text-muted-foreground line-through'
+                            ? 'border-border bg-card text-muted-foreground line-through'
                             : foreign?.has(e.id) ? 'border-border bg-background text-foreground hover:bg-accent'
                             : 'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25')}>
                       <span className="tabular-nums text-muted-foreground">
@@ -280,13 +296,14 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
  * предела нет, рисуем как раньше.
  */
 function раскладкаДня(события: CalendarEvent[], день: Date, ширина: number) {
-  const блоки = layoutDayEvents(события, день)
+  const блоки = layoutDayEvents(события, день, МИН_МИНУТ)
   const предел = ширина > 0 ? Math.max(1, Math.floor(ширина / МИН_БЛОК_PX)) : Number.POSITIVE_INFINITY
   const видимые: typeof блоки = []
   const скрытыеПоГруппам = new Map<number, typeof блоки>()
   for (const блок of блоки) {
     if (блок.columns <= предел || блок.column < предел - 1) {
-      видимые.push(блок)
+      // Свёрнутую колонку «+N» растянутый блок не накрывает.
+      видимые.push(блок.columns > предел ? { ...блок, span: Math.min(блок.span, предел - 1 - блок.column) } : блок)
       continue
     }
     const группа = скрытыеПоГруппам.get(блок.group) ?? []

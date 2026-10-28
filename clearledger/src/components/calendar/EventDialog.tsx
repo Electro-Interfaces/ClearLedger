@@ -110,7 +110,7 @@ function Строка({ icon: Icon, label, children, className, id }: {
 }
 
 export function EventDialog({ companyId, event: initialEvent, startAt, subjectRef, initialTitle,
-  companyDay, panel: панельЗапрошена, onDraft, onClose, onChanged }: {
+  companyDay, allDay: весьДеньНовой, panel: панельЗапрошена, onDraft, onClose, onChanged }: {
   companyId: string
   /** Существующая встреча — правим её; иначе собираем новую. */
   event: CalendarEvent | null
@@ -125,6 +125,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   /** Событие компании: дата на весь день для всех, без созыва — день компании,
    *  выездная проверка, отключение площадки. Та же встреча, другая заготовка. */
   companyDay?: boolean
+  /** Новая встреча на весь день — клик по ряду «весь день» в сетке. Видимость
+   *  обычная (только участники), в отличие от события компании. */
+  allDay?: boolean
   /** Панелью справа поверх сетки, а не окном по центру: календарь остаётся
    *  виден, и время встречи сверяют с соседними. Только на компьютере —
    *  на телефоне для панели нет места, там прежнее окно. */
@@ -142,7 +145,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const мой = (event?.is_organizer ?? true) && event?.status !== 'cancelled'
   const canRespond = !!event && !event.is_organizer && event.my_response !== null && event.status !== 'cancelled'
   const eventHref = useHref(event ? workService.refHref('event:' + event.id)! : '/')
-  const [allDay, setAllDay] = useState(event?.all_day ?? !!companyDay)
+  const наДень = !!companyDay || !!весьДеньНовой
+  const [allDay, setAllDay] = useState(event?.all_day ?? наДень)
   const [peopleSearch, setPeopleSearch] = useState('')
   const [cancelConfirm, setCancelConfirm] = useState(false)
   const [запасКонца, setЗапасКонца] = useState<string | null>(null)
@@ -227,10 +231,10 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [title, setTitle] = useState(event?.title ?? initialTitle ?? '')
   const [description, setDescription] = useState(event?.description ?? '')
   const [starts, setStarts] = useState(() => local(
-    event ? event.starts_at : companyDay ? началоДня(startAt) : (startAt ?? new Date())))
+    event ? event.starts_at : наДень ? началоДня(startAt) : (startAt ?? new Date())))
   const [ends, setEnds] = useState(() => local(
     event ? event.ends_at
-      : companyDay ? companyDayStart(addDays(parseISO(companyDateKey(началоДня(startAt))), 1))
+      : наДень ? companyDayStart(addDays(parseISO(companyDateKey(началоДня(startAt))), 1))
         : new Date((startAt ?? new Date()).getTime() + 60 * 60_000)))
   const [location, setLocation] = useState(event?.location ?? '')
   const [conference, setConference] = useState(event?.conference_url ?? '')

@@ -122,6 +122,7 @@ export function CalendarPage() {
   } | null>(null)
   const [newAt, setNewAt] = useState<Date | null>(null)
   const [companyDay, setCompanyDay] = useState(false)
+  const [newAllDay, setNewAllDay] = useState(false)
   /** Встреча, которую собирают в панели: сетка рисует её на месте. */
   const [draft, setDraft] = useState<{ start: Date; end: Date; title: string } | null>(null)
   const [желаемыйДень, setЖелаемыйДень] = useState<{ from: string; day: number } | null>(null)
@@ -134,6 +135,15 @@ export function CalendarPage() {
   const [showCancelled, setShowCancelled] = useState(() => {
     try { return localStorage.getItem('calendar-show-cancelled') === '1' } catch { return false }
   })
+  // Список календарей свёрнут по умолчанию: слои меняют редко, а место в
+  // колонке нужнее блоку «Ждут вашего ответа» (МАГ, 28.10.2026). Выбор запоминается.
+  const [слоиСвёрнуты, setСлоиСвёрнуты] = useState(() => {
+    try { return localStorage.getItem('calendar-layers-collapsed') !== '0' } catch { return true }
+  })
+  const свернутьСлои = (value: boolean) => {
+    setСлоиСвёрнуты(value)
+    try { localStorage.setItem('calendar-layers-collapsed', value ? '1' : '0') } catch { /* пусто */ }
+  }
   const переключитьОтменённые = (value: boolean) => {
     setShowCancelled(value)
     try { localStorage.setItem('calendar-show-cancelled', value ? '1' : '0') } catch { /* пусто */ }
@@ -326,8 +336,9 @@ export function CalendarPage() {
   const openDay = (day: Date, nextMode: Mode = 'day') => update({ date: format(day, 'yyyy-MM-dd'), calendarMode: nextMode })
   /** Новая встреча на это время. Одна панель за раз: открытая встреча или дело
    *  уступают место новой, иначе две панели легли бы друг на друга. */
-  const startMeeting = (at: Date, forCompany = false) => {
+  const startMeeting = (at: Date, forCompany = false, allDay = false) => {
     setCompanyDay(forCompany)
+    setNewAllDay(allDay)
     setDeed(null)
     if (eventId) update({ event: null })
     setNewAt(at)
@@ -514,7 +525,18 @@ export function CalendarPage() {
       <MiniMonth value={anchor} mode={mode} onPick={day => { update({ date: format(day, 'yyyy-MM-dd') }); setКолонкаОткрыта(false) }} />
 
       <section aria-labelledby="calendar-layers-title" className="space-y-0.5">
-        <h3 id="calendar-layers-title" className="px-1 pb-1 text-xs font-medium text-muted-foreground">Календари</h3>
+        <h3 id="calendar-layers-title">
+          <button type="button" aria-expanded={!слоиСвёрнуты} aria-controls="calendar-layers-list"
+            onClick={() => свернутьСлои(!слоиСвёрнуты)}
+            className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-1 text-left text-xs font-medium text-muted-foreground hover:bg-accent/60">
+            <ChevronDown aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none', слоиСвёрнуты && '-rotate-90')} />
+            <span className="flex-1">Календари</span>
+            {/* Свёрнутый список говорит, что включено: иначе выключенный слой
+                прятался бы вместе со списком. */}
+            {слоиСвёрнуты && <span className="tabular-nums">включено {СЛОИ_ПОДПИСИ.filter(({ key }) => слои[key]).length + (showCancelled ? 1 : 0)} из {СЛОИ_ПОДПИСИ.length + 1}</span>}
+          </button>
+        </h3>
+        <div id="calendar-layers-list" hidden={слоиСвёрнуты} className="space-y-0.5">
         {СЛОИ_ПОДПИСИ.map(({ key, label, mark }) => (
           <label key={key} className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-1 text-sm hover:bg-accent/60">
             <Checkbox checked={слои[key]} onCheckedChange={value => переключитьСлой(key, value === true)} />
@@ -526,6 +548,7 @@ export function CalendarPage() {
           <Checkbox checked={showCancelled} onCheckedChange={value => переключитьОтменённые(value === true)} />
           <span className="min-w-0 flex-1 truncate">Прошедшие отменённые</span>
         </label>
+        </div>
       </section>
 
       {/* Приглашения без ответа — отдельным списком: организатор ждёт ответа, а в
@@ -732,9 +755,9 @@ export function CalendarPage() {
     onDay={day => openDay(day, 'day')} onMonth={day => openDay(day, 'month')} />
     : mode !== 'month' ? <div className="flex min-h-0 flex-1 overflow-x-auto">
       <TimeGrid days={days} events={events} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
-        onEvent={open} onAdd={at => startMeeting(at)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
+        onEvent={open} onAdd={at => startMeeting(at)} onAddAllDay={day => startMeeting(companyDayTime(day, 0), false, true)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
     </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
-      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
+      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="px-2 py-2 text-sm font-medium text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
           неделю под край экрана (QA 27.10.2026), шесть недель должны влезать. */}
       <div className={cn('grid flex-1 grid-cols-7', phone ? 'min-h-0 [grid-auto-rows:minmax(3rem,1fr)]' : '[grid-auto-rows:minmax(5.5rem,1fr)]')}>{days.map(day => {
@@ -809,8 +832,8 @@ export function CalendarPage() {
     </div>}
   </>
 
-  const встреча = meetingOpen && <EventDialog key={eventId || `${newAt?.toISOString()}-${companyDay}`} companyId={companyId}
-    event={newAt ? null : eventQ.data!} startAt={newAt} companyDay={!!newAt && companyDay} panel onDraft={setDraft}
+  const встреча = meetingOpen && <EventDialog key={eventId || `${newAt?.toISOString()}-${companyDay}-${newAllDay}`} companyId={companyId}
+    event={newAt ? null : eventQ.data!} startAt={newAt} companyDay={!!newAt && companyDay} allDay={!!newAt && newAllDay} panel onDraft={setDraft}
     onClose={() => { setNewAt(null); if (eventId) update({ event: null }) }} onChanged={changed} />
 
   // Нижний отступ на высоту плашки установки: иначе на столе она ложится на
@@ -925,7 +948,7 @@ function MiniMonth({ value, mode, onPick }: { value: Date; mode: Mode; onPick: (
             className={cn('mx-auto grid size-8 place-items-center rounded-full text-xs tabular-nums hover:bg-accent',
               isCompanyToday(d) ? 'bg-primary font-semibold text-primary-foreground hover:bg-primary/90'
                 : выбранныйПериод(d) ? 'bg-primary/15 font-medium text-foreground'
-                  : !isSameMonth(d, месяц) ? 'text-muted-foreground/70' : 'text-foreground')}>
+                  : !isSameMonth(d, месяц) ? 'text-muted-foreground' : 'text-foreground')}>
             {format(d, 'd')}
           </button>
         ))}

@@ -20,14 +20,28 @@ export function eventDaySegment(event: TimedEvent, day: Date) {
   }
 }
 
-export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date) {
+/**
+ * Колонки встреч одного дня.
+ *
+ * `minMinutes` — сколько минут занимает на экране самый короткий блок: встреча,
+ * завершённая через десять секунд, рисуется строкой текста, и для пересечений
+ * она такой же длины, иначе соседние строки ложатся одна на другую.
+ * `span` — сколько колонок встреча занимает вправо: колонки цепочки считаются по
+ * самому плотному месту, и без растяжения утренняя встреча делила ширину с
+ * вечерними, которых рядом с ней нет (QA 28.10.2026).
+ */
+export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date, minMinutes = 0) {
+  const minMs = minMinutes * 60_000
   const segments = events.flatMap(event => {
     const segment = eventDaySegment(event, day)
     // `group` — номер цепочки пересекающихся встреч. Нужен тому, кто рисует:
     // на узкой колонке показать все колонки нельзя, и свернуть лишнее в «+N»
     // можно только внутри одной цепочки, а не по дню целиком.
-    return segment ? [{ event, ...segment, column: 0, columns: 1, group: 0 }] : []
-  }).sort((a, b) => a.start.getTime() - b.start.getTime() || b.end.getTime() - a.end.getTime())
+    if (!segment) return []
+    const from = segment.start.getTime()
+    return [{ event, ...segment, from, to: Math.max(segment.end.getTime(), from + minMs),
+      column: 0, columns: 1, span: 1, group: 0 }]
+  }).sort((a, b) => a.from - b.from || b.to - a.to)
   let group: typeof segments = []
   let groupEnd = 0
   let groupIndex = 0
@@ -36,23 +50,25 @@ export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date) {
     for (const entry of group) {
       entry.columns = columns.length
       entry.group = groupIndex
+      let span = 1
+      while (entry.column + span < columns.length && !group.some(other => other.column === entry.column + span
+        && other.from < entry.to && entry.from < other.to)) span += 1
+      entry.span = span
     }
     if (group.length) groupIndex += 1
   }
   for (const entry of segments) {
-    const start = entry.start.getTime()
-    const end = entry.end.getTime()
-    if (start >= groupEnd) {
+    if (entry.from >= groupEnd) {
       finish()
       group = []
       columns = []
     }
-    let column = columns.findIndex(until => until <= start)
+    let column = columns.findIndex(until => until <= entry.from)
     if (column < 0) column = columns.length
-    columns[column] = end
+    columns[column] = entry.to
     entry.column = column
     group.push(entry)
-    groupEnd = Math.max(groupEnd, end)
+    groupEnd = Math.max(groupEnd, entry.to)
   }
   finish()
   return segments
