@@ -14,6 +14,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { addDays, parseISO } from 'date-fns'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useHref } from 'react-router-dom'
@@ -105,9 +106,62 @@ function Строка({ icon: Icon, label, children, className, id }: {
   return (
     <div role="group" aria-label={label} id={id}
       className={cn('grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-3', className)}>
-      <Icon aria-hidden className="mt-3 h-4 w-4 text-muted-foreground" />
-      <div className="min-w-0 space-y-2">{children}</div>
+      <Icon aria-hidden className="mt-2.5 h-4 w-4 text-muted-foreground" />
+      <div className="min-w-0 space-y-1.5">{children}</div>
     </div>
+  )
+}
+
+/** Плашка участника в составе встречи: имя, роль и настройки по нажатию. */
+function ПлашкаУчастника({ имя, подпись, ведущий, наВедущего, дляСведения, наСведения, убрать }: {
+  имя: string; подпись?: string
+  /** Есть видеовстреча — можно отметить ведущего; иначе пункта нет. */
+  ведущий?: boolean; наВедущего: (v: boolean) => void
+  дляСведения?: boolean; наСведения?: (v: boolean) => void
+  убрать?: () => void
+}) {
+  const подписи = [подпись, ведущий ? 'ведущий' : null].filter(Boolean).join(' · ')
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button"
+          className="inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border border-border bg-card pl-2.5 pr-2 text-sm hover:bg-accent"
+          aria-label={`${имя}${подписи ? `, ${подписи}` : ''}: настроить участие`}>
+          <span className="truncate">{имя}</span>
+          {подписи && <span className="shrink-0 text-xs text-muted-foreground">· {подписи}</span>}
+          <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 space-y-1 p-2 text-sm">
+        {наСведения && (
+          <div role="radiogroup" aria-label="Участие" className="grid grid-cols-2 gap-1">
+            {([['Обязательно', false], ['Для сведения', true]] as const).map(([слово, v]) => (
+              <button key={слово} type="button" role="radio" aria-checked={!!дляСведения === v} onClick={() => наСведения(v)}
+                className={cn('min-h-8 rounded-md border px-2 text-xs',
+                  !!дляСведения === v ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-accent')}>
+                {слово}
+              </button>
+            ))}
+          </div>
+        )}
+        {ведущий !== undefined && (
+          <label className="flex min-h-9 items-center gap-2 px-1"
+            title="Ведущего ждут, он впускает гостей; если через 5 минут после начала его нет, первый вошедший откроет комнату сам">
+            <Checkbox checked={ведущий} onCheckedChange={(v) => наВедущего(v === true)} />
+            Ведущий видеовстречи
+          </label>
+        )}
+        {!наСведения && ведущий === undefined && (
+          <p className="px-1 py-1 text-xs text-muted-foreground">Организатор участвует всегда.</p>
+        )}
+        {убрать && (
+          <button type="button" onClick={убрать}
+            className="flex min-h-9 w-full items-center gap-2 rounded-md px-1 text-left text-destructive hover:bg-destructive/10">
+            <X aria-hidden className="h-3.5 w-3.5" />Убрать из встречи
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -166,7 +220,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   // (РусГидро, 15.10.2026). Новой встрече номер выдаём заранее — комната
   // считается от него, и ссылка видна сразу.
   const [заранееId, setЗаранееId] = useState<string | null>(null)
-  const [своя, setСвоя] = useState(false)
+  // Список сотрудников раскрыт, только пока ищут: раньше под полем висел весь
+  // штат с галочками и форма уходила на два экрана (МАГ, 28.10.2026, по образцу VK).
+  const [ищуЛюдей, setИщуЛюдей] = useState(false)
   const [видеоИдёт, setВидеоИдёт] = useState(false)
   useEffect(() => { setEvent(initialEvent) }, [initialEvent?.id])
   const notifyChanged = () => {
@@ -472,6 +528,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   const люди = (peopleQ.data?.people ?? []).filter(person => person.id !== (event?.organizer_id ?? user?.id)
     && (!peopleSearch.trim() || person.name.toLocaleLowerCase('ru').includes(peopleSearch.trim().toLocaleLowerCase('ru'))))
+  const имяЧеловека = (id: string) => peopleQ.data?.people.find((p) => p.id === id)?.name
+    ?? event?.attendees.find((x) => x.user_id === id)?.name ?? 'Сотрудник'
   const startMs = companyDateTimeToDate(starts).getTime()
   const endMs = companyDateTimeToDate(ends).getTime()
   let formError = !Number.isFinite(startMs) || !Number.isFinite(endMs) ? 'Укажите начало и конец встречи.'
@@ -660,22 +718,16 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             }} />
         )}
         {!allDay && (
+          /* Список конца — от начала и с длительностью («11:30 (1,5 ч)»): одно
+             нажатие вместо кнопок 30/60/90 (по образцу VK, 28.10.2026). */
           <TimeField className="w-24" disabled={!мой} aria-label="Время окончания"
-            value={ends.slice(11, 16)}
+            value={ends.slice(11, 16)} from={датаОкончания ? undefined : starts.slice(11, 16)}
             onChange={changeEndTime} />
         )}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <label className="flex min-h-8 items-center gap-2 text-sm">
+        <label className="flex min-h-9 items-center gap-2 text-sm">
           <Checkbox checked={allDay} disabled={!мой} onCheckedChange={(v) => toggleAllDay(v === true)} />
           Весь день
         </label>
-        {/* Длительность — самый быстрый способ задать конец: одно нажатие
-            против набора четырёх цифр. */}
-        {!allDay && мой && [30, 60, 90].map(minutes => (
-          <Button key={minutes} type="button" variant="outline" size="xs" disabled={!Number.isFinite(startMs)}
-            onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>
-        ))}
         {!allDay && мой && !датаОкончания && (
           <button type="button" onClick={() => setДоДругогоДня(true)}
             className="text-xs text-primary underline-offset-2 hover:underline">
@@ -683,7 +735,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           </button>
         )}
       </div>
-      {полно && <p className="text-xs text-muted-foreground">
+      {/* Пояс называем тому, у кого он другой: москвичу строка ничего не говорит. */}
+      {полно && Intl.DateTimeFormat().resolvedOptions().timeZone !== COMPANY_TIME_ZONE && <p className="text-xs text-muted-foreground">
         Время указано по Москве (часовой пояс компании).
       </p>}
       {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
@@ -744,14 +797,15 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
      (15.10.2026). Своя комната создаётся кнопкой, чужая ссылка — полем. */
   const видеоБлок = !мой && !conference.trim() ? null : (
     <Строка icon={Video} label="Видеовстреча">
-      {мой && !conference.trim() && !своя ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <Button type="button" variant="outline" size="sm" disabled={видеоИдёт} onClick={создатьВидео}>
-            {видеоИдёт ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Video className="mr-1.5 h-4 w-4" />}
-            Создать видеоконференцию
+      {мой && !conference.trim() ? (
+        /* Одна строка: своя ссылка полем, своя комната — «Создать» справа (как в VK). */
+        <div className="flex items-center gap-2">
+          <Input id={fieldId + '-conference'} aria-label="Ссылка на видеовстречу" className="min-w-0 flex-1 text-base sm:text-sm"
+            value={conference} onChange={(e) => setConference(e.target.value)} placeholder="Ссылка на видеовстречу (Zoom, Teams…)" />
+          <Button type="button" variant="ghost" size="sm" className="shrink-0 text-primary" disabled={видеоИдёт} onClick={создатьВидео}
+            title="Создать видеоконференцию пространства">
+            {видеоИдёт && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Создать
           </Button>
-          <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-            onClick={() => setСвоя(true)}>или своя ссылка (Zoom, Teams)</button>
         </div>
       ) : (
         <div className="flex gap-2">
@@ -772,9 +826,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     <Строка icon={AlignLeft} label="Описание"><p className="whitespace-pre-wrap break-words pt-2 text-sm">{description}</p></Строка>
   ) : null) : (
     <Строка icon={AlignLeft} label="Описание">
-      <Textarea id={fieldId + '-description'} aria-label="Описание" className="text-base sm:text-sm" value={description} rows={3} disabled={!мой}
+      {/* Пустое описание — одна строка; растёт, когда пишут. */}
+      <Textarea id={fieldId + '-description'} aria-label="Описание" className="min-h-9 resize-y py-1.5 text-base sm:text-sm"
+        value={description} rows={description.trim() ? 3 : 1} disabled={!мой}
         onChange={(e) => setDescription(e.target.value)}
-        placeholder="Что обсуждаем, что принести" />
+        placeholder="Описание: что обсуждаем, что принести" />
     </Строка>
   ))
 
@@ -897,53 +953,57 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     <Строка icon={Users} label="Участники">
       {мой && visibility === 'personal' ? <p className="pt-2 text-sm text-muted-foreground">После сохранения останется только организатор. Приглашённые участники будут убраны.</p>
         : мой ? <>
-          <Input aria-label="Найти участника" placeholder="Добавить участников" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
-          <p className="text-xs text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
-          {conference.trim() && (
-            <p className="text-xs text-muted-foreground">Ведущий видеоконференции — по умолчанию организатор. Чтобы передать роль, отметьте участника и поставьте у него «ведущий». Ведущего ждут, он впускает гостей; если через 5 минут после начала его нет, первый вошедший откроет комнату сам.</p>
-          )}
+          {/* Состав плашками, как в VK: организатор первым, у каждого позванного
+              свои настройки (обязательно или для сведения, ведущий) и «убрать». */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <ПлашкаУчастника имя={организаторИмя} подпись="организатор"
+              ведущий={conference.trim() ? ведущий(организаторId) : undefined}
+              наВедущего={(v) => отметитьВедущего(организаторId, v)} />
+            {attendees.filter((id) => id !== организаторId).map((id) => (
+              <ПлашкаУчастника key={id} имя={имяЧеловека(id)}
+                подпись={optional.includes(id) ? 'для сведения' : undefined}
+                ведущий={conference.trim() ? ведущий(id) : undefined}
+                наВедущего={(v) => отметитьВедущего(id, v)}
+                дляСведения={optional.includes(id)}
+                наСведения={(v) => setOptional((c) => v ? [...c.filter((x) => x !== id), id] : c.filter((x) => x !== id))}
+                убрать={() => {
+                  setAttendees((c) => c.filter((x) => x !== id))
+                  setOptional((c) => c.filter((x) => x !== id))
+                  отметитьВедущего(id, false)
+                }} />
+            ))}
+          </div>
+          <div className="relative">
+            <Input aria-label="Найти участника" placeholder="Добавить участников" value={peopleSearch}
+              onChange={(e) => { setPeopleSearch(e.target.value); setИщуЛюдей(true) }}
+              onFocus={() => setИщуЛюдей(true)}
+              onBlur={() => setTimeout(() => setИщуЛюдей(false), 150)}
+              onKeyDown={(e) => { if (e.key === 'Escape' && ищуЛюдей) { e.stopPropagation(); setИщуЛюдей(false) } }}
+              aria-expanded={ищуЛюдей} aria-controls={fieldId + '-people'} role="combobox"
+              className="text-base sm:text-sm" />
+            {ищуЛюдей && (
+              <div id={fieldId + '-people'} role="listbox" aria-label="Сотрудники"
+                className="absolute inset-x-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-popover p-1"
+                style={{ boxShadow: 'var(--shadow-medium)' }}>
+                {peopleQ.isLoading && <p role="status" className="px-2 py-1.5 text-sm">Загружаются сотрудники…</p>}
+                {peopleQ.isError && <p role="alert" className="px-2 py-1.5 text-sm text-destructive">Не удалось загрузить сотрудников. <button type="button" className="underline" onMouseDown={(e) => e.preventDefault()} onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
+                {!peopleQ.isLoading && !peopleQ.isError && !люди.some((p) => !attendees.includes(p.id)) && (
+                  <p className="px-2 py-1.5 text-sm text-muted-foreground">{peopleSearch.trim() ? 'Никого не нашли' : 'Все уже позваны'}</p>
+                )}
+                {люди.filter((p) => !attendees.includes(p.id)).slice(0, 60).map((person) => (
+                  <button key={person.id} type="button" role="option" aria-selected={false}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { setAttendees((c) => [...c, person.id]); setPeopleSearch('') }}
+                    className="flex min-h-9 w-full items-center rounded-md px-2 text-left text-sm hover:bg-accent">
+                    {person.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {conference.trim() && !hosts.some(id => id === организаторId || attendees.includes(id)) && (
             <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
           )}
-          {peopleQ.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <button className="underline" onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
-          <div className="max-h-56 overflow-y-auto rounded-lg border border-border px-2 lg:max-h-64">
-            {peopleQ.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
-            {!peopleQ.isLoading && !peopleQ.isError && !люди.length && <p className="py-2 text-sm text-muted-foreground">Сотрудники не найдены</p>}
-            {/* Организатор первой строкой, с именем: его добавляет сервер, и раньше
-                человек не видел ни себя, ни того, что он ведущий (МАГ, 15.10.2026). */}
-            <div className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1">
-              <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
-                <input type="checkbox" checked disabled aria-label="Организатор участвует всегда" />
-                <span className="break-words">{организаторИмя}<span className="text-muted-foreground"> · организатор</span></span>
-              </label>
-              {conference.trim() && (
-                <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
-                  <input type="checkbox" checked={ведущий(организаторId)} onChange={e => отметитьВедущего(организаторId, e.target.checked)} />
-                  ведущий
-                </label>
-              )}
-            </div>
-            {люди.map(person => <div key={person.id} className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1 last:border-0">
-              <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
-                <input type="checkbox" checked={attendees.includes(person.id)} onChange={e => {
-                  setAttendees(current => e.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))
-                  if (!e.target.checked) setOptional(current => current.filter(id => id !== person.id))
-                  if (!e.target.checked) отметитьВедущего(person.id, false)
-                }} /><span className="break-words">{person.name}</span>
-              </label>
-              {attendees.includes(person.id) && <select aria-label={`Участие: ${person.name}`} value={optional.includes(person.id) ? 'optional' : 'required'}
-                onChange={e => setOptional(current => e.target.value === 'optional' ? [...current.filter(id => id !== person.id), person.id] : current.filter(id => id !== person.id))}
-                className="h-9 max-w-36 rounded-md border border-input bg-card px-2 text-base sm:text-sm">
-                <option value="required">Обязательно</option><option value="optional">Для сведения</option>
-              </select>}
-              {attendees.includes(person.id) && person.id !== организаторId && conference.trim() && (
-                <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
-                  <input type="checkbox" checked={ведущий(person.id)} onChange={e => отметитьВедущего(person.id, e.target.checked)} />
-                  ведущий
-                </label>
-              )}
-            </div>)}
-          </div>
           {подборБлок}
         </> : <div className="space-y-1 pt-2 text-sm text-muted-foreground">{event!.attendees.map(attendee => <p key={attendee.user_id}>{attendee.name || 'Участник'} · {ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}{event!.conference_url && ведущий(attendee.user_id) ? ' · ведущий' : ''}</p>)}</div>}
       {!новая && мой && event!.attendees.length > 1 && (
@@ -1162,7 +1222,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             <X className="h-4 w-4" />
           </Button>
         </div>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 pt-1">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4 pt-1">
           {отменённая}
           {ключи([...основное, ...люди_, ...подробности, ...после], 'p')}
           {подвал}
