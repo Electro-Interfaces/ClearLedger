@@ -50,6 +50,7 @@ import { MarketImportDialog } from './MarketImportDialog'
 import { MarketOcmButton } from './MarketOcmButton'
 import { MarketSiteDialog } from './MarketSiteDialog'
 import { MarketObservationDialog } from './MarketObservationDialog'
+import { MarketNewsPanel } from './MarketNewsPanel'
 import { MarketSourcesPanel } from './MarketSourcesPanel'
 import { MarketLandscapePanel } from './MarketLandscapePanel'
 import { MarketPlayersPanel } from './MarketPlayersPanel'
@@ -1120,6 +1121,7 @@ export function MarketRouter({ tab }: { tab: string }) {
     case 'mk_sites': return <MarketSites />
     case 'mk_landscape2': return <MarketLandscapePanel />
     case 'mk_players': return <MarketPlayersPanel />
+    case 'mk_news': return <MarketNewsPanel />
     case 'mk_observations': return <MarketObservations />
     case 'mk_sources': return <MarketSourcesPanel />
     case 'mk_coverage': return <MarketCoveragePanel />

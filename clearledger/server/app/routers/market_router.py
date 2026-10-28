@@ -13,6 +13,7 @@ import uuid
 import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -24,13 +25,15 @@ from app.services.market_quality import RATING_DIGITS, observed_rating, rating_e
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.net_guard import assert_external_host
 from app.services.mapping import canon_city, canon_region
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
+                        MarketNews, MarketNewsSource,
                         MarketPlayer, MarketRegionStat, MarketShop,
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
                         ServiceLocation, User)
-from app.services import market_ocm
+from app.services import market_news, market_ocm
 
 router = APIRouter(prefix="/market", tags=["Маркетинг — рынок"])
 
@@ -4802,3 +4805,428 @@ async def ocm_import_network(
         for k in ("found", "created", "updated", "prices", "skippedOurs"):
             total[k] += res[k]
     return {**total, "cities": len(rows), "problems": problems}
+
+
+# ===========================================================================
+# Новости рынка: общая лента отрасли и разбор материалов
+# ===========================================================================
+# Новость здесь — не публикация, а наблюдение: открылась чужая станция, оператор
+# поднял тариф, вышло постановление. Лента общая (её открывают, чтобы прочитать,
+# что происходит), а привязка к оператору, региону и точке делается из неё же.
+#
+# Маршруты источников объявлены ДО `/news/{news_id}`: иначе путь `/news/sources`
+# разбирался бы как идентификатор новости и отвечал 422 вместо списка лент.
+
+
+class NewsSourceIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    kind: str = "search"
+    # Для `search` здесь поисковый запрос, для остальных — адрес ленты или страницы.
+    url: str = Field(min_length=2, max_length=600)
+    operator_id: uuid.UUID | None = None
+    player_id: uuid.UUID | None = None
+    vendor: str | None = Field(default=None, max_length=160)
+    is_profile: bool = False
+    note: str | None = None
+
+
+class NewsSourcePatch(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    url: str | None = Field(default=None, max_length=600)
+    active: bool | None = None
+    is_profile: bool | None = None
+    operator_id: uuid.UUID | None = None
+    player_id: uuid.UUID | None = None
+    vendor: str | None = Field(default=None, max_length=160)
+    note: str | None = None
+
+
+class NewsIn(BaseModel):
+    """Новость, добавленная человеком: увидел в канале, принёс с выставки."""
+    title: str = Field(min_length=3, max_length=500)
+    url: str = Field(min_length=5, max_length=900)
+    published_at: datetime | None = None
+    source_name: str | None = Field(default=None, max_length=200)
+    snippet: str | None = None
+    topic: str | None = None
+    operator_id: uuid.UUID | None = None
+    player_id: uuid.UUID | None = None
+    site_id: uuid.UUID | None = None
+    region: str | None = Field(default=None, max_length=160)
+    city: str | None = Field(default=None, max_length=160)
+    note: str | None = None
+
+
+class NewsPatch(BaseModel):
+    """Разбор новости человеком: отобрать, привязать, отбросить."""
+    status: str | None = None
+    topic: str | None = None
+    operator_id: uuid.UUID | None = None
+    player_id: uuid.UUID | None = None
+    site_id: uuid.UUID | None = None
+    region: str | None = Field(default=None, max_length=160)
+    city: str | None = Field(default=None, max_length=160)
+    lead_id: uuid.UUID | None = None
+    note: str | None = None
+
+
+NEWS_STATUS = {"new", "kept", "noise"}
+NEWS_TOPICS = {"opening", "price", "regulation", "tech", "deal", "other"}
+
+
+def _news_source_row(s: MarketNewsSource, names: dict[str, str]) -> dict[str, Any]:
+    return {
+        "id": str(s.id), "title": s.title, "kind": s.kind, "url": s.url,
+        "operatorId": str(s.operator_id) if s.operator_id else None,
+        "operatorName": names.get(str(s.operator_id)) if s.operator_id else None,
+        "playerId": str(s.player_id) if s.player_id else None,
+        "vendor": s.vendor, "isProfile": s.is_profile, "active": s.active,
+        "lastRunAt": s.last_run_at.isoformat() if s.last_run_at else None,
+        "lastOkAt": s.last_ok_at.isoformat() if s.last_ok_at else None,
+        "lastError": s.last_error, "foundTotal": s.found_total or 0, "note": s.note,
+    }
+
+
+@router.get("/news/sources")
+async def list_news_sources(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Ленты, запросы и страницы, из которых собираются новости, и их здоровье.
+
+    Молчание источника — такой же факт, как его материалы: лента, которая три
+    недели не отвечает, выглядит на экране как «не приходило», а не как пустота.
+    """
+    cid = await _member(company_id, user, db)
+    rows = (await db.execute(select(MarketNewsSource)
+                             .where(MarketNewsSource.company_id == cid)
+                             .order_by(MarketNewsSource.active.desc(),
+                                       MarketNewsSource.title))).scalars().all()
+    names = {str(o.id): o.name for o in (await db.execute(
+        select(MarketOperator).where(MarketOperator.company_id == cid))).scalars().all()}
+    counts = dict((sid, int(c)) for sid, c in (await db.execute(
+        select(MarketNews.source_id, func.count())
+        .where(MarketNews.company_id == cid)
+        .group_by(MarketNews.source_id))).all())
+    return {"sources": [{**_news_source_row(s, names),
+                         "newsTotal": counts.get(s.id, 0)} for s in rows],
+            "sinceDays": market_news.SINCE_DAYS}
+
+
+@router.post("/news/sources", status_code=status.HTTP_201_CREATED)
+async def create_news_source(
+    company_id: str = Query(...), body: NewsSourceIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Добавить источник. Адрес проверяется так же, как адрес почтового сервера.
+
+    Поле заполняет сотрудник, а запрос по нему делает бэкенд изнутри стека: без
+    проверки форма источника работала бы сканером внутренней сети (`net_guard`).
+    """
+    cid = await _member(company_id, user, db)
+    if body.kind not in {"search", "rss", "page"}:
+        raise HTTPException(422, "Вид источника: search, rss или page")
+    url = body.url.strip()
+    if body.kind != "search":
+        if not url.lower().startswith(("http://", "https://")):
+            raise HTTPException(422, "Адрес ленты или страницы должен начинаться с http(s)://")
+        assert_external_host(urlparse(url).hostname)
+    exists = (await db.execute(select(MarketNewsSource).where(
+        MarketNewsSource.company_id == cid, MarketNewsSource.url == url))).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Такой источник уже есть: «{exists.title}»")
+    src = MarketNewsSource(company_id=cid, **{**body.model_dump(), "url": url})
+    db.add(src)
+    await db.commit()
+    return {"id": str(src.id)}
+
+
+@router.patch("/news/sources/{source_id}")
+async def patch_news_source(
+    source_id: uuid.UUID, company_id: str = Query(...), body: NewsSourcePatch = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Поправить или выключить источник. Выключенный не обходится, материалы остаются."""
+    cid = await _member(company_id, user, db)
+    src = (await db.execute(select(MarketNewsSource).where(
+        MarketNewsSource.id == source_id,
+        MarketNewsSource.company_id == cid))).scalar_one_or_none()
+    if src is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Источник не найден")
+    data = body.model_dump(exclude_unset=True)
+    if "url" in data and data["url"]:
+        url = str(data["url"]).strip()
+        if src.kind != "search":
+            assert_external_host(urlparse(url).hostname)
+        data["url"] = url
+    for k, v in data.items():
+        setattr(src, k, v)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/news/sources/preset")
+async def preset_news_sources(
+    company_id: str = Query(...),
+    operators: int = Query(15, ge=0, le=100, description="сколько сетей брать по размеру"),
+    players: int = Query(10, ge=0, le=100, description="сколько игроков рынка брать"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Поставить базовый набор источников: общий невод плюс компании нашего реестра.
+
+    Иначе первый экран требует от человека выдумать поисковые запросы с нуля.
+    Набор складывается из двух частей:
+      * общие ресурсы интернета — запросы по событиям рынка (открытия, тарифы,
+        регулирование, сделки, оборудование);
+      * сайты компаний, которые мы и так ведём: операторы сетей по числу точек,
+        игроки рынка (агрегаторы, банки, автопроизводители) и платформы-интеграторы.
+        Своего RSS у них, как правило, нет, поэтому берётся их домен в поиске —
+        на `punkt-e.ru` это отдаёт публикации самой компании.
+
+    Повторный вызов добавляет только отсутствующее: набор можно расширять по мере
+    появления в реестре новых сетей.
+    """
+    cid = await _member(company_id, user, db)
+    было = {u for (u,) in (await db.execute(select(MarketNewsSource.url)
+                                            .where(MarketNewsSource.company_id == cid))).all()}
+    добавлено: list[str] = []
+
+    def добавить(title: str, url: str, **kw: Any) -> None:
+        if url in было or not url:
+            return
+        db.add(MarketNewsSource(company_id=cid, title=title[:200], kind="search",
+                                url=url[:600], **kw))
+        было.add(url)
+        добавлено.append(title)
+
+    for title, query in (
+        ("Открытия и стройка ЭЗС", "зарядная станция электромобиля открыли"),
+        ("Цены и тарифы зарядки", "тариф зарядка электромобиля подорожала ЭЗС"),
+        ("Регулирование и господдержка", "зарядная инфраструктура постановление субсидия"),
+        ("Сделки и партнёрства сетей", '"зарядных станций" сеть сделка приобрела оператор'),
+        ("Оборудование и платформы", "зарядные станции производство инверторы платформа"),
+    ):
+        добавить(title, query)
+
+    if operators:
+        сети = (await db.execute(
+            select(MarketOperator)
+            .where(MarketOperator.company_id == cid, MarketOperator.relation != "own")
+            .order_by(MarketOperator.points_total.desc().nullslast())
+            .limit(operators))).scalars().all()
+        for o in сети:
+            q = market_news.site_query(o.site_url, o.short_name or o.name)
+            if q:
+                добавить(f"{o.name} — публикации", q, operator_id=o.id,
+                         is_profile=q.startswith("site:"))
+
+    if players:
+        игроки = (await db.execute(
+            select(MarketPlayer)
+            .where(MarketPlayer.company_id == cid, MarketPlayer.is_active.is_(True))
+            .order_by(MarketPlayer.own_stations.desc().nullslast())
+            .limit(players))).scalars().all()
+        for p in игроки:
+            имя = p.brand or p.app
+            # У игрока в реестре нет сайта — ищем по имени: это агрегаторы, банки и
+            # автопроизводители, станций у них нет, а публикации есть.
+            q = market_news.site_query(None, имя)
+            if q:
+                добавить(f"{имя} — упоминания", q, player_id=p.id)
+
+    await db.commit()
+    return {"added": len(добавлено), "titles": добавлено[:40]}
+
+
+@router.post("/news/fetch")
+async def fetch_news(
+    company_id: str = Query(...),
+    since_days: int = Query(market_news.SINCE_DAYS, ge=1, le=120),
+    source_id: uuid.UUID | None = Query(None, description="обойти один источник"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Обойти источники и сложить новое в очередь разбора.
+
+    Обход идёт здесь, в Ядре, а не во внешнем боте: в «Ангаре» такой же конвейер
+    встал на месяц, когда упал контейнер бота, и этого никто не заметил.
+    """
+    cid = await _member(company_id, user, db)
+    q = select(MarketNewsSource).where(MarketNewsSource.company_id == cid,
+                                       MarketNewsSource.active.is_(True))
+    if source_id:
+        q = q.where(MarketNewsSource.id == source_id)
+    sources = list((await db.execute(q)).scalars().all())
+    if not sources:
+        return {"added": 0, "sources": [],
+                "note": "Источники не настроены — добавьте ленту, запрос или страницу"}
+    return await market_news.collect(db, cid, sources, since_days=since_days)
+
+
+@router.get("/news")
+async def list_news(
+    company_id: str = Query(...),
+    status_filter: str | None = Query(None, alias="status"),
+    topic: str | None = Query(None),
+    operator_id: uuid.UUID | None = Query(None),
+    region: str | None = Query(None),
+    q: str | None = Query(None, description="поиск по заголовку"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    limit: int = Query(60, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Общая новостная лента рынка с отборами и счётчиками очереди.
+
+    Область учёта из шапки здесь НЕ применяется к самой выборке: новость чаще всего
+    федеральная («вышло постановление»), и спрятать её, потому что выбран край,
+    значило бы спрятать событие, которое край и касается. Регион остаётся отбором,
+    который человек включает сам.
+    """
+    cid = await _member(company_id, user, db)
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "Начало периода позже конца")
+
+    base = select(MarketNews).where(MarketNews.company_id == cid)
+    if status_filter == "feed":
+        # Сама лента: всё, кроме отброшенного. Отобранное и ещё не разобранное
+        # человек читает вместе — это одна отрасль, а не две очереди.
+        base = base.where(MarketNews.status != "noise")
+    elif status_filter:
+        if status_filter not in NEWS_STATUS:
+            raise HTTPException(422, "Состояние: feed, new, kept или noise")
+        base = base.where(MarketNews.status == status_filter)
+    if topic:
+        base = base.where(MarketNews.topic == topic)
+    if operator_id:
+        base = base.where(MarketNews.operator_id == operator_id)
+    if region:
+        base = base.where(MarketNews.region == region)
+    if q and q.strip():
+        base = base.where(MarketNews.title.ilike(f"%{q.strip()}%"))
+    if date_from:
+        base = base.where(MarketNews.published_at >= datetime.combine(
+            date_from, datetime.min.time(), tzinfo=timezone.utc))
+    if date_to:
+        base = base.where(MarketNews.published_at < datetime.combine(
+            date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
+
+    total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    rows = (await db.execute(
+        base.order_by(MarketNews.published_at.desc().nullslast(),
+                      MarketNews.retrieved_at.desc(), MarketNews.id)
+        .offset(offset).limit(limit))).scalars().all()
+
+    ops = {str(o.id): o.name for o in (await db.execute(
+        select(MarketOperator).where(MarketOperator.company_id == cid))).scalars().all()}
+    players = {str(p.id): (p.brand or p.app) for p in (await db.execute(
+        select(MarketPlayer).where(MarketPlayer.company_id == cid))).scalars().all()}
+    srcs = {str(s.id): s.title for s in (await db.execute(
+        select(MarketNewsSource).where(MarketNewsSource.company_id == cid))).scalars().all()}
+
+    by_status = dict((s, int(c)) for s, c in (await db.execute(
+        select(MarketNews.status, func.count()).where(MarketNews.company_id == cid)
+        .group_by(MarketNews.status))).all())
+    by_topic = dict((t, int(c)) for t, c in (await db.execute(
+        select(MarketNews.topic, func.count()).where(MarketNews.company_id == cid)
+        .group_by(MarketNews.topic))).all())
+
+    return {
+        "news": [{
+            "id": str(n.id), "title": n.title, "url": n.url, "snippet": n.snippet,
+            "sourceName": n.source_name, "sourceId": str(n.source_id) if n.source_id else None,
+            "sourceTitle": srcs.get(str(n.source_id)) if n.source_id else None,
+            "publishedAt": n.published_at.isoformat() if n.published_at else None,
+            "retrievedAt": n.retrieved_at.isoformat() if n.retrieved_at else None,
+            "channel": n.channel, "topic": n.topic, "status": n.status,
+            "operatorId": str(n.operator_id) if n.operator_id else None,
+            "operatorName": ops.get(str(n.operator_id)) if n.operator_id else None,
+            "playerId": str(n.player_id) if n.player_id else None,
+            "playerName": players.get(str(n.player_id)) if n.player_id else None,
+            "siteId": str(n.site_id) if n.site_id else None,
+            "region": n.region, "city": n.city,
+            "suggested": n.suggested, "linkedBy": n.linked_by,
+            "leadId": str(n.lead_id) if n.lead_id else None,
+            "note": n.note, "author": n.author_name,
+        } for n in rows],
+        "total": total, "returned": len(rows), "offset": offset, "limit": limit,
+        "counts": {"new": by_status.get("new", 0), "kept": by_status.get("kept", 0),
+                   "noise": by_status.get("noise", 0)},
+        "byTopic": by_topic,
+    }
+
+
+@router.post("/news", status_code=status.HTTP_201_CREATED)
+async def create_news(
+    company_id: str = Query(...), body: NewsIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Добавить новость вручную: канал, выставка, письмо партнёра.
+
+    Добавленная человеком сразу отобрана (`kept`): он её уже прочитал и признал
+    нужной — отправлять её же в собственную очередь разбора незачем.
+    """
+    cid = await _member(company_id, user, db)
+    if body.topic and body.topic not in NEWS_TOPICS:
+        raise HTTPException(422, "Тема новости вне списка")
+    url = body.url.strip()
+    key = market_news.normalize_url(url)
+    dup = (await db.execute(select(MarketNews).where(
+        MarketNews.company_id == cid, MarketNews.url_key == key))).scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Эта новость уже есть в ленте")
+    data = body.model_dump()
+    data["url"] = url
+    news = MarketNews(
+        company_id=cid, url_key=key, channel="manual", status="kept", linked_by="human",
+        author_id=user.id, author_name=user.name,
+        **{**data, "topic": body.topic or market_news.topic_of(
+            f"{body.title} {body.snippet or ''}")},
+    )
+    db.add(news)
+    await db.commit()
+    return {"id": str(news.id)}
+
+
+@router.patch("/news/{news_id}")
+async def patch_news(
+    news_id: uuid.UUID, company_id: str = Query(...), body: NewsPatch = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Разобрать новость: отобрать в ленту, привязать к оператору или отбросить.
+
+    «Шум» стоит ровно столько же, сколько «отобрать», и это осознанно: в «Ангаре»
+    треть собранного (40 материалов из 120) так и осталась в очереди, потому что
+    отклонить было так же трудоёмко, как принять.
+    """
+    cid = await _member(company_id, user, db)
+    news = (await db.execute(select(MarketNews).where(
+        MarketNews.id == news_id, MarketNews.company_id == cid))).scalar_one_or_none()
+    if news is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Новость не найдена")
+    data = body.model_dump(exclude_unset=True)
+    if "status" in data and data["status"] not in NEWS_STATUS:
+        raise HTTPException(422, "Состояние: new, kept или noise")
+    if "topic" in data and data["topic"] and data["topic"] not in NEWS_TOPICS:
+        raise HTTPException(422, "Тема новости вне списка")
+    if data.get("operator_id"):
+        if (await db.execute(select(MarketOperator.id).where(
+                MarketOperator.id == data["operator_id"],
+                MarketOperator.company_id == cid))).scalar_one_or_none() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Оператор не найден")
+    if data.get("site_id"):
+        if (await db.execute(select(MarketSite.id).where(
+                MarketSite.id == data["site_id"],
+                MarketSite.company_id == cid))).scalar_one_or_none() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Точка не найдена")
+    for k, v in data.items():
+        setattr(news, k, v)
+    # Привязку подтвердил человек — это уже не подсказка разбора.
+    if {"operator_id", "player_id", "site_id", "region", "city"} & set(data):
+        news.linked_by = "human"
+    news.updated_at = datetime.now(timezone.utc)
+    news.author_name = news.author_name or user.name
+    await db.commit()
+    return {"ok": True}

@@ -1190,3 +1190,158 @@ export function allMarketObservations(companyId: string, params: ObservationPara
     return { rows: page.observations, total: page.total }
   })
 }
+
+/* ───────────────────────── Новости рынка ─────────────────────────
+ * Общая лента отрасли: что происходит вокруг сети. Новость здесь — наблюдение
+ * (открылась чужая станция, оператор поднял тариф, вышло постановление), поэтому
+ * у неё те же четыре поля происхождения, что у любого факта продукта: откуда,
+ * когда, как получено, насколько уверены.
+ *
+ * Область учёта к ленте НЕ применяется: событие чаще федеральное, и прятать его
+ * из-за выбранного края значит прятать то, что этот край и касается. Регион —
+ * отбор, который включает человек.
+ */
+
+/** О чём новость. Тема — подсказка для отбора, а не классификация смысла. */
+export type MarketNewsTopic = 'opening' | 'price' | 'regulation' | 'tech' | 'deal' | 'other'
+
+export const NEWS_TOPIC_LABEL: Record<MarketNewsTopic, string> = {
+  opening: 'Открытия и стройка',
+  price: 'Цены и тарифы',
+  regulation: 'Регулирование',
+  tech: 'Техника и платформы',
+  deal: 'Сделки и партнёрства',
+  other: 'Прочее',
+}
+
+/** Состояние разбора. «Шум» стоит столько же, сколько «отобрать» — иначе очередь встаёт. */
+export type MarketNewsStatus = 'new' | 'kept' | 'noise'
+
+export const NEWS_STATUS_LABEL: Record<MarketNewsStatus, string> = {
+  new: 'В разборе',
+  kept: 'В ленте',
+  noise: 'Шум',
+}
+
+/** Как получено: поисковая лента, своя лента компании, её страница или руками. */
+export const NEWS_CHANNEL_LABEL: Record<string, string> = {
+  search: 'поисковая лента',
+  rss: 'лента источника',
+  page: 'страница источника',
+  manual: 'вручную',
+}
+
+export const NEWS_SOURCE_KIND_LABEL: Record<string, string> = {
+  search: 'Поисковый запрос',
+  rss: 'Лента (RSS/Atom)',
+  page: 'Страница новостей',
+}
+
+export interface MarketNewsItem {
+  id: string
+  title: string
+  url: string
+  snippet: string | null
+  sourceName: string | null
+  sourceId: string | null
+  sourceTitle: string | null
+  publishedAt: string | null
+  retrievedAt: string | null
+  channel: string
+  topic: MarketNewsTopic
+  status: MarketNewsStatus
+  operatorId: string | null
+  operatorName: string | null
+  playerId: string | null
+  playerName: string | null
+  siteId: string | null
+  region: string | null
+  city: string | null
+  /** Что предложил разбор: имя компании, слово совпадения, регион. Не утверждение. */
+  suggested: Record<string, string> | null
+  linkedBy: string
+  leadId: string | null
+  note: string | null
+  author: string | null
+}
+
+export interface MarketNewsReply {
+  news: MarketNewsItem[]
+  total: number
+  returned: number
+  offset: number
+  limit: number
+  counts: { new: number; kept: number; noise: number }
+  byTopic: Record<string, number>
+}
+
+export interface MarketNewsSource {
+  id: string
+  title: string
+  kind: string
+  url: string
+  operatorId: string | null
+  operatorName: string | null
+  playerId: string | null
+  vendor: string | null
+  isProfile: boolean
+  active: boolean
+  lastRunAt: string | null
+  lastOkAt: string | null
+  lastError: string | null
+  foundTotal: number
+  newsTotal: number
+  note: string | null
+}
+
+export type NewsParams = {
+  status?: MarketNewsStatus
+  topic?: string
+  operator_id?: string
+  region?: string
+  q?: string
+  date_from?: string
+  date_to?: string
+  offset?: number
+  limit?: number
+}
+
+export const listMarketNews = (companyId: string, params?: NewsParams) =>
+  httpGet<MarketNewsReply>('/api/market/news', { company_id: companyId, ...params })
+
+export const listMarketNewsSources = (companyId: string) =>
+  httpGet<{ sources: MarketNewsSource[]; sinceDays: number }>(
+    '/api/market/news/sources', { company_id: companyId })
+
+export const createMarketNews = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string }>(`/api/market/news?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchMarketNews = (companyId: string, newsId: string, body: Record<string, unknown>) =>
+  patch<{ ok: boolean }>(
+    `/api/market/news/${newsId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const createMarketNewsSource = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string }>(
+    `/api/market/news/sources?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchMarketNewsSource = (companyId: string, sourceId: string, body: Record<string, unknown>) =>
+  patch<{ ok: boolean }>(
+    `/api/market/news/sources/${sourceId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+/** Базовый набор источников: общий невод плюс компании нашего реестра. */
+export const presetMarketNewsSources = (companyId: string) =>
+  post<{ added: number; titles: string[] }>(
+    `/api/market/news/sources/preset?company_id=${encodeURIComponent(companyId)}`, {})
+
+/** Обход источников. Возвращает, что принёс каждый, включая его ошибку. */
+export const fetchMarketNews = (companyId: string, params?: { since_days?: number; source_id?: string }) =>
+  post<{
+    added: number
+    sinceDays?: number
+    note?: string
+    sources: { id: string; title: string; added: number; seen?: number; error?: string }[]
+  }>(`/api/market/news/fetch?${new URLSearchParams({
+    company_id: companyId,
+    ...(params?.since_days ? { since_days: String(params.since_days) } : {}),
+    ...(params?.source_id ? { source_id: params.source_id } : {}),
+  }).toString()}`, {})
