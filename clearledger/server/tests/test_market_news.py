@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import pytest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -125,3 +126,47 @@ def test_reprints_share_one_title_key():
     a = clean_title("Росатом открыл станции в Северске - ТАСС", "ТАСС")
     b = clean_title("Росатом открыл станции в Северске - Интерфакс", "Интерфакс")
     assert title_key(a) == title_key(b)
+
+
+def test_выход_наружу_берётся_из_окружения_стека(monkeypatch):
+    """Прокси не настраивается отдельно: стек уже держит его для Telegram.
+
+    Со стенда `news.google.com` закрыт геоблокировкой, и без этого выхода обход
+    возвращал бы пустую ленту при исправном коде.
+    """
+    from app.services import market_news as mn
+    for name in ("MARKET_NEWS_PROXY", "HTTPS_PROXY", "https_proxy", "SECURITY_TG_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    assert mn.proxy() is None, "нет настройки — ходим напрямую"
+
+    monkeypatch.setenv("SECURITY_TG_PROXY", "http://10.10.70.50:3128")
+    assert mn.proxy() == "http://10.10.70.50:3128"
+    # Своя настройка новостей сильнее общей: ей может понадобиться другой выход.
+    monkeypatch.setenv("MARKET_NEWS_PROXY", "http://own:3128")
+    assert mn.proxy() == "http://own:3128"
+
+
+@pytest.mark.asyncio
+async def test_прокси_подхватывает_только_упавшее_напрямую():
+    """Прямой путь основной: падение прокси не должно гасить обход целиком."""
+    import httpx
+    from app.services.market_news import get_page
+
+    def прямой(request: httpx.Request) -> httpx.Response:
+        if "closed" in str(request.url):
+            raise httpx.ConnectTimeout("геоблок", request=request)
+        return httpx.Response(200, text="напрямую")
+
+    def через_прокси(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="через прокси")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(прямой)) as direct, \
+            httpx.AsyncClient(transport=httpx.MockTransport(через_прокси)) as proxied:
+        открытый = await get_page("https://open.example.ru/rss", direct, proxied)
+        assert открытый.text == "напрямую", "доступное напрямую через прокси не гоняем"
+        закрытый = await get_page("https://closed.example.ru/rss", direct, proxied)
+        assert закрытый.text == "через прокси"
+
+        # Прокси нет вовсе — причина отказа доходит до карточки источника.
+        with pytest.raises(httpx.ConnectTimeout):
+            await get_page("https://closed.example.ru/rss", direct, None)

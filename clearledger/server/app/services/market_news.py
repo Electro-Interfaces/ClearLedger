@@ -25,6 +25,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import unicodedata
 import uuid
@@ -43,6 +45,10 @@ from app.models import MarketNews, MarketNewsSource, MarketOperator, MarketPlaye
 TIMEOUT = httpx.Timeout(25.0)
 UA = "ElsyPlusMarket/1.0 (+https://rushydro.dataworker.ru)"
 SEARCH_BASE = "https://news.google.com/rss/search"
+
+# Сколько лент тянем одновременно. Шесть — компромисс: тридцать источников
+# укладываются в несколько секунд, а прокси стека не получает залпом весь список.
+FETCH_PARALLEL = 6
 
 # Окно обхода по умолчанию. Поисковая лента охотно отдаёт материалы 2022–2024 годов
 # по тому же запросу; без окна первая же выгрузка завалит очередь разбора архивом.
@@ -83,6 +89,23 @@ DEFAULT_EXCLUDE = ("зарядное устройство для телефон"
                    # бытовых устройств, а не событие рынка.
                    "рейтинг лучших", "топ-10", "топ 10", "как выбрать", "своими руками",
                    "лучшие зарядные устройства", "обзор зарядных устройств")
+
+
+def proxy() -> str | None:
+    """Через что ходить наружу. Пусто — напрямую.
+
+    Со стенда часть источников недоступна напрямую: `news.google.com` отвечает
+    таймаутом TLS-рукопожатия (геоблокировка), и обход возвращал бы пустую ленту
+    при исправном коде. Стек для таких случаев уже держит прокси —
+    `SECURITY_TG_PROXY`, тот же путь, которым уходят уведомления в Telegram, —
+    поэтому своей настройки обход не требует, а `MARKET_NEWS_PROXY` оставлен на
+    случай, когда новостям нужен отдельный выход.
+    """
+    for name in ("MARKET_NEWS_PROXY", "HTTPS_PROXY", "https_proxy", "SECURITY_TG_PROXY"):
+        v = (os.environ.get(name) or "").strip()
+        if v:
+            return v
+    return None
 
 
 def normalize_url(url: str) -> str:
@@ -272,21 +295,49 @@ def suggest_links(text: str, operators: list[MarketOperator],
     return found
 
 
-async def fetch_feed(url: str, client: httpx.AsyncClient) -> list[dict[str, Any]]:
+async def get_page(url: str, client: httpx.AsyncClient,
+                   proxied: httpx.AsyncClient | None = None) -> httpx.Response:
+    """Забрать страницу: сначала напрямую, при сетевом отказе — через прокси.
+
+    Порядок именно такой. Прокси стека живёт на VPN-пире, и если сделать его
+    единственным путём, то его выключение останавливает обход целиком — включая
+    российские источники, которые со стенда открываются напрямую. Наоборот
+    безопаснее: прямой путь обслуживает всё, что доступно, а прокси подхватывает
+    то, что закрыто геоблокировкой.
+    """
+    try:
+        r = await client.get(url, headers={"User-Agent": UA}, follow_redirects=True)
+        r.raise_for_status()
+        return r
+    except (httpx.TransportError, httpx.HTTPStatusError) as direct_error:
+        if proxied is None:
+            raise
+        try:
+            r = await proxied.get(url, headers={"User-Agent": UA}, follow_redirects=True)
+            r.raise_for_status()
+            return r
+        except Exception:
+            # В карточку источника важнее причина ПРЯМОГО отказа: она объясняет,
+            # почему вообще понадобился обход, — а падение прокси видно по тому,
+            # что через него не прошёл ни один источник.
+            raise direct_error from None
+
+
+async def fetch_feed(url: str, client: httpx.AsyncClient,
+                     proxied: httpx.AsyncClient | None = None) -> list[dict[str, Any]]:
     """Получить и разобрать ленту. Ошибка источника — факт для карточки, не исключение."""
-    r = await client.get(url, headers={"User-Agent": UA}, follow_redirects=True)
-    r.raise_for_status()
+    r = await get_page(url, client, proxied)
     return parse_feed(r.text)
 
 
-async def discover_feed(page_url: str, client: httpx.AsyncClient) -> str | None:
+async def discover_feed(page_url: str, client: httpx.AsyncClient,
+                        proxied: httpx.AsyncClient | None = None) -> str | None:
     """Есть ли у страницы своя лента (`<link rel=alternate type=application/rss+xml>`).
 
     У операторов её не нашлось ни у одного проверенного (28.10.2026), но проверить
     дешевле, чем объяснять человеку, почему мы ищем его пресс-релизы в поиске.
     """
-    r = await client.get(page_url, headers={"User-Agent": UA}, follow_redirects=True)
-    r.raise_for_status()
+    r = await get_page(page_url, client, proxied)
     m = re.search(r'<link[^>]+type=["\']application/(?:rss|atom)\+xml["\'][^>]*>', r.text, re.I)
     if not m:
         return None
@@ -309,6 +360,11 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
     Идемпотентно: ключ новости — приведённый адрес, повторный обход обновляет
     найденное, а не плодит второе. Перепечатка с тем же заголовком в пределах окна
     тоже считается той же новостью: иначе один пресс-релиз даёт пять «упоминаний».
+
+    Ленты забираются ПАРАЛЛЕЛЬНО, и это не оптимизация, а условие работоспособности:
+    последовательный обход тридцати источников по несколько секунд каждый не
+    укладывается в таймаут кромки, и человек вместо ленты получает «Bad Gateway»
+    (28.10.2026). Запись в базу идёт после — одной сессией, последовательно.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, since_days))
     operators = list((await db.execute(select(MarketOperator).where(
@@ -327,22 +383,35 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
     added = 0
     per_source_stat: list[dict[str, Any]] = []
     now = datetime.now(timezone.utc)
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        for src in sources:
-            src.last_run_at = now
+    p = proxy()
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client, \
+            httpx.AsyncClient(timeout=TIMEOUT, proxy=p) as proxied_client:
+        proxied = proxied_client if p else None
+        gate = asyncio.Semaphore(FETCH_PARALLEL)
+
+        async def забрать(src: MarketNewsSource) -> tuple[MarketNewsSource, str, Any]:
+            """Лента источника или его ошибка. Исключение здесь — результат, не сбой."""
             feed_url = src.url if src.kind != "search" else search_url(src.url)
+            async with gate:
+                try:
+                    if src.kind == "page":
+                        found = await discover_feed(src.url, client, proxied)
+                        if not found:
+                            raise RuntimeError(
+                                "страница не отдаёт ленту — используйте поисковый источник "
+                                f"по домену: {site_query(src.url, src.title)}")
+                        feed_url = found
+                    return src, feed_url, await fetch_feed(feed_url, client, proxied)
+                except Exception as e:  # noqa: BLE001 — причина нужна в карточке источника
+                    return src, feed_url, e
+
+        собрано = await asyncio.gather(*(забрать(s) for s in sources))
+
+        for src, feed_url, items in собрано:
+            src.last_run_at = now
             stat: dict[str, Any] = {"id": str(src.id), "title": src.title, "added": 0}
-            try:
-                if src.kind == "page":
-                    found = await discover_feed(src.url, client)
-                    if not found:
-                        raise RuntimeError(
-                            "страница не отдаёт ленту — используйте поисковый источник "
-                            f"по домену: {site_query(src.url, src.title)}")
-                    feed_url = found
-                items = await fetch_feed(feed_url, client)
-            except Exception as e:  # noqa: BLE001 — причина нужна в карточке источника
-                src.last_error = f"{type(e).__name__}: {e}"[:300]
+            if isinstance(items, BaseException):
+                src.last_error = f"{type(items).__name__}: {items}"[:300]
                 stat["error"] = src.last_error
                 per_source_stat.append(stat)
                 continue

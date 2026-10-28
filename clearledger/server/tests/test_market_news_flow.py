@@ -64,7 +64,7 @@ async def test_обход_дедупликация_разбор_и_лента(au
     свежий = datetime.now(timezone.utc) - timedelta(days=2)
     старый = datetime.now(timezone.utc) - timedelta(days=400)
 
-    async def лента(url, client):  # noqa: ARG001 — подпись как у настоящей
+    async def лента(url, client, proxied=None):  # noqa: ARG001 — подпись как у настоящей
         return [материал(1, свежий), материал(2, свежий), материал(3, старый)]
 
     monkeypatch.setattr(market_news, "fetch_feed", лента)
@@ -128,7 +128,7 @@ async def test_отказ_источника_попадает_в_его_карт
     assert создан.status_code == 201, создан.text
     sid = создан.json()["id"]
 
-    async def падение(url, client):  # noqa: ARG001
+    async def падение(url, client, proxied=None):  # noqa: ARG001
         raise RuntimeError("504 Gateway Timeout")
 
     monkeypatch.setattr(market_news, "fetch_feed", падение)
@@ -203,3 +203,40 @@ async def test_базовый_набор_берёт_компании_из_рее
     assert по_домену[0]["operatorName"] == "QA Набор Сеть"
     assert any(s["url"] == "зарядная станция электромобиля открыли" for s in список), \
         "общий невод по событиям рынка тоже поставлен"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_обход_берёт_порцию_и_говорит_об_остатке(auth_client, db, monkeypatch):
+    """Кнопка «Обновить» не должна упираться в таймаут кромки.
+
+    28.10.2026 обход всех источников шёл последовательно одним запросом, и на
+    трёх десятках лент человек получал «Bad Gateway» вместо новостей. Теперь за
+    вызов берётся порция, а ответ говорит, сколько осталось.
+    """
+    cid = (await db.execute(select(Company.id).where(Company.slug == "gig"))).scalar_one()
+    общий = {"company_id": str(cid)}
+    for i in range(5):
+        r = await auth_client.post("/api/market/news/sources", params=общий, json={
+            "title": f"QA порция {i}", "kind": "search", "url": f"порция запрос {i}"})
+        assert r.status_code == 201, r.text
+
+    async def пусто(url, client, proxied=None):  # noqa: ARG001
+        return []
+
+    monkeypatch.setattr(market_news, "fetch_feed", пусто)
+    ответ = await auth_client.post("/api/market/news/fetch",
+                                    params={**общий, "limit_sources": 2})
+    assert ответ.status_code == 200, ответ.text
+    d = ответ.json()
+    assert len(d["sources"]) == 2, "за вызов обходим только порцию"
+    assert d["pending"] >= 3, "остаток назван, чтобы человек нажал ещё раз"
+
+    # Следующий вызов берёт ДРУГИХ: первыми идут те, кого дольше не обходили.
+    первые = {s["id"] for s in d["sources"]}
+    второй = (await auth_client.post("/api/market/news/fetch",
+                                     params={**общий, "limit_sources": 2})).json()
+    assert не_пересекаются(первые, {s["id"] for s in второй["sources"]})
+
+
+def не_пересекаются(a: set[str], b: set[str]) -> bool:
+    return not (a & b)

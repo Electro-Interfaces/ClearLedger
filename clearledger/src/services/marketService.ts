@@ -1338,6 +1338,8 @@ export const fetchMarketNews = (companyId: string, params?: { since_days?: numbe
   post<{
     added: number
     sinceDays?: number
+    /** Сколько источников не попало в эту порцию: нажать «Обновить» ещё раз. */
+    pending?: number
     note?: string
     sources: { id: string; title: string; added: number; seen?: number; error?: string }[]
   }>(`/api/market/news/fetch?${new URLSearchParams({

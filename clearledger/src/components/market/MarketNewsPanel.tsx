@@ -321,9 +321,13 @@ export function MarketNewsPanel() {
             {результат && (
               <span className="text-xs text-muted-foreground">
                 {результат.note
-                  ?? `принесено ${результат.added}${результат.sources.some((s) => s.error)
-                    ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
-                    : ''}`}
+                  ?? `принесено ${результат.added}`
+                    + (результат.sources.some((s) => s.error)
+                      ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
+                      : '')
+                    + (результат.pending
+                      ? `, осталось обойти ${результат.pending} — нажмите ещё раз`
+                      : '')}
               </span>
             )}
           </CardContent>
@@ -370,11 +374,7 @@ export function MarketNewsPanel() {
           <div className="min-h-0 flex-1 space-y-2 overflow-auto">
             {(источники.data?.sources ?? []).length === 0 && !источники.isLoading && (
               <p className="p-2 text-sm text-muted-foreground">
-                Источников пока нет. Общий невод отрасли — поисковый запрос; сайты
-                операторов, производителей и интеграторов своего RSS, как правило,
-                не отдают, поэтому для них берут запрос вида «site:домен».
-                «Поставить базовый набор» соберёт его сам — из событий рынка и
-                компаний, которые уже есть в реестре.
+                Источников нет — нажмите «Поставить базовый набор».
               </p>
             )}
             {(источники.data?.sources ?? []).map((s) => (
@@ -412,7 +412,7 @@ export function MarketNewsPanel() {
               <p className="p-2 text-sm text-muted-foreground">
                 {подача === 'review'
                   ? 'Очередь разбора пуста — всё разобрано.'
-                  : 'Лента пуста. Проверьте источники и нажмите «Обновить из источников».'}
+                  : 'Лента пуста — нажмите «Обновить из источников».'}
               </p>
             )}
             {rows.map((n) => (
