@@ -13,7 +13,8 @@
  * Сводное состояние считает сервер; здесь только его подписи и пояснения.
  */
 import type {
-  AccountingLinkSummary, AccountingState, LinkStatus, VerificationStatus,
+  AccountingComparedField, AccountingLinkSummary, AccountingRecheck, AccountingState,
+  LinkStatus, VerificationStatus,
 } from '@/services/accountingSpaceService'
 
 /**
@@ -88,6 +89,48 @@ export const дата = (iso: string | null | undefined, locale = 'ru-RU') => {
 export const полеRU = (f: { label?: string; field: string }) => f.label || f.field
 
 /**
+ * Исход сравнения одного поля словами.
+ *
+ * `unknown` — «сравнивать было нечего», а не конфликт: красить его как
+ * расхождение значит выдумать проблему. Если прогон записал о поле своё
+ * «совпадает», а пересчёт дал `unknown`, видно и то и другое: утверждение
+ * прогона — свидетельство, а не отметка. Так читается и название стороны:
+ * имена совместимы, но ИНН в выгрузке нет, и сверкой контрагента это не стало.
+ */
+export function сравнение(f: AccountingComparedField): { text: string; tone: 'ok' | 'bad' | 'none' } {
+  const spor = f.claimed && f.claimed !== f.result
+    ? ' Прогон записал «' + ИСХОД[f.claimed] + '»'
+      + (f.claimed_basis ? ': ' + f.claimed_basis : '') + ' — это свидетельство, не отметка.'
+    : ''
+  if (f.result === 'difference') {
+    return { tone: 'bad', text: 'расходится: в бухгалтерии «' + (f.source || '—')
+      + '», здесь «' + (f.space || '—') + '».' + spor }
+  }
+  if (f.result === 'match') {
+    return { tone: 'ok', text: 'совпадает'
+      + (f.origin === 'recheck' ? ' (по повторной сверке)' : '') + '.' + spor }
+  }
+  return { tone: 'none', text: 'сравнивать нечего' + (f.basis ? ': ' + f.basis : '') + '.' + spor }
+}
+
+const ИСХОД: Record<string, string> = {
+  match: 'совпадает', difference: 'расходится', unknown: 'сравнивать нечего',
+}
+
+/** Свидетельство повторной сверки, если оно вообще принято. */
+export function recheckLine(r: AccountingRecheck | null | undefined): string | null {
+  if (!r) return null
+  if (!r.applicable) {
+    return 'Повторная сверка не принята: ' + (r.not_applicable_reason
+      || 'прогон шёл по другой редакции файла') + '. Отсутствием сверки это не является.'
+  }
+  const блок = (r.open_questions ?? []).filter((q) => q.blocking)
+  return 'Повторная сверка' + (r.checked_at ? ' ' + дата(r.checked_at) : '')
+    + (r.overall ? ': ' + r.overall : '')
+    + (блок.length ? '. Нерешённое: ' + блок.map((q) => q.label).join('; ') : '')
+}
+
+/**
  * Пояснение отметки строками — одно правило на подсказку и на раскрытие.
  *
  * Оси не сливаются: сопряжение, сверенные реквизиты с доказательством, несверенные
@@ -111,13 +154,12 @@ export function markLines(s: AccountingLinkSummary | undefined, state: MarkState
     // Доказательства, а не снимок: что сравнивали, с чем и чем кончилось.
     const ср = s.verification.compared_fields ?? []
     if (ср.length) {
-      L.push('Сверено с выгрузкой: ' + ср.map((f) => полеRU(f) + ' — '
-        + (f.equal === true ? 'совпадает'
-          : f.equal === false ? 'расходится (в бухгалтерии «' + (f.source || '—') + '», здесь «' + (f.space || '—') + '»)'
-            : 'сравнивать нечего' + (f.basis ? ': ' + f.basis : ''))).join('; '))
+      L.push('Сверено с выгрузкой: ' + ср.map((f) => полеRU(f) + ' — ' + сравнение(f).text).join(' '))
     } else {
       L.push('Сверено с выгрузкой: ничего — реквизиты не сверялись')
     }
+    const пов = recheckLine(s.verification.recheck)
+    if (пов) L.push(пов)
 
     const нет = s.verification.unchecked_fields ?? []
     if (нет.length) {

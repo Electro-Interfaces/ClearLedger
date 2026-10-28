@@ -22,9 +22,9 @@ import {
 import { ExportButton } from './analytics/ExportButton'
 import { exportRows } from './analytics/exportRows'
 import { useCompany } from '@/contexts/CompanyContext'
-import {
-  AccountingMark, MARK_LABEL, MATCHING_LABEL, useAccountingMarks, дата,
-} from '@/components/reference/AccountingMark'
+import { MARK_LABEL, MATCHING_LABEL, дата, type MarkState } from '@/lib/accountingMark'
+import { AccountingMark } from '@/components/reference/AccountingMark'
+import { useAccountingMarks } from '@/hooks/useAccountingMarks'
 import {
   getAccountingObjects, getAccountingSources, getAccountingSummary,
   type AccountingObject, type AccountingObjectContract,
@@ -78,7 +78,7 @@ export function AccountingObjectsPanel() {
     o.code, o.name, o.address, o.contracts_count,
     o.has_rent ? 'есть' : 'нет', o.has_energy ? 'есть' : 'нет',
     o.with_source, o.without_source, o.unchecked,
-    MARK_LABEL[отметки.state(o.id)], o.status,
+    MARK_LABEL[отметки.state(o.id) as MarkState], o.status,
   ]), [строки, отметки])
   const набор = useReportKit({ id: 'acct-objects.v2', title: 'Объекты и основания',
     head: О_ШАПКА, rows: ячейки, hide: О_СКРЫТЫ, ready: !!q.data, help: О_ПОМОЩЬ })

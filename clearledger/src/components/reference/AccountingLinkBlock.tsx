@@ -15,7 +15,12 @@
  */
 import { AlertTriangle, Loader2, RefreshCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { AccountingMark, MARK_LABEL, useAccountingMark, полеRU, дата } from './AccountingMark'
+import { cn } from '@/lib/utils'
+import {
+  MARK_LABEL, recheckLine, полеRU, сравнение, дата,
+} from '@/lib/accountingMark'
+import { useAccountingMark } from '@/hooks/useAccountingMarks'
+import { AccountingMark } from './AccountingMark'
 import type { AccountingEntityType, AccountingLinkSummary } from '@/services/accountingSpaceService'
 
 const ЗАГОЛОВОК = 'text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70'
@@ -68,12 +73,15 @@ function Детали({ s }: { s: AccountingLinkSummary }) {
       <p className="text-muted-foreground">Сверено с выгрузкой:</p>
       {сверено.length
         ? <ul className="mt-0.5 flex flex-col gap-0.5">
-            {сверено.map((f) => <li key={f.field}
-              className={f.equal === false ? 'text-destructive' : undefined}>
-              {полеRU(f)} — {f.equal === true ? 'совпадает'
-                : f.equal === false ? <>расходится: в бухгалтерии «{f.source || '—'}», здесь «{f.space || '—'}»</>
-                  : 'сравнивать нечего' + (f.basis ? ': ' + f.basis : '')}
-            </li>)}
+            {сверено.map((f) => {
+              // «Сравнивать нечего» — не конфликт: красным не красим.
+              const и = сравнение(f)
+              return <li key={f.field} className={и.tone === 'bad' ? 'text-destructive' : undefined}>
+                {полеRU(f)} — {и.text}
+                {f.evidence?.file && <span className="text-muted-foreground"> (источник: {f.evidence.file}
+                  {f.evidence.rows ? ', строки ' + f.evidence.rows : ''})</span>}
+              </li>
+            })}
           </ul>
         : <p>ничего — реквизиты не сверялись</p>}
     </div>
@@ -88,6 +96,12 @@ function Детали({ s }: { s: AccountingLinkSummary }) {
     </div>}
 
     {s.verification.snapshot_basis && <p className="text-muted-foreground">{s.verification.snapshot_basis}</p>}
+
+    {/* Повторная сверка — отдельное свидетельство. Непринятый прогон говорит
+        именно это, а не «сверки не было». */}
+    {!!recheckLine(s.verification.recheck) && <p className={cn('text-muted-foreground',
+      s.verification.recheck && !s.verification.recheck.applicable && 'text-amber-700 dark:text-amber-400')}>
+      {recheckLine(s.verification.recheck)}</p>}
 
     {!!s.differences.length && <ul className="flex flex-col gap-0.5">
       {s.differences.map((d) => <li key={d.field} className="flex items-start gap-1.5 text-destructive">

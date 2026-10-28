@@ -76,8 +76,8 @@ export const SUMMARIES = {
     verification: {
       status: 'verified', label: 'Сверено',
       compared_fields: [
-        { field: 'number', label: 'Номер', source: 'ЭС-001', space: 'ЭС-001', equal: true, basis: '', recheck: false },
-        { field: 'date', label: 'Дата', source: '15.01.2026', space: '15.01.2026', equal: true, basis: '', recheck: false },
+        { field: 'number', label: 'Номер', source: 'ЭС-001', space: 'ЭС-001', result: 'match', equal: true, basis: '', origin: 'row', claimed: 'match', claimed_basis: '', evidence: { file: 'Расчёты_2026-09.xlsx', sheet: 'База', rows: '12' } },
+        { field: 'date', label: 'Дата', source: '15.01.2026', space: '15.01.2026', result: 'match', equal: true, basis: '', origin: 'row', claimed: 'match', claimed_basis: '', evidence: { file: 'Расчёты_2026-09.xlsx', sheet: 'База', rows: '12' } },
       ],
       checked_fields: ['number', 'date'],
       snapshot_fields: ['counterparty_id', 'date', 'number', 'type_code'],
@@ -95,8 +95,8 @@ export const SUMMARIES = {
     verification: {
       status: 'differences', label: 'Расхождения',
       compared_fields: [
-        { field: 'number', label: 'Номер', source: 'ЭС-2/26', space: 'ЭС-002', equal: false, basis: '', recheck: false },
-        { field: 'date', label: 'Дата', source: '19.02.2026', space: '20.02.2026', equal: false, basis: '', recheck: false },
+        { field: 'number', label: 'Номер', source: 'ЭС-2/26', space: 'ЭС-002', result: 'difference', equal: false, basis: '', origin: 'row', claimed: 'difference', claimed_basis: '', evidence: { file: 'Расчёты_2026-09.xlsx', sheet: 'База', rows: '12' } },
+        { field: 'date', label: 'Дата', source: '19.02.2026', space: '20.02.2026', result: 'difference', equal: false, basis: '', origin: 'row', claimed: 'difference', claimed_basis: '', evidence: { file: 'Расчёты_2026-09.xlsx', sheet: 'База', rows: '12' } },
       ],
       checked_fields: [], snapshot_fields: ['counterparty_id', 'date', 'number', 'type_code'],
       snapshot_basis: СНИМОК, unchecked_fields: ПОСТОЯННО_НЕ_СВЕРЕНО, recheck: null,
@@ -118,9 +118,9 @@ export const SUMMARIES = {
     verification: {
       status: 'stale', label: 'Устарела',
       compared_fields: [
-        { field: 'number', label: 'Номер', source: 'АР-3/26', space: 'АР-003', equal: true, basis: '', recheck: false },
-        { field: 'date', label: 'Дата', source: '', space: '10.03.2026', equal: null,
-          basis: 'в выгрузке значения нет', recheck: false },
+        { field: 'number', label: 'Номер', source: 'АР-3/26', space: 'АР-003', result: 'match', equal: true, basis: '', origin: 'row', claimed: 'match', claimed_basis: '', evidence: { file: 'Расчёты_2026-09.xlsx', sheet: 'База', rows: '12' } },
+        { field: 'date', label: 'Дата', source: '', space: '10.03.2026', result: 'unknown', equal: null,
+          basis: 'в выгрузке значения нет', origin: 'row', claimed: 'unknown', claimed_basis: '', evidence: null },
       ],
       checked_fields: ['number'], snapshot_fields: ['counterparty_id', 'date', 'number', 'type_code'],
       snapshot_basis: СНИМОК,
@@ -142,7 +142,11 @@ export const SUMMARIES = {
       unchecked_fields: [...ПОСТОЯННО_НЕ_СВЕРЕНО,
         { field: 'number', label: 'Номер', reason: 'сверка не проводилась' },
         { field: 'date', label: 'Дата', reason: 'сверка не проводилась' }],
-      recheck: null,
+      recheck: {
+        schema_version: 1, run_id: 'run-77', checked_at: '2026-10-26', overall: 'не принято',
+        applicable: false, not_applicable_reason: 'прогон шёл по другой редакции файла выгрузки',
+        open_questions: [], blocking_questions: [], claims: [], candidates_in_registry: 2,
+      },
     },
     freshness: свежесть({ checked_at: null, checked_at_basis: '', checked_hash: null, current_hash: null }),
     differences: [], sources: источник('103'), records: 1, aggregate: null, disclaimer: ОГОВОРКА,
@@ -168,7 +172,17 @@ export const SUMMARIES = {
     matching: { by_status: { matched: 3 }, labels: { matched: 'Сопряжено' } },
     verification: {
       status: 'differences', label: 'Расхождения',
-      compared_fields: [{ field: 'number', label: 'Номер', source: 'ЭС-2/26', space: 'ЭС-002', equal: false, basis: '', recheck: false }],
+      compared_fields: [
+        { field: 'number', label: 'Номер', source: 'ЭС-2/26', space: 'ЭС-002', result: 'difference',
+          equal: false, basis: '', origin: 'row', claimed: 'difference', claimed_basis: '',
+          evidence: { file: 'Расчёты_2026-09.xlsx', sheet: 'База', rows: '12' } },
+        // Название стороны прогон счёл совпавшим, пересчёт — нет: ИНН в выгрузке
+        // нет, и сверкой контрагента это не становится.
+        { field: 'counterparty_name', label: 'Название стороны', source: 'АО «Тестэнергосбыт»',
+          space: 'АО «Тестэнергосбыт»', result: 'unknown', equal: null,
+          basis: 'названия совместимы, но ИНН в выгрузке нет — юридическая сверка стороны не проводилась',
+          origin: 'recheck', claimed: 'match', claimed_basis: 'значимые слова названия совпали',
+          evidence: null }],
       checked_fields: [], snapshot_fields: [], snapshot_basis: '',
       unchecked_fields: ПОСТОЯННО_НЕ_СВЕРЕНО, recheck: null,
     },

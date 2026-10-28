@@ -26,7 +26,9 @@ import { ExportButton } from './analytics/ExportButton'
 import { exportRows } from './analytics/exportRows'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
-import { MATCHING_LABEL, VERIFICATION_LABEL, полеRU } from '@/components/reference/AccountingMark'
+import {
+  MATCHING_LABEL, VERIFICATION_LABEL, recheckLine, полеRU, сравнение,
+} from '@/lib/accountingMark'
 import {
   getAccountingRecord, getAccountingSummary, getAllAccountingRecords,
   type AccountingLink, type AccountingRecord, type LinkStatus, type VerificationStatus,
@@ -339,12 +341,12 @@ function Связь({ link }: { link: AccountingLink }) {
       <span className="text-muted-foreground">Сверено с выгрузкой: </span>
       {(link.compared_fields ?? []).length
         ? <ul className="mt-0.5 flex flex-col gap-0.5">
-            {link.compared_fields.map((f) => <li key={f.field}
-              className={f.equal === false ? 'text-destructive' : undefined}>
-              {полеRU(f)} — {f.equal === true ? 'совпадает'
-                : f.equal === false ? 'расходится: в бухгалтерии «' + (f.source || '—') + '», здесь «' + (f.space || '—') + '»'
-                  : 'сравнивать нечего' + (f.basis ? ': ' + f.basis : '')}
-            </li>)}
+            {link.compared_fields.map((f) => {
+              const и = сравнение(f)
+              return <li key={f.field} className={и.tone === 'bad' ? 'text-destructive' : undefined}>
+                {полеRU(f)} — {и.text}
+              </li>
+            })}
           </ul>
         : <span>ничего — реквизиты не сверялись</span>}
     </div>
@@ -352,6 +354,7 @@ function Связь({ link }: { link: AccountingLink }) {
       <span className="text-muted-foreground">Не сверялись: </span>
       {link.unchecked_fields.map((f) => полеRU(f) + (f.reason ? ' (' + f.reason + ')' : '')).join('; ')}
     </div>}
+    {!!recheckLine(link.recheck) && <p className="mt-1 text-xs text-muted-foreground">{recheckLine(link.recheck)}</p>}
     {link.stale && <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
       Карточка менялась после сверки — проверку нужно повторить
       (хеш сверенных значений {link.checked_hash.slice(0, 8)}… → {link.current_hash.slice(0, 8)}…).

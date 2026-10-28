@@ -21,7 +21,8 @@ import type { ServiceLocation } from '@/types/location'
 import { PAYMENT_META, ROLE_LABEL, paidThroughLabel, type SettlementRole } from '@/types/settlement'
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { AccountingLinkBlock } from '@/components/reference/AccountingLinkBlock'
-import { AccountingMarkCell, useAccountingMarks } from '@/components/reference/AccountingMark'
+import { AccountingMarkCell } from '@/components/reference/AccountingMark'
+import { useAccountingMarks } from '@/hooks/useAccountingMarks'
 import { Placeholder, ScrollTab } from './shared'
 
 /** Вид договора 1С кодом («СПоставщиком») → по-русски. */

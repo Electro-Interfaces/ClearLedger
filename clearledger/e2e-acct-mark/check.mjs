@@ -200,6 +200,16 @@ try {
     ok(профиль + ': ось свежести видна рядом с расхождениями',
       /Карточку правили после сверки/.test(основание))
     ok(профиль + ': сырых имён полей в основании нет', !/\[object Object\]/.test(основание))
+    await page.keyboard.press('Escape')
+    // «Сравнивать нечего» не выдаётся ни за совпадение, ни за конфликт.
+    await готовые(page).filter({ hasText: 'Требует сверки' }).first().click()
+    const пов = page.locator('[data-slot="popover-content"], [role="dialog"]').last()
+    await пов.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+    const текстПов = await пов.innerText().catch(() => '')
+    ok(профиль + ': непринятая повторная сверка названа именно так',
+      /Повторная сверка не принята: прогон шёл по другой редакции файла/.test(текстПов)
+      && /Отсутствием сверки это не является/.test(текстПов))
+    await page.keyboard.press('Escape')
     await снимок(page, профиль + '-2-основание')
     await page.keyboard.press('Escape')
 
@@ -284,6 +294,50 @@ try {
     ok(профиль + ': показан охват сводки по договорам', /со сведениями бухгалтерии/.test(тело))
     ok(профиль + ': договоры контрагента перечислены со своими состояниями',
       /ЭС-001/.test(тело) && /ЭС-002/.test(тело))
+    ok(профиль + ': название стороны не выдаётся за сверку контрагента',
+      /Название стороны — сравнивать нечего: названия совместимы, но ИНН в выгрузке нет/.test(тело))
+    ok(профиль + ': расхождение утверждения прогона с пересчётом показано',
+      /Прогон записал «совпадает»: значимые слова названия совпали — это свидетельство, не отметка/.test(тело))
+    ok(профиль + ': в списке контрагентов есть отметка по договорам',
+      (await page.locator('[aria-label^="Договоры:"]').count()) > 0)
+
+    // ── 9. Переход между разделами без перезагрузки ──
+    // Условный хук или потерянный ключ кеша проявляются именно здесь, а не на
+    // прямой ссылке: экран уже смонтирован, меняется только раздел.
+    const пункт = page.getByText('Договоры', { exact: true })
+    let нажали = false
+    for (let i = 0; i < await пункт.count(); i++) {
+      if (!await пункт.nth(i).isVisible().catch(() => false)) continue
+      await пункт.nth(i).click({ timeout: 5000 }).catch(() => {})
+      await page.waitForTimeout(600)
+      // Нажатие засчитывается только по смене раздела: заголовок «Договоры» есть
+      // и внутри карточки контрагента, и кликом по нему никуда не уходишь.
+      if (page.url().includes('sub=contracts')) { нажали = true; break }
+    }
+    console.log('  после перехода: ' + page.url().split('?')[1]?.slice(0, 60))
+    if (!нажали) {
+      // На узкой ширине меню разделов свёрнуто. Тот же риск (условный хук,
+      // потерянный ключ кеша при смене раздела без размонтирования приложения)
+      // проверяется возвратом по истории: это тоже клиентский переход.
+      await page.goto(UI + '/contractors?sub=contracts', { waitUntil: 'domcontentloaded' })
+      await готовые(page).first().waitFor({ state: 'attached', timeout: 25000 }).catch(() => {})
+      await page.goBack({ waitUntil: 'commit' }).catch(() => {})
+      await page.waitForTimeout(800)
+      await page.goForward({ waitUntil: 'commit' }).catch(() => {})
+      нажали = page.url().includes('sub=contracts')
+    }
+    if (!нажали) {
+      результаты.push({ имя: профиль + ': переход между разделами', статус: 'SKIP',
+        прим: 'раздел «Договоры» на этой ширине не открылся ни меню, ни историей' })
+      console.log('SKIP ' + профиль + ': переход между разделами')
+    } else {
+      await готовые(page).first().waitFor({ state: 'attached', timeout: 25000 }).catch(() => {})
+      const послеПерехода = await тексты(page)
+      ok(профиль + ': переход «Контрагенты → Договоры» без перезагрузки сохраняет отметки',
+        послеПерехода.includes('Есть расхождения') && послеПерехода.includes('Нет данных для сравнения'))
+      ok(профиль + ': при переходе экран не упал',
+        !(await page.locator('body').innerText()).includes('Что-то пошло не так'))
+    }
     await снимок(page, профиль + '-7-контрагент')
 
     await ctx.close()
@@ -298,6 +352,7 @@ try {
 if (неизвестные.size) console.log('\nбез фикстуры (отвечено пустым списком): ' + [...неизвестные].join(', '))
 const fail = результаты.filter((r) => r.статус === 'FAIL')
 writeFileSync(OUT + '/итог.json', JSON.stringify(результаты, null, 2))
-console.log('\nИТОГ: PASS ' + (результаты.length - fail.length) + ' / FAIL ' + fail.length)
+const skip = результаты.filter((r) => r.статус === 'SKIP').length
+console.log('\nИТОГ: PASS ' + (результаты.length - fail.length - skip) + ' / FAIL ' + fail.length + ' / SKIP ' + skip)
 for (const f of fail) console.log('  FAIL ' + f.имя + (f.прим ? ' — ' + f.прим : ''))
 process.exit(fail.length ? 1 : 0)
