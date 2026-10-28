@@ -42,7 +42,8 @@ import {
   companyTodayDate, isCompanyDay, isCompanyToday, COMPANY_TIME_ZONE,
 } from '@/lib/companyTime'
 import { EventDialog } from '@/components/calendar/EventDialog'
-import { TagChips } from '@/components/tags/PersonalTags'
+import { TagChips, TagPicker } from '@/components/tags/PersonalTags'
+import * as tagsService from '@/services/tagsService'
 import { usePersonalTags } from '@/hooks/usePersonalTags'
 import { tagTone } from '@/lib/tagTones'
 import { TimeGrid } from '@/components/calendar/TimeGrid'
@@ -136,7 +137,7 @@ export function CalendarPage() {
   /** Черновик дела: что, когда, на весь день или к часу, напоминание, повторение. */
   const [deed, setDeed] = useState<{
     title: string; date: string; time: string; allDay: boolean
-    remindBefore: number | null; repeat: DeedRepeat
+    remindBefore: number | null; repeat: DeedRepeat; tags: string[]
   } | null>(null)
   const [newAt, setNewAt] = useState<Date | null>(null)
   const [companyDay, setCompanyDay] = useState(false)
@@ -326,6 +327,11 @@ export function CalendarPage() {
         assigneeId: user?.id || undefined,
         dueAt: at.toISOString(),
       })
+      if (d.tags.length) {
+        await tagsService.assignTags(companyId, `task:${task.id}`, d.tags)
+          .catch(() => toast.error('Дело записано, а теги не поставились'))
+        void qc.invalidateQueries({ queryKey: ['personal-tags', companyId] })
+      }
       if (!d.allDay && d.remindBefore !== null) {
         // «За сколько до» — то же, что у встречи: срок один, а сказать о нём можно
         // заранее (вопрос МАГа 07.09.2026).
@@ -394,13 +400,18 @@ export function CalendarPage() {
     { сейчас: new Date(), показыватьПрошедшие: showCancelled, открытая: eventId }))
     .filter(e => !отборТегов.length || тегиВстречи(e).some(t => отборТегов.includes(t.id)) || e.id === eventId)
   const наСетке = events.map(e => сдвиг[e.id] ? { ...e, ...сдвиг[e.id] } : e)
-  const когдаСтанет = (start: Date, end: Date) =>
-    `${format(parseISO(companyDateKey(start)), 'EEEEEE, d MMMM', { locale: ru })}, ${companyTime(start)}–${companyTime(end)}`
+  const когдаСтанет = (start: Date, end: Date, весьДень = false) => {
+    const день = (d: Date) => format(parseISO(companyDateKey(d)), 'EEEEEE, d MMMM', { locale: ru })
+    if (!весьДень) return `${день(start)}, ${companyTime(start)}–${companyTime(end)}`
+    // Конец всёдневной — полночь следующего дня: последний день на сутки раньше.
+    const последний = new Date(end.getTime() - 1)
+    return companyDateKey(последний) === companyDateKey(start) ? `${день(start)}, весь день` : `${день(start)} — ${день(последний)}`
+  }
   const выполнитьПеренос = async (e: CalendarEvent, start: Date, end: Date, можноОтменить: boolean) => {
     setСдвиг(s => ({ ...s, [e.id]: { starts_at: start.toISOString(), ends_at: end.toISOString() } }))
     try {
       await workService.eventAction(companyId, e.id, { startsAt: start.toISOString(), endsAt: end.toISOString() })
-      toast.success(`«${e.title}» — ${когдаСтанет(start, end)}`, можноОтменить ? {
+      toast.success(`«${e.title}» — ${когдаСтанет(start, end, e.all_day)}`, можноОтменить ? {
         action: { label: 'Отменить', onClick: () => { void выполнитьПеренос(e, new Date(e.starts_at), new Date(e.ends_at), false) } },
       } : undefined)
     } catch (err) {
@@ -425,7 +436,7 @@ export function CalendarPage() {
         <AlertDialogHeader>
           <AlertDialogTitle>Перенести встречу?</AlertDialogTitle>
           <AlertDialogDescription>
-            {спроситьПеренос && <>«{спроситьПеренос.e.title}» — {когдаСтанет(спроситьПеренос.start, спроситьПеренос.end)}.
+            {спроситьПеренос && <>«{спроситьПеренос.e.title}» — {когдаСтанет(спроситьПеренос.start, спроситьПеренос.end, спроситьПеренос.e.all_day)}.
               Уведомление о переносе получат участники ({спроситьПеренос.кому}); их ответы сбросятся,
               подтвердить участие нужно будет заново.</>}
           </AlertDialogDescription>
@@ -469,7 +480,7 @@ export function CalendarPage() {
     if (eventId) update({ event: null })
     setDeed({
       title: '', date: format(anchor, 'yyyy-MM-dd'), time: '18:00', allDay: false,
-      remindBefore: 0, repeat: 'none',
+      remindBefore: 0, repeat: 'none', tags: [],
     })
   }
   /** Что можно записать в календарь. Одно меню на телефон и на стол: раньше со
@@ -750,6 +761,12 @@ export function CalendarPage() {
       Весь день
     </label>
 
+    {/* Мои теги — рядом со временем, как у встречи. У повторяющегося дела задачи
+        ещё нет: её поставит расписание, и тег вешать не на что. */}
+    {deed?.repeat === 'none' && (
+      <TagPicker companyId={companyId} value={deed.tags} onChange={ids => setDeed(d => d && { ...d, tags: ids })} />
+    )}
+
     {!deed?.allDay && (
       <label className="flex flex-wrap items-center gap-2 text-sm">
         <span className="flex items-center gap-1.5"><Bell className="h-3.5 w-3.5 text-muted-foreground" />Напомнить</span>
@@ -852,7 +869,7 @@ export function CalendarPage() {
       <TimeGrid days={days} events={наСетке} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
         onEvent={open} onAdd={at => startMeeting(at)} onAddAllDay={day => startMeeting(companyDayTime(day, 0), false, true)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')}
         onMove={(e, start, end) => { void перенести(e, start, end) }} tagsOf={тегиВстречи}
-        canMove={e => e.is_organizer && e.status !== 'cancelled' && !e.all_day} />
+        canMove={e => e.is_organizer && e.status !== 'cancelled'} />
     </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
       <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="px-2 py-2 text-sm font-medium text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
