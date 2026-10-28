@@ -16,6 +16,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -123,6 +127,10 @@ export function CalendarPage() {
   const [newAt, setNewAt] = useState<Date | null>(null)
   const [companyDay, setCompanyDay] = useState(false)
   const [newAllDay, setNewAllDay] = useState(false)
+  // Перенос мышью: пока сервер отвечает, встреча стоит на новом месте; встречу
+  // с участниками сначала подтверждают — им уйдёт уведомление и ответы сбросятся.
+  const [сдвиг, setСдвиг] = useState<Record<string, { starts_at: string; ends_at: string }>>({})
+  const [спроситьПеренос, setСпроситьПеренос] = useState<{ e: CalendarEvent; start: Date; end: Date; кому: number } | null>(null)
   /** Встреча, которую собирают в панели: сетка рисует её на месте. */
   const [draft, setDraft] = useState<{ start: Date; end: Date; title: string } | null>(null)
   const [желаемыйДень, setЖелаемыйДень] = useState<{ from: string; day: number } | null>(null)
@@ -367,6 +375,54 @@ export function CalendarPage() {
 
   const events = (eventsQ.data?.events ?? []).filter(e => видимаВКалендаре(e,
     { сейчас: new Date(), показыватьПрошедшие: showCancelled, открытая: eventId }))
+  const наСетке = events.map(e => сдвиг[e.id] ? { ...e, ...сдвиг[e.id] } : e)
+  const когдаСтанет = (start: Date, end: Date) =>
+    `${format(parseISO(companyDateKey(start)), 'EEEEEE, d MMMM', { locale: ru })}, ${companyTime(start)}–${companyTime(end)}`
+  const выполнитьПеренос = async (e: CalendarEvent, start: Date, end: Date, можноОтменить: boolean) => {
+    setСдвиг(s => ({ ...s, [e.id]: { starts_at: start.toISOString(), ends_at: end.toISOString() } }))
+    try {
+      await workService.eventAction(companyId, e.id, { startsAt: start.toISOString(), endsAt: end.toISOString() })
+      toast.success(`«${e.title}» — ${когдаСтанет(start, end)}`, можноОтменить ? {
+        action: { label: 'Отменить', onClick: () => { void выполнитьПеренос(e, new Date(e.starts_at), new Date(e.ends_at), false) } },
+      } : undefined)
+    } catch (err) {
+      toast.error((err as Error).message || 'Не удалось перенести встречу')
+    } finally {
+      await Promise.all(['calendar', 'events', 'calendar-event', 'calendar-summary', 'calendar-busy', 'work-mine']
+        .map(key => qc.invalidateQueries({ queryKey: [key, companyId] })))
+      setСдвиг(s => { const n = { ...s }; delete n[e.id]; return n })
+    }
+  }
+  const перенести = async (e: CalendarEvent, start: Date, end: Date) => {
+    const свои = e.attendees.filter(a => a.user_id !== e.organizer_id).length
+    let гости = 0
+    // Не узнали, есть ли гости, — лучше спросить лишний раз, чем молча разослать письма.
+    try { гости = (await workService.eventGuests(companyId, e.id)).guests.length } catch { гости = 1 }
+    if (свои + гости > 0) setСпроситьПеренос({ e, start, end, кому: свои + гости })
+    else void выполнитьПеренос(e, start, end, true)
+  }
+  const подтверждениеПереноса = (
+    <AlertDialog open={!!спроситьПеренос} onOpenChange={open => { if (!open) setСпроситьПеренос(null) }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Перенести встречу?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {спроситьПеренос && <>«{спроситьПеренос.e.title}» — {когдаСтанет(спроситьПеренос.start, спроситьПеренос.end)}.
+              Уведомление о переносе получат участники ({спроситьПеренос.кому}); их ответы сбросятся,
+              подтвердить участие нужно будет заново.</>}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Оставить как было</AlertDialogCancel>
+          <AlertDialogAction onClick={() => {
+            const п = спроситьПеренос
+            setСпроситьПеренос(null)
+            if (п) void выполнитьПеренос(п.e, п.start, п.end, false)
+          }}>Перенести</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
   const tasks = слои.due ? (tasksQ.data?.tasks ?? []).filter(t => !query || t.title.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))) : []
   const plan = personal && !query && mode !== 'year' ? (planQ.data ?? {}) : {}
   const reminders = (слои.reminders ? remindersQ.data?.items ?? [] : [])
@@ -754,8 +810,10 @@ export function CalendarPage() {
   </div> : mode === 'year' ? <YearView anchor={anchor} busyDays={занятыеДни}
     onDay={day => openDay(day, 'day')} onMonth={day => openDay(day, 'month')} />
     : mode !== 'month' ? <div className="flex min-h-0 flex-1 overflow-x-auto">
-      <TimeGrid days={days} events={events} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
-        onEvent={open} onAdd={at => startMeeting(at)} onAddAllDay={day => startMeeting(companyDayTime(day, 0), false, true)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
+      <TimeGrid days={days} events={наСетке} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
+        onEvent={open} onAdd={at => startMeeting(at)} onAddAllDay={day => startMeeting(companyDayTime(day, 0), false, true)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')}
+        onMove={(e, start, end) => { void перенести(e, start, end) }}
+        canMove={e => e.is_organizer && e.status !== 'cancelled' && !e.all_day} />
     </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
       <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="px-2 py-2 text-sm font-medium text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
@@ -882,6 +940,7 @@ export function CalendarPage() {
       </DialogContent>
     </Dialog>
     {встреча}
+    {подтверждениеПереноса}
   </div>
 
   return <div className="relative flex h-full min-h-0 min-w-0" style={отступПлашки}>
@@ -899,6 +958,7 @@ export function CalendarPage() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         {сетка}
         {встреча}
+        {подтверждениеПереноса}
         {deed && (
           <aside role="dialog" aria-label="Дело себе"
             onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setDeed(null) } }}

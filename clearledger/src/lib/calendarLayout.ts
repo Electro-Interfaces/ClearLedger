@@ -94,3 +94,23 @@ export function recurrenceTimes(
     })
     .filter(at => at > after)
 }
+
+/**
+ * Новое время встречи, которую тянут мышью: минуты от начала дня.
+ *
+ * `move` — переносит, сохраняя длительность; `start` и `end` — тянут за край.
+ * Шаг — 15 минут по часам дня, а не по сдвигу: встреча с 09:04 встаёт на
+ * 09:00 или 09:15, как в настольных календарях. Встреча не выходит за сутки и
+ * не становится короче шага.
+ */
+export function dragTimes(mode: 'move' | 'start' | 'end', start: number, end: number,
+  deltaMinutes: number, step = 15) {
+  const snap = (m: number) => Math.round(m / step) * step
+  if (mode === 'move') {
+    const length = Math.max(end - start, step)
+    const from = Math.min(Math.max(snap(start + deltaMinutes), 0), 1440 - length)
+    return { start: from, end: from + length }
+  }
+  if (mode === 'start') return { start: Math.min(Math.max(snap(start + deltaMinutes), 0), end - step), end }
+  return { start, end: Math.max(Math.min(snap(end + deltaMinutes), 1440), start + step) }
+}
