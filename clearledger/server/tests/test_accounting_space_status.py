@@ -36,7 +36,7 @@ from app.models import (
     User,
     UserCompany,
 )
-from app.services.accounting_space import digest
+from app.services.accounting_space import _blocking_question, digest
 # Строители строки источника и связи — те же, что в тесте среза: вторая копия
 # сразу разошлась бы с формой данных, которую пишет применённая сверка.
 from tests.test_accounting_space import FILE, SHA, _entry, _recon
@@ -663,6 +663,44 @@ async def test_конверт_читается_и_строкой_json(auth_clien
     broken = (await _summary(auth_client, cid, "contract", space["c"]["rech"].id)).json()
     assert broken["verification"]["recheck"] is None
     assert broken["freshness"]["rechecked_at"] is None
+
+
+async def test_коды_открытых_вопросов_калиброваны():
+    """Фактический набор кодов прогона: что снимает отметку, а что подсказка.
+
+    Коды — контракт между прогоном и этой ручкой. Без проверки любой новый код
+    молча попадал бы в «не блокирует», и неоднозначная привязка оставалась бы
+    зелёной — или наоборот, подсказка о роли карточки гасила бы отметку.
+    """
+    blocking = {"party_ambiguous_identity", "party_contradiction",
+                "link_ambiguous", "source_ambiguous"}
+    hints = {"party_name_only", "role_card", "card_date_empty"}
+    for code in blocking | hints:
+        assert _blocking_question({"code": code}) is (code in blocking), code
+
+
+async def test_конверт_дополнения_сравнивает_основной_договор(auth_client, db, space):
+    """У дополнения номер строки — его собственный, а номер из конверта — основного.
+
+    Поэтому значение строки сравнивать с паспортом нельзя, а значение конверта
+    можно и нужно: иначе доказательство по дополнениям теряется целиком.
+    """
+    cid = space["company_id"]
+    entry = space["entries"]["rel"]
+    meta = dict(entry.meta)
+    meta["_accountingRecheck"] = json.dumps(_recheck_envelope(
+        space["c"]["rel"], space["parties"]["Связанный ООО"],
+        relation="amendment_to_contract"), ensure_ascii=False)
+    entry.meta = meta
+    await db.commit()
+    s = (await _summary(auth_client, cid, "contract", space["c"]["rel"].id)).json()
+    by_origin = {(c["origin"], c["field"]): c for c in s["verification"]["compared_fields"]}
+    # Своё значение строки осталось несравнимым...
+    assert by_origin[("row", "number")]["result"] == "unknown"
+    assert "другой документ" in by_origin[("row", "number")]["basis"]
+    # ...а номер основного договора из конверта сошёлся.
+    assert by_origin[("recheck", "number")]["result"] == "match"
+    assert s["verification"]["checked_fields"] == ["date", "number"]
 
 
 async def test_прогон_по_другой_редакции_файла_не_подтверждает_сверку(auth_client, space):

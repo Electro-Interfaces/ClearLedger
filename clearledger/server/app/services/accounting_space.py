@@ -373,7 +373,11 @@ def _comparison(link: Link, field_name: str, source: Any, *, origin: str,
     card = link.card_values.get(field_name, "")
     if not link.exists:
         result, why = "unknown", "карточка недоступна — сверить нечем"
-    elif field_name in ("number", "date") and not link.same_document:
+    elif (origin == "row" and field_name in ("number", "date")
+            and not link.same_document):
+        # Номер и дата СТРОКИ у дополнения — реквизиты его самого. Конверт
+        # повторной сверки отдаёт для дополнения номер и дату ОСНОВНОГО договора
+        # (разобраны отдельно), поэтому его значения сравнивать можно.
         result, why = "unknown", "другой документ: это не реквизит паспорта договора"
     else:
         result, why = _compare(field_name, source, card)
