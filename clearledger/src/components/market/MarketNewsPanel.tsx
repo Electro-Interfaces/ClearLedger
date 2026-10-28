@@ -25,7 +25,9 @@
  */
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2, Newspaper, RefreshCw, SlidersHorizontal } from 'lucide-react'
+import {
+  ChevronDown, ChevronUp, ExternalLink, Loader2, Newspaper, RefreshCw, SlidersHorizontal,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -205,6 +207,15 @@ export function MarketNewsPanel() {
   const qc = useQueryClient()
   const экран = useRef<HTMLDivElement>(null)
   const [подача, setПодача] = useState<string>('feed')
+  // Свёрнутая панель отдаёт ленте весь экран. Выбор запоминается: человек,
+  // который читает ленту во весь экран, читает её так каждый раз.
+  const [панель, setПанель] = useState<boolean>(() => {
+    try { return localStorage.getItem('market-news-panel') !== 'off' } catch { return true }
+  })
+  const переключитьПанель = (открыта: boolean) => {
+    setПанель(открыта)
+    try { localStorage.setItem('market-news-panel', открыта ? 'on' : 'off') } catch { /* не критично */ }
+  }
   const [тема, setТема] = useState('all')
   const [оператор, setОператор] = useState('all')
   const [поиск, setПоиск] = useState('')
@@ -319,6 +330,17 @@ export function MarketNewsPanel() {
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
+      {!панель && (
+        <div className="flex items-center justify-end gap-2" data-export-ignore>
+          <PanelViewTabs tabs={ВИДЫ} value={подача} onChange={setПодача} />
+          <Button size="sm" variant="ghost" className="h-7 text-xs"
+            onClick={() => переключитьПанель(true)}>
+            <ChevronDown className="mr-1.5 size-3.5" aria-hidden /> Панель
+          </Button>
+        </div>
+      )}
+
+      {панель && (
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -388,6 +410,10 @@ export function MarketNewsPanel() {
               </>
             )}
             <PanelViewTabs tabs={ВИДЫ} value={подача} onChange={setПодача} />
+            <Button size="sm" variant="ghost" className="h-7 text-xs"
+              onClick={() => переключитьПанель(false)}>
+              <ChevronUp className="mr-1.5 size-3.5" aria-hidden /> Свернуть панель
+            </Button>
           </span>
           <span data-export-ignore>
             <ExportButton title="Новости рынка"
@@ -405,6 +431,7 @@ export function MarketNewsPanel() {
           ]))} />
         </CardContent>
       </Card>
+      )}
 
 
       {результат && подача !== 'admin' && (
