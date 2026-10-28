@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { NotebookPen, Repeat, Video } from 'lucide-react'
+import { NotebookPen, Plus, Repeat, Video } from 'lucide-react'
 import type { CalendarEvent } from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
@@ -147,6 +147,49 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
     window.addEventListener('keydown', клавиша)
   }
 
+  // Встреча на весь день — только по дням: в «Неделе» её тянут влево-вправо,
+  // подсвечены дни, куда она встанет (МАГ, 28.10.2026).
+  const [тягаДня, setТягаДня] = useState<{ e: CalendarEvent; сдвиг: number } | null>(null)
+  const начатьТягуДня = (ev: ReactPointerEvent<HTMLButtonElement>, e: CalendarEvent) => {
+    if (!onMove || ev.pointerType !== 'mouse' || ev.button !== 0 || days.length < 2 || ширинаДня <= 0) return
+    const x0 = ev.clientX
+    let сдвиг: number | null = null
+    const ход = (m: PointerEvent) => {
+      if (сдвиг === null && Math.abs(m.clientX - x0) < 4) return
+      сдвиг = Math.round((m.clientX - x0) / ширинаДня)
+      setТягаДня({ e, сдвиг })
+      document.body.style.cursor = 'grabbing'
+      document.body.style.userSelect = 'none'
+    }
+    const закончить = (отмена: boolean) => {
+      window.removeEventListener('pointermove', ход)
+      window.removeEventListener('pointerup', отпустить)
+      window.removeEventListener('keydown', клавиша)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setТягаДня(null)
+      const s: number | null = сдвиг
+      if (s === null) return
+      безКлика.current = true
+      setTimeout(() => { безКлика.current = false }, 0)
+      if (отмена || s === 0) return
+      onMove(e, new Date(new Date(e.starts_at).getTime() + s * 86_400_000),
+        new Date(new Date(e.ends_at).getTime() + s * 86_400_000))
+    }
+    const отпустить = () => закончить(false)
+    const клавиша = (k: KeyboardEvent) => { if (k.key === 'Escape') закончить(true) }
+    window.addEventListener('pointermove', ход)
+    window.addEventListener('pointerup', отпустить)
+    window.addEventListener('keydown', клавиша)
+  }
+  const цельДня = (d: Date) => !!тягаДня && пересекаетДень({
+    ...тягаДня.e,
+    starts_at: new Date(new Date(тягаДня.e.starts_at).getTime() + тягаДня.сдвиг * 86_400_000).toISOString(),
+    ends_at: new Date(new Date(тягаДня.e.ends_at).getTime() + тягаДня.сдвиг * 86_400_000).toISOString(),
+  }, d)
+  // «+» у подписи ряда: в «Дне» — этот день, в «Неделе» — сегодня, если оно в неделе.
+  const деньПлюса = days.find((d) => isCompanyToday(d)) ?? days[0]
+
   // Встреча от суток и длиннее — наверху, как всёдневная (так делают Google и
   // Outlook): блоком через всю колонку она закрывала день, и клик по «пустому»
   // месту открывал её вместо новой встречи (МАГ, 28.10.2026).
@@ -186,8 +229,16 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
           записи на день вытесняли с телефона всю сетку часов; в альбоме ряд ещё ниже
           (QA 28.10.2026). */}
       <div className="flex max-h-24 shrink-0 overflow-y-auto [@media(max-height:500px)]:max-h-10 border-b border-border [scrollbar-gutter:stable]">
-        <div className="w-14 shrink-0 py-1 pr-2 text-right text-xs leading-tight text-muted-foreground">
-          весь день
+        <div className="flex w-14 shrink-0 flex-col items-end gap-1 py-1 pr-1.5 text-right text-xs leading-tight text-muted-foreground">
+          <span>весь день</span>
+          {onAddAllDay && (
+            <button type="button" onClick={() => onAddAllDay(деньПлюса)}
+              aria-label={`Встреча на весь день, ${format(деньПлюса, 'd MMMM', { locale: ru })}`}
+              title="Встреча или событие на весь день"
+              className="grid size-6 place-items-center rounded-md border border-border bg-card text-foreground hover:bg-accent">
+              <Plus aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         {days.map((d) => {
           const дневные = сверху.filter((e) => пересекаетДень(e, d))
@@ -201,10 +252,14 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
               onClick={(ev) => { if (ev.target === ev.currentTarget) onAddAllDay?.(d) }}
               title={onAddAllDay ? 'Нажмите на свободное место — встреча на весь день' : undefined}
               className={cn('min-h-[1.75rem] min-w-0 flex-1 space-y-0.5 border-l border-border p-0.5',
-                onAddAllDay && 'cursor-pointer hover:bg-accent/40')}>
+                onAddAllDay && 'cursor-pointer hover:bg-accent/40',
+                цельДня(d) && 'bg-primary/10 ring-2 ring-inset ring-primary/60')}>
               {дневные.map((e) => (
-                <button key={e.id} onClick={() => onEvent(e)}
+                <button key={e.id} onClick={() => { if (!безКлика.current) onEvent(e) }}
+                  onPointerDown={canMove?.(e) ? (ev) => начатьТягуДня(ev, e) : undefined}
+                  title={canMove?.(e) && days.length > 1 ? `${e.title} · тяните мышью на другой день` : e.title}
                   className={cn('block w-full truncate rounded px-1 text-[12px]',
+                    тягаДня?.e.id === e.id && 'opacity-40',
                     e.status === 'cancelled'
                       ? 'text-muted-foreground line-through'
                       : цвет(e) ? cn('border text-foreground', цвет(e))
@@ -325,7 +380,8 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                       title={e.status === 'cancelled'
                         ? `Отменена${e.cancel_reason ? `: ${e.cancel_reason}` : ''}`
                         : ждёт ? `${e.title} — ждёт вашего ответа`
-                          : можно ? `${e.title} · тяните мышью — перенести, за край — изменить длительность` : e.title}
+                          : можно ? `${e.title} · тяните мышью — перенести, за край — изменить длительность`
+                            : onMove && !e.is_organizer ? `${e.title} · перенести может только организатор` : e.title}
                       style={{
                         top: верх, height: высота,
                         left: `${(колонка / всего) * 100}%`,

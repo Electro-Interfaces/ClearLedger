@@ -24,6 +24,7 @@ import {
   ListPlus, Loader2, MapPin, Paperclip, Repeat, Tag, Users, Video, X,
 } from 'lucide-react'
 import { TagPicker } from '@/components/tags/PersonalTags'
+import * as tagsService from '@/services/tagsService'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { PollPanel } from '@/components/calendar/PollPanel'
@@ -157,6 +158,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [more, setMore] = useState(false)
   /** За сколько минут до начала напомнить себе; null — не напоминать. */
   const [напомнитьЗа, setНапомнитьЗа] = useState<number | null>(null)
+  // Мои теги новой встречи: id ещё нет, ставим сразу после сборки.
+  const [тегиНовой, setТегиНовой] = useState<string[]>([])
   const [cancelReason, setCancelReason] = useState('')
   // «Создать видеоконференцию»: ссылка появлялась только после «Начать
   // видеовстречу» в уже собранной встрече и в приглашение не попадала
@@ -411,6 +414,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             }).catch(() => toast.error('Встреча собрана, а напоминание не поставилось'))
           }
         }
+        if (тегиНовой.length) {
+          await tagsService.assignTags(companyId, `event:${created.id}`, тегиНовой)
+            .catch(() => toast.error('Встреча собрана, а теги не поставились'))
+          void qc.invalidateQueries({ queryKey: ['personal-tags', companyId] })
+        }
         return created
       }
       return workService.eventAction(companyId, event!.id, {
@@ -488,7 +496,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
       && event?.status !== 'poll' && endMs > Date.now(),
     staleTime: 30_000,
   })
-  const заняты = (накладкаQ.data?.people ?? []).filter((p) => p.busy.some((b) =>
+  // Событие на весь день время не занимает — та же договорённость, что у подбора (lib/slots).
+  const заняты = (накладкаQ.data?.people ?? []).filter((p) => p.busy.some((b) => !b.all_day &&
     new Date(b.starts_at).getTime() < endMs && new Date(b.ends_at).getTime() > startMs))
     .map((p) => p.user_id === user?.id ? 'вы' : p.name)
   const changeStart = (value: string) => {
@@ -778,9 +787,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   /* Мои теги — личная пометка встречи: цвет в календаре, поиск и отбор. Ставит
      любой, кто видит встречу, и видит только он сам (МАГ, 28.10.2026). */
-  const тегиБлок = !новая && (
+  const тегиБлок = (
     <Строка icon={Tag} label="Мои теги">
-      <TagPicker companyId={companyId} targetRef={`event:${event!.id}`} />
+      {новая
+        ? <TagPicker companyId={companyId} value={тегиНовой} onChange={setТегиНовой} />
+        : <TagPicker companyId={companyId} targetRef={`event:${event!.id}`} />}
     </Строка>
   )
 
@@ -1119,8 +1130,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     {!panel && <Button size="sm" variant="ghost" onClick={onClose}>Закрыть</Button>}
   </>
 
-  const основное = [шаблоныБлок, времяБлок, повторБлок]
-  const подробности = [местоБлок, видеоБлок, описаниеБлок, материалыБлок, тегиБлок, напоминаниеБлок]
+  // Теги — сразу под временем: ими встречу и находят в календаре (МАГ, 28.10.2026).
+  const основное = [шаблоныБлок, времяБлок, тегиБлок, повторБлок]
+  const подробности = [местоБлок, видеоБлок, описаниеБлок, материалыБлок, напоминаниеБлок]
   const люди_ = [кругБлок, участникиБлок]
   const после = [опросБлок, гостиБлок, предложенияБлок]
   const ключи = (блоки: ReactNode[], префикс: string) => блоки.map((б, i) => б ? <div key={префикс + i}>{б}</div> : null)

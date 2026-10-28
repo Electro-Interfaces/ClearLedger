@@ -110,3 +110,12 @@ test('нулевая длительность не порождает беско
     people: [человек()], requiredIds: ['a'], from: utc(6), to: utc(12), minutes: 0,
   }), [])
 })
+
+test('событие на весь день время не занимает', () => {
+  // «пример 2» на весь день объявлял занятым каждый час (МАГ, 28.10.2026).
+  const сОтпуском = человек({
+    busy: [{ starts_at: utc(0).toISOString(), ends_at: utc(23, 59).toISOString(), all_day: true }],
+  })
+  const слоты = findSlots({ people: [сОтпуском], requiredIds: ['a'], from: utc(6), to: utc(12), minutes: 60 })
+  assert.ok(слоты.length > 0, 'весь день не должен закрывать рабочие часы')
+})
