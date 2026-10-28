@@ -314,7 +314,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
             )}
           </div>
           {days.map((d, индекс) => {
-            const { видимые, свёрнутые } = раскладкаДня(вСетке, d, ширинаДня)
+            const { видимые, свёрнутые, отменённые } = раскладкаДня(вСетке, d, ширинаДня)
             const черновик = draft && eventDaySegment({ id: 'draft', starts_at: draft.start.toISOString(), ends_at: draft.end.toISOString() }, d)
             return (
             <div key={d.toISOString()} ref={индекс === 0 ? колонкаДня : undefined}
@@ -342,6 +342,17 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                     onAdd(companyDayTime(d, h))
                   }}
                   className="border-b border-border/40 hover:bg-accent/40" />
+              ))}
+              {отменённые.map((о) => (
+                /* Отменённые поверх живых — меткой у правого края: встречи видны в «Списке» дня. */
+                <button key={`cancelled-${о.start}`} onClick={() => onDay?.(d)}
+                  aria-label={`Отменено: ${о.titles.length} — ${о.titles.join(', ')}`}
+                  title={`Отменены: ${о.titles.join('; ')}. Показать день списком`}
+                  style={{ top: о.start / 60 * ЧАС_PX }}
+                  className="absolute right-0.5 z-20 rounded border border-dashed border-border bg-card px-1 text-[12px]
+                             leading-[16px] text-muted-foreground hover:bg-accent">
+                  +{о.titles.length} отменено
+                </button>
               ))}
               {свёрнутые.map((группа) => (
                 /* Больше встреч, чем влезает в колонку этого дня: остальные —
@@ -435,7 +446,30 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
  * предела нет, рисуем как раньше.
  */
 function раскладкаДня(события: CalendarEvent[], день: Date, ширина: number) {
-  const блоки = layoutDayEvents(события, день, МИН_МИНУТ)
+  // Отменённая и отклонённая встреча ширину у живой не отнимает: зачёркнутые
+  // тестовые конференции сжимали «Интеграцию» до трети колонки (МАГ, 28.10.2026).
+  // Сначала раскладываются живые; отменённые, которым рядом с живыми места нет,
+  // становятся меткой «+N отменено» у края, остальные рисуются как обычно.
+  const неживая = (e: CalendarEvent) => e.status === 'cancelled' || e.my_response === 'declined'
+  const живыеБлоки = layoutDayEvents(события.filter((e) => !неживая(e)), день, МИН_МИНУТ)
+  const отрезок = (e: CalendarEvent) => {
+    const s = eventDaySegment(e, день)
+    return s ? [s.startMinute, Math.max(s.endMinute, s.startMinute + МИН_МИНУТ)] as const : null
+  }
+  const мешает = (e: CalendarEvent) => {
+    const o = отрезок(e)
+    return !!o && живыеБлоки.some((b) => o[0] < Math.max(b.endMinute, b.startMinute + МИН_МИНУТ) && b.startMinute < o[1])
+  }
+  const подЖивыми = события.filter((e) => неживая(e) && мешает(e))
+  const блоки = [...живыеБлоки, ...layoutDayEvents(события.filter((e) => неживая(e) && !мешает(e)), день, МИН_МИНУТ)
+    .map((b) => ({ ...b, group: b.group + 100_000 }))]
+  const отменённые: { start: number; end: number; titles: string[] }[] = []
+  for (const e of подЖивыми.sort((a, b) => a.starts_at.localeCompare(b.starts_at))) {
+    const o = отрезок(e)!
+    const last = отменённые[отменённые.length - 1]
+    if (last && o[0] < last.end) { last.end = Math.max(last.end, o[1]); last.titles.push(e.title) }
+    else отменённые.push({ start: o[0], end: o[1], titles: [e.title] })
+  }
   const предел = ширина > 0 ? Math.max(1, Math.floor(ширина / МИН_БЛОК_PX)) : Number.POSITIVE_INFINITY
   const видимые: typeof блоки = []
   const скрытыеПоГруппам = new Map<number, typeof блоки>()
@@ -461,6 +495,7 @@ function раскладкаДня(события: CalendarEvent[], день: Dat
   return {
     видимые: видимые.map((b) => (b.columns > предел ? { ...b, columns: предел } : b)),
     свёрнутые,
+    отменённые,
   }
 }
 
