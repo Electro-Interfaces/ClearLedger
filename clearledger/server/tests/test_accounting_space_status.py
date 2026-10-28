@@ -341,6 +341,7 @@ async def test_расхождение_и_устаревание_остаются
     diff = (await _summary(auth_client, cid, "contract", space["c"]["diff"].id)).json()
     assert diff["state"] == "differences"
     assert [d["field"] for d in diff["differences"]] == ["date"]
+    assert "Расходятся: Дата." in diff["state_note"]
     assert diff["freshness"]["stale"] is False, "карточку не правили — устаревания нет"
     assert diff["verification"]["status"] == "differences"
 
@@ -673,8 +674,8 @@ async def test_коды_открытых_вопросов_калиброваны
     зелёной — или наоборот, подсказка о роли карточки гасила бы отметку.
     """
     blocking = {"party_ambiguous_identity", "party_contradiction",
-                "link_ambiguous", "source_ambiguous"}
-    hints = {"party_name_only", "role_card", "card_date_empty"}
+                "link_ambiguous", "source_ambiguous", "card_date_empty"}
+    hints = {"party_name_only", "role_card"}
     for code in blocking | hints:
         assert _blocking_question({"code": code}) is (code in blocking), code
 
@@ -757,6 +758,8 @@ async def test_противоречие_стороны_снимает_отмет
     assert s["state"] == "needs_check"
     assert [q["code"] for q in s["verification"]["recheck"]["blocking_questions"]] == [
         "party_contradiction"]
+    # Пояснение называет причину: иначе менеджер не знает, ЧТО уточнять.
+    assert "Что уточнить: Сторона не та — в выгрузке другая организация." in s["state_note"]
 
     # Неоднозначная привязка к нескольким карточкам — тоже блокирует.
     meta = dict(entry.meta)
@@ -769,6 +772,7 @@ async def test_противоречие_стороны_снимает_отмет
     assert s["state"] == "needs_check"
     # При этом номер и дату она сравнить не мешает: это тот же договор.
     assert s["verification"]["checked_fields"] == ["date", "number"]
+    assert "легла на несколько карточек" in s["state_note"]
 
 
 async def test_строки_чужого_юрлица_не_видны_целиком(client, auth_client, space):

@@ -78,11 +78,16 @@ OTHER_DOCUMENT_RELATIONS = ("amendment", "amendment_of", "annex", "annex_of",
                             "supplement", "supplement_of", "agreement_of")
 # Отношение, которое само означает неоднозначную привязку.
 AMBIGUOUS_RELATIONS = ("multiple_cards",)
-# Открытый вопрос снимает отметку совпадения только когда он про саму привязку:
-# противоречие стороны и неоднозначность связывания. Подсказка о виде или роли
-# договора дефектом не является и зелёного не снимает (калибровка 28.10.2026).
+# Открытый вопрос снимает отметку совпадения, когда он про саму привязку или про
+# нехватку сведений в карточке: неоднозначное связывание, противоречие стороны,
+# пустая дата карточки. Оговорка о названии стороны и подсказка о роли карточки
+# дефектом не являются и зелёного не снимают (калибровка по фактическому набору
+# прогона 29.10.2026: party_name_only 425, role_card 152 — подсказки;
+# link_ambiguous 66, party_ambiguous_identity 6, card_date_empty 5,
+# source_ambiguous 2 — требуют уточнения).
 BLOCKING_QUESTION_MARKERS = ("contradict", "ambig", "multiple_cards",
                              "party_conflict", "party_mismatch", "wrong_party")
+BLOCKING_QUESTION_CODES = ("card_date_empty",)
 
 LINK_STATUS_LABEL = {
     "matched": "Сопряжено",
@@ -291,7 +296,8 @@ def _blocking_question(question: dict[str, Any]) -> bool:
     датой, и «карточка другой роли» конфликтом не является.
     """
     code = str((question or {}).get("code") or "").casefold()
-    return any(marker in code for marker in BLOCKING_QUESTION_MARKERS)
+    return (code in BLOCKING_QUESTION_CODES
+            or any(marker in code for marker in BLOCKING_QUESTION_MARKERS))
 
 
 def _contract_values(c: Contract) -> dict[str, Any]:
@@ -1225,6 +1231,40 @@ def _source_block(pairs: list[tuple[Record, Link]]) -> list[dict[str, Any]]:
     return out
 
 
+def _state_note(state: str, links: list[Link]) -> str:
+    """Пояснение состояния с конкретной причиной: что именно нужно уточнить.
+
+    Менеджеру нужен не только цвет: «требует сверки» без причины отправляет его
+    искать её на другом экране. Поэтому к общему тексту состояния добавляются
+    расходящиеся реквизиты и открытые вопросы прогона, которые сняли отметку.
+    """
+    note = ENTITY_STATE_NOTE[state]
+    fields = []
+    for l in links:
+        for d in l.differences:
+            if d["label"] not in fields:
+                fields.append(d["label"])
+    if fields:
+        note += " Расходятся: " + ", ".join(fields) + "."
+    reasons = []
+    for l in links:
+        for q in l.open_questions:
+            if not _blocking_question(q):
+                continue
+            label = str(q.get("label") or q.get("code") or "").strip()
+            reason = str(q.get("reason") or "").strip()
+            text = f"{label} — {reason}" if label and reason else label or reason
+            if text and text not in reasons:
+                reasons.append(text)
+    if any(l.relation in AMBIGUOUS_RELATIONS for l in links):
+        text = "Строка источника легла на несколько карточек — связь неоднозначна"
+        if text not in reasons:
+            reasons.append(text)
+    if reasons:
+        note += " Что уточнить: " + "; ".join(reasons) + "."
+    return note
+
+
 def _state_payload(entity_type: str, entity_id: str, state: str, scope: str,
                    pairs: list[tuple[Record, Link]], *, exists: bool,
                    aggregate: dict[str, Any] | None) -> dict[str, Any]:
@@ -1250,7 +1290,9 @@ def _state_payload(entity_type: str, entity_id: str, state: str, scope: str,
         "scope_label": SCOPE_LABEL[scope],
         "state": state,
         "state_label": ENTITY_STATE_LABEL[state],
-        "state_note": ENTITY_STATE_NOTE[state],
+        # Пояснение называет, ЧТО уточнить: общего текста состояния менеджеру мало,
+        # а отдельного места для причины в интерфейсе нет — он показывает это поле.
+        "state_note": _state_note(state, links),
         # Карточка целиком не сверялась НИКОГДА: сверка охватывает только состав
         # полей выше. Отметка договора не переносится на контрагента и площадку.
         "entity_verified": False,
