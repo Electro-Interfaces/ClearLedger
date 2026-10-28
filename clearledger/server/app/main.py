@@ -113,6 +113,7 @@ from app.routers import (
     conf_router,
     work_router,
     personal_tags_router,
+    speech_router,
     tasks_router,
     tickets_router,
     users_router,
@@ -493,6 +494,7 @@ app.include_router(docs_archive_router.router, prefix=API_PREFIX)
 app.include_router(docs_router.router, prefix=API_PREFIX)  # «Трек»: документооборот и работа
 app.include_router(work_router.router, prefix=API_PREFIX)  # единый список работы
 app.include_router(personal_tags_router.router, prefix=API_PREFIX)  # личные теги
+app.include_router(speech_router.router, prefix=API_PREFIX)  # речь в текст
 app.include_router(conf_router.router, prefix=API_PREFIX)  # «Конференции»: журнал созвонов
 app.include_router(site_router.router, prefix=API_PREFIX)  # «Сайт»: витрина и кабинет клиента
 app.include_router(vendor_router.router, prefix=API_PREFIX)

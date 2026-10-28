@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import { TagPicker } from '@/components/tags/PersonalTags'
 import { DictateButton } from '@/components/auditor/DictateButton'
-import * as auditor from '@/services/spaceAuditorService'
+import * as speech from '@/services/speechService'
 import * as tagsService from '@/services/tagsService'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
@@ -218,7 +218,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [тегиНовой, setТегиНовой] = useState<string[]>([])
   // Распознавание речи стека (профиль `asr`): тот же, что у Аудитора. Нет его —
   // микрофон стоит неактивным с объяснением, а не пропадает.
-  const здоровьеQ = useQuery({ queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false })
+  const речьQ = useQuery({ queryKey: ['speech-health'], queryFn: speech.health, staleTime: 60_000, retry: false })
   const [cancelReason, setCancelReason] = useState('')
   // «Создать видеоконференцию»: ссылка появлялась только после «Начать
   // видеовстречу» в уже собранной встрече и в приглашение не попадала
@@ -1159,8 +1159,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
         value={title} onChange={(e) => setTitle(e.target.value)}
         placeholder="Тема рабочей встречи"
         className="h-11 min-w-0 flex-1 font-headline text-lg font-semibold md:text-lg" />
-      {здоровьеQ.data?.dictation ? (
-        <DictateButton title="Продиктовать тему"
+      {речьQ.data?.ready ? (
+        <DictateButton title="Продиктовать тему" transcribe={speech.dictate}
           onText={(слова) => setTitle((было) => (было.trim() ? `${было.trim()} ${слова}` : слова).slice(0, 300))} />
       ) : (
         <span title="Голосовой ввод: распознавание речи в этом пространстве не подключено">
