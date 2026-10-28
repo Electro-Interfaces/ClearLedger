@@ -407,7 +407,11 @@ export function DocsLayout() {
             последние полсотни пикселей сетки (QA 27.10.2026). */}
         {route !== '/docs/setup' && !(short && active === 'calendar') && <DocsScopeBar personal={route === '/docs/work'} />}
         <div data-track-scroll className="min-w-0 flex-1 overflow-y-auto"
-          style={{ paddingBottom: short
+          style={{ paddingBottom: active === 'calendar'
+            // Календарь сам держит запас под плашку установки и сжимается под экран;
+            // второй запас здесь съедал всю сетку, пока плашка видна (QA 28.10.2026).
+            ? 'env(safe-area-inset-bottom)'
+            : short
             // В альбоме нижней навигации нет (она до 768 px) — запас под неё не нужен.
             ? 'calc(var(--pwa-install-height, 0px) + 0.5rem + env(safe-area-inset-bottom))'
             : 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' }}>
