@@ -108,8 +108,10 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
       </div>}
 
       {/* Всёдневная полоса: командировки и СРОКИ. Срок здесь точкой — у него нет
-          длительности, и место ему не в сетке часов. */}
-      <div className="flex overflow-y-hidden border-b border-border [scrollbar-gutter:stable]">
+          длительности, и место ему не в сетке часов. Высота ограничена: четыре
+          записи на день вытесняли с телефона всю сетку часов; в альбоме ряд ещё ниже
+          (QA 28.10.2026). */}
+      <div className="flex max-h-24 shrink-0 overflow-y-auto [@media(max-height:500px)]:max-h-10 border-b border-border [scrollbar-gutter:stable]">
         <div className="w-14 shrink-0 py-1 pr-2 text-right text-xs leading-tight text-muted-foreground">
           весь день
         </div>

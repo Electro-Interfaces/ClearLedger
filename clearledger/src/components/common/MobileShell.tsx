@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, ArrowDown, RefreshCw, Smartphone } from 'lucide-react'
 import { usePullToRefresh } from '@/hooks/usePullToRefresh'
+import { useShortTouch } from '@/hooks/use-mobile'
 import { APP_BUILD, APP_VERSION, applyUpdate, watchForUpdate } from '@/lib/appUpdate'
 import {
   hasPwaInstallPrompt, isPwaInstalled, requestPwaInstall, subscribePwaInstall,
@@ -152,7 +153,10 @@ export function InstallApp() {
     })
   }, [])
 
-  const visible = !pathname.startsWith('/marketing') && !installed && !hidden
+  // Телефон в альбоме: плашка занимала треть экрана высотой ~290 px и съедала сетку
+  // календаря (QA 28.10.2026). Предложим установку, когда телефон повернут обратно.
+  const short = useShortTouch()
+  const visible = !pathname.startsWith('/marketing') && !installed && !hidden && !short
   useEffect(() => {
     if (!visible || !bannerRef.current) return
     // Высота плашки и зазор под ней: по ним экраны отодвигают своё содержимое и

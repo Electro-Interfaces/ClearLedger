@@ -817,7 +817,11 @@ export function CalendarPage() {
   // последнюю строку месяца, и записи этих дней не видно и не нажать.
   const отступПлашки = { paddingBottom: 'calc(0.75rem + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))' }
 
-  if (phone) return <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 p-3" style={отступПлашки}>
+  // Телефон с нижней навигацией: над навигацией и плашкой содержимое уже подняла
+  // оболочка (data-mobile-shell), второй запас под плашку съедал сетку. Здесь — только
+  // место под плавающий плюс, чтобы он не ложился на последний ряд (QA 28.10.2026).
+  if (phone) return <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 p-3"
+    style={нижняяНавигация ? { paddingBottom: 'calc(4.75rem + env(safe-area-inset-bottom))' } : отступПлашки}>
     {(searchOpen || query) && (
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
