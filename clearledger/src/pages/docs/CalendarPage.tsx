@@ -42,6 +42,9 @@ import {
   companyTodayDate, isCompanyDay, isCompanyToday, COMPANY_TIME_ZONE,
 } from '@/lib/companyTime'
 import { EventDialog } from '@/components/calendar/EventDialog'
+import { TagChips } from '@/components/tags/PersonalTags'
+import { usePersonalTags } from '@/hooks/usePersonalTags'
+import { tagTone } from '@/lib/tagTones'
 import { TimeGrid } from '@/components/calendar/TimeGrid'
 
 /** Порядок видов — от короткого периода к длинному, «Список» отдельно в конце:
@@ -94,6 +97,17 @@ export function CalendarPage() {
   const qc = useQueryClient()
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
+  // Мои теги: красят встречи и отбирают их. Отбор пуст — видно всё; выбор
+  // запоминается, как слои календаря (МАГ, 28.10.2026).
+  const { tags: моиТеги, tagsOf: тегиПредмета } = usePersonalTags(companyId)
+  const [тегОтбор, setТегОтбор] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('calendar-tag-filter') ?? '[]') as string[] } catch { return [] }
+  })
+  const отобратьТег = (id: string | null, on = true) => setТегОтбор(было => {
+    const стало = id === null ? [] : on ? [...было, id] : было.filter(x => x !== id)
+    try { localStorage.setItem('calendar-tag-filter', JSON.stringify(стало)) } catch { /* пусто */ }
+    return стало
+  })
   const [defaultMode] = useState<Mode>(() => window.matchMedia(PHONE_QUERY).matches ? 'agenda' : 'month')
   const requestedMode = params.get('calendarMode')
   const mode = requestedMode && Object.hasOwn(MODES, requestedMode) ? requestedMode as Mode : defaultMode
@@ -373,8 +387,12 @@ export function CalendarPage() {
   }
   if (!companyId) return null
 
+  const тегиВстречи = (e: CalendarEvent) => тегиПредмета(`event:${e.id}`)
+  // Удалённый тег из отбора не держит календарь пустым.
+  const отборТегов = тегОтбор.filter(id => моиТеги.some(t => t.id === id))
   const events = (eventsQ.data?.events ?? []).filter(e => видимаВКалендаре(e,
     { сейчас: new Date(), показыватьПрошедшие: showCancelled, открытая: eventId }))
+    .filter(e => !отборТегов.length || тегиВстречи(e).some(t => отборТегов.includes(t.id)) || e.id === eventId)
   const наСетке = events.map(e => сдвиг[e.id] ? { ...e, ...сдвиг[e.id] } : e)
   const когдаСтанет = (start: Date, end: Date) =>
     `${format(parseISO(companyDateKey(start)), 'EEEEEE, d MMMM', { locale: ru })}, ${companyTime(start)}–${companyTime(end)}`
@@ -469,7 +487,8 @@ export function CalendarPage() {
   </>
   const chip = (event: CalendarEvent) => cn(
     'mb-0.5 block w-full truncate rounded-md px-1.5 py-1 text-left text-xs',
-    foreign.has(event.id) ? 'border border-border bg-background hover:bg-accent' : 'bg-primary/15 hover:bg-primary/25',
+    тегиВстречи(event)[0] ? cn('border', tagTone(тегиВстречи(event)[0].color).plate)
+      : foreign.has(event.id) ? 'border border-border bg-background hover:bg-accent' : 'bg-primary/15 hover:bg-primary/25',
     // Не отвечено — пунктир, как в неделе: приглашение не должно выглядеть принятым.
     event.my_response === 'pending' && event.status !== 'cancelled' && 'border border-dashed border-primary/50',
     (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')
@@ -605,6 +624,25 @@ export function CalendarPage() {
           <span className="min-w-0 flex-1 truncate">Прошедшие отменённые</span>
         </label>
         </div>
+      </section>
+
+      {/* Мои теги — отбор встреч. Пусто — объясняем, где их ставят, а не прячем раздел. */}
+      <section aria-labelledby="calendar-tags-title" className="space-y-0.5">
+        <div className="flex min-h-8 items-center gap-2 px-1">
+          <h3 id="calendar-tags-title" className="flex-1 text-xs font-medium text-muted-foreground">Мои теги</h3>
+          {отборТегов.length > 0 && <button type="button" onClick={() => отобратьТег(null)}
+            className="rounded px-1 text-xs text-primary hover:underline">Показать все</button>}
+        </div>
+        {моиТеги.length === 0
+          ? <p className="px-1 text-xs text-muted-foreground">Ставятся в карточке встречи: красят её в календаре, по ним отбирают. Видите только вы.</p>
+          : моиТеги.map(t => (
+            <label key={t.id} className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-1 text-sm hover:bg-accent/60">
+              <Checkbox checked={отборТегов.includes(t.id)} onCheckedChange={value => отобратьТег(t.id, value === true)} />
+              <span className="min-w-0 flex-1 truncate">{t.name}</span>
+              <span aria-hidden className={cn('size-2.5 rounded-full', tagTone(t.color).dot)} />
+            </label>
+          ))}
+        {отборТегов.length > 0 && <p className="px-1 text-xs text-muted-foreground">Показаны только встречи с отмеченными тегами.</p>}
       </section>
 
       {/* Приглашения без ответа — отдельным списком: организатор ждёт ответа, а в
@@ -772,6 +810,7 @@ export function CalendarPage() {
           <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{event.all_day ? 'Весь день' : <>{companyTime(eventDaySegment(event, day)!.start)}<span className="block">{eventDaySegment(event, day)!.endMinute === 1440 ? '24:00' : companyTime(eventDaySegment(event, day)!.end)}</span></>}</span>
           <span className="min-w-0 flex-1">
             <span className={cn('block break-words text-sm font-medium', (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')}>{event.title}</span>
+            <TagChips tags={тегиВстречи(event)} className="mt-1" />
             <span className="mt-1 block break-words text-sm text-muted-foreground">{event.status === 'cancelled' ? `Отменена${event.cancel_reason ? ': ' + event.cancel_reason : ''}` : event.my_response === 'pending' ? 'Ждёт вашего ответа' : event.my_response === 'declined' ? 'Вы отказались' : event.location || (event.conference_url ? 'Видеовстреча' : eventDaySegment(event, day)?.continues ? 'Продолжение встречи' : foreign.has(event.id) ? 'Календарь компании' : '')}</span>
           </span>
           {event.conference_url && <Video className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />}
@@ -812,7 +851,7 @@ export function CalendarPage() {
     : mode !== 'month' ? <div className="flex min-h-0 flex-1 overflow-x-auto">
       <TimeGrid days={days} events={наСетке} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
         onEvent={open} onAdd={at => startMeeting(at)} onAddAllDay={day => startMeeting(companyDayTime(day, 0), false, true)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')}
-        onMove={(e, start, end) => { void перенести(e, start, end) }}
+        onMove={(e, start, end) => { void перенести(e, start, end) }} tagsOf={тегиВстречи}
         canMove={e => e.is_organizer && e.status !== 'cancelled' && !e.all_day} />
     </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
       <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="px-2 py-2 text-sm font-medium text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>

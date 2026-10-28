@@ -111,6 +111,8 @@ async def list_work(
     # «показать всю работу по проекту» приводил на список без единого поручения.
     ref: str | None = Query(None, max_length=120),
     label_id: str | None = Query(None),
+    # Мой личный тег (personal_tags): отбор по пометкам самого человека.
+    my_tag: str | None = Query(None),
     author_id: str | None = Query(None),
     q: str | None = Query(None, max_length=200),
     # Тот же язык, что в реестре поручений (этап 12): «тип: входящее #мои
@@ -312,6 +314,13 @@ async def list_work(
             union.c.id.in_(select(TaskLabelLink.task_id).where(TaskLabelLink.label_id == lid)),
             union.c.id.in_(select(DocLabelLink.doc_id).where(DocLabelLink.label_id == lid)),
         ))
+    if my_tag:
+        # Тег личный: берём только свои, чужой id тега молча ничего не отберёт.
+        from app.models import PersonalTag, PersonalTagLink
+        tid = _uuid_or_400(my_tag, "my_tag")
+        sel = sel.where(union.c.kind.concat(":").concat(cast(union.c.id, String)).in_(
+            select(PersonalTagLink.target_ref).join(PersonalTag, PersonalTag.id == PersonalTagLink.tag_id)
+            .where(PersonalTag.id == tid, PersonalTag.user_id == current_user.id)))
     if q and (text := q.strip()):
         like = f"%{text}%"
         digits = text.lstrip("№#").strip()

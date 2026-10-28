@@ -33,6 +33,10 @@ import { QueryBar, type QuerySuggestions } from '@/components/tasks/QueryBar'
 import { dt, PRIORITY_TONE, priorityWord } from '@/components/tasks/taskWords'
 import { NudgeButton } from '@/components/work/NudgeButton'
 import { cn } from '@/lib/utils'
+import { tagTone } from '@/lib/tagTones'
+import { TagChips } from '@/components/tags/PersonalTags'
+import { usePersonalTags } from '@/hooks/usePersonalTags'
+import type { PersonalTag } from '@/services/tagsService'
 
 const PAGE = 50
 
@@ -64,7 +68,9 @@ export function WorkListPage() {
   // этой площадке». В язык запросов его не завести — значение само содержит
   // двоеточие, и разбор пар «поле: значение» развалил бы ссылку.
   const ref = params.get('ref') ?? ''
+  const myTag = params.get('tag') ?? ''
   const page = Math.max(0, Number(params.get('page')) || 0)
+  const { tags: моиТеги, tagsOf: тегиПредмета } = usePersonalTags(company.id)
 
   const filters = {
     scope: scope as workService.WorkFilters['scope'],
@@ -72,6 +78,7 @@ export function WorkListPage() {
     state: state || undefined,
     query: queryText || undefined,
     ref: ref || undefined,
+    myTag: myTag || undefined,
     limit: PAGE, offset: page * PAGE,
   }
   const listQ = useQuery({
@@ -191,9 +198,27 @@ export function WorkListPage() {
             ))}
           </SelectContent>
         </Select>
-        {hasFilter && (
+        {/* Мои теги — личный отбор: видит только сам человек. */}
+        {моиТеги.length > 0 && (
+          <Select value={myTag || 'all'} onValueChange={(v) => set({ tag: v === 'all' ? null : v })}>
+            <SelectTrigger className="h-8 w-[170px] text-xs" aria-label="Мой тег">
+              <SelectValue placeholder="Мой тег" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Любой мой тег</SelectItem>
+              {моиТеги.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="inline-flex items-center gap-2">
+                    <span aria-hidden className={cn('size-2.5 rounded-full', tagTone(t.color).dot)} />{t.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {(hasFilter || myTag) && (
           <Button variant="ghost" size="sm" className="h-8 text-muted-foreground"
-            onClick={() => set({ kind: null, state: null, query: null })}>
+            onClick={() => set({ kind: null, state: null, query: null, tag: null })}>
             <X className="mr-1 h-3.5 w-3.5" />Сбросить
           </Button>
         )}
@@ -253,7 +278,7 @@ export function WorkListPage() {
             <tbody>
               {items.map((item) => (
                 <Row key={`${item.kind}-${item.id}`} item={item}
-                  companyId={company.id}
+                  companyId={company.id} myTags={тегиПредмета(`${item.kind}:${item.id}`)}
                   onOpen={() => navigate(workService.workHref(item))} />
               ))}
             </tbody>
@@ -347,8 +372,8 @@ function SavedViews({ companyId, current, onApply }: {
   )
 }
 
-function Row({ item, companyId, onOpen }: {
-  item: WorkItem; companyId: string; onOpen: () => void
+function Row({ item, companyId, myTags, onOpen }: {
+  item: WorkItem; companyId: string; myTags: PersonalTag[]; onOpen: () => void
 }) {
   const Icon = item.kind === 'doc' ? FileText : ListChecks
   return (
@@ -380,6 +405,7 @@ function Row({ item, companyId, onOpen }: {
           {item.labels.map((l) => (
             <span key={l.id} className="rounded border border-border/60 px-1">{l.name}</span>
           ))}
+          <TagChips tags={myTags} />
         </div>
       </td>
       <td className="px-3 py-2">
