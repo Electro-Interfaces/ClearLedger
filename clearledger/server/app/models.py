@@ -9044,6 +9044,239 @@ class MarketGrowthLead(Base):
     )
 
 
+class MarketNewsSource(Base):
+    """Откуда берём новости рынка: лента, поисковый запрос или страница компании.
+
+    Источник — настройка пространства, а не список в образе. В «Ангаре» такой же
+    обход живёт файлом `feeds.json` внутри контейнера бота, и добавить ленту без
+    выкатки нельзя; здесь ленты правит маркетолог.
+
+    Три вида, и они не взаимозаменяемы:
+      search — поисковая лента по запросу («зарядная станция» + регион). Профильного
+        отраслевого RSS в рунете нет (проверено 28.10.2026: у общих лент ТАСС и РИА в
+        последней сотне новостей ноль про зарядки), поэтому широкий невод — поиск.
+      rss — собственная лента компании, если она её отдаёт. Проходит без
+        тематического фильтра: у источника одна тема, и она наша.
+      page — страница новостей оператора, производителя или интегратора без RSS.
+        Разбирается ссылками со страницы; так же, как watchlist «Ангара».
+
+    `operator_id` / `player_id` связывают источник с записью реестра: сайт «Пункт Е»
+    уже лежит в `market_operators.site_url`, и второй справочник компаний продукту
+    не нужен.
+    """
+    __tablename__ = "market_news_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    # search (лента с обложками) | search_wide (широкий невод) | rss | page
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, default="rss")
+    url: Mapped[str] = mapped_column(String(600), nullable=False)
+    # Рубрика источника: ленту заводят ради темы, и она сильнее словаря. Пусто —
+    # тема определяется по заголовку.
+    default_topic: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # Чья это лента: оператор сети, игрок рынка (агрегатор, банк, автопроизводитель),
+    # производитель оборудования. Привязка переносится на найденную новость.
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True)
+    player_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_players.id", ondelete="SET NULL"), nullable=True)
+    vendor: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # Своя лента компании темой уже отобрана — общий невод фильтруется словарём.
+    is_profile: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # ── здоровье источника: молчание ленты — факт, а не пустой экран ──
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    found_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_market_news_source_url", "company_id", "url", unique=True),
+        Index("ix_market_news_source_active", "company_id", "active", "kind"),
+    )
+
+
+class MarketNewsSettings(Base):
+    """Настройки новостного обхода пространства: словари тем и окно.
+
+    Словари живут настройкой, а не константой в образе: «Ангар» держит их в
+    `feeds.json` внутри контейнера бота, и чтобы добавить стоп-слово, нужна
+    выкатка. Здесь их правит маркетолог на административной странице раздела.
+
+    Пустые списки означают «берём встроенные»: пространство, которое ничего не
+    настраивало, должно работать, а не отбрасывать весь поток.
+    """
+    __tablename__ = "market_news_settings"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    include_words: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    exclude_words: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    since_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class MarketActor(Base):
+    """Участник рынка, которого нет в реестрах сетей и приложений.
+
+    Реестры продукта покрывают две роли: `market_operators` — кто владеет и
+    эксплуатирует станции, `market_players` — чьё приложение стоит у водителя.
+    В новостях действуют и другие: производитель оборудования, сервисная
+    служба, ведомство. Поле `vendor` у точек рынка пустое у всех записей
+    (проверено 28.10.2026), то есть производителей мы не знаем вовсе — их имена
+    впервые появляются именно в новостях.
+
+    Третий реестр заведён, чтобы не растягивать первые два: у ведомства нет
+    станций и приложения, а у завода нет сети. Связь с рынком даёт не запись
+    сама по себе, а совместные упоминания — см. `MarketNewsMention`.
+    """
+    __tablename__ = "market_actors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # vendor (производитель оборудования) | service (сервис и монтаж) |
+    # state (ведомство, регулятор) | utility (сетевая, энергосбыт) | other
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, default="vendor")
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Как его пишут в новостях: «Парус электро», «Парус-электро», «ПАРУС ЭЛЕКТРО».
+    aliases: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    site_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Заведён человеком или предложен разбором новостей и ещё не подтверждён.
+    confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_market_actor_name", "company_id", "name", unique=True),
+        Index("ix_market_actor_kind", "company_id", "kind", "confirmed"),
+    )
+
+
+class MarketNewsMention(Base):
+    """Кого новость упоминает и в какой роли.
+
+    Привязка «одна новость — один оператор» не отвечает на вопрос маркетинга:
+    рынок интересен связями, а они видны только когда в одном материале рядом
+    стоят производитель и сеть, сеть и ведомство, агрегатор и банк. Поэтому
+    упоминания — отдельные строки, и их у новости столько, сколько участников
+    в ней названо.
+
+    Пара упоминаний в одном материале и есть наблюдаемая связь: «Парус электро
+    поставит оборудование Росатому» — это завод и сеть в одной строке. Связь не
+    утверждается как факт отношений, она считается по частоте совместных
+    появлений, и человек видит, из каких материалов она собрана.
+    """
+    __tablename__ = "market_news_mentions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    news_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_news.id", ondelete="CASCADE"), nullable=False, index=True)
+    # operator | platform | vendor | aggregator | automaker | bank | service |
+    # state | utility | other — роль участника в раскладе рынка, а не в новости.
+    role: Mapped[str] = mapped_column(String(12), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="CASCADE"), nullable=True)
+    player_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_players.id", ondelete="CASCADE"), nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_actors.id", ondelete="CASCADE"), nullable=True)
+    # По какому написанию узнали: без этого подтверждать подсказку вслепую.
+    matched: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # auto — распознал разбор, human — поставил человек.
+    linked_by: Mapped[str] = mapped_column(String(8), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_market_mention", "news_id", "role", "name", unique=True),
+        Index("ix_market_mention_role", "company_id", "role", "name"),
+    )
+
+
+class MarketNews(Base):
+    """Новость рынка: материал источника с происхождением и разбором.
+
+    Это наблюдение, а не публикация. У «Ангара» новость — контент для читателя,
+    у нас — факт о рынке: открылась чужая станция, оператор поднял тариф, вышло
+    постановление о машино-местах. Поэтому поля те же четыре, что у любого факта
+    продукта (принцип 2 docs/MARKET.md): откуда, когда, как, насколько уверены.
+
+    Лента общая — её открывают, чтобы прочитать, что происходит в отрасли, и уже
+    из неё привязывают к оператору, региону или точке. Привязка предлагается
+    машинно по именам реестра, подтверждает человек: совпадение слова в заголовке
+    не делает новость новостью этой компании.
+
+    `url_key` — нормализованный адрес (без utm, якоря и хвостового слэша). Одну
+    новость перепечатывают пять сайтов, и это не пять подтверждений: ключ уникален
+    в пределах компании, повторный обход обновляет строку, а не плодит вторую.
+    """
+    __tablename__ = "market_news"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_news_sources.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    url: Mapped[str] = mapped_column(String(900), nullable=False)
+    url_key: Mapped[str] = mapped_column(String(600), nullable=False)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(900), nullable=True)
+    # Издание, как оно себя назвало в ленте: «Пункт Е», «Коммерсантъ», «Минэнерго».
+    source_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Дата публикации источника и дата, когда МЫ это получили. Подменять первую
+    # второй нельзя: «вышло вчера» и «увидели вчера» — разные утверждения.
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retrieved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    # manual | search | rss | page — как получили.
+    channel: Mapped[str] = mapped_column(String(10), nullable=False, default="manual")
+    # opening | price | regulation | tech | deal | other — о чём новость.
+    topic: Mapped[str] = mapped_column(String(12), nullable=False, default="other")
+    # ── к чему относится: предложено машинно, подтверждает человек ──
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True)
+    player_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_players.id", ondelete="SET NULL"), nullable=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_sites.id", ondelete="SET NULL"), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # Что предложил разбор, пока человек не подтвердил: имена и причина совпадения.
+    suggested: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    linked_by: Mapped[str] = mapped_column(String(10), nullable=False, default="auto")
+    # new — в очереди разбора, kept — отобрана и живёт в ленте, noise — мимо темы.
+    # Дешёвый «шум» обязателен: в «Ангаре» 40 из 120 собранных материалов так и
+    # висят в review, потому что отклонить было так же дорого, как принять.
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="new")
+    # Взято в работу: кандидат роста или сценарий. Новость без выхода в действие —
+    # чтение, а продукт не читалка (docs/MARKET.md §1).
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_growth_leads.id", ondelete="SET NULL"), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_market_news_url", "company_id", "url_key", unique=True),
+        Index("ix_market_news_feed", "company_id", "status", "published_at"),
+        Index("ix_market_news_operator", "company_id", "operator_id", "published_at"),
+    )
+
+
 # ===========================================================================
 # «Эксплуатация» — денежный контур площадок: что мы должны собрать за месяц
 # ===========================================================================

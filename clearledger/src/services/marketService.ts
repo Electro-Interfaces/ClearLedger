@@ -4,7 +4,7 @@
  * Внешний мир вокруг сети: чужие станции, торговые центры, парковки, АЗС и наблюдения
  * по ним. Наши объекты сюда не копируются — карта складывается из двух реестров.
  */
-import { get as httpGet, post, patch } from './apiClient'
+import { get as httpGet, post, patch, put } from './apiClient'
 import { collectPages } from '@/lib/collectPages'
 
 /**
@@ -1190,3 +1190,311 @@ export function allMarketObservations(companyId: string, params: ObservationPara
     return { rows: page.observations, total: page.total }
   })
 }
+
+/* ───────────────────────── Новости рынка ─────────────────────────
+ * Общая лента отрасли: что происходит вокруг сети. Новость здесь — наблюдение
+ * (открылась чужая станция, оператор поднял тариф, вышло постановление), поэтому
+ * у неё те же четыре поля происхождения, что у любого факта продукта: откуда,
+ * когда, как получено, насколько уверены.
+ *
+ * Область учёта к ленте НЕ применяется: событие чаще федеральное, и прятать его
+ * из-за выбранного края значит прятать то, что этот край и касается. Регион —
+ * отбор, который включает человек.
+ */
+
+/** О чём новость. Тема — подсказка для отбора, а не классификация смысла. */
+export type MarketNewsTopic = 'opening' | 'price' | 'regulation' | 'tech' | 'deal' | 'other'
+
+export const NEWS_TOPIC_LABEL: Record<MarketNewsTopic, string> = {
+  opening: 'Открытия и стройка',
+  price: 'Цены и тарифы',
+  regulation: 'Регулирование',
+  tech: 'Техника и платформы',
+  deal: 'Сделки и партнёрства',
+  other: 'Прочее',
+}
+
+/** Состояние разбора. «Шум» стоит столько же, сколько «отобрать» — иначе очередь встаёт. */
+export type MarketNewsStatus = 'new' | 'kept' | 'noise'
+
+export const NEWS_STATUS_LABEL: Record<MarketNewsStatus, string> = {
+  new: 'В разборе',
+  kept: 'В ленте',
+  noise: 'Шум',
+}
+
+/** Как получено: поисковая лента, своя лента компании, её страница или руками. */
+export const NEWS_CHANNEL_LABEL: Record<string, string> = {
+  search: 'поисковая лента',
+  rss: 'лента источника',
+  page: 'страница источника',
+  manual: 'вручную',
+}
+
+export const NEWS_SOURCE_KIND_LABEL: Record<string, string> = {
+  search: 'Поисковый запрос (с обложками)',
+  search_wide: 'Широкий невод (только заголовки)',
+  rss: 'Лента (RSS/Atom)',
+  page: 'Страница новостей',
+}
+
+export interface MarketNewsItem {
+  id: string
+  title: string
+  url: string
+  snippet: string | null
+  sourceName: string | null
+  sourceId: string | null
+  sourceTitle: string | null
+  /** Обложка публикации (og:image издания). Пусто — карточка без картинки. */
+  imageUrl: string | null
+  /** article | video — видео помечается значком поверх обложки. */
+  media: string
+  publishedAt: string | null
+  retrievedAt: string | null
+  channel: string
+  topic: MarketNewsTopic
+  status: MarketNewsStatus
+  operatorId: string | null
+  operatorName: string | null
+  playerId: string | null
+  playerName: string | null
+  siteId: string | null
+  region: string | null
+  city: string | null
+  /** Кого материал упоминает и в какой роли: состав участников, не одна привязка. */
+  actors: { role: string; roleLabel: string; name: string }[]
+  /** Что предложил разбор: имя компании, слово совпадения, регион. Не утверждение. */
+  suggested: Record<string, string> | null
+  linkedBy: string
+  leadId: string | null
+  note: string | null
+  author: string | null
+}
+
+export interface MarketNewsReply {
+  news: MarketNewsItem[]
+  total: number
+  returned: number
+  offset: number
+  limit: number
+  counts: { new: number; kept: number; noise: number }
+  byTopic: Record<string, number>
+}
+
+export interface MarketNewsSource {
+  id: string
+  title: string
+  kind: string
+  url: string
+  operatorId: string | null
+  operatorName: string | null
+  playerId: string | null
+  vendor: string | null
+  /** Рубрика источника: сильнее словаря. Пусто — тема по заголовку. */
+  defaultTopic: string | null
+  isProfile: boolean
+  active: boolean
+  lastRunAt: string | null
+  lastOkAt: string | null
+  lastError: string | null
+  foundTotal: number
+  newsTotal: number
+  note: string | null
+}
+
+export type NewsParams = {
+  status?: MarketNewsStatus
+  topic?: string
+  operator_id?: string
+  region?: string
+  /** Материалы, где назван этот участник (по части имени). */
+  mention?: string
+  /** Материалы, где есть участник такой роли: «где вообще мелькают заводы». */
+  role?: string
+  q?: string
+  date_from?: string
+  date_to?: string
+  offset?: number
+  limit?: number
+}
+
+export const listMarketNews = (companyId: string, params?: NewsParams) =>
+  httpGet<MarketNewsReply>('/api/market/news', { company_id: companyId, ...params })
+
+export const listMarketNewsSources = (companyId: string) =>
+  httpGet<{ sources: MarketNewsSource[]; sinceDays: number }>(
+    '/api/market/news/sources', { company_id: companyId })
+
+export const createMarketNews = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string }>(`/api/market/news?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchMarketNews = (companyId: string, newsId: string, body: Record<string, unknown>) =>
+  patch<{ ok: boolean }>(
+    `/api/market/news/${newsId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const createMarketNewsSource = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string }>(
+    `/api/market/news/sources?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchMarketNewsSource = (companyId: string, sourceId: string, body: Record<string, unknown>) =>
+  patch<{ ok: boolean }>(
+    `/api/market/news/sources/${sourceId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+export interface MarketNewsSettings {
+  includeWords: string[]
+  excludeWords: string[]
+  sinceDays: number
+  /** Встроенные словари — показываем их, когда своих нет: отбор не бывает «никаким». */
+  defaultInclude: string[]
+  defaultExclude: string[]
+  updatedAt: string | null
+  updatedBy: string | null
+  topics: string[]
+  kinds: string[]
+}
+
+export const getMarketNewsSettings = (companyId: string) =>
+  httpGet<MarketNewsSettings>('/api/market/news/settings', { company_id: companyId })
+
+export const putMarketNewsSettings = (companyId: string, body: Record<string, unknown>) =>
+  put<{ ok: boolean }>(
+    `/api/market/news/settings?company_id=${encodeURIComponent(companyId)}`, body)
+
+/** Базовый набор источников: общий невод плюс компании нашего реестра. */
+export const presetMarketNewsSources = (companyId: string) =>
+  post<{ added: number; titles: string[] }>(
+    `/api/market/news/sources/preset?company_id=${encodeURIComponent(companyId)}`, {})
+
+/** Обход источников. Возвращает, что принёс каждый, включая его ошибку. */
+export const fetchMarketNews = (companyId: string, params?: { since_days?: number; source_id?: string }) =>
+  post<{
+    added: number
+    sinceDays?: number
+    /** Сколько источников не попало в эту порцию: нажать «Обновить» ещё раз. */
+    pending?: number
+    note?: string
+    sources: { id: string; title: string; added: number; seen?: number; error?: string }[]
+  }>(`/api/market/news/fetch?${new URLSearchParams({
+    company_id: companyId,
+    ...(params?.since_days ? { since_days: String(params.since_days) } : {}),
+    ...(params?.source_id ? { source_id: params.source_id } : {}),
+  }).toString()}`, {})
+
+/* ──────────────── Участники рынка в новостях ────────────────
+ * Рынок читается связями: производитель и сеть в одном материале, сеть и
+ * ведомство, агрегатор и банк. Поэтому у новости не одна привязка, а состав
+ * участников, а связь между ними — наблюдение по совместным появлениям,
+ * которое всегда показывает, из каких материалов собрано.
+ */
+
+/** Порядок разбора рынка, а не алфавит: сначала те, кто строит и питает сеть. */
+export const ACTOR_ROLE_ORDER = ['operator', 'vendor', 'platform', 'aggregator', 'service',
+                                 'utility', 'automaker', 'bank', 'state', 'other'] as const
+
+export const ACTOR_ROLE_LABEL: Record<string, string> = {
+  operator: 'сеть ЭЗС',
+  platform: 'платформа и процессинг',
+  vendor: 'производитель оборудования',
+  aggregator: 'агрегатор и приложение',
+  automaker: 'автопроизводитель',
+  bank: 'банк и финтех',
+  service: 'сервис и монтаж',
+  state: 'государство и регулятор',
+  utility: 'энергетика и сети',
+  other: 'прочее',
+}
+
+/** Виды, которые заводятся справочником: остальных даёт реестр сетей и приложений. */
+export const ACTOR_KIND_LABEL: Record<string, string> = {
+  vendor: 'производитель оборудования',
+  service: 'сервис и монтаж',
+  state: 'государство и регулятор',
+  utility: 'энергетика и сети',
+  other: 'прочее',
+}
+
+export interface MarketActor {
+  id: string
+  name: string
+  kind: string
+  kindLabel: string
+  aliases: string[]
+  siteUrl: string | null
+  inn: string | null
+  confirmed: boolean
+  note: string | null
+  mentions: number
+}
+
+export interface MarketParticipant {
+  role: string
+  roleLabel: string
+  name: string
+  /** Данные реестра по участнику: масштаб сети рядом с новостями о ней. */
+  network: { sites: number; regions: number; offline: number } | null
+  news: number
+  lastAt: string | null
+  operatorId: string | null
+  actorId: string | null
+  playerId: string | null
+  byTopic: Record<string, number>
+}
+
+export interface MarketLink {
+  a: { role: string; roleLabel: string; name: string }
+  b: { role: string; roleLabel: string; name: string }
+  news: number
+  examples: { title: string; publishedAt: string | null }[]
+}
+
+export const listMarketActors = (companyId: string, kind?: string) =>
+  httpGet<{ actors: MarketActor[]; kinds: string[]; roleLabels: Record<string, string> }>(
+    '/api/market/news/actors', { company_id: companyId, ...(kind ? { kind } : {}) })
+
+export const createMarketActor = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string }>(
+    `/api/market/news/actors?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchMarketActor = (companyId: string, actorId: string, body: Record<string, unknown>) =>
+  patch<{ ok: boolean }>(
+    `/api/market/news/actors/${actorId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const getMarketParticipants = (companyId: string, params?: { role?: string; days?: number }) =>
+  httpGet<{
+    participants: MarketParticipant[]
+    byRole: Record<string, number>
+    roleLabels: Record<string, string>
+    days: number
+  }>('/api/market/news/participants', { company_id: companyId, ...params })
+
+export const getMarketLinks = (companyId: string, params?: {
+  role?: string; name?: string; days?: number; min_news?: number
+}) =>
+  httpGet<{ links: MarketLink[]; total: number; days: number }>(
+    '/api/market/news/links', { company_id: companyId, ...params })
+
+export interface NetworkSnapshot {
+  date: string
+  locations: number
+  offline: number
+  stations: number
+}
+
+/** Снять карту сети оператора: то, чего публичные реестры не показывают. */
+export const importMarketNetwork = (companyId: string, body: Record<string, unknown>) =>
+  post<{
+    url: string; date: string; locations: number; stations: number; inactive: number
+    new: number; regions: number; lastCommissioned: string | null
+    byCurrent: Record<string, number>; byRegion: Record<string, number>
+    created: number; updated: number; snapshots: number
+  }>(`/api/market/network/import?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const getNetworkSnapshots = (companyId: string, operatorId?: string) =>
+  httpGet<{ snapshots: NetworkSnapshot[] }>('/api/market/network/snapshots',
+    { company_id: companyId, ...(operatorId ? { operator_id: operatorId } : {}) })
+
+/** Перечитать состав участников у собранных новостей — после правки справочника. */
+export const rescanMarketMentions = (companyId: string) =>
+  post<{ news: number; added: number }>(
+    `/api/market/news/rescan?company_id=${encodeURIComponent(companyId)}`, {})

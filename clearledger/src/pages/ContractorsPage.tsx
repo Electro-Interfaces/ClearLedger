@@ -58,6 +58,7 @@ import { ContractAppsField, saveContractLinks, useAppLabel, type ContractLinkDra
 import { useSearchParams } from 'react-router-dom'
 import { useHistoryViewState } from '@/hooks/useHistoryViewState'
 import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
+import { AccountingLinkBlock } from '@/components/reference/AccountingLinkBlock'
 import { ContractQualityPanel } from '@/components/reference/ContractQualityPanel'
 import { useStationContracts, stationHitLabel } from '@/components/reference/useStationContracts'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
@@ -275,6 +276,9 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
           <ContractDocumentsBlock contract={c} />
           <ContractLinksBlock id={c.id} />
           <ContractUsageBlock id={c.id} />
+          {/* Сопряжение с бухгалтерией — здесь же: человек, открывший договор, не должен
+              искать ответ «что об этом знает учёт» на другом экране. */}
+          {isEnergy && <AccountingLinkBlock id={c.id} />}
           {/* Условие — это договор, прочитанный учётом: «5000 ₽ в месяц до 10-го
               числа». Держим его здесь же, а не отдельным реестром приложения:
               иначе человек ищет связь, которую система знает сама. */}

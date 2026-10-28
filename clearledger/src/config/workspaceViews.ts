@@ -25,6 +25,10 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   // «Данные» компании без объектов: разделы идут от источника (бухгалтерия клиента),
   // а не от каналов приёма файлов.
   connect: 'Подключения',
+  // «Бухгалтерия» пространства: сопряжение выгрузки бухгалтерии с нашими карточками.
+  acct_review: 'Разбор',
+  acct_objects: 'Объекты и основания',
+  acct_sources: 'Источники сведений',
   data_sources: 'Источники',
   data_model: 'База пространства',
   data_quality: 'Качество данных',
@@ -175,6 +179,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   marketing: {
     mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
     mk_landscape2: 'Компании и расклад сил', mk_players: 'Игроки рынка',
+    mk_news: 'Новости рынка',
     mk_observations: 'Наблюдения', mk_operators: 'Компании',
   },
   marketing_decision: {
