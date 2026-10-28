@@ -1,68 +1,151 @@
 /**
  * «Что знает бухгалтерия» — блок карточки сущности пространства.
  *
- * Та же механика, что в приложении «Бухгалтерия», но в карточке договора: человек,
- * открывший договор, должен видеть сопряжение здесь, а не искать его на другом экране.
- * Логика живёт в сервисе (`accountingSpaceService`) и на сервере — страница «Бухгалтерия»
- * и этот блок читают один ответ.
+ * Та же механика, что в приложении «Бухгалтерия», но в карточке договора,
+ * контрагента или площадки: человек, открывший карточку, должен видеть сверку
+ * здесь, а не искать её на другом экране. Логика живёт в сервисе и на сервере —
+ * страница «Бухгалтерия» и этот блок читают одну сводку; подписи берутся из
+ * общей отметки, второй копии правил здесь нет.
  *
- * Сопряжение и проверка разделены: «сопряжено» не значит «реквизиты сверены», а правка
- * карточки после сверки делает проверку устаревшей.
+ * Три оси показаны раздельно: сопряжение (опознана ли строка выгрузки), проверка
+ * (что сверено с выгрузкой и что не сверялось — с причиной) и свежесть (правили
+ * ли карточку после сверки). Свежесть видна и при расхождениях: это разные оси.
+ * «Сопряжено» не значит «реквизиты сверены», и ни одно из этого не значит, что
+ * проверен весь договор — сервер так и отвечает `entity_verified: false`.
  */
-import { useQuery } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
-import { useCompany } from '@/contexts/CompanyContext'
-import { cn } from '@/lib/utils'
-import { getAccountingEntityLinks } from '@/services/accountingSpaceService'
+import { AlertTriangle, Loader2, RefreshCcw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { AccountingMark, MARK_LABEL, useAccountingMark, полеRU, дата } from './AccountingMark'
+import type { AccountingEntityType, AccountingLinkSummary } from '@/services/accountingSpaceService'
+
+const ЗАГОЛОВОК = 'text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70'
 
 export function AccountingLinkBlock({ entityType = 'contract', id }: {
-  entityType?: string
+  entityType?: AccountingEntityType
   id: string
 }) {
-  const { companyId } = useCompany()
-  const q = useQuery({
-    queryKey: ['acct-space-links', companyId, entityType, id],
-    queryFn: () => getAccountingEntityLinks(companyId, entityType, id),
-    enabled: !!companyId && !!id, staleTime: 60_000,
-  })
-  const items = q.data?.items ?? []
+  const { summary, state, loading, error, refetch } = useAccountingMark(entityType, id)
   return <div className="space-y-2 border-t border-border/50 pt-3">
-    <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-      Что знает бухгалтерия
-    </p>
-    {q.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground">
-      <Loader2 className="size-3.5 animate-spin" />Загружается сопряжение</p>}
-    {q.isError && <p role="alert" className="text-xs text-muted-foreground">
-      Не удалось получить сопряжение — это ошибка запроса, а не отсутствие сведений.</p>}
-    {!q.isLoading && !q.isError && !items.length && <p className="text-xs text-muted-foreground">
-      Строки бухгалтерской выгрузки на эту карточку не легли. Выгрузка охватывает свой
-      период: отсутствие строки не означает, что договора нет в учёте.</p>}
-    {items.map((l) => <div key={l.record_id} className="rounded-md border border-border/50 bg-muted/20 p-2.5 text-xs">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary">{l.status_label}</span>
-        <span className={cn('rounded-full px-2 py-0.5',
-          l.verification === 'differences' ? 'bg-destructive/10 text-destructive'
-            : l.stale ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-              : 'bg-muted text-muted-foreground')}>{l.verification_label}</span>
-      </div>
-      <p className="mt-1.5">
-        {l.source.counterparty || 'контрагент не указан'} · {l.source.contract || 'основание не указано'}
-      </p>
-      <p className="text-muted-foreground">
-        {[l.source.file, l.source.sheet && 'лист ' + l.source.sheet,
-          l.source.rows && 'строки ' + l.source.rows,
-          l.source.period && 'период ' + l.source.period].filter(Boolean).join(' · ')}
-      </p>
-      <p className="text-muted-foreground">
-        {l.checked_fields.length ? 'сверены поля: ' + l.checked_fields.join(', ') : 'реквизиты не сверялись'}
-      </p>
-      {!!l.differences.length && <ul className="mt-1 flex flex-col gap-0.5">
-        {l.differences.map((d) => <li key={d.field} className="text-destructive">
-          {d.label}: в бухгалтерии «{d.source}», здесь «{d.space || '—'}»
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className={ЗАГОЛОВОК}>Что знает бухгалтерия</p>
+      {!loading && !error && <AccountingMark state={state} summary={summary} />}
+    </div>
+
+    {loading && <p className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Loader2 className="size-3.5 animate-spin" />Загружается сверка с бухгалтерией</p>}
+
+    {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>Не удалось получить сверку — это ошибка запроса, а не отсутствие сведений.</span>
+      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void refetch()}>Повторить</Button>
+    </div>}
+
+    {!loading && !error && !summary && <p className="text-xs text-muted-foreground">
+      Сведений по этой карточке сервер не вернул. {MARK_LABEL.no_source} — выгрузка охватывает
+      свой период, и отсутствие строки не означает, что договора нет в учёте.</p>}
+
+    {!loading && !error && summary && <Детали s={summary} />}
+  </div>
+}
+
+function Детали({ s }: { s: AccountingLinkSummary }) {
+  const сопряжение = Object.entries(s.matching.by_status)
+    .filter(([, n]) => n)
+    .map(([k, n]) => (s.matching.labels?.[k as keyof typeof s.matching.labels] ?? k) + ': ' + n)
+  const сверено = s.verification.compared_fields ?? []
+  const несверено = s.verification.unchecked_fields ?? []
+  return <div className="flex flex-col gap-2 text-xs">
+    {s.state_note && <p className="text-muted-foreground">{s.state_note}</p>}
+
+    {/* Ось сопряжения — отдельной строкой: она отвечает «опознана ли запись»,
+        а не «сверены ли реквизиты». */}
+    <Строка label="Сопряжение" value={сопряжение.length
+      ? сопряжение.join(' · ') + ' (строк источника ' + s.records + ')'
+      : 'строк выгрузки на эту карточку нет'} />
+
+    {/* Ось проверки — доказательствами, а не галочкой: что с чем сравнили и чем
+        это кончилось. Снимок наших полей сверкой не является и показан отдельно. */}
+    <div>
+      <p className="text-muted-foreground">Сверено с выгрузкой:</p>
+      {сверено.length
+        ? <ul className="mt-0.5 flex flex-col gap-0.5">
+            {сверено.map((f) => <li key={f.field}
+              className={f.equal === false ? 'text-destructive' : undefined}>
+              {полеRU(f)} — {f.equal === true ? 'совпадает'
+                : f.equal === false ? <>расходится: в бухгалтерии «{f.source || '—'}», здесь «{f.space || '—'}»</>
+                  : 'сравнивать нечего' + (f.basis ? ': ' + f.basis : '')}
+            </li>)}
+          </ul>
+        : <p>ничего — реквизиты не сверялись</p>}
+    </div>
+
+    {!!несверено.length && <div>
+      <p className="text-muted-foreground">Не сверялись:</p>
+      <ul className="mt-0.5 flex flex-col gap-0.5">
+        {несверено.map((f) => <li key={f.field}>
+          {полеRU(f)}{f.reason ? <span className="text-muted-foreground"> — {f.reason}</span> : null}
+        </li>)}
+      </ul>
+    </div>}
+
+    {s.verification.snapshot_basis && <p className="text-muted-foreground">{s.verification.snapshot_basis}</p>}
+
+    {!!s.differences.length && <ul className="flex flex-col gap-0.5">
+      {s.differences.map((d) => <li key={d.field} className="flex items-start gap-1.5 text-destructive">
+        <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+        <span>{d.label}: в бухгалтерии «{d.source}», здесь «{d.space || '—'}»</span>
+      </li>)}
+    </ul>}
+
+    {/* Ось свежести. Сервер выставляет её параллельно состоянию — в том числе при
+        расхождениях, поэтому блок стоит отдельно, а не вместо расхождений. */}
+    {s.freshness.stale && <p className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+      <RefreshCcw className="mt-0.5 size-3 shrink-0" />
+      <span>Карточку правили после сверки — проверку нужно повторить
+        {s.freshness.stale_records > 1 ? ' (устаревших строк: ' + s.freshness.stale_records + ')' : ''}.</span>
+    </p>}
+    {(s.freshness.checked_at || s.freshness.rechecked_at) && <p className="text-muted-foreground">
+      {s.freshness.checked_at && <>Сверено {дата(s.freshness.checked_at)}
+        {s.freshness.checked_at_basis ? ' — ' + s.freshness.checked_at_basis : ''}. </>}
+      {s.freshness.rechecked_at && <>Повторная сверка {дата(s.freshness.rechecked_at)}. </>}
+      {s.freshness.baseline}
+    </p>}
+
+    {/* Источник: без файла и даты отметка — чьё-то слово. */}
+    {s.sources.length
+      ? <div className="flex flex-col gap-0.5 text-muted-foreground">
+          {s.sources.map((src) => <span key={src.record_id}>
+            {[src.file || 'файл не указан', src.sheet && 'лист ' + src.sheet,
+              src.rows && 'строки ' + src.rows, src.period && 'период ' + src.period,
+              src.as_of && 'данные на ' + дата(src.as_of)].filter(Boolean).join(' · ')}
+          </span>)}
+        </div>
+      : <p className="text-muted-foreground">Источник не указан: строки выгрузки на карточку не легли.</p>}
+
+    {/* Сводка по договорам у контрагента и площадки. Их собственная проверка этим
+        не подтверждается — сказано словами, а не оставлено на догадку. */}
+    {s.scope !== 'self' && s.aggregate && <div className="flex flex-col gap-1 rounded-md border border-border/50 bg-muted/20 p-2">
+      <p className="font-medium">Договоров: {s.aggregate.contracts_total} ·
+        со сведениями бухгалтерии {s.aggregate.with_source} ·
+        без сведений {s.aggregate.without_source}</p>
+      {!!Object.keys(s.aggregate.by_state).length && <p className="text-muted-foreground">
+        {Object.entries(s.aggregate.by_state).filter(([, n]) => n)
+          .map(([k, n]) => (MARK_LABEL[k as keyof typeof MARK_LABEL] ?? k) + ': ' + n).join(' · ')}</p>}
+      <p className="text-muted-foreground">{s.scope_label
+        || 'Отметка собрана из договоров; сама карточка отдельно не сверялась.'}</p>
+      {!!s.aggregate.contracts.length && <ul className="flex flex-col gap-0.5">
+        {s.aggregate.contracts.map((c) => <li key={c.id} className="flex flex-wrap items-center gap-1.5">
+          <span>№ {c.number || '—'} от {c.date || '—'}</span>
+          <AccountingMark compact state={c.state} />
         </li>)}
       </ul>}
-      {l.stale && <p className="mt-1 text-amber-700 dark:text-amber-400">
-        Карточку правили после сверки — проверку нужно повторить.</p>}
-    </div>)}
+    </div>}
+
+    {/* Чего выгрузка не содержит — словами сервера: признака проведения в 1С нет,
+        первичные документы не предоставлены. */}
+    {s.disclaimer && <p className="text-muted-foreground">{s.disclaimer}</p>}
   </div>
+}
+
+function Строка({ label, value }: { label: string; value: string }) {
+  return <p><span className="text-muted-foreground">{label}: </span>{value}</p>
 }
