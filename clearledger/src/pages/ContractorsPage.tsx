@@ -982,7 +982,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
   const [type, setType] = useState<CounterpartyType>(edit?.type ?? 'ЮЛ')
   const set = (k: CpField) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setF((s) => ({ ...s, [k]: e.target.value }))
-  const canSave = f.name.trim() !== '' && (f.inn.trim() !== '' || (!!edit && !edit.inn.trim()))
+  const canSave = f.name.trim() !== '' && (f.inn.trim() !== '' || (!!edit && !(edit.inn ?? '').trim()))
   const pending = create.isPending || update.isPending
   function save() {
     const c = (v: string) => v.trim() || undefined
@@ -1031,7 +1031,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
             </LField>
             <LField label="Краткое наименование" required><Input value={f.name} onChange={set('name')} placeholder="ООО …" /></LField>
             <LField label="Полное наименование" span><Input value={f.fullName} onChange={set('fullName')} /></LField>
-            <LField label="ИНН" required={!edit || !!edit.inn.trim()}><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
+            <LField label="ИНН" required={!edit || !!(edit.inn ?? '').trim()}><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
             <LField label="КПП"><Input value={f.kpp} onChange={set('kpp')} /></LField>
             <LField label="ОГРН / ОГРНИП"><Input value={f.ogrn} onChange={set('ogrn')} /></LField>
             <LField label="ОКПО"><Input value={f.okpo} onChange={set('okpo')} /></LField>
