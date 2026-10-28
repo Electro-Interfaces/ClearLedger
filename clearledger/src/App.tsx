@@ -383,7 +383,8 @@ const router = createBrowserRouter([
           // иначе плитка со стола вела бы в «страница не найдена». За ним заставка,
           // объясняющая, что здесь появится (`PRODUCT_SETUP_NOTE`).
           { path: '/netlink', element: <RequireApp code="netlink"><ProductStub code="netlink" /></RequireApp> },
-          { path: '/accounting', element: <RequireApp code="accounting"><ProductStub code="accounting" /></RequireApp> },
+          // `/accounting` заставку больше не показывает: у «Бухгалтерии» появились свои
+          // разделы, и маршрут ей строит общая карта продуктов (`SPACE_PRODUCTS`) выше.
           { path: '/diagnostics', element: <RequireApp code="diag"><ProductStub code="diag" /></RequireApp> },
           // Рабочие места компании без объектов (профиль `office`) стали продуктами
           // пространства со своими разделами — маршруты им строит карта выше
