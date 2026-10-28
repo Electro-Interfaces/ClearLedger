@@ -1,21 +1,21 @@
 /**
- * «Новости рынка» — лента отрасли, очередь разбора и настройка источников.
+ * «Новости рынка» - лента отрасли, очередь разбора и настройка источников.
  *
  * Три вида одного раздела, и они отвечают на разные вопросы:
- *   Лента      — что происходит вокруг сети. Читают глазами: обложка, заголовок,
- *                первые строки, издание и дата. Кнопок разбора здесь нет —
+ *   Лента      - что происходит вокруг сети. Читают глазами: обложка, заголовок,
+ *                первые строки, издание и дата. Кнопок разбора здесь нет -
  *                чтение не должно соревноваться с работой.
- *   Разбор     — очередь нового: привязать к оператору, уточнить рубрику,
+ *   Разбор     - очередь нового: привязать к оператору, уточнить рубрику,
  *                оставить в ленте или отбросить как шум.
- *   Управление — откуда поток: источники, их рубрики, здоровье и словарь отбора.
+ *   Управление - откуда поток: источники, их рубрики, здоровье и словарь отбора.
  *
  * Почему у карточек есть обложка. Поисковая лента Bing отдаёт ссылку через свой
  * счётчик, но это обычный редирект: пройдя его, обход забирает со страницы
- * издания og:image, первые строки и признак видео. Google News так не умеет —
- * адрес издания зашифрован в токене (проверено 28.10.2026), — поэтому он заведён
+ * издания og:image, первые строки и признак видео. Google News так не умеет -
+ * адрес издания зашифрован в токене (проверено 28.10.2026), - поэтому он заведён
  * отдельным видом источника «широкий невод»: заголовки без обложек.
  *
- * Карточка без обложки — нормальная карточка, а не сломанная: серой заглушки с
+ * Карточка без обложки - нормальная карточка, а не сломанная: серой заглушки с
  * иконкой здесь нет, место занимают заголовок и лид.
  *
  * Разбор отделён от ленты, и кнопка «Шум» стоит ровно столько же, сколько
@@ -78,7 +78,7 @@ function когда(iso: string | null): string {
   return дней < 14 ? `${текст} · ${дней} дн назад` : текст
 }
 
-/** Источник молчит дольше недели — факт, а не пустой экран. Считается вне рендера. */
+/** Источник молчит дольше недели - факт, а не пустой экран. Считается вне рендера. */
 function молчит(lastOkAt: string | null): boolean {
   return !lastOkAt || Date.now() - new Date(lastOkAt).getTime() > 7 * 86_400_000
 }
@@ -120,7 +120,7 @@ function ReviewRow({ n, operators, onPatch, busy }: {
           {подсказка && (
             <p className="text-xs text-muted-foreground">
               Похоже на {подсказка.operatorName ?? подсказка.playerName}
-              {подсказка.matched ? ` (совпало «${подсказка.matched}»)` : ''} — подтвердите, если так
+              {подсказка.matched ? ` (совпало «${подсказка.matched}»)` : ''} - подтвердите, если так
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2" data-export-ignore>
@@ -130,7 +130,7 @@ function ReviewRow({ n, operators, onPatch, busy }: {
                 <SelectValue placeholder="Чья новость" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">— без оператора —</SelectItem>
+                <SelectItem value="none">- без оператора -</SelectItem>
                 {operators.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -374,7 +374,7 @@ export function MarketNewsPanel() {
 
   const rows = лента.data?.news ?? []
   // Позиция в потоке и есть роль материала (как на главной «Ангара»): герой,
-  // четыре строки «Свежего», пять заголовков «Коротко», остальное — карточками.
+  // четыре строки «Свежего», пять заголовков «Коротко», остальное - карточками.
   // Героем не делаем материал без обложки: баннер был бы пустым.
   const герой = rows.find((n) => n.imageUrl) ?? rows[0] ?? null
   const остальные = rows.filter((n) => n.id !== герой?.id)
@@ -390,7 +390,7 @@ export function MarketNewsPanel() {
   const отборов = [тема !== 'all', оператор !== 'all', !!поиск.trim()].filter(Boolean).length
   const список = источники.data?.sources ?? []
   // Поля словаря показывают действующий отбор: свой, если он задан, иначе встроенный.
-  // Пока человек их не трогал, сохранять нечего — кнопка недоступна.
+  // Пока человек их не трогал, сохранять нечего - кнопка недоступна.
   const текСлова = слова ?? {
     include: (настройки.data?.includeWords?.length
       ? настройки.data.includeWords : настройки.data?.defaultInclude ?? []).join('\n'),
@@ -416,10 +416,12 @@ export function MarketNewsPanel() {
           <span className="flex items-center gap-2 text-sm font-medium">
             <Newspaper className="size-4 text-primary" aria-hidden />
             {counts
-              ? `В ленте ${counts.kept + counts.new}, из них неразобранных ${counts.new}, отброшено ${counts.noise}`
+              ? `Материалов ${counts.kept + counts.new}`
+                + (counts.new ? `, не разобрано ${counts.new}` : '')
+                + (counts.noise ? `, отброшено ${counts.noise}` : '')
               : 'Новости рынка'}
           </span>
-          {подача !== 'admin' && (
+          {(подача === 'feed' || подача === 'review') && (
             <span className="flex flex-wrap items-center gap-1" data-export-ignore>
               <Button size="sm" variant={тема === 'all' ? 'default' : 'outline'}
                 className="h-7 text-xs" onClick={() => setТема('all')}>Все темы</Button>
@@ -431,12 +433,13 @@ export function MarketNewsPanel() {
               ))}
             </span>
           )}
-          <span className="ml-auto flex flex-wrap items-center gap-2" data-export-ignore>
+          <span className="ml-auto flex max-w-full flex-wrap items-center gap-2
+                           overflow-x-auto" data-export-ignore>
             {(подача === 'feed' || подача === 'review') && (
               <>
                 {/* Поля отбора занимали полосу над лентой и отодвигали новости за
                     край экрана: в свёрнутом виде кнопка называет число действующих
-                    отборов, развёрнутый вид — те же поля одной строкой. */}
+                    отборов, развёрнутый вид - те же поля одной строкой. */}
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button size="sm" variant={отборов ? 'default' : 'outline'} className="h-7 text-xs">
@@ -512,7 +515,7 @@ export function MarketNewsPanel() {
                 ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
                 : '')
               + (результат.pending
-                ? `, в эту порцию не вошло ${результат.pending} — нажмите ещё раз`
+                ? `, в эту порцию не вошло ${результат.pending} - нажмите ещё раз`
                 : '')}
         </p>
       )}
@@ -523,7 +526,7 @@ export function MarketNewsPanel() {
             <RoleFilter value={роль} counts={участники.data?.byRole ?? связиРоли}
               onChange={setРоль} />
             <Input value={участник} onChange={(e) => setУчастник(e.target.value)}
-              placeholder="Участник: «Парус электро»" className="h-8 w-[220px] text-xs" />
+              placeholder="Поиск участника" className="h-8 w-[220px] text-xs" />
             <Select value={окно} onValueChange={setОкно}>
               <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -583,7 +586,7 @@ export function MarketNewsPanel() {
             <CardContent className="space-y-3 p-3">
               <div className="flex flex-wrap items-end gap-2">
                 <Input value={имяИсточника} onChange={(e) => setИмяИсточника(e.target.value)}
-                  placeholder="Название: «Пункт Е — публикации»" className="h-8 w-[240px] text-xs" />
+                  placeholder="Название источника" className="h-8 w-[240px] text-xs" />
                 <Select value={видИсточника} onValueChange={setВидИсточника}>
                   <SelectTrigger className="h-8 w-[230px] text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -601,8 +604,8 @@ export function MarketNewsPanel() {
                 </Select>
                 <Input value={адресИсточника} onChange={(e) => setАдресИсточника(e.target.value)}
                   placeholder={видИсточника.startsWith('search')
-                    ? 'Запрос: site:punkt-e.ru или «зарядная станция» Забайкальский край'
-                    : 'https://… адрес ленты или страницы новостей'}
+                    ? 'Запрос, например site:punkt-e.ru'
+                    : 'Адрес ленты или страницы новостей'}
                   className="h-8 w-[400px] text-xs" />
                 <Button size="sm" disabled={!имяИсточника || !адресИсточника || датьИсточник.isPending}
                   onClick={() => датьИсточник.mutate()}>Добавить источник</Button>
@@ -639,19 +642,21 @@ export function MarketNewsPanel() {
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">Словарь отбора</span>
                 <span className="text-xs text-muted-foreground">
-                  по одному слову в строке; пусто — встроенный словарь
+                  по одному слову в строке; пусто - встроенный словарь
                   {настройки.data?.updatedBy ? ` · правил ${настройки.data.updatedBy}` : ''}
                 </span>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="space-y-1 text-xs">
                   <span className="text-muted-foreground">Берём материал, если встретилось</span>
-                  <Textarea rows={6} className="font-mono text-xs" value={текСлова.include}
+                  <Textarea rows={8} className="max-h-56 overflow-y-auto font-mono text-xs"
+                    value={текСлова.include}
                     onChange={(e) => setСлова({ ...текСлова, include: e.target.value })} />
                 </label>
                 <label className="space-y-1 text-xs">
                   <span className="text-muted-foreground">Отбрасываем, если встретилось</span>
-                  <Textarea rows={6} className="font-mono text-xs" value={текСлова.exclude}
+                  <Textarea rows={8} className="max-h-56 overflow-y-auto font-mono text-xs"
+                    value={текСлова.exclude}
                     onChange={(e) => setСлова({ ...текСлова, exclude: e.target.value })} />
                 </label>
               </div>
@@ -659,7 +664,7 @@ export function MarketNewsPanel() {
                 <Button size="sm" disabled={слова === null || сохранитьСловарь.isPending}
                   onClick={() => сохранитьСловарь.mutate()}>Сохранить словарь</Button>
                 <span className="text-xs text-muted-foreground">
-                  Профильный источник проходит словарь целиком — у него одна тема.
+                  Профильный источник проходит словарь целиком - у него одна тема.
                 </span>
               </div>
             </CardContent>
@@ -668,7 +673,7 @@ export function MarketNewsPanel() {
           <Card>
             <CardContent className="flex flex-wrap items-end gap-2 p-3">
               <Input value={имяУчастника} onChange={(e) => setИмяУчастника(e.target.value)}
-                placeholder="Участник рынка: «Парус электро»" className="h-8 w-[260px] text-xs" />
+                placeholder="Название участника" className="h-8 w-[260px] text-xs" />
               <Select value={видУчастника} onValueChange={setВидУчастника}>
                 <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -678,7 +683,7 @@ export function MarketNewsPanel() {
                 </SelectContent>
               </Select>
               <Input value={псевдонимы} onChange={(e) => setПсевдонимы(e.target.value)}
-                placeholder="Как ещё пишут, через запятую: Парус-электро, ПАРУС ЭЛЕКТРО"
+                placeholder="Другие написания через запятую"
                 className="h-8 w-[380px] text-xs" />
               <Button size="sm" disabled={!имяУчастника || датьУчастника.isPending}
                 onClick={() => датьУчастника.mutate()}>Добавить участника</Button>
@@ -701,10 +706,10 @@ export function MarketNewsPanel() {
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <Input value={адресСети} onChange={(e) => setАдресСети(e.target.value)}
-                  placeholder="https://… страница карты сети оператора"
+                  placeholder="Адрес страницы с картой сети"
                   className="h-8 w-[420px] text-xs" />
                 <Input value={сетьОператора} onChange={(e) => setСетьОператора(e.target.value)}
-                  placeholder="Чья сеть: «PUNKT E»" className="h-8 w-[220px] text-xs" />
+                  placeholder="Чья это сеть" className="h-8 w-[220px] text-xs" />
                 <Button size="sm" disabled={!адресСети || снятьСеть.isPending}
                   onClick={() => снятьСеть.mutate()}>
                   {снятьСеть.isPending ? 'Снимаем…' : 'Снять слепок сети'}
@@ -735,7 +740,7 @@ export function MarketNewsPanel() {
 
           {список.length === 0 && !источники.isLoading && (
             <p className="p-2 text-sm text-muted-foreground">
-              Источников нет — нажмите «Поставить базовый набор».
+              Источников нет - нажмите «Поставить базовый набор».
             </p>
           )}
           {список.map((s) => (
@@ -750,7 +755,7 @@ export function MarketNewsPanel() {
           <Card>
             <CardContent className="flex flex-wrap items-center gap-2 p-3">
               <Input value={ручнойUrl} onChange={(e) => setРучнойUrl(e.target.value)}
-                placeholder="Ссылка на материал, который принесли руками"
+                placeholder="Ссылка на материал"
                 className="h-8 w-[360px] text-xs" />
               <Input value={ручнойTitle} onChange={(e) => setРучнойTitle(e.target.value)}
                 placeholder="Заголовок" className="h-8 w-[300px] text-xs" />
@@ -769,7 +774,7 @@ export function MarketNewsPanel() {
             </p>
           )}
           {!лента.isLoading && rows.length === 0 && (
-            <p className="p-2 text-sm text-muted-foreground">Очередь разбора пуста — всё разобрано.</p>
+            <p className="p-2 text-sm text-muted-foreground">Очередь разбора пуста - всё разобрано.</p>
           )}
           {rows.map((n) => (
             <ReviewRow key={n.id} n={n} operators={ops}
@@ -786,7 +791,7 @@ export function MarketNewsPanel() {
           )}
           {!лента.isLoading && rows.length === 0 && (
             <p className="p-2 text-sm text-muted-foreground">
-              Лента пуста — нажмите «Обновить из источников»; сами источники
+              Лента пуста - нажмите «Обновить из источников»; сами источники
               настраиваются во вкладке «Управление».
             </p>
           )}

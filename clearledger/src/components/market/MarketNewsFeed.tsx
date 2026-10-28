@@ -1,22 +1,22 @@
 /**
- * Подача новостной ленты рынка — по канону издания «Ангара» (`kka-site`,
+ * Подача новостной ленты рынка - по канону издания «Ангара» (`kka-site`,
  * `src/app/angar/news/page.tsx`), перенесённому на токены пространства.
  *
  * Раскладка новостного агентства, а не список строк:
- *   герой край-в-край — главный материал дня: обложка, тёмный градиент, рубрика,
+ *   герой край-в-край - главный материал дня: обложка, тёмный градиент, рубрика,
  *     крупный заголовок, лид;
- *   «Свежее» — четыре строки с миниатюрой: быстрый просмотр того, что было;
- *   карточки — остальной поток крупно, в две колонки;
- *   сайдбар — «Коротко» (заголовки без фото) и состояние источников.
+ *   «Свежее» - четыре строки с миниатюрой: быстрый просмотр того, что было;
+ *   карточки - остальной поток крупно, в две колонки;
+ *   сайдбар - «Коротко» (заголовки без фото) и состояние источников.
  *
  * Позиция в потоке и есть роль материала: [0] герой, [1..4] «Свежее»,
- * [5..9] «Коротко», дальше карточки. Героем не делаем материал без обложки —
+ * [5..9] «Коротко», дальше карточки. Героем не делаем материал без обложки -
  * баннер был бы пустым.
  *
  * Обложки приходят от обогащения: обход проходит редирект поисковой ленты и
  * берёт со страницы издания og:image, первые строки и признак видео. Там, где
  * издание ничего не отдало, рисуется не серый прямоугольник, а градиентная
- * заглушка с мотивом зарядной станции — пустое место в ленте читается как сбой.
+ * заглушка с мотивом зарядной станции - пустое место в ленте читается как сбой.
  */
 import { ArrowRight, Play } from 'lucide-react'
 import {
@@ -61,7 +61,8 @@ function Cover({ n, className, icon }: { n: MarketNewsItem; className?: string; 
     <span className={`relative block overflow-hidden bg-muted ${className ?? ''}`}>
       {n.imageUrl
         ? <img src={n.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer"
-            className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
+            className="relative size-full object-cover transition-transform duration-500
+                       group-hover:scale-105"
             onError={(e) => {
               const img = e.currentTarget
               img.hidden = true
@@ -87,6 +88,13 @@ export function NewsHero({ n }: { n: MarketNewsItem }) {
       className="group relative flex min-h-[240px] items-end overflow-hidden rounded-xl border
                  border-border sm:min-h-[300px] lg:min-h-[340px]
                  focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      {/* Обложка кроет баннер целиком: при узкой картинке издания остальное
+          поле добирается её же размытой копией, иначе половина героя — чёрный
+          прямоугольник (видно на приёмке 29.10.2026). */}
+      {n.imageUrl && (
+        <span aria-hidden className="absolute inset-0 bg-cover bg-center blur-xl saturate-150"
+          style={{ backgroundImage: `url("${n.imageUrl}")` }} />
+      )}
       <Cover n={n} className="absolute inset-0 size-full" icon="size-20" />
       <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/5" />
       <span className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/10 to-transparent" />
@@ -194,7 +202,7 @@ export function NewsCard({ n }: { n: MarketNewsItem }) {
   )
 }
 
-/** «Коротко»: заголовок без фото — то, что просматривают по диагонали. */
+/** «Коротко»: заголовок без фото - то, что просматривают по диагонали. */
 export function NewsBrief({ n }: { n: MarketNewsItem }) {
   return (
     <a href={n.url} target="_blank" rel="noopener noreferrer"

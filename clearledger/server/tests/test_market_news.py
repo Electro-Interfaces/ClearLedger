@@ -456,3 +456,35 @@ def test_смена_формата_карты_это_отказ_а_не_пуст
     assert parse_dots("<script>let dots = [сломано;</script>") == []
     # Точки без координат не годятся: по ним нечего сопоставлять.
     assert parse_dots('<script>let dots = [{"id":"1"}];</script>') == []
+
+
+def test_живость_точки_учитывает_метку_оператора():
+    """Станция, которую владелец пометил нерабочей, живой не считается.
+
+    До 29.10.2026 живость везде считалась только по дате последней зарядки, и
+    разделы не видели того, что оператор показывает у себя: у «Пункт Е» это
+    292 неработающие станции из 1673. Доля рынка и белые пятна считались по
+    станциям, которых на деле нет.
+    """
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace as N
+    from app.routers.market_router import жива
+
+    порог = datetime.now(timezone.utc) - timedelta(days=90)
+    свежая = datetime.now(timezone.utc) - timedelta(days=3)
+    старая = datetime.now(timezone.utc) - timedelta(days=200)
+
+    assert жива(N(last_session_at=свежая, is_alive=True), порог)
+    assert жива(N(last_session_at=свежая, is_alive=None), порог), "нет метки — судим по зарядкам"
+    assert not жива(N(last_session_at=свежая, is_alive=False), порог), \
+        "оператор говорит «не работает» — это сильнее недавней зарядки"
+    assert not жива(N(last_session_at=старая, is_alive=True), порог), \
+        "метка живости не воскрешает точку без зарядок"
+    assert not жива(N(last_session_at=None, is_alive=None), порог)
+
+
+def test_карта_оператора_ранжируется_выше_публичной_выгрузки():
+    """Оператор ближе к первоисточнику: он знает, что у него не работает."""
+    from app.routers.market_router import SOURCE_RANK
+    assert SOURCE_RANK["network"] == 85
+    assert SOURCE_RANK["registry"] < SOURCE_RANK["network"] < SOURCE_RANK["api"]

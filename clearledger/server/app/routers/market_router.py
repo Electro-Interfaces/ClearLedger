@@ -43,7 +43,32 @@ router = APIRouter(prefix="/market", tags=["Маркетинг — рынок"])
 SITE_KINDS = {"ezs", "mall", "parking", "fuel", "hotel", "office", "other"}
 # Ранг источника: чем ближе к первоисточнику, тем выше доверие при конфликте.
 SOURCE_RANK = {"partner": 100, "api": 90, "registry": 70, "service_visit": 65,
+               # Карта самого оператора ближе к первоисточнику, чем публичная
+               # выгрузка: он показывает, что у него не работает сегодня.
+               "network": 85,
                "manual": 60, "import": 40, "parser": 20}
+
+
+def жива(site: Any, alive_since: datetime) -> bool:
+    """Работает ли чужая точка. Один ответ на все разделы.
+
+    Два признака, и второй сильнее. Зарядка за последние ALIVE_DAYS говорит, что
+    точкой пользовались, но оператор на своей карте показывает ТЕКУЩЕЕ состояние:
+    у «Пункт Е» 29.10.2026 это 292 неработающие станции из 1673. Точка, которую
+    владелец пометил нерабочей, живой не считается, даже если месяц назад на ней
+    заряжались, — иначе доля рынка и белые пятна считаются по станциям, которых
+    на деле нет.
+    """
+    if getattr(site, "is_alive", None) is False:
+        return False
+    last = getattr(site, "last_session_at", None)
+    return bool(last and last >= alive_since)
+
+
+def жива_sql(alive_since: datetime) -> Any:
+    """То же условие для запроса: разделы не должны расходиться с питоном."""
+    return and_(MarketSite.last_session_at >= alive_since,
+                MarketSite.is_alive.isnot(False))
 
 
 class OperatorIn(BaseModel):
@@ -197,7 +222,7 @@ async def list_operators(
         await db.execute(
             select(MarketSite.operator_id, func.count(),
                    func.sum(MarketSite.ports),
-                   func.sum(case((MarketSite.last_session_at >= alive_since, 1), else_=0)),
+                   func.sum(case((жива_sql(alive_since), 1), else_=0)),
                    func.max(MarketSite.max_power_kw),
                    func.avg(MarketSite.connection_quality_24h),
                    func.avg(MarketSite.success_charge_pct),
@@ -371,7 +396,7 @@ async def operator_card(
             "sites": len(network),
             "homeSockets": len(sites) - len(network),
             "ports": sum(s.ports or 0 for s in network),
-            "alive": sum(1 for s in network if s.last_session_at and s.last_session_at >= alive_since),
+            "alive": sum(1 for s in network if жива(s, alive_since)),
             "closed": sum(1 for s in network if s.status == "closed"),
             "planned": sum(1 for s in network if s.status == "planned"),
             "medianPricePerKwh": _median(prices),
@@ -396,7 +421,7 @@ async def operator_card(
             "rating": observed_rating(s.rating, s.reviews_count),
             "quality": float(s.connection_quality_24h) if s.connection_quality_24h is not None else None,
             "lastSessionAt": s.last_session_at.isoformat() if s.last_session_at else None,
-            "alive": bool(s.last_session_at and s.last_session_at >= alive_since),
+            "alive": жива(s, alive_since),
         } for s in network), key=lambda r: (r["city"] or "", r["name"]))[:300],
     }
 
@@ -472,7 +497,7 @@ async def list_sites(
         q = q.where(MarketSite.max_power_kw >= min_power)
     if alive is not None:
         edge = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
-        q = (q.where(MarketSite.last_session_at >= edge) if alive
+        q = (q.where(жива_sql(edge)) if alive
              else q.where(sa_or(MarketSite.last_session_at.is_(None),
                                 MarketSite.last_session_at < edge)))
     if bbox:
@@ -639,7 +664,7 @@ async def sites_breakdown(
                                         "ports": 0, "prices": []})
             row["sites"] += 1
             row["ports"] += it.ports or 0
-            if it.last_session_at and it.last_session_at >= alive_since:
+            if жива(it, alive_since):
                 row["alive"] += 1
             price = last_price.get(str(it.id))
             if price:
@@ -685,7 +710,7 @@ async def sites_breakdown(
     success = [float(x.success_charge_pct) for x in sites
                if x.success_charge_pct is not None]
     ratings = [r for x in sites if (r := observed_rating(x.rating, x.reviews_count)) is not None]
-    alive = [x for x in sites if x.last_session_at and x.last_session_at >= alive_since]
+    alive = [x for x in sites if жива(x, alive_since)]
     silent = [x for x in sites if x.last_session_at is None]
 
     return {
@@ -1287,7 +1312,7 @@ async def market_sources(
     alive = int((await db.execute(
         select(func.count()).select_from(MarketSite)
         .where(MarketSite.company_id == cid,
-               MarketSite.last_session_at >= alive_since))).scalar() or 0)
+               жива_sql(alive_since)))).scalar() or 0)
 
     return {
         "sources": sources, "snapshots": snapshots,
@@ -1420,7 +1445,7 @@ def _territory_rows(sites, ours, sales, prices, alive_since, level: str) -> list
             continue
         row["rivalSites"] += 1
         row["rivalPorts"] += site.ports or 0
-        if site.last_session_at and site.last_session_at >= alive_since:
+        if жива(site, alive_since):
             row["rivalAlive"] += 1
         price = prices.get(str(site.id))
         if price is not None:
@@ -1626,7 +1651,7 @@ async def market_site_score(
                 "distanceKm": round(distance, 1), "ports": site.ports,
                 "maxPowerKw": float(site.max_power_kw) if site.max_power_kw else None,
                 "pricePerKwh": prices.get(str(site.id)),
-                "alive": bool(site.last_session_at and site.last_session_at >= alive_since),
+                "alive": жива(site, alive_since),
             })
         return sorted(out, key=lambda r: r["distanceKm"])
 
@@ -1670,7 +1695,7 @@ async def market_site_score(
         area["marketSites"] = len(region_sites)
         area["marketAlive"] = sum(
             1 for x in region_sites
-            if x.last_session_at and x.last_session_at >= alive_since)
+            if жива(x, alive_since))
         area["carsPerAlive"] = (round(свой.ev_cars / area["marketAlive"], 1)
                                 if свой and свой.ev_cars and area["marketAlive"] else None)
 
@@ -2303,7 +2328,7 @@ async def suggest_control(
 
     def rivals_near(lat, lon) -> int:
         return sum(1 for site in _geo_around(pressure_index, float(lat), float(lon), radius_km)
-                   if site.last_session_at and site.last_session_at >= alive_since
+                   if жива(site, alive_since)
                    and _distance_km(float(lat), float(lon),
                                     float(site.latitude), float(site.longitude)) <= radius_km)
 
@@ -2505,7 +2530,7 @@ async def market_partners(
         })
         row["sites"] += 1
         row["ports"] += site.ports or 0
-        if site.last_session_at and site.last_session_at >= alive_since:
+        if жива(site, alive_since):
             row["alive"] += 1
         if site.city:
             if site.city in our_cities:
@@ -3355,7 +3380,7 @@ async def growth_pipeline(
     for site in market:
         bucket = market_city.setdefault(key(site.city), {"sites": 0, "alive": 0})
         bucket["sites"] += 1
-        if site.last_session_at and site.last_session_at >= alive_since:
+        if жива(site, alive_since):
             bucket["alive"] += 1
 
     # ── воронка ──
@@ -3670,7 +3695,7 @@ async def market_self_view(
             "reviews": site.reviews_count,
             "publicPricePerKwh": obs["price"] if obs else None,
             "lastSessionAt": site.last_session_at.isoformat() if site.last_session_at else None,
-            "aliveByMarket": bool(site.last_session_at and site.last_session_at >= alive_since),
+            "aliveByMarket": жива(site, alive_since),
             # Что знаем мы
             "ourSessions": sale["sessions"] if sale else None,
             "ourRevenue": sale["revenue"] if sale else None,
@@ -3948,7 +3973,7 @@ async def territory_profile(
             "homeSockets": len(home),
             "rivalPorts": sum(x.ports or 0 for x in rivals),
             "aliveRivals": sum(1 for x in rivals
-                               if x.last_session_at and x.last_session_at >= alive_since),
+                               if жива(x, alive_since)),
             "marketPricePerKwh": _median(rival_prices),
             "pricedSites": len(rival_prices),
             # Знаменатель — все внешние зарядки территории, и сетевые, и
@@ -4065,7 +4090,7 @@ async def _network_metrics(db: AsyncSession, cid: uuid.UUID, scope: list[Any]) -
               for oid, sites, ports, alive, q, sc, silent, cities, districts, power, seen in (await db.execute(
                   select(MarketSite.operator_id, func.count(),
                          func.sum(MarketSite.ports),
-                         func.sum(case((MarketSite.last_session_at >= alive_since, 1), else_=0)),
+                         func.sum(case((жива_sql(alive_since), 1), else_=0)),
                          func.avg(MarketSite.connection_quality_24h),
                          func.avg(MarketSite.success_charge_pct),
                          func.sum(case(
@@ -4115,7 +4140,7 @@ async def market_landscape(
                     for oid, sites, ports, alive in (await db.execute(
                         select(MarketSite.owner_id, func.count(),
                                func.sum(MarketSite.ports),
-                               func.sum(case((MarketSite.last_session_at >= alive_since, 1),
+                               func.sum(case((жива_sql(alive_since), 1),
                                              else_=0)))
                         .where(MarketSite.company_id == cid, *обл,
                                MarketSite.owner_id.is_not(None),
@@ -4338,7 +4363,7 @@ async def market_coverage(
             continue
         row = market.setdefault(site.region, {"sites": 0, "alive": 0})
         row["sites"] += 1
-        if site.last_session_at and site.last_session_at >= alive_since:
+        if жива(site, alive_since):
             row["alive"] += 1
 
     def _match(name: str) -> dict[str, int]:
