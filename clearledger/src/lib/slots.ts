@@ -75,6 +75,10 @@ export function localParts(at: Date, tz: string | null | undefined) {
 }
 
 function пересекается(aFrom: number, aTo: number, b: Busy): boolean {
+  // Событие на весь день — пометка дня (отпуск, праздник, срок), а не встреча:
+  // время оно не занимает, как в Google и Outlook. Иначе «пример» на весь день
+  // объявлял занятым каждый час и подбор не находил ничего (МАГ, 28.10.2026).
+  if (b.all_day) return false
   const bFrom = new Date(b.starts_at).getTime()
   const bTo = new Date(b.ends_at).getTime()
   return aFrom < bTo && aTo > bFrom

@@ -48,10 +48,14 @@ export function TonePicker({ value, onChange }: { value: TagTone; onChange: (t: 
   )
 }
 
-export function TagPicker({ companyId, targetRef }: { companyId: string; targetRef: string }) {
+/** Выбор тегов. С `targetRef` — сразу пишет на сервер; с `value`/`onChange` — держит
+ *  выбор у себя: у новой встречи ещё нет id, теги ставятся после сборки. */
+export function TagPicker({ companyId, targetRef = '', value, onChange }: {
+  companyId: string; targetRef?: string; value?: string[]; onChange?: (ids: string[]) => void
+}) {
   const qc = useQueryClient()
   const { tags, tagsOf } = usePersonalTags(companyId)
-  const висят = tagsOf(targetRef)
+  const висят = value ? value.map((id) => tags.find((t) => t.id === id)).filter((t): t is PersonalTag => !!t) : tagsOf(targetRef)
   const [имя, setИмя] = useState('')
   const [тон, setТон] = useState<TagTone>('blue')
   const ключ = ['personal-tags', companyId]
@@ -75,13 +79,16 @@ export function TagPicker({ companyId, targetRef }: { companyId: string; targetR
     mutationFn: () => tagsService.createTag(companyId, имя.trim(), тон),
     onSuccess: (t) => {
       setИмя('')
-      повесить.mutate([...висят.map((x) => x.id), t.id])
+      if (onChange) { onChange([...(value ?? []), t.id]); void qc.invalidateQueries({ queryKey: ключ }) }
+      else повесить.mutate([...висят.map((x) => x.id), t.id])
     },
     onError: (e) => toast.error((e as Error).message || 'Не удалось завести тег'),
   })
   const переключить = (id: string) => {
     const есть = висят.some((t) => t.id === id)
-    повесить.mutate(есть ? висят.filter((t) => t.id !== id).map((t) => t.id) : [...висят.map((t) => t.id), id])
+    const ids = есть ? висят.filter((t) => t.id !== id).map((t) => t.id) : [...висят.map((t) => t.id), id]
+    if (onChange) onChange(ids)
+    else повесить.mutate(ids)
   }
 
   return (
