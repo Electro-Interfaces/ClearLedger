@@ -146,7 +146,7 @@ export function ActorsAdmin({ actors, loading, onPatch, onRescan, rescanning, re
   onPatch: (id: string, body: Record<string, unknown>) => void
   onRescan: () => void
   rescanning: boolean
-  rescanResult: { news: number; added: number } | undefined
+  rescanResult: { news: number; added: number; topics: number } | undefined
 }) {
   return (
     <Card>
@@ -168,6 +168,7 @@ export function ActorsAdmin({ actors, loading, onPatch, onRescan, rescanning, re
           {rescanResult && (
             <span className="text-xs text-muted-foreground">
               просмотрено материалов {rescanResult.news}, новых упоминаний {rescanResult.added}
+              {rescanResult.topics > 0 ? `, уточнено рубрик ${rescanResult.topics}` : ''}
             </span>
           )}
         </div>

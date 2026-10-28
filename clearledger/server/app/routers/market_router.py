@@ -4901,7 +4901,7 @@ class NewsPatch(BaseModel):
 
 NEWS_STATUS = {"new", "kept", "noise"}
 NEWS_SOURCE_KINDS = {"search", "search_wide", "rss", "page"}
-NEWS_TOPICS = {"opening", "price", "regulation", "tech", "deal", "other"}
+NEWS_TOPICS = {"opening", "price", "regulation", "tech", "deal", "market", "other"}
 
 
 def _news_source_row(s: MarketNewsSource, names: dict[str, str]) -> dict[str, Any]:
@@ -5678,8 +5678,17 @@ async def rescan_mentions(
         было.setdefault(n_id, set()).add((role, name))
 
     добавлено = 0
+    уточнено_тем = 0
     for n in news:
         текст = f"{n.title} {n.snippet or ''}"
+        # Тема присваивается при записи, поэтому словарь, пополненный позже, сам
+        # по себе ничего не меняет. Уточняем только «прочее»: это признание
+        # «не разобрали», а не выбор человека, который трогать нельзя.
+        if n.topic == "other":
+            уточнённая = market_news.topic_of(текст)
+            if уточнённая != "other":
+                n.topic = уточнённая
+                уточнено_тем += 1
         for м in market_news.actors_in_text(текст, operators, players, actors):
             if (м["role"], м["name"]) in было.get(n.id, set()):
                 continue
@@ -5692,7 +5701,7 @@ async def rescan_mentions(
                 linked_by="auto"))
             добавлено += 1
     await db.commit()
-    return {"news": len(news), "added": добавлено}
+    return {"news": len(news), "added": добавлено, "topics": уточнено_тем}
 
 
 # ───────────────── Карта сети оператора как источник данных ─────────────────

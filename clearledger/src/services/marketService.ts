@@ -1203,7 +1203,8 @@ export function allMarketObservations(companyId: string, params: ObservationPara
  */
 
 /** О чём новость. Тема — подсказка для отбора, а не классификация смысла. */
-export type MarketNewsTopic = 'opening' | 'price' | 'regulation' | 'tech' | 'deal' | 'other'
+export type MarketNewsTopic =
+  | 'opening' | 'price' | 'regulation' | 'tech' | 'deal' | 'market' | 'other'
 
 export const NEWS_TOPIC_LABEL: Record<MarketNewsTopic, string> = {
   opening: 'Открытия и стройка',
@@ -1211,6 +1212,7 @@ export const NEWS_TOPIC_LABEL: Record<MarketNewsTopic, string> = {
   regulation: 'Регулирование',
   tech: 'Техника и платформы',
   deal: 'Сделки и партнёрства',
+  market: 'Рынок и спрос',
   other: 'Прочее',
 }
 
@@ -1496,5 +1498,5 @@ export const getNetworkSnapshots = (companyId: string, operatorId?: string) =>
 
 /** Перечитать состав участников у собранных новостей — после правки справочника. */
 export const rescanMarketMentions = (companyId: string) =>
-  post<{ news: number; added: number }>(
+  post<{ news: number; added: number; topics: number }>(
     `/api/market/news/rescan?company_id=${encodeURIComponent(companyId)}`, {})
