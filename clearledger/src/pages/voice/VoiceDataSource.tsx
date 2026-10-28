@@ -50,7 +50,7 @@ export function VoiceDataSourceBar({ state, pathname }: { state: ReturnType<type
       <select aria-label="Источник данных" value={state.loading ? '' : state.source} onChange={event => state.select(event.target.value)}
         className="min-h-9 max-w-full rounded-md border border-input bg-background px-2 text-sm">
         {state.loading ? <option value="">Проверяем подключение…</option> : null}
-        {Object.entries(SOURCE_NAMES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        {Object.entries(SOURCE_NAMES).map(([key, label]) => <option key={key} value={key}>{key === 'node' ? 'Все звонки узла' : `${label} · история API`}</option>)}
       </select>
     </label> : <p className="font-medium">Источник: наш узел</p>}
     <p className="text-xs text-muted-foreground">{state.providerHistory ? `${SOURCE_NAMES[state.source]} · история провайдера. При смене источника период и фильтры сбрасываются.` : description}</p>

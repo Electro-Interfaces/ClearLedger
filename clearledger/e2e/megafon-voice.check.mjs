@@ -46,6 +46,7 @@ export function FixtureCompanyProvider({ children }) {
 }`
 let server, browser, page, nodeRequests = 0, mode = 'normal'
 const errors = [], requests = [], screenshots = []
+let liveRows = []
 const calls = Array.from({ length: 32 }, (_, index) => ({
   id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
   call_id: `synthetic-${index + 1}`, direction: index % 2 ? 'outbound' : 'inbound', missed: index % 3 === 0,
@@ -111,7 +112,17 @@ try {
   })
   await context.route('**/api/voice/connections', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ company_id: route.request().headers()['x-company-id'], connections: [] }) }))
   for (const pattern of ['**/voice/api/v1/**', '**/api/sso/token**']) {
-    await context.route(pattern, route => { nodeRequests++; return route.fulfill({ status: 503, body: 'Node недоступен' }) })
+    await context.route(pattern, route => {
+      nodeRequests++
+      if (mode === 'live-node') {
+        const path = new URL(route.request().url()).pathname
+        const body = path === '/api/sso/token' ? { token: 'synthetic-voice-token', expires_in: 300 }
+          : path.endsWith('/calls') ? { items: liveRows, next: null }
+          : path.endsWith('/stats/operators') ? [] : { companyId: 'qa-company-a', sub: 'qa-user', role: 'admin', permissions: [] }
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+      }
+      return route.fulfill({ status: 503, body: 'Node недоступен' })
+    })
   }
   page = await context.newPage()
   page.setDefaultTimeout(30000)
@@ -278,16 +289,31 @@ try {
   await page.goto(`${origin}/voice`)
   await page.getByText('Узел заказчика не отвечает', { exact: true }).waitFor()
   assert.ok(nodeRequests > 0, 'На соседнем маршруте проверка узла сохранена')
-  mode = 'normal'
+  mode = 'live-node'
+  liveRows = []
   await page.goto(`${origin}/voice/pbx?source=node`)
   await page.getByRole('heading', { name: 'АТС', exact: true }).waitFor()
-  await page.getByRole('table', { name: 'Журнал звонков АТС' }).waitFor()
+  await page.getByText('За этот период звонков нет', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('Источник звонков', { exact: true }).inputValue(), 'node')
-  await page.getByLabel('Группа', { exact: true }).selectOption('Тестовая группа')
+  liveRows.push({ contactId: 'live-synthetic-8561', lineId: 'L-qa', number: '***8561', startedAt: new Date().toISOString(), queuedAt: null, connectedAt: null, endedAt: null, outcome: null, flags: [] })
+  const liveRow = page.getByRole('row').filter({ hasText: '8561' })
+  await liveRow.getByText('Входящий', { exact: true }).waitFor({ timeout: 8000 })
+  liveRows[0].queuedAt = new Date().toISOString()
+  await liveRow.getByText('В очереди', { exact: true }).waitFor({ timeout: 8000 })
+  liveRows[0].connectedAt = new Date().toISOString()
+  await liveRow.getByText('Разговор', { exact: true }).waitFor({ timeout: 8000 })
+  await screenshot('live-call-mobile.png')
+  liveRows[0].endedAt = new Date().toISOString(); liveRows[0].outcome = 'connected'
+  await liveRow.getByText('отвечен', { exact: true }).waitFor({ timeout: 8000 })
+  assert.equal(await liveRow.count(), 1, 'Переход к завершённому звонку не создаёт дубликат')
+  mode = 'normal'
   await page.getByLabel('Источник звонков', { exact: true }).selectOption('mango')
   await page.getByRole('table', { name: 'Журнал звонков АТС' }).waitFor()
+  await page.getByLabel('Группа', { exact: true }).selectOption('Тестовая группа')
+  await page.getByLabel('Источник звонков', { exact: true }).selectOption('megafon')
+  await page.getByRole('table', { name: 'Журнал звонков АТС' }).waitFor()
   assert.equal(new URL(page.url()).searchParams.get('group'), null)
-  assert.equal(new URL(page.url()).searchParams.get('source'), 'mango')
+  await page.getByLabel('Источник звонков', { exact: true }).selectOption('mango')
   await page.reload()
   await page.getByRole('table', { name: 'Журнал звонков АТС' }).waitFor()
   assert.equal(await page.getByLabel('Источник звонков', { exact: true }).inputValue(), 'mango')

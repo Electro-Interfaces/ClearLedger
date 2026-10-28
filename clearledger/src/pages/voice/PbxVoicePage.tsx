@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ViewParamsBar } from '@/components/workspace/ViewParamsBar'
+import VoiceCallsPage from './VoiceCallsPage'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import {
   megafonParamsFromUrl, megafonPeriodBounds,
@@ -32,7 +33,19 @@ const direction = (value: MegafonCall['direction']) => value === 'inbound' ? 'В
 
 export default function PbxVoicePage({ section }: { section?: 'calls' | 'stats' }) {
   const { companyId } = useCompany()
-  return <PbxCompanyPage key={companyId} companyId={companyId} section={section} />
+  const [url, setUrl] = useSearchParams()
+  const location = useLocation()
+  const requested = url.get('source')
+  const source = isCallSource(requested) ? requested : location.pathname.endsWith('/megafon') ? 'megafon' : 'node'
+  if (source === 'node' && !section) return <main aria-label="АТС" className="flex h-full min-h-0 flex-col">
+    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b p-3">
+      <SelectFilter label="Источник звонков" value="node" options={Object.entries(SOURCE_NAMES).map(([value, label]) => ({ value, label: value === 'node' ? 'Все звонки узла' : `${label} · история API` }))}
+        onChange={value => setUrl({ source: value }, { replace: false })} />
+      <p className="text-xs text-muted-foreground">Входящие, ожидание, разговоры и завершённые звонки. Обновляется автоматически.</p>
+    </div>
+    <div className="min-h-0 flex-1"><VoiceCallsPage key={companyId} title="АТС" /></div>
+  </main>
+  return <PbxCompanyPage key={`${companyId}:${source}`} companyId={companyId} section={section} />
 }
 
 function PbxCompanyPage({ companyId, section }: { companyId: string; section?: 'calls' | 'stats' }) {
@@ -109,14 +122,14 @@ function PbxCompanyPage({ companyId, section }: { companyId: string; section?: '
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
         <h1 className="font-headline text-lg font-semibold">{section === 'calls' ? 'Журнал звонков' : section === 'stats' ? 'Статистика' : 'АТС'}</h1>
-        <p className="text-sm text-muted-foreground">{sourceName} · журнал звонков и работа операторов</p>
+        <p className="text-sm text-muted-foreground">{sourceName} · история API и работа операторов</p>
       </div>
       <Button variant="outline" size="sm" disabled={query.isFetching || invalidUrlSearch || !companyId} onClick={() => void query.refetch()}>
         <RefreshCw data-icon="inline-start" />{query.isFetching ? 'Обновляем…' : 'Обновить'}
       </Button>
     </header>
     <ViewParamsBar label={null}>
-      <SelectFilter label="Источник звонков" value={source} options={Object.entries(SOURCE_NAMES).map(([value, label]) => ({ value, label }))}
+      <SelectFilter label="Источник звонков" value={source} options={Object.entries(SOURCE_NAMES).map(([value, label]) => ({ value, label: value === 'node' ? 'Все звонки узла' : `${label} · история API` }))}
         onChange={value => { setSearchDraft(''); change({ source: value, operator: null, group: null, line: null, missed: null, direction: null, search: null, view: null }) }} />
       <SelectFilter label="Период" value={period} options={period === 'custom' ? [{ value: 'custom', label: 'Период из ссылки' }, ...PERIODS] : PERIODS} onChange={selectPeriod} />
       <p className="text-xs text-muted-foreground">{dateTime(params.from)} — {dateTime(params.to)} (до, не включая) · {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
