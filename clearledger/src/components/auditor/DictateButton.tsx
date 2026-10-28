@@ -21,7 +21,9 @@ import { dictate } from '@/services/spaceAuditorService'
  * Тем же занимается удержание клавиши в мастерской: терминал не текстовое поле, кнопку
  * там жать неудобно, а руки уже на клавиатуре. Логика одна, входов два.
  */
-export function useDictation(onText: (text: string) => void) {
+export function useDictation(onText: (text: string) => void,
+  /** Кто распознаёт: по умолчанию Аудитор; формы пространства — бэкенд стека. */
+  transcribe: (audio: Blob) => Promise<string> = dictate) {
   const [state, setState] = useState<'idle' | 'rec' | 'busy'>('idle')
   const recRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -43,7 +45,7 @@ export function useDictation(onText: (text: string) => void) {
         setState('busy')
         try {
           const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' })
-          const text = await dictate(blob)
+          const text = await transcribe(blob)
           if (text) onText(text)
           else toast.info('Ничего не разобрал — попробуйте ещё раз')
         } catch (e) {
@@ -66,12 +68,13 @@ export function useDictation(onText: (text: string) => void) {
   return { state, start, stop }
 }
 
-export function DictateButton({ onText, disabled, title = 'Продиктовать' }: {
+export function DictateButton({ onText, disabled, title = 'Продиктовать', transcribe }: {
   onText: (text: string) => void
   disabled?: boolean
   title?: string
+  transcribe?: (audio: Blob) => Promise<string>
 }) {
-  const { state, start, stop } = useDictation(onText)
+  const { state, start, stop } = useDictation(onText, transcribe)
 
   return (
     <Button
