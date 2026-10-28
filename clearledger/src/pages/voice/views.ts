@@ -41,8 +41,8 @@ export const VOICE_GROUPS: { key: VoiceGroup; label: string }[] = [
 export const VOICE_VIEWS: VoiceView[] = [
   { key: 'now', path: '', label: 'Сейчас', group: 'work', wave: '2.1', ready: true,
     hint: 'принимается ли линия и кто ждёт' },
-  { key: 'megafon', path: 'megafon', label: 'МегаФон ВАТС', group: 'work', wave: null, ready: true,
-    hint: 'история МегаФона: линия, операторы, группы и журнал звонков' },
+  { key: 'pbx', path: 'pbx', label: 'АТС', group: 'work', wave: null, ready: true,
+    hint: 'звонки узла и история выбранного провайдера: Mango или МегаФон' },
   { key: 'calls', path: 'calls', label: 'Журнал звонков', group: 'work', wave: '2.1', ready: true,
     hint: 'все звонки линии: найти звонок по последним цифрам номера' },
   { key: 'contact', path: 'contact', label: 'Нужен контакт', group: 'work', wave: '2.7', ready: true,
@@ -68,7 +68,7 @@ export const VOICE_VIEWS: VoiceView[] = [
     hint: 'живое обогащение: порог уверенности, что видит оператор' },
 
   { key: 'connections', path: 'connections', label: 'Настройки подключений', group: 'links', wave: null, ready: true,
-    hint: 'МегаФон, обмен с пространством, контакт-центр и голосовая линия' },
+    hint: 'Mango или МегаФон, голосовая линия, пространство и контакт-центр' },
   { key: 'cc', path: 'cc', label: 'Контакт-центры', group: 'links', wave: '2.4', ready: true,
     hint: 'подключение КЦ, сверка ключа, допуск операторов' },
   { key: 'webhooks', path: 'webhooks', label: 'Системы и вебхуки', group: 'links', wave: '2.5', ready: true,
@@ -95,7 +95,7 @@ export const VOICE_GROUP_ICONS: Record<VoiceGroup, LucideIcon> = {
 }
 
 export const VOICE_VIEW_ICONS: Record<string, LucideIcon> = {
-  now: Radio, megafon: PhoneCall, calls: ScrollText, contact: PhoneMissed, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
+  now: Radio, pbx: PhoneCall, calls: ScrollText, contact: PhoneMissed, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
   reconcile: GitCompare, reception: ListChecks, passport: IdCard, targets: Users, sounds: Volume2,
   enrichment: Sparkles, connections: Cable, cc: Headset, webhooks: Webhook, versions: History, audit: ShieldCheck,
   retention: Archive, health: Stethoscope, extensions: Hash, outbound: PhoneOutgoing,
@@ -105,6 +105,7 @@ export const voicePath = (v: VoiceView) => (v.path ? `/voice/${v.path}` : '/voic
 
 /** Пункт меню по адресу: самый длинный совпавший путь, иначе «Сейчас». */
 export function voiceViewFor(pathname: string): VoiceView {
+  if (pathname === '/voice/megafon' || pathname.startsWith('/voice/megafon/')) return VOICE_VIEWS.find(v => v.key === 'pbx')!
   return [...VOICE_VIEWS].filter(v => v.path)
     .find(v => pathname === voicePath(v) || pathname.startsWith(`${voicePath(v)}/`)) ?? VOICE_VIEWS[0]
 }

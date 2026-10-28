@@ -64,3 +64,6 @@ clearledger/tools/onec/*.out.txt
 clearledger/tools/onec/*.json
 clearledger/tools/onec/load-*.py
 clearledger/tools/onec/first-run/load-pull.py
+
+# Изолированные сборки, временные ключи и частные доказательства проверки.
+.tmp/

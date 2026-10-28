@@ -24,7 +24,7 @@ import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { VOICE_GROUPS, VOICE_VIEWS, voicePath, voiceViewFor } from './views'
 import { useVoiceDataSource, VoiceDataSourceBar } from './VoiceDataSource'
 
-const MegafonVoicePage = lazy(() => import('./MegafonVoicePage'))
+const MegafonVoicePage = lazy(() => import('./PbxVoicePage'))
 const MegafonMonthlyReportPage = lazy(() => import('./MegafonMonthlyReportPage'))
 
 export function VoiceLayout() {
@@ -32,9 +32,9 @@ export function VoiceLayout() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const connections = pathname.replace(/\/$/, '') === '/voice/connections'
-  // Историю МегаФона читает Ядро: компанию, продукт и роль проверяет Core API.
+  // Журнал АТС и историю провайдеров читает Ядро с проверкой компании, продукта и роли.
   const source = useVoiceDataSource(pathname)
-  const megafon = source.megafon
+  const history = source.providerHistory || source.directPbx
   // ≤1024 рельсы пространства на экране нет (MainLayout прячет её в шторку), поэтому раздел
   // выбирается списком сверху — как у «Конференций» на телефоне.
   const компакт = useMaxWidth(1024)
@@ -42,7 +42,7 @@ export function VoiceLayout() {
   const кто = useQuery({
     queryKey: ['voice-me', companyId],
     queryFn: () => voice.me(companyId),
-    enabled: !!companyId && !connections && !megafon && !source.loading && !source.error,
+    enabled: !!companyId && !connections && !history && !source.loading && !source.error,
     // Повторяем только обрыв/временный 5xx. 403 role/company — окончательный ответ,
     // а 401 уже один раз обновляет токен в voiceService: других скрытых повторов нет.
     retry: (failureCount, error) => failureCount < 1 && voice.узелНедоступен(error),
@@ -53,7 +53,7 @@ export function VoiceLayout() {
   const содержимое = connections ? <Outlet key={companyId} />
     : source.loading ? <AccessLoading />
     : source.error ? null
-    : megafon ? (source.managed
+    : history ? (source.managed
       ? <Suspense fallback={<AccessLoading />}>{pathname.endsWith('/report')
         ? <MegafonMonthlyReportPage key={companyId} />
         : <MegafonVoicePage key={`${companyId}:${pathname}`} section={pathname.endsWith('/stats') ? 'stats' : 'calls'} />}</Suspense>

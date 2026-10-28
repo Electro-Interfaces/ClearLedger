@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -23,7 +23,12 @@ def no_store(response: Response):
     response.headers["Referrer-Policy"] = "no-referrer"
 
 
-router = APIRouter(prefix="/voice/megafon", tags=["Телефония: МегаФон"], dependencies=[Depends(no_store)])
+router = APIRouter(tags=["Телефония: АТС"], dependencies=[Depends(no_store)])
+CallSource = Literal["node", "mango", "megafon"]
+
+
+def requested_source(request: Request, source: CallSource | None) -> CallSource:
+    return source or ("megafon" if "/voice/megafon" in request.url.path else "node")
 
 
 async def _scope(user: User, db: AsyncSession, company_header: str | None) -> tuple[uuid.UUID, str]:
@@ -51,8 +56,11 @@ async def _audit(db: AsyncSession, user: User, cid: uuid.UUID, action: str, deta
     await db.commit()
 
 
-@router.get("")
+@router.get("/voice/megafon")
+@router.get("/voice/pbx")
 async def overview(
+    request: Request,
+    source: CallSource | None = Query(None),
     start: datetime | None = Query(None, alias="from"),
     end: datetime | None = Query(None, alias="to"),
     operator: str | None = Query(None, max_length=200),
@@ -68,20 +76,33 @@ async def overview(
 ):
     cid, support_cid = await _scope(user, db, company_header)
     start, end = megafon_voice.period(start, end)
-    result = await megafon_voice.overview(db, support_cid, cid, start=start, end=end,
+    selected = requested_source(request, source)
+    result = await megafon_voice.overview(db, support_cid, cid, source=selected, start=start, end=end,
         operator=operator, group=group, line=line, missed=missed, direction=direction,
         search=search, page=page, page_size=page_size)
-    await _audit(db, user, cid, "voice.megafon.read", {"count": len(result["calls"]["items"]), "search": bool(search)})
+    await _audit(db, user, cid, f"voice.{selected}.read", {"count": len(result["calls"]["items"]), "search": bool(search)})
     return result
 
 
-@router.get("/calls/{call_id}")
+@router.get("/voice/megafon/calls/{call_id}")
+@router.get("/voice/pbx/calls/{call_id}")
 async def call_detail(
+    request: Request,
     call_id: uuid.UUID,
+    source: CallSource | None = Query(None),
     company_header: str | None = Header(None, alias="X-Company-Id"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid, support_cid = await _scope(user, db, company_header)
-    call = await megafon_voice.call_detail(db, support_cid, call_id)
-    await _audit(db, user, cid, "voice.megafon.detail", {"call_id": str(call_id)})
-    return {"provider": "megafon", "company_id": str(cid), "call": call}
+    selected = requested_source(request, source)
+    call = await megafon_voice.call_detail(db, support_cid, call_id, source=selected)
+    await _audit(db, user, cid, f"voice.{selected}.detail", {"call_id": str(call_id)})
+    return {"provider": selected, "company_id": str(cid), "call": call}
+
+
+@router.get("/voice/pbx/sources")
+async def sources(company_header: str | None = Header(None, alias="X-Company-Id"),
+                  user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    cid, support_cid = await _scope(user, db, company_header)
+    result = await megafon_voice.source_connections(db, support_cid)
+    return {"company_id": str(cid), **result}

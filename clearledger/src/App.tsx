@@ -46,7 +46,7 @@ const ConfStatsPage = lazy(() => import('@/pages/conf/ConfStatsPage'))
 const VoiceLayout = lazy(() => import('@/pages/voice/VoiceLayout').then((m) => ({ default: m.VoiceLayout })))
 const VoiceNowPage = lazy(() => import('@/pages/voice/VoiceNowPage'))
 const VoiceCallsPage = lazy(() => import('@/pages/voice/VoiceCallsPage'))
-const MegafonVoicePage = lazy(() => import('@/pages/voice/MegafonVoicePage'))
+const MegafonVoicePage = lazy(() => import('@/pages/voice/PbxVoicePage'))
 const VoiceCallbacksPage = lazy(() => import('@/pages/voice/VoiceCallbacksPage'))
 const VoiceStatsPage = lazy(() => import('@/pages/voice/VoiceStatsPage'))
 const VoiceReceptionPage = lazy(() => import('@/pages/voice/VoiceReceptionPage'))
@@ -414,6 +414,7 @@ const router = createBrowserRouter([
             children: [
               { index: true, element: <LazyPage><VoiceNowPage /></LazyPage> },
               { path: 'calls', element: <LazyPage><VoiceCallsPage /></LazyPage> },
+              { path: 'pbx', element: <LazyPage><MegafonVoicePage /></LazyPage> },
               { path: 'megafon', element: <LazyPage><MegafonVoicePage /></LazyPage> },
               { path: 'callbacks', element: <LazyPage><VoiceCallbacksPage /></LazyPage> },
               { path: 'stats', element: <LazyPage><VoiceStatsPage /></LazyPage> },

@@ -1,4 +1,4 @@
-import type { MegafonVoiceData } from '@/services/megafonVoiceService'
+import { SOURCE_NAMES, type PbxVoiceData } from '@/services/pbxVoiceService'
 import type { Лист } from './exportTable'
 
 export const currentMonth = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -13,7 +13,7 @@ export function shiftMonth(month: string, offset: number) {
 }
 export const monthlyTitle = (month: string) => new Date(`${month}-01T12:00:00`).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
 export const monthlyDate = (value: string | null) => value ? new Date(value).toLocaleString('ru-RU') : 'Не указана'
-export function monthlyMetrics(data: MegafonVoiceData): [string, number | null, string][] {
+export function monthlyMetrics(data: PbxVoiceData): [string, number | null, string][] {
   const s = data.summary
   return [
     ['Всего звонков', s.total, 'По загруженной истории'], ['Входящие', s.inbound, 'Направление: входящий'],
@@ -26,15 +26,15 @@ export function monthlyMetrics(data: MegafonVoiceData): [string, number | null, 
   ]
 }
 export const monthlyLimits = [
-  'Только загруженная история МегаФона. Отсутствие строк не доказывает отсутствие звонков у оператора связи.',
+  'Только записи выбранного источника. Отсутствие строк не доказывает отсутствие звонков у оператора связи.',
   'Группа указана лишь у части звонков; эти данные не описывают полную нагрузку смен.',
   'SLA и решение с первого звонка (FCR) не рассчитываются: необходимых данных в истории нет.',
   'Исходный номер 8 800 не подтверждён для каждого звонка. Настройка линии приводится отдельно.',
   'Отчёт пересчитывается по истории; зафиксированная опубликованная версия не создаётся.',
 ]
-export function monthlySheets(data: MegafonVoiceData, month: string, line: string, generatedAt: string): Лист[] {
+export function monthlySheets(data: PbxVoiceData, month: string, line: string, generatedAt: string): Лист[] {
   const known = data.groups.filter(g => g.name).reduce((sum, g) => sum + g.total, 0)
-  const meta: (string | number | null)[][] = [['Источник', 'МегаФон ВАТС'], ['Месяц', month], ['Часовой пояс', Intl.DateTimeFormat().resolvedOptions().timeZone],
+  const meta: (string | number | null)[][] = [['Источник', data.provider === 'megafon' ? 'МегаФон ВАТС' : SOURCE_NAMES[data.provider]], ['Месяц', month], ['Часовой пояс', Intl.DateTimeFormat().resolvedOptions().timeZone],
     ['Начало включительно', data.period.from], ['Конец не включая', data.period.to], ['Линия по истории', line || 'Все линии'],
     ['Сформирован', generatedAt], ['Последняя синхронизация', data.connection.last_sync_at],
     ['Публичный номер в настройке', data.line.public_number], ['Переадресация в настройке', data.line.forwarding_number]]
@@ -47,5 +47,6 @@ export function monthlySheets(data: MegafonVoiceData, month: string, line: strin
 }
 const html = (value: unknown) => String(value ?? '—').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
 export function monthlyPrint(sheets: Лист[], month: string) {
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>МегаФон — отчёт ${html(month)}</title><style>@page{size:A4;margin:14mm}body{font:13px Arial,sans-serif;color:#162033}h1{font-size:22px}h2{font-size:17px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0;table-layout:fixed}td{border:1px solid #bbb;padding:6px;overflow-wrap:anywhere}tr{break-inside:avoid}p{color:#555}@media print{.print-help{display:none}thead{display:table-header-group}}</style></head><body><h1>МегаФон ВАТС · отчёт за ${html(monthlyTitle(month))}</h1><p class="print-help">Печать или сохранение в PDF: Ctrl+P.</p>${sheets.map(s => { const columns = Math.max(1, ...s.строки.map(row => row.length)); return `<h2>${html(s.имя)}</h2><table><tbody>${s.строки.map(row => `<tr>${Array.from({ length: columns }, (_, i) => `<td>${html(row[i])}</td>`).join('')}</tr>`).join('')}</tbody></table>` }).join('')}</body></html>`
+  const source = sheets[0]?.строки.find(row => row[0] === 'Источник')?.[1] ?? 'АТС'
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${html(source)} — отчёт ${html(month)}</title><style>@page{size:A4;margin:14mm}body{font:13px Arial,sans-serif;color:#162033}h1{font-size:22px}h2{font-size:17px;margin-top:24px}table{border-collapse:collapse;width:100%;margin:12px 0;table-layout:fixed}td{border:1px solid #bbb;padding:6px;overflow-wrap:anywhere}tr{break-inside:avoid}p{color:#555}@media print{.print-help{display:none}thead{display:table-header-group}}</style></head><body><h1>${html(source)} · отчёт за ${html(monthlyTitle(month))}</h1><p class="print-help">Печать или сохранение в PDF: Ctrl+P.</p>${sheets.map(s => { const columns = Math.max(1, ...s.строки.map(row => row.length)); return `<h2>${html(s.имя)}</h2><table><tbody>${s.строки.map(row => `<tr>${Array.from({ length: columns }, (_, i) => `<td>${html(row[i])}</td>`).join('')}</tr>`).join('')}</tbody></table>` }).join('')}</body></html>`
 }

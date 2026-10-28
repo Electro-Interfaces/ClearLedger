@@ -6,28 +6,31 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCompany } from '@/contexts/CompanyContext'
-import { getMegafonVoice } from '@/services/megafonVoiceService'
+import { getPbxVoice, isCallSource, SOURCE_NAMES } from '@/services/pbxVoiceService'
 import { скачатьCSV, скачатьExcel } from './exportTable'
 import { currentMonth, monthlyBounds, monthlyDate, monthlyLimits, monthlyMetrics, monthlyPrint, monthlySheets, monthlyTitle, shiftMonth } from './megafonMonthly'
 
 export default function MegafonMonthlyReportPage() {
   const { companyId } = useCompany()
   const [url, setUrl] = useSearchParams()
+  const requestedSource = url.get('source')
+  const source = isCallSource(requestedSource) ? requestedSource : 'megafon'
+  const sourceName = SOURCE_NAMES[source]
   const month = url.get('month') ?? currentMonth()
   const bounds = monthlyBounds(month)
   const changedCompany = url.has('voice_company') && url.get('voice_company') !== companyId
   const line = changedCompany ? '' : url.get('line') ?? ''
   const query = useQuery({
-    queryKey: ['voice-megafon-monthly', companyId, month, line],
-    queryFn: () => getMegafonVoice(companyId, { ...bounds!, line: line || undefined, page: 1, page_size: 1 }),
+    queryKey: ['voice-pbx-monthly', companyId, source, month, line],
+    queryFn: () => getPbxVoice(companyId, { ...bounds!, line: line || undefined, page: 1, page_size: 1 }, source),
     enabled: !!companyId && !!bounds && !changedCompany, retry: false,
   })
   useEffect(() => {
-    if (!companyId || (url.get('voice_company') === companyId && url.get('source') === 'megafon')) return
-    const next = new URLSearchParams(url); next.set('voice_company', companyId); next.set('source', 'megafon')
+    if (!companyId || (url.get('voice_company') === companyId && url.get('source') === source)) return
+    const next = new URLSearchParams(url); next.set('voice_company', companyId); next.set('source', source)
     if (changedCompany) next.delete('line')
     setUrl(next, { replace: true })
-  }, [url, setUrl, companyId, changedCompany])
+  }, [url, setUrl, companyId, changedCompany, source])
   const data = !changedCompany && !query.isError ? query.data : undefined
   const generatedAt = query.dataUpdatedAt ? new Date(query.dataUpdatedAt).toISOString() : ''
   const sheets = data ? monthlySheets(data, month, line, generatedAt) : []
@@ -37,7 +40,7 @@ export default function MegafonMonthlyReportPage() {
   }
   async function download(format: 'csv' | 'xlsx') {
     if (!ready) return
-    try { const name = `мегафон-отчёт-${month}`; if (format === 'csv') скачатьCSV(name, sheets); else await скачатьExcel(name, sheets) }
+    try { const name = `атс-${source}-отчёт-${month}`; if (format === 'csv') скачатьCSV(name, sheets); else await скачатьExcel(name, sheets) }
     catch { toast.error('Не удалось подготовить файл отчёта') }
   }
   function print() {
@@ -49,9 +52,9 @@ export default function MegafonMonthlyReportPage() {
   const integer = (value: number | null) => value == null ? '—' : value.toLocaleString('ru-RU')
   const options = data?.filters.lines ?? []
   const knownGroups = data?.groups.filter(g => g.name).reduce((sum, g) => sum + g.total, 0) ?? 0
-  return <main aria-label="Месячный отчёт МегаФона" className="flex min-w-0 flex-col gap-4 p-3 md:p-5">
+  return <main aria-label="Месячный отчёт АТС" className="flex min-w-0 flex-col gap-4 p-3 md:p-5">
     <header className="flex flex-wrap items-start justify-between gap-3">
-      <div><h1 className="font-headline text-lg font-semibold">Отчёт за месяц</h1><p className="text-sm text-muted-foreground">МегаФон ВАТС · сводка, операторы и группы · без номеров звонящих</p></div>
+      <div><h1 className="font-headline text-lg font-semibold">Отчёт за месяц</h1><p className="text-sm text-muted-foreground">{sourceName} · сводка, операторы и группы · без номеров звонящих</p></div>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" disabled={!ready} onClick={() => void download('csv')}><Download />CSV</Button>
         <Button variant="outline" size="sm" disabled={!ready} onClick={() => void download('xlsx')}><Download />Excel</Button>
@@ -66,17 +69,17 @@ export default function MegafonMonthlyReportPage() {
       <Button variant="outline" size="sm" disabled={!bounds || query.isFetching || !companyId} onClick={() => void query.refetch()}><RefreshCw />Обновить</Button>
     </section>
     {!bounds ? <p role="alert">Выберите корректный месяц не позже текущего. <Button variant="outline" size="sm" onClick={() => change('month', currentMonth())}>Текущий месяц</Button></p> : null}
-    {query.isLoading ? <p role="status">Рассчитываем отчёт по истории МегаФона…</p> : null}
+    {query.isLoading ? <p role="status">Рассчитываем отчёт по выбранному источнику…</p> : null}
     {query.isError ? <div role="alert"><p>Не удалось рассчитать отчёт: {query.error instanceof Error ? query.error.message : 'Ошибка источника'}</p><Button variant="outline" onClick={() => void query.refetch()}>Повторить</Button></div> : null}
     {data && bounds ? <>
       <section className="flex flex-col gap-2 rounded-lg border bg-card p-4" aria-label="Состояние отчёта">
         <h2 className="font-semibold">{monthlyTitle(month)}</h2>
         <p className="text-sm">{month === currentMonth() ? 'Месяц продолжается. Данные по загруженной истории на момент синхронизации.' : 'Рассчитан по загруженной истории. Поздние обновления могут изменить результат.'}</p>
         <p className="text-xs text-muted-foreground">Часовой пояс: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Период: {monthlyDate(bounds.from)} — {monthlyDate(bounds.to)}, конец не включён. Синхронизация: {monthlyDate(data.connection.last_sync_at)}. Сформирован: {monthlyDate(generatedAt)}.</p>
-        {!data.connection.configured ? <p role="note" className="text-sm">Подключение МегаФона для компании не настроено.</p> : null}
+        {!data.connection.configured ? <p role="note" className="text-sm">Источник {sourceName} для организации не подключён.</p> : null}
         {data.connection.last_error ? <p role="alert" className="text-sm">{data.connection.last_error}</p> : null}
         {data.summary.total === 0 ? <p role="note" className="text-sm">В загруженной истории за выбранный месяц и линию звонков нет. Проверьте период и полноту загрузки.</p> : null}
-        <Link className="text-sm text-primary underline" to={`/voice/calls?${new URLSearchParams({ source: 'megafon', from: bounds.from, to: bounds.to, ...(line ? { line } : {}) })}`}>Открыть звонки этого отчёта</Link>
+        <Link className="text-sm text-primary underline" to={`/voice/calls?${new URLSearchParams({ source, from: bounds.from, to: bounds.to, ...(line ? { line } : {}) })}`}>Открыть звонки этого отчёта</Link>
       </section>
       <section aria-label="Показатели отчёта" className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">{monthlyMetrics(data).map(([label, value, formula]) => <div key={label} className="flex min-w-0 flex-col gap-1 rounded-lg border bg-card p-3"><span className="text-xs text-muted-foreground">{label}</span><strong className="text-xl">{integer(value)}</strong><span className="text-xs text-muted-foreground">{formula}</span></div>)}</section>
       <section className="flex min-w-0 flex-col gap-2" aria-label="Разрезы месячного отчёта">{sheets.slice(1, 3).map(sheet => <div key={sheet.имя} className="flex min-w-0 flex-col gap-2"><h2 className="font-semibold">{sheet.имя}</h2>{sheet.имя === 'Группы' ? <p role="note" className="text-sm text-muted-foreground">Группа указана для {integer(knownGroups)} из {integer(data.summary.total)} звонков. Полную нагрузку смен эти данные не описывают.</p> : null}<div className="min-w-0 overflow-x-auto rounded-lg border"><table aria-label={`${sheet.имя} за месяц`} className="w-full text-sm"><thead><tr>{sheet.строки[sheet.имя === 'Группы' ? 1 : 0].map((v, i) => <th key={i} className="whitespace-nowrap border-b bg-card p-2 text-left font-medium">{v}</th>)}</tr></thead><tbody>{sheet.строки.slice(sheet.имя === 'Группы' ? 2 : 1).map((row, i) => <tr key={i}>{row.map((v, j) => <td key={j} className="border-b p-2">{v ?? '—'}</td>)}</tr>)}</tbody></table></div></div>)}</section>
