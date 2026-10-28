@@ -15,6 +15,7 @@ import { Camera, CornerDownLeft, Gauge, KeyRound, Loader2, LogOut, Monitor, Moon
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
+import { TagsManager } from '@/components/tags/PersonalTags'
 import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { Button } from '@/components/ui/button'
@@ -728,6 +729,18 @@ export function PersonalSettings() {
             </p>
           </div>
           <CalendarDelegates companyId={company.id} />
+        </div>
+
+        {/* Мои теги — личные цветные пометки встреч, поручений и документов. */}
+        <div className="mb-6 break-inside-avoid space-y-3 border-t pt-5 xl:mb-0">
+          <div>
+            <h3 className="text-sm font-medium">Мои теги</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Цветные пометки встреч, поручений и документов: красят встречи в календаре, по ним
+              отбирают работу в «Треке». Видите только вы, у остальных ничего не меняется.
+            </p>
+          </div>
+          <TagsManager companyId={company.id} />
         </div>
 
         {/* Место в пространстве — сведения администратора, не личное дело */}

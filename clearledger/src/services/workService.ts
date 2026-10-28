@@ -64,6 +64,8 @@ export interface WorkFilters {
   /** Предмет работы: `site:<uuid>`, `contract:<uuid>`, `object:<ключ>`. */
   ref?: string
   labelId?: string
+  /** Мой личный тег (personal_tags). */
+  myTag?: string
   q?: string
   query?: string
   dueTo?: string
@@ -88,6 +90,7 @@ export async function listWork(companyId: string, opts?: WorkFilters) {
     object_id: opts?.objectId || undefined,
     ref: opts?.ref || undefined,
     label_id: opts?.labelId || undefined,
+    my_tag: opts?.myTag || undefined,
     q: opts?.q || undefined,
     query: opts?.query || undefined,
     due_to: opts?.dueTo || undefined,

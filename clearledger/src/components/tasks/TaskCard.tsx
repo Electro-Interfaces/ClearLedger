@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { TagPicker } from '@/components/tags/PersonalTags'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -798,6 +799,8 @@ function Header({ task, companyId, onRename, onBack, live, busy, canRename, onSt
             {l.name}
           </span>
         ))}
+        {/* Мои теги: личная пометка поручения, видит только сам человек. */}
+        <TagPicker companyId={companyId} targetRef={`task:${task.id}`} />
         {/* Работа встала из-за программы — вопрос уходит поставщику отсюда, с
             номером задачи предметом обращения (docs/BRIDGE.md §4.2). */}
         <span className="ml-auto flex items-center gap-1">
