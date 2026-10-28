@@ -25,7 +25,7 @@
  */
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2, Newspaper, Play, RefreshCw } from 'lucide-react'
+import { ExternalLink, Loader2, Newspaper, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -35,6 +35,9 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
+import {
+  NewsBrief, NewsCard, NewsHero, NewsRow, StripTitle,
+} from './MarketNewsFeed'
 import {
   createMarketNews, createMarketNewsSource, fetchMarketNews, getMarketNewsSettings,
   listMarketNews, listMarketNewsSources, listMarketOperators, patchMarketNews,
@@ -67,70 +70,6 @@ function когда(iso: string | null): string {
 /** Источник молчит дольше недели — факт, а не пустой экран. Считается вне рендера. */
 function молчит(lastOkAt: string | null): boolean {
   return !lastOkAt || Date.now() - new Date(lastOkAt).getTime() > 7 * 86_400_000
-}
-
-/* ─────────────────────────── Лента ─────────────────────────── */
-
-/**
- * Карточка материала: обложка, заголовок, первые строки, издание и дата.
- *
- * Вся карточка — ссылка на публикацию: в новостной ленте читатель метит в
- * заголовок и в картинку одинаково, и ссылка только на тексте заставляла бы
- * целиться.
- */
-function NewsCard({ n }: { n: MarketNewsItem }) {
-  const видео = n.media === 'video'
-  return (
-    <a href={n.url} target="_blank" rel="noopener noreferrer"
-      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border
-                 bg-card transition-colors hover:border-primary/40
-                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-      {n.imageUrl && (
-        <span className="relative block aspect-video overflow-hidden bg-muted">
-          <img src={n.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer"
-            className="size-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-            onError={(e) => { (e.currentTarget.parentElement as HTMLElement).hidden = true }} />
-          {видео && (
-            <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md
-                             bg-foreground/80 px-2 py-0.5 text-xs text-background">
-              <Play className="size-3" aria-hidden /> видео
-            </span>
-          )}
-        </span>
-      )}
-      <span className="flex flex-1 flex-col gap-2 p-4">
-        <span className="flex items-start gap-1.5">
-          <span className="font-headline text-sm font-semibold leading-snug group-hover:underline">
-            {n.title}
-          </span>
-          <ExternalLink className="mt-1 size-3 shrink-0 text-muted-foreground" aria-hidden />
-        </span>
-        {n.snippet && (
-          <span className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-            {n.snippet}
-          </span>
-        )}
-        <span className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-xs
-                         text-muted-foreground">
-          <span className="font-medium text-foreground/80">
-            {n.sourceName ?? n.sourceTitle ?? 'источник не указан'}
-          </span>
-          <span aria-hidden>·</span>
-          <span>{когда(n.publishedAt)}</span>
-          <span aria-hidden>·</span>
-          <span>{NEWS_TOPIC_LABEL[n.topic] ?? n.topic}</span>
-          {!n.imageUrl && видео && <span className="text-foreground/80">· видео</span>}
-          {n.operatorName && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="text-foreground/80">{n.operatorName}</span>
-            </>
-          )}
-          {n.region && <><span aria-hidden>·</span><span>{n.region}</span></>}
-        </span>
-      </span>
-    </a>
-  )
 }
 
 /* ─────────────────────────── Разбор ─────────────────────────── */
@@ -354,6 +293,14 @@ export function MarketNewsPanel() {
   })
 
   const rows = лента.data?.news ?? []
+  // Позиция в потоке и есть роль материала (как на главной «Ангара»): герой,
+  // четыре строки «Свежего», пять заголовков «Коротко», остальное — карточками.
+  // Героем не делаем материал без обложки: баннер был бы пустым.
+  const герой = rows.find((n) => n.imageUrl) ?? rows[0] ?? null
+  const остальные = rows.filter((n) => n.id !== герой?.id)
+  const свежее = остальные.slice(0, 4)
+  const коротко = остальные.slice(4, 9)
+  const поток = остальные.slice(9)
   const counts = лента.data?.counts
   const ops = (операторы.data?.operators ?? []).map((o) => ({ id: o.id, name: o.name }))
   const byTopic = лента.data?.byTopic ?? {}
@@ -586,7 +533,7 @@ export function MarketNewsPanel() {
           ))}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 space-y-6 overflow-auto">
           {лента.isLoading && (
             <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden /> Загружаем ленту…
@@ -598,9 +545,54 @@ export function MarketNewsPanel() {
               настраиваются во вкладке «Управление».
             </p>
           )}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {rows.map((n) => <NewsCard key={n.id} n={n} />)}
-          </div>
+
+          {герой && <NewsHero n={герой} />}
+
+          {rows.length > 1 && (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+              <section className="space-y-7">
+                {свежее.length > 0 && (
+                  <div>
+                    <StripTitle>Свежее</StripTitle>
+                    {свежее.map((n) => <NewsRow key={n.id} n={n} />)}
+                  </div>
+                )}
+                {поток.length > 0 && (
+                  <div>
+                    <StripTitle>Материалы</StripTitle>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {поток.map((n) => <NewsCard key={n.id} n={n} />)}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <aside className="space-y-6 lg:sticky lg:top-2">
+                {коротко.length > 0 && (
+                  <div>
+                    <StripTitle>Коротко</StripTitle>
+                    {коротко.map((n) => <NewsBrief key={n.id} n={n} />)}
+                  </div>
+                )}
+                <div>
+                  <StripTitle>Источники</StripTitle>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {список.length === 0
+                      ? 'Ни одного источника. Во вкладке «Управление» есть базовый набор.'
+                      : `Лент и запросов: ${список.length}, из них работают ${
+                          список.filter((s) => s.active).length}. Молчат дольше недели: ${
+                          список.filter((s) => молчит(s.lastOkAt)).length}.`}
+                  </p>
+                  {список.filter((s) => s.lastError).slice(0, 3).map((s) => (
+                    <p key={s.id} className="mt-2 text-xs text-destructive">
+                      {s.title}: {s.lastError}
+                    </p>
+                  ))}
+                </div>
+              </aside>
+            </div>
+          )}
+
           {(лента.data?.total ?? 0) > rows.length && (
             <p className="p-2 text-xs text-muted-foreground">
               Показаны первые {rows.length} из {лента.data?.total}. Сузьте отбор темой,
