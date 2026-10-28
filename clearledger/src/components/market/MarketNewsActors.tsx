@@ -71,6 +71,22 @@ export function ParticipantRow({ p, onNews, onLinks }: {
           <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs
                            text-muted-foreground">
             <span className="text-primary">{p.roleLabel}</span>
+            {/* Данные реестра рядом с новостями: новость объясняет движение,
+                цифры показывают масштаб того, кто движется. */}
+            {p.network && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="tabular-nums text-foreground/80">
+                  точек {p.network.sites}
+                </span>
+                {p.network.offline > 0 && (
+                  <span className="tabular-nums text-warning-foreground">
+                    не работает {p.network.offline}
+                  </span>
+                )}
+                <span className="tabular-nums">регионов {p.network.regions}</span>
+              </>
+            )}
             <span aria-hidden>·</span>
             <span className="tabular-nums">материалов {p.news}</span>
             <span aria-hidden>·</span>

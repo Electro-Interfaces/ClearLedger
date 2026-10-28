@@ -166,8 +166,21 @@ def title_key(title: str) -> str:
     return re.sub(r"[^a-zа-я0-9 ]+", " ", t).strip()[:200]
 
 
+# Оператор OR обнуляет выдачу Bing: по запросу с ним приходит ноль элементов,
+# без него — девять-двенадцать (проверено 28.10.2026 на «Парус электро»).
+# Источник с таким запросом выглядит живым — отвечает без ошибки и приносит
+# пусто, то есть молчит громче, чем сломанный.
+OR_IN_QUERY = re.compile(r"\s+OR\s+")
+
+
+def clean_query(query: str) -> str:
+    """Запрос без того, что гасит поисковую ленту."""
+    return OR_IN_QUERY.sub(" ", query or "").strip()
+
+
 def search_url(query: str, kind: str = "search") -> str:
     """Адрес поисковой ленты по запросу: Bing для ленты, Google для широкого невода."""
+    query = clean_query(query)
     if kind == "search_wide":
         return f"{GOOGLE_BASE}?{urlencode({'q': query, 'hl': 'ru', 'gl': 'RU', 'ceid': 'RU:ru'})}"
     return f"{BING_BASE}?{urlencode({'q': query, 'format': 'RSS', 'setmkt': 'ru-RU'})}"
@@ -708,7 +721,15 @@ def actors_in_text(text: str, operators: list[Any], players: list[Any],
         if v:
             добавить(PLAYER_ROLE.get(pl.player_class or "", "aggregator"),
                      имя or pl.app, v, player_id=str(pl.id))
+    # Участник справочника не дублирует реестр: компанию, уже найденную как сеть
+    # или приложение, второй записью не заводим. Иначе «Мособлэнерго» приходит и
+    # сетью, и энергетикой, а связь с ним удваивается (видно на живых данных
+    # 28.10.2026). Справочник ведёт тех, кого в реестрах нет.
+    из_реестров = {m["name"].lower().replace("ё", "е") for m in out}
     for ac in actors:
+        имя = ac.name.lower().replace("ё", "е")
+        if any(имя in r or r in имя for r in из_реестров):
+            continue
         псевдонимы = set(ac.aliases or [])
         v = _found(t, _name_variants(ac.name) | {a.lower() for a in псевдонимы})
         if v:

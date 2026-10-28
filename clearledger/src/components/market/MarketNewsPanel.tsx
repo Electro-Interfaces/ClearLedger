@@ -47,7 +47,7 @@ import {
 import {
   createMarketActor, createMarketNews, createMarketNewsSource, fetchMarketNews,
   getMarketLinks, getMarketNewsSettings, getMarketParticipants, listMarketActors,
-  patchMarketActor, rescanMarketMentions,
+  patchMarketActor, rescanMarketMentions, importMarketNetwork,
   ACTOR_KIND_LABEL,
   listMarketNews, listMarketNewsSources, listMarketOperators, patchMarketNews,
   patchMarketNewsSource, presetMarketNewsSources, putMarketNewsSettings,
@@ -242,6 +242,9 @@ export function MarketNewsPanel() {
   const [имяУчастника, setИмяУчастника] = useState('')
   const [видУчастника, setВидУчастника] = useState('vendor')
   const [псевдонимы, setПсевдонимы] = useState('')
+  // Карта сети оператора: адрес страницы с его точками и чья это сеть.
+  const [адресСети, setАдресСети] = useState('')
+  const [сетьОператора, setСетьОператора] = useState('')
 
   const лента = useQuery({
     queryKey: ['market-news', companyId, подача, тема, оператор, поиск, участник, роль],
@@ -343,6 +346,13 @@ export function MarketNewsPanel() {
   const правкаУчастника = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
       patchMarketActor(companyId, id, body),
+    onSuccess: освежитьРазрезы,
+  })
+  const снятьСеть = useMutation({
+    mutationFn: () => importMarketNetwork(companyId, {
+      url: адресСети,
+      ...(сетьОператора.trim() ? { operator_name: сетьОператора.trim() } : {}),
+    }),
     onSuccess: освежитьРазрезы,
   })
   const перечитать = useMutation({
@@ -676,6 +686,44 @@ export function MarketNewsPanel() {
                 <span role="alert" className="text-xs text-destructive">
                   {(датьУчастника.error as Error).message}
                 </span>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-2 p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-sm font-medium">Карта сети оператора</span>
+                <span className="text-xs text-muted-foreground">
+                  данные, которых нет в публичных реестрах: какие станции не работают
+                  сегодня и когда введена последняя
+                </span>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <Input value={адресСети} onChange={(e) => setАдресСети(e.target.value)}
+                  placeholder="https://… страница карты сети оператора"
+                  className="h-8 w-[420px] text-xs" />
+                <Input value={сетьОператора} onChange={(e) => setСетьОператора(e.target.value)}
+                  placeholder="Чья сеть: «PUNKT E»" className="h-8 w-[220px] text-xs" />
+                <Button size="sm" disabled={!адресСети || снятьСеть.isPending}
+                  onClick={() => снятьСеть.mutate()}>
+                  {снятьСеть.isPending ? 'Снимаем…' : 'Снять слепок сети'}
+                </Button>
+              </div>
+              {снятьСеть.isError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {(снятьСеть.error as Error).message}
+                </p>
+              )}
+              {снятьСеть.data && (
+                <p className="text-xs text-muted-foreground">
+                  снято {снятьСеть.data.locations} локаций и {снятьСеть.data.stations} станций
+                  в {снятьСеть.data.regions} регионах; не работает {снятьСеть.data.inactive},
+                  помечено новыми {снятьСеть.data.new}
+                  {снятьСеть.data.lastCommissioned
+                    ? `, последний ввод ${снятьСеть.data.lastCommissioned}` : ''}.
+                  Заведено точек {снятьСеть.data.created}, обновлено {снятьСеть.data.updated}.
+                </p>
               )}
             </CardContent>
           </Card>

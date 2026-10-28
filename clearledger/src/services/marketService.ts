@@ -1431,6 +1431,8 @@ export interface MarketParticipant {
   role: string
   roleLabel: string
   name: string
+  /** Данные реестра по участнику: масштаб сети рядом с новостями о ней. */
+  network: { sites: number; regions: number; offline: number } | null
   news: number
   lastAt: string | null
   operatorId: string | null
@@ -1471,6 +1473,26 @@ export const getMarketLinks = (companyId: string, params?: {
 }) =>
   httpGet<{ links: MarketLink[]; total: number; days: number }>(
     '/api/market/news/links', { company_id: companyId, ...params })
+
+export interface NetworkSnapshot {
+  date: string
+  locations: number
+  offline: number
+  stations: number
+}
+
+/** Снять карту сети оператора: то, чего публичные реестры не показывают. */
+export const importMarketNetwork = (companyId: string, body: Record<string, unknown>) =>
+  post<{
+    url: string; date: string; locations: number; stations: number; inactive: number
+    new: number; regions: number; lastCommissioned: string | null
+    byCurrent: Record<string, number>; byRegion: Record<string, number>
+    created: number; updated: number; snapshots: number
+  }>(`/api/market/network/import?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const getNetworkSnapshots = (companyId: string, operatorId?: string) =>
+  httpGet<{ snapshots: NetworkSnapshot[] }>('/api/market/network/snapshots',
+    { company_id: companyId, ...(operatorId ? { operator_id: operatorId } : {}) })
 
 /** Перечитать состав участников у собранных новостей — после правки справочника. */
 export const rescanMarketMentions = (companyId: string) =>

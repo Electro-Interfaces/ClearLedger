@@ -34,7 +34,7 @@ from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLea
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
                         ServiceLocation, User)
-from app.services import market_news, market_ocm
+from app.services import market_network, market_news, market_ocm
 
 router = APIRouter(prefix="/market", tags=["Маркетинг — рынок"])
 
@@ -4934,6 +4934,10 @@ async def create_news_source(
         raise HTTPException(422, "Вид источника: search, search_wide, rss или page")
     if body.default_topic and body.default_topic not in NEWS_TOPICS:
         raise HTTPException(422, "Рубрика источника вне списка тем")
+    if body.kind.startswith("search") and market_news.OR_IN_QUERY.search(body.url):
+        raise HTTPException(
+            422, "Уберите OR из запроса: поисковая лента с ним возвращает пусто. "
+                 f"Рабочий вид: «{market_news.clean_query(body.url)}»")
     url = body.url.strip()
     if not body.kind.startswith("search"):
         if not url.lower().startswith(("http://", "https://")):
@@ -5443,6 +5447,15 @@ async def create_actor(
         func.lower(MarketActor.name) == body.name.strip().lower()))).scalar_one_or_none()
     if есть is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"«{есть.name}» уже в справочнике")
+    # Справочник — для тех, кого нет в реестрах сетей и приложений. Запись-двойник
+    # даёт участнику две роли сразу и удваивает его связи.
+    двойник = (await db.execute(select(MarketOperator.name).where(
+        MarketOperator.company_id == cid,
+        func.lower(MarketOperator.name) == body.name.strip().lower()))).scalar_one_or_none()
+    if двойник:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"«{двойник}» уже ведётся в реестре сетей — там же правьте его роль")
     actor = MarketActor(company_id=cid, confirmed=True,
                         **{**body.model_dump(), "name": body.name.strip()})
     db.add(actor)
@@ -5510,8 +5523,23 @@ async def news_participants(
         .group_by(MarketNewsMention.role, MarketNewsMention.name, MarketNews.topic))).all():
         темы.setdefault((r, n), {})[t] = int(c)
 
+    # Досье, а не список имён: к упоминаниям подтягиваются данные реестра —
+    # сколько у участника точек, сколько из них не работает и в скольких он
+    # регионах. Новость объясняет движение, цифры показывают масштаб.
+    сеть: dict[str, dict[str, Any]] = {}
+    for op_id, точек, регионов, мертвых in (await db.execute(
+        select(cast(MarketSite.operator_id, String), func.count(),
+               func.count(func.distinct(MarketSite.region)),
+               func.sum(case((MarketSite.is_alive.is_(False), 1), else_=0)))
+        .where(MarketSite.company_id == cid, MarketSite.operator_id.is_not(None),
+               MarketSite.duplicate_of_id.is_(None))
+        .group_by(cast(MarketSite.operator_id, String)))).all():
+        сеть[op_id] = {"sites": int(точек), "regions": int(регионов),
+                       "offline": int(мертвых or 0)}
+
     участники = [{
         "role": role_, "roleLabel": ROLE_LABEL.get(role_, role_), "name": name,
+        "network": сеть.get(op) if op else None,
         "news": int(cnt), "lastAt": last.isoformat() if last else None,
         "operatorId": op, "actorId": ac, "playerId": pl,
         "byTopic": темы.get((role_, name), {}),
@@ -5640,3 +5668,73 @@ async def rescan_mentions(
             добавлено += 1
     await db.commit()
     return {"news": len(news), "added": добавлено}
+
+
+# ───────────────── Карта сети оператора как источник данных ─────────────────
+
+
+class NetworkImportIn(BaseModel):
+    """Откуда снимать сеть и чья она."""
+    url: str = Field(min_length=10, max_length=600)
+    operator_id: uuid.UUID | None = None
+    operator_name: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/network/import")
+async def network_import(
+    company_id: str = Query(...), body: NetworkImportIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Снять карту сети оператора и обновить точки рынка со снимком на дату.
+
+    Это не новости, а данные: оператор показывает у себя то, чего нет в
+    публичных реестрах, — какие станции сегодня не работают, какие помечены
+    новыми и когда введена последняя. На «Пункт Е» 28.10.2026 это 1524 локации
+    и 292 неработающие станции при 1418 точках в нашем реестре.
+    """
+    cid = await _member(company_id, user, db)
+    url = body.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(422, "Адрес страницы должен начинаться с http(s)://")
+    assert_external_host(urlparse(url).hostname)
+    if body.operator_id:
+        if (await db.execute(select(MarketOperator.id).where(
+                MarketOperator.id == body.operator_id,
+                MarketOperator.company_id == cid))).scalar_one_or_none() is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Оператор не найден")
+    try:
+        return await market_network.import_network(
+            db, cid, url, operator_id=body.operator_id, operator_name=body.operator_name)
+    except RuntimeError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+
+@router.get("/network/snapshots")
+async def network_snapshots(
+    company_id: str = Query(...),
+    operator_id: uuid.UUID | None = Query(None),
+    limit: int = Query(30, ge=1, le=180),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Ряд снимков сети по датам: что изменилось, а не только как сейчас.
+
+    Чужой реестр истории не отдаёт, поэтому ряд собирается нами: без него
+    «стало меньше неработающих» нечем подтвердить.
+    """
+    cid = await _member(company_id, user, db)
+    q = (select(MarketSiteSnapshot.snapshot_date,
+                func.count(),
+                func.sum(case((MarketSiteSnapshot.is_alive.is_(False), 1), else_=0)),
+                func.sum(func.coalesce(MarketSiteSnapshot.ports, 0)))
+         .where(MarketSiteSnapshot.company_id == cid,
+                MarketSiteSnapshot.source == "network"))
+    if operator_id:
+        q = q.where(MarketSiteSnapshot.site_id.in_(
+            select(MarketSite.id).where(MarketSite.company_id == cid,
+                                        MarketSite.operator_id == operator_id)))
+    rows = (await db.execute(q.group_by(MarketSiteSnapshot.snapshot_date)
+                             .order_by(MarketSiteSnapshot.snapshot_date.desc())
+                             .limit(limit))).all()
+    return {"snapshots": [{
+        "date": d, "locations": int(c), "offline": int(off or 0), "stations": int(p or 0),
+    } for d, c, off, p in rows]}

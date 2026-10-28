@@ -385,3 +385,74 @@ def test_одна_компания_в_двух_реестрах_не_двое():
                operator_id=None, player_class="зарядная сеть / агрегатор")]
     пара = actors_in_text("РусГидро и Яндекс Заправки договорились", ops, чужой, [])
     assert {m["role"] for m in пара} == {"operator", "aggregator"}
+
+
+def test_оператор_or_не_доезжает_до_поисковой_ленты():
+    """С «OR» выдача Bing пуста: источник выглядит живым и молчит.
+
+    Проверено 28.10.2026 на «Парус электро»: с оператором — 0 элементов, без
+    него — 9. Такой источник хуже сломанного: ошибки нет, материалов нет.
+    """
+    from app.services.market_news import clean_query, search_url
+    assert clean_query('"Парус электро" зарядные станции OR электромобили') \
+        == '"Парус электро" зарядные станции электромобили'
+    assert " OR " not in search_url('сеть OR оператор')
+    assert clean_query("site:punkt-e.ru") == "site:punkt-e.ru"
+
+
+def test_справочник_не_удваивает_компанию_из_реестра():
+    """Компания, найденная как сеть, не приходит ещё и из справочника.
+
+    28.10.2026 «Мособлэнерго» оказалось и сетью, и энергетикой: связь с ним
+    удвоилась, и в разрезе появились две строки об одном участнике.
+    """
+    from types import SimpleNamespace as N
+    from app.services.market_news import actors_in_text
+    ops = [N(id="1", name="Мособлэнерго", short_name=None, is_platform=False)]
+    acs = [N(id="2", kind="utility", name="Мособлэнерго", aliases=[]),
+           N(id="3", kind="vendor", name="Парус электро", aliases=[])]
+    состав = actors_in_text("«Парус электро» поставил станции «Мособлэнерго»", ops, [], acs)
+    роли = sorted(m["role"] for m in состав)
+    assert роли == ["operator", "vendor"], "каждая компания ровно в одной роли"
+
+
+def test_карта_сети_разбирается_в_точки_и_состояние():
+    """Со страницы оператора берётся вся сеть: координаты, ток, живость, ввод.
+
+    На «Пункт Е» 28.10.2026 это 1524 локации и 292 неработающие станции —
+    последнего в публичных реестрах нет вовсе.
+    """
+    from app.services.market_network import dedup_key, parse_dots, summarize
+    страница = """<html><script>
+      let dots = [
+        {"id":"54030","coords":[55.03205,82.93298],"region":"54","type":["DC"],
+         "plug":["CHAdeMO","CCS 2"],"stations":2,
+         "marker":{"isNew":false,"latestCommissioningDate":"2026-08-01T10:00:00+00:00",
+                   "stations":[{"id":"1","inactive":false},{"id":"2","inactive":true}]}},
+        {"id":"50001","coords":[55.75,37.61],"region":"50","type":["AC"],
+         "plug":["Type 2"],"stations":1,
+         "marker":{"isNew":true,"latestCommissioningDate":"2026-10-27T21:00:00+00:00",
+                   "stations":[{"id":"3","inactive":false}]}}
+      ];
+    </script></html>"""
+    dots = parse_dots(страница)
+    assert len(dots) == 2
+    итог = summarize(dots)
+    assert итог["locations"] == 2 and итог["stations"] == 3
+    assert итог["inactive"] == 1, "неработающая станция — главное, что даёт карта оператора"
+    assert итог["new"] == 1
+    assert итог["byCurrent"] == {"DC": 1, "AC": 1}
+    assert итог["byRegion"]["Новосибирская область"] == 1
+    assert итог["byRegion"]["Московская область"] == 1
+    assert итог["lastCommissioned"] == "2026-10-27"
+    # Ключ совпадения — тот же, что у прочих импортов рынка: ~50 метров.
+    assert dedup_key(55.03205, 82.93298) == "ezs:55.032:82.933"
+
+
+def test_смена_формата_карты_это_отказ_а_не_пустая_сеть():
+    """Страница изменилась — импорт обязан отказаться, а не стереть известное."""
+    from app.services.market_network import parse_dots
+    assert parse_dots("<html>мы переехали</html>") == []
+    assert parse_dots("<script>let dots = [сломано;</script>") == []
+    # Точки без координат не годятся: по ним нечего сопоставлять.
+    assert parse_dots('<script>let dots = [{"id":"1"}];</script>') == []
