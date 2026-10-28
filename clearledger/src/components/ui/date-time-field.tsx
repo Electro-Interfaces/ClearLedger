@@ -105,15 +105,34 @@ export function DateField({ id, value, onChange, disabled, className, ...rest }:
  * сразу — по нему можно ткнуть, а не прокручивать к нему. Открывается на текущем
  * значении, чтобы 18:00 не искали от полуночи.
  */
-export function TimeField({ id, value, onChange, disabled, className, ...rest }: FieldProps) {
+/** Подпись длительности: «30 мин», «1 ч», «1,5 ч». */
+function длительностьСловом(m: number) {
+  return m < 60 ? `${m} мин` : `${String(m / 60).replace('.', ',')} ч`
+}
+
+export function TimeField({ id, value, onChange, disabled, className, from, ...rest }: FieldProps & {
+  /** Время начала: список конца встречи идёт от него и подписывает длительность —
+   *  «11:30 (1,5 ч)», как в VK Календаре; быстрые кнопки 30/60/90 больше не нужны. */
+  from?: string
+}) {
   const [text, setText] = useState(value || '')
   const [open, setOpen] = useState(false)
   const typing = useRef(false)
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => { if (!typing.current) setText(value || '') }, [value])
 
-  const slots = useMemo(() => Array.from({ length: 48 }, (_, i) =>
-    `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`), [])
+  const slots = useMemo(() => {
+    const старт = from ? textToTime(from) : null
+    if (!старт) return Array.from({ length: 48 }, (_, i) => ({
+      s: `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`, hint: '' }))
+    const [ч, м] = старт.split(':').map(Number)
+    return [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480]
+      .filter((d) => ч * 60 + м + d < 24 * 60)
+      .map((d) => {
+        const к = ч * 60 + м + d
+        return { s: `${String(Math.floor(к / 60)).padStart(2, '0')}:${String(к % 60).padStart(2, '0')}`, hint: длительностьСловом(d) }
+      })
+  }, [from])
 
   const commit = (next: string) => {
     setText(next)
@@ -152,18 +171,19 @@ export function TimeField({ id, value, onChange, disabled, className, ...rest }:
             <Clock className="size-4" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-28 p-1">
+        <PopoverContent align="end" className={cn('p-1', from ? 'w-40' : 'w-28')}>
           <div ref={listRef} className="max-h-64 overflow-y-auto">
-            {slots.map((s) => (
+            {slots.map(({ s, hint }) => (
               <button
                 key={s}
                 type="button"
                 data-current={s === value}
                 onClick={() => { typing.current = false; onChange(s); setOpen(false) }}
-                className={cn('flex w-full items-center justify-center rounded px-2 py-2 text-sm tabular-nums transition-colors sm:py-1.5',
+                className={cn('flex w-full items-center gap-2 rounded px-2 py-2 text-sm tabular-nums transition-colors sm:py-1.5',
+                  hint ? 'justify-between' : 'justify-center',
                   s === value ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-accent hover:text-foreground')}
               >
-                {s}
+                {s}{hint && <span className="text-xs text-muted-foreground">{hint}</span>}
               </button>
             ))}
           </div>
