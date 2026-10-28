@@ -231,6 +231,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
         }
       }).filter((s) => s.items.length > 0 || s.mode === 'accounting')
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
+  // «Бухгалтерия» пространства (energy): сопряжение выгрузки бухгалтерии с карточками.
+  // Пунктов во второй панели нет — каждый раздел это один отчёт, как «На сегодня».
+  const acctReview: WorkspaceSection = { mode: 'acct_review', label: 'Разбор', icon: GitCompare,
+    items: [], connected: isEnergy }
+  const acctObjects: WorkspaceSection = { mode: 'acct_objects', label: 'Объекты', icon: Building2,
+    items: [], connected: isEnergy }
+  const acctSources: WorkspaceSection = { mode: 'acct_sources', label: 'Источники', icon: FileText,
+    items: [], connected: isEnergy, separatorBefore: true }
   // Компания без объектов (профиль `office`): «Реализация» и «Бухгалтерия». Разделы
   // строятся по тому же правилу, что у «Топлива» — крупный угол в рельсе, его экраны
   // во второй панели. Подключение проверять нечем и незачем: данные приезжают из
@@ -307,7 +315,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketingDecision, marketing, marketingArea, marketingPrice,
        projects, projectsAnalytics, projectsIntegration, ops, opsEquipment, opsEconomy,
-       storeSections[0], ...accSections, exp, normalize, reconcile, connect]
+       storeSections[0], ...accSections, exp, acctReview, acctObjects, acctSources,
+       normalize, reconcile, connect]
     : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,
        ...accSections, normalize, reconcile, connect]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели

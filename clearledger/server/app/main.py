@@ -29,6 +29,7 @@ from app.routers import management_router
 from app.routers import (
     accounting_adjustments_router,
     accounting_docs_router,
+    accounting_space_router,
     audit_data_router,
     audit_router,
     auditor_router,
@@ -529,6 +530,8 @@ app.include_router(references_router.router, prefix=API_PREFIX)
 app.include_router(location_contacts_router.router, prefix=API_PREFIX)
 app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(accounting_adjustments_router.router, prefix=API_PREFIX)
+# «Бухгалтерия» пространства: сопряжение выгрузок бухгалтерии с карточками (чтение).
+app.include_router(accounting_space_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # прокси «Сверки»: /api/tradecorp/*, /api/msto/*
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
