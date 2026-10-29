@@ -87,7 +87,7 @@ UUID EzsEquipmentUnit, Counterparty, Contract, DocCard. Сервер прове�
 
 Scopes фиксированы в `SCOPE_DESCRIPTIONS`; неизвестные запрещены:
 `openid`, `profile`, `email`, `offline_access`, `docs:read`, `objects:read`,
-`equipment:read`, `counterparties:read`, `contracts:read`, `documents:read`,
+`equipment:read`, `monitoring:read`, `counterparties:read`, `contracts:read`, `documents:read`,
 `documents.files:download`. `docs:read` относится к документации API и само по себе
 не даёт права на бизнес-документы. Наличие scope не заменяет domain/resource ACL.
 
@@ -102,7 +102,7 @@ Mail-only, отсутствие пароля, активная блокиров�
 
 ## HTTP интерфейсы
 
-Все перечисленные пути имеют префикс `/api`. Администрирование использует
+Кроме стандартного discovery по origin, перечисленные пути имеют префикс `/api`. Администрирование использует
 обычный Core bearer; OAuth endpoints используют собственный профиль.
 
 | Метод и путь | Назначение |
@@ -123,7 +123,8 @@ Mail-only, отсутствие пароля, активная блокиров�
 | POST `/oauth2/revoke` | RFC 7009, form-urlencoded; отзывает семейство access/refresh |
 | GET `/oauth2/userinfo` | Partner bearer с openid, только пользовательский grant |
 | GET `/oauth2/jwks` | Только публичный RSA JWK |
-| GET `/oauth2/.well-known/openid-configuration` | Metadata URL для явной настройки клиента; существующие guard traps не отключены |
+| GET `/.well-known/openid-configuration` (без `/api`) | Стандартный discovery от origin issuer, тот же защищённый конфигурацией metadata handler |
+| GET `/oauth2/.well-known/openid-configuration` | Совместимый alias под `/api` |
 
 GET consent возвращает `{id,clientName,requestedScopes:[{code,description}],
 companies:[{id,name,eligibleScopes}],expiresAt}`. Первое открытие обычным Core
@@ -228,3 +229,10 @@ UPLOAD_DIR=/tmp/partner-identity-upload \
   SDK/OIDC certification/нагрузочный прогон не выполнялись.
 - После добавления независимого `partner_api_enabled=false`: целевые проверки
   defaultoff/неполной issuer configuration **2 PASS**, 50 deselected, 16.23 с.
+
+
+Для нового `monitoring:read` нужны текущие права полного администратора/члена
+с `modules=None` либо `ops`, `ops:ops_state`, `ops:ops_reliability`. Финансовый
+`ops:ops_overview` не подходит. Метод статуса требует также отдельный
+`objects:read` и типизированный objects grant; старые согласия не расширяются.
+Практический порядок подключения: [PARTNER_QUICKSTART.md](PARTNER_QUICKSTART.md).
