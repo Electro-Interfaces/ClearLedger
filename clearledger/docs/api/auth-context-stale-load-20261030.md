@@ -123,3 +123,18 @@ Root owns full browser acceptance, перенос в integration/sandbox fronten
 повтор реального согласия. Этот отчёт подтверждает actual React lifecycle race
 и её управляемые регрессии; он не утверждает, что HTTPS Swagger/server flow
 уже принят на новой сборке.
+
+
+Независимая проверка координатора в общем кандидате a5e1a0ad:
+15 actual React scenarios PASS за19.046с,17 transport/redirect PASS за5.515с.
+Полный настоящий HTTPS Swagger browser с actual main/public builds,
+Code/PKCE/consent, защищённой схемой из12операций в6группах, native Authorize,
+Try it out на PostgreSQL, logout/revoke и expiredCore recovery: PASS108.19с.
+Перед исправлением тот же сценарий дважды останавливался на повторном
+consent popup; новая диагностика показала страницу login, а управляемые
+React/transport baseline отдельно подтвердили гонку. Два deprecation warnings
+websockets/uvicorn не считаются подтверждением проблем авторизации.
+Screenshots синтетики: [desktop](http://10.10.70.56:8000/api-platform-20261029/swagger-desktop.png),
+[mobile](http://10.10.70.56:8000/api-platform-20261029/swagger-mobile.png).
+Desktop читаем; mobile tag description требует отдельной responsive правки,
+поэтому полный визуальный mobile acceptance не объявляется пройденным.
