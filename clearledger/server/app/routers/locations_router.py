@@ -7,10 +7,10 @@ id — клиентский nanoid (String), чтобы фронт и бэк с�
 """
 import json
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,7 @@ OP_STATUSES = {"working", "no_link", "disabled", "not_working", "on_repair",
                "maintenance", "unknown", "decommissioned"}
 
 router = APIRouter(prefix="/locations", tags=["Точки обслуживания"])
+LocationId = Annotated[str, AfterValidator(location_commands.validate_identifier)]
 
 
 class LocationIn(BaseModel):
@@ -43,7 +44,7 @@ class LocationIn(BaseModel):
     # свой при повторной отправке того же объекта (ручка работает как upsert), но
     # придумывать ключ за систему ему больше не нужно. Формат к прочтению людьми
     # не предназначен и в документах не применяется.
-    id: str | None = None
+    id: LocationId | None = None
     company_id: str
     code: str
     name: str
@@ -219,7 +220,7 @@ async def create_location(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(payload.company_id, current_user, db)
-    new_id = (payload.id or "").strip() or f"ezs-{uuid.uuid4().hex[:20]}"
+    new_id = payload.id if payload.id is not None else f"ezs-{uuid.uuid4().hex[:20]}"
     data = payload.model_dump(exclude={"id", "company_id"})
     if "metadata" not in payload.model_fields_set:
         # Omission is not an explicit request to erase the object number.
@@ -244,7 +245,7 @@ async def create_location(
 
 @router.patch("/{location_id}", response_model=LocationOut)
 async def update_location(
-    location_id: str,
+    location_id: LocationId,
     payload: LocationUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -272,7 +273,7 @@ async def update_location(
 
 @router.delete("/{location_id}")
 async def delete_location(
-    location_id: str,
+    location_id: LocationId,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -296,7 +297,7 @@ class OpStatusBody(BaseModel):
 
 @router.patch("/{location_id}/operational-status", response_model=LocationOut)
 async def set_operational_status(
-    location_id: str,
+    location_id: LocationId,
     body: OpStatusBody,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

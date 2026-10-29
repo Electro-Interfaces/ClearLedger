@@ -1,4 +1,4 @@
-"""Native HTTP and PostgreSQL mutation invariants; only synthetic api_objects_test."""
+"""Native HTTP/PostgreSQL invariants; opt-in isolated synthetic test database."""
 import asyncio
 from datetime import date
 import json
@@ -6,18 +6,21 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
+from urllib.parse import quote
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from sqlalchemy import func, select, text
-from sqlalchemy.engine import make_url
+from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-_url = make_url(os.environ.get("TEST_DATABASE_URL", "postgresql://invalid/invalid"))
-if (_url.host, _url.port, _url.database) != ("127.0.0.1", 33546, "api_objects_test"):
-    pytest.skip("Requires explicitly dedicated api_objects_test", allow_module_level=True)
+from tests.partner_test_safety import partner_test_safety_error
+
+if os.environ.get("RUN_OBJECT_COMMAND_TESTS") != "1":
+    pytest.skip("Opt in with RUN_OBJECT_COMMAND_TESTS=1", allow_module_level=True)
+if error := partner_test_safety_error(os.environ, flag="RUN_OBJECT_COMMAND_TESTS"):
+    raise RuntimeError(error)
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -78,7 +81,7 @@ async def world(db, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
                                 base_url="http://test") as client:
         yield SimpleNamespace(factory=factory, cid=companies[0].id, foreign=companies[1].id,
-                              user=user, locations=locations, client=client, projections=projections)
+                              user=user, locations=locations, client=client, app=app, projections=projections)
     set_request_scope(None)
     set_request_organization(None)
 
@@ -461,3 +464,122 @@ async def test_physical_delete_is_closed_without_fabricating_retirement(world):
         await session.commit()
     forbidden = await w.client.delete(f"/api/locations/{w.locations[0].id}")
     assert forbidden.status_code == 404
+
+
+@pytest.mark.parametrize("operation", ["update", "create", "upsert"])
+async def test_foreign_row_lock_never_delays_own_company_command(world, operation):
+    w = world
+    identifier = uuid.uuid4().hex
+    async with w.factory() as seed:
+        seed.add(ServiceLocation(id=identifier, company_id=w.foreign, code="foreign-lock", name="Foreign payload"))
+        await seed.commit()
+    set_request_scope(None)
+    async with w.factory() as owner, w.factory() as requester:
+        await owner.execute(select(ServiceLocation.id).where(ServiceLocation.id == identifier).with_for_update())
+        # PostgreSQL server timeout makes a cross-tenant wait a deterministic
+        # failure. The foreign owner transaction remains open throughout.
+        await requester.execute(text("SET LOCAL lock_timeout = '250ms'"))
+        command = getattr(location_commands, operation)
+        if operation == "update":
+            assert await command(requester, w.cid, identifier, {"name": "forbidden"}) is None
+        else:
+            with pytest.raises(location_commands.LocationConflict) as error:
+                await command(requester, w.cid, identifier, {"code": "new", "name": "forbidden"})
+            assert error.value.status == 404
+        assert not any(isinstance(row, ServiceLocation) and row.id == identifier
+                       for row in requester.identity_map.values())
+        await requester.rollback()
+        # Legitimate same-company UPDATE still waits for the very same row lock.
+        await requester.execute(text("SET LOCAL lock_timeout = '250ms'"))
+        from sqlalchemy.exc import DBAPIError
+        with pytest.raises(DBAPIError):
+            await location_commands.update(requester, w.foreign, identifier, {"name": "legitimate"})
+        await requester.rollback()
+        await owner.rollback()
+        result = await location_commands.update(requester, w.foreign, identifier, {"name": "legitimate"})
+        assert result.location.name == "legitimate"
+        await requester.rollback()
+
+
+@pytest.mark.parametrize("identifier", ["x" * 41, "bad\x00id"])
+@pytest.mark.parametrize("operation", ["post", "patch", "delete", "operational-status"])
+async def test_invalid_native_mutation_id_is_422_before_any_sql(world, identifier, operation):
+    w = world
+    statements = []
+    engine = w.factory.kw["bind"].sync_engine
+    def observed(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+    event.listen(engine, "before_cursor_execute", observed)
+    try:
+        path = "/api/locations/" + quote(identifier, safe="")
+        if operation == "post":
+            response = await w.client.post("/api/locations", json=native_payload(w, id=identifier, code="invalid", metadata=None))
+        elif operation == "operational-status":
+            response = await w.client.patch(path + "/operational-status", json={"status": "working"})
+        else:
+            response = await w.client.request(operation.upper(), path,
+                **({"json": {"name": "invalid"}} if operation == "patch" else {}))
+    finally:
+        event.remove(engine, "before_cursor_execute", observed)
+    assert response.status_code == 422, response.text
+    assert statements == []
+    assert not w.projections
+
+
+@pytest.mark.parametrize("operation", ["create", "upsert", "update"])
+@pytest.mark.parametrize("identifier", ["x" * 41, "bad\x00id", ""])
+async def test_direct_command_id_validation_precedes_advisory_or_data_sql(world, operation, identifier):
+    w = world
+    statements = []
+    engine = w.factory.kw["bind"].sync_engine
+    def observed(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+    event.listen(engine, "before_cursor_execute", observed)
+    try:
+        async with w.factory() as session:
+            with pytest.raises(location_commands.LocationConflict) as error:
+                await getattr(location_commands, operation)(session, w.cid, identifier, {"code": "new", "name": "new"})
+            assert error.value.status == 422
+    finally:
+        event.remove(engine, "before_cursor_execute", observed)
+    assert statements == []
+
+
+@pytest.mark.parametrize("identifier", ["a" * 40, "Я" * 40, " Точка-Я "])
+async def test_legitimate_opaque_id_roundtrips_without_trimming(world, identifier):
+    w = world
+    response = await w.client.post("/api/locations", json=native_payload(w, id=identifier, code="valid", metadata=None))
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == identifier
+    path = "/api/locations/" + quote(identifier, safe="")
+    response = await w.client.patch(path, json={"name": "updated opaque"})
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == identifier and response.json()["name"] == "updated opaque"
+
+
+@pytest.mark.parametrize("path", ["registry", "upsert"])
+async def test_http_own_company_request_rejects_foreign_id_while_owner_holds_row_lock(world, path):
+    w = world
+    identifier = uuid.uuid4().hex
+    async with w.factory() as seed:
+        seed.add(ServiceLocation(id=identifier, company_id=w.foreign, code="foreign-http", name="Foreign payload"))
+        await seed.commit()
+
+    async def request_session():
+        async with w.factory() as session:
+            await session.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            try:
+                yield session
+            finally:
+                await session.rollback()
+
+    w.app.dependency_overrides[get_db] = request_session
+    async with w.factory() as owner:
+        await owner.execute(select(ServiceLocation.id).where(ServiceLocation.id == identifier).with_for_update())
+        if path == "registry":
+            response = await w.client.patch(f"/api/registry/objects/{identifier}",
+                params={"company_id": str(w.cid)}, json={"name": "forbidden"})
+        else:
+            response = await w.client.post("/api/locations", json=native_payload(w, id=identifier))
+        assert response.status_code == 404, response.text
+        assert owner.in_transaction()  # The foreign row was never released to make this pass.

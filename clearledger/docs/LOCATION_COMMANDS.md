@@ -139,3 +139,51 @@ null/partial edit, history/retired IDs, caller rollback, concurrent POST/PATCH
 порядок проверяет блокировку FK insert до caller rollback. Legacy standalone
 `test_location_contacts_integration` требует другую contacts_test; его guard не
 ослаблялся, другая БД не запускалась. Full CI и нагрузочная проверка не заявляются.
+
+## Bounded hardening после 1617e55b
+
+Предыдущий `_locked` выбирал строку по одному ID, брал FOR UPDATE и лишь затем
+проверял tenant. Real PostgreSQL counterexample: другая транзакция удерживает
+foreign row lock, запрос своей компании получает lock timeout вместо отказа.
+Теперь WHERE включает company_id **до** FOR UPDATE, поэтому foreign payload не
+загружается в ORM и чужая строка не блокируется. UPDATE foreign/unknown по-прежнему
+даёт 404 через wrapper. CREATE своего existing ID даёт 409. CREATE/UPSERT чужого
+ID выполняет только nonlocking глобальную проверку существования ID и даёт 404;
+все поддерживаемые claimants используют прежний global ID advisory barrier.
+Именно этот барьер может требовать ожидания другого claimant того же ID; обещание
+«не ждёт» относится к чужому row lock, а не к отмене глобальной уникальности.
+
+Публичный pure `validate_identifier` проверяет nonempty String(40) и отсутствие
+NUL, не меняет ID, не навязывает ASCII/UUID и не обрезает пробелы. Native POST id
+и mutation path IDs (PATCH, DELETE, operational-status) проходят ту же проверку
+через Pydantic до handler/get_owned и SQL самого mutation use case; прежние
+FastAPI auth dependencies могут выполнять свои запросы раньше. Серверный ID создаётся только при id=null
+или отсутствии id; explicit пустая строка теперь даёт 422. Команды также проверяют
+ID до advisory/data SQL, поэтому прямой caller не обходит validation. Registry
+использует те же команды; прежние router admission/preflight queries остаются
+вне этой гарантии «до SQL». Native read-only history/HubEx paths не менялись.
+
+Контрпримеры baseline дали 11 FAIL: три foreign-row lock timeout и восемь invalid
+native mutation ID отказов (500 либо 404/409 после SQL вместо 422). В конце этого
+прогона DROP тестовой схемы отдельно упал с PostgreSQL shared lock memory error;
+настройки кластера и другие БД не менялись. Лог baseline:
+`.artifacts/location-hardening-baseline.log`.
+
+Dependency commit отдельно переносит `tests/partner_test_safety.py` точными bytes
+из `47415062`, blob `bdefb1c6cf19c279359c6ebc376de9c786db8310`. Новый opt-in guard
+модуля: `RUN_OBJECT_COMMAND_TESTS=1` плюс pure safety predicate с явными
+TEST_DATABASE_URL и абсолютным UPLOAD_DIR, имя которого содержит test; hardcoded
+host/port/database skip удалён. При opt-in небезопасная конфигурация даёт ошибку
+collection до destructive fixtures; без opt-in модуль пропускается. Guard не
+доказывает владение БД: фактический прогон остаётся только на разрешённой synthetic
+api_objects_test. CI flag будет подключён владельцем CI отдельно.
+
+Полный follow-up targeted прогон: **123 PASS за 32,85 с**, без FAIL/SKIP и
+teardown errors: все прежние 98 cases плюс 25 новых. Новые PostgreSQL/HTTP cases
+проверяют foreign row lock при UPDATE/CREATE/UPSERT и registry/native HTTP,
+legitimate same-company lock control, invalid body/path/direct-command IDs до
+любой SQL fixture-операции и неизменный roundtrip ASCII40/Unicode40/пробелов.
+В SQL logger этих invalid fixture requests нет ни SELECT, ни advisory, ни DML;
+production auth dependency queries этим наблюдением не покрываются. Повторный
+прогон выполнен одним процессом, ошибка shared lock memory не повторилась;
+эксклюзивность кластера не заявляется. Лог `.artifacts/location-hardening-tests.log`.

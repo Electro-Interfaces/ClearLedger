@@ -57,6 +57,13 @@ def _number(value) -> str:
     return "" if value is None else str(value).strip()
 
 
+def validate_identifier(identifier: str) -> str:
+    """Validate the existing String(40) identity without rewriting opaque IDs."""
+    if not isinstance(identifier, str) or not 1 <= len(identifier) <= 40 or "\x00" in identifier:
+        raise ValueError("Ключ объекта должен содержать от 1 до 40 символов без нулевого байта")
+    return identifier
+
+
 async def _barrier(db, company_id, identifier):
     # Stable, transaction-scoped across processes and both HTTP entry points.
     # ID before company also serializes concurrent cross-tenant ID claims.
@@ -67,10 +74,15 @@ async def _barrier(db, company_id, identifier):
 
 
 async def _locked(db, company_id, identifier):
+    try:
+        validate_identifier(identifier)
+    except ValueError as exc:
+        raise LocationConflict(422, str(exc)) from exc
     await _barrier(db, company_id, identifier)
     # FOR UPDATE conflicts with FK key-share checks in contract/session writers.
     # Reload even when admission already loaded this row into the identity map.
-    return (await db.execute(select(ServiceLocation).where(ServiceLocation.id == identifier)
+    return (await db.execute(select(ServiceLocation).where(
+                            ServiceLocation.id == identifier, ServiceLocation.company_id == company_id)
                             .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
 
 
@@ -177,7 +189,12 @@ async def create(db, company_id, identifier, data):
     """CREATE never updates an existing identity; transaction stays with caller."""
     existing = await _locked(db, company_id, identifier)
     if existing is not None:
-        raise LocationConflict(409 if existing.company_id == company_id else 404, "Ключ объекта уже используется")
+        raise LocationConflict(409, "Ключ объекта уже используется")
+    # ID advisory lock remains global, but tenant rejection must not lock/load
+    # another company's row. Ordinary MVCC existence reads do not await its row
+    # lock; every supported ID claimant holds the same advisory barrier.
+    if await db.scalar(select(ServiceLocation.id).where(ServiceLocation.id == identifier)) is not None:
+        raise LocationConflict(404, "Объект не найден в этой компании")
     linked = await db.scalar(select(ObjectLink.id).where(
         ((ObjectLink.parent_type == "point_of_service") & (ObjectLink.parent_id == identifier)) |
         ((ObjectLink.child_type == "point_of_service") & (ObjectLink.child_id == identifier))).limit(1))
