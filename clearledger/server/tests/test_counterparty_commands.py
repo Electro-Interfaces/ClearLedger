@@ -80,7 +80,8 @@ async def test_import_replay_keeps_manual_fields_and_source(world, producer):
     ids = {row.id for row in rows}
     snapshots = {row.id: row.raw for row in rows}
     for row in rows:
-        assert row.kind == "external" and row.aliases == ["rent"] and row.inn == ""
+        # Канон nullable INN: неизвестное значение хранится NULL, raw остаётся источником.
+        assert row.kind == "external" and row.aliases == ["rent"] and row.inn is None
         before = snapshot_reference_fields(row)
         row.name = "Ручное имя " + str(row.id)
         row.aliases = ["Ручная роль"]
@@ -118,15 +119,17 @@ async def test_import_preserves_legal_forms_of_existing_tax_identities(world, pr
     await w.db.rollback()
 
 
-@pytest.mark.parametrize("producer", ["legacy", "l2"])
-async def test_second_blank_tax_identity_keeps_existing_sql_refusal_without_merge(world, producer):
-    """Прежний DDL запрещает две пустые пары; срез не исправляет этот долг."""
+@pytest.mark.parametrize("kpp", [None, ""])
+async def test_literal_blank_tax_identity_keeps_existing_sql_refusal_without_merge(world, kpp):
+    """Direct SQL/ORM контроль индекса, отдельно от исправленного native импорта."""
     w = world
-    await imported(w, producer, ['ООО «Одинаковое имя»'])
+    w.db.add(Counterparty(company_id=w.cid, name='ООО «Одинаковое имя»', inn="", kpp=kpp))
+    await w.db.flush()
     before = (await parties(w))[0].id
     async with w.db.begin_nested() as transaction:
+        w.db.add(Counterparty(company_id=w.cid, name='АО «Одинаковое имя»', inn="", kpp=kpp))
         with pytest.raises(IntegrityError, match="uq_counterparties_inn_kpp"):
-            await imported(w, producer, ['АО «Одинаковое имя»'])
+            await w.db.flush()
         await transaction.rollback()
     saved = await parties(w)
     assert len(saved) == 1 and saved[0].id == before and saved[0].name == 'ООО «Одинаковое имя»'
@@ -186,7 +189,7 @@ async def test_l2_known_inn_company_scope_and_incomplete_identity(world):
     unknown = await cache.counterparty(w.db, w.cid, "ООО Без ИНН")
     with pytest.raises(IdentityConflict, match="сверить ИНН"):
         await cache.counterparty(w.db, w.cid, unknown.name, inn="7744444444")
-    assert unknown.inn == "" and len(await parties(w)) == 2
+    assert unknown.inn is None and len(await parties(w)) == 2
     await w.db.rollback()
 
 
@@ -299,5 +302,6 @@ async def test_native_http_existing_alias_update_respects_manual_freeze(http_wor
     await w.db.refresh(row)
     await w.db.refresh(w.client_row)
     assert row.aliases == (["rent"] if frozen else ["corporate", "rent"])
+    assert row.inn == ""  # Старые сохранённые строки эта правка не переписывает.
     assert row.raw == snapshot and row.id == identifier
     assert w.client_row.counterparty_id == identifier and len(await parties(w)) == 1
