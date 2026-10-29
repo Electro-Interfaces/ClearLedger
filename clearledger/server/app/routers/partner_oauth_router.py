@@ -24,6 +24,7 @@ from app.services.partner_identity import (NO_STORE, SCOPE_DESCRIPTIONS, Partner
     require_core_user, require_enabled, settings, user_info, validate_scopes)
 
 router = APIRouter(prefix="/oauth2", tags=["Partner OAuth/OIDC"], route_class=PartnerRoute)
+well_known_router = APIRouter(tags=["Partner discovery"], route_class=PartnerRoute)
 consent_router = APIRouter(prefix="/developer/authorization-requests", tags=["Partner consent"], route_class=PartnerRoute)
 
 _hits: OrderedDict[str, deque] = OrderedDict()
@@ -151,6 +152,7 @@ async def revoke(request: Request, db: AsyncSession = Depends(get_db)):
         return protocol_error(exc.error, exc.status_code)
 
 
+@well_known_router.get("/.well-known/openid-configuration", include_in_schema=False)
 @router.get("/.well-known/openid-configuration")
 async def discovery():
     require_enabled()

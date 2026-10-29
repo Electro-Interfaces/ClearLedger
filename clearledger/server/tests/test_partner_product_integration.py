@@ -254,3 +254,20 @@ async def test_valid_explicit_https_port_preserves_discovery(flow, monkeypatch):
     assert response.status_code == 200 and response.json()["issuer"] == issuer
     from app.product_api import create_product_api, curated_openapi
     assert curated_openapi(create_product_api(issuer=issuer))["servers"][0]["url"] == issuer + "/api/v1"
+
+
+async def test_standard_oidc_discovery_matches_issuer_and_legacy_alias(flow, monkeypatch):
+    # OIDC Discovery 1.0 section4: issuer + /.well-known/openid-configuration.
+    standard = await flow["client"].get("/.well-known/openid-configuration")
+    alias = await flow["client"].get("/api/oauth2/.well-known/openid-configuration")
+    assert standard.status_code == alias.status_code == 200
+    assert standard.json() == alias.json()
+    assert standard.headers["content-type"].startswith("application/json")
+    assert standard.headers["cache-control"] == "no-store"
+    metadata = standard.json()
+    assert metadata["issuer"] == flow["settings"].partner_oauth_issuer
+    keys = await flow["client"].get(urlsplit(metadata["jwks_uri"]).path)
+    assert keys.status_code == 200 and keys.json()["keys"][0]["alg"] == "RS256"
+    monkeypatch.setattr(flow["settings"], "partner_oauth_enabled", False)
+    denied = await flow["client"].get("/.well-known/openid-configuration")
+    assert denied.status_code == 503 and denied.headers["cache-control"] == "no-store"
