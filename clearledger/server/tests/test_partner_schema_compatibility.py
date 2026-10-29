@@ -56,7 +56,8 @@ PARTNER_TABLES = frozenset({
     "partner_resource_scopes", "partner_resource_items", "partner_grants", "partner_authorization_requests",
     "partner_subjects", "partner_codes", "partner_token_families", "partner_tokens",
 })
-OWNED_MODEL_TABLES = {"app.models_partner": PARTNER_TABLES}
+BUDGET_MODEL_TABLES = {"app.models_product_budget": frozenset({"product_api_budgets"})}
+OWNED_MODEL_TABLES = {"app.models_partner": PARTNER_TABLES, **BUDGET_MODEL_TABLES}
 EXTENSION_MODEL_TABLES = {"app.models_docs_portal": frozenset({"partner_docs_sessions"})}
 REQUIRE_PORTAL = os.environ.get("PARTNER_SCHEMA_REQUIRE_PORTAL", "0")
 if REQUIRE_PORTAL not in {"0", "1"}:
@@ -65,6 +66,9 @@ if REQUIRE_PORTAL not in {"0", "1"}:
 
 def candidate_model_manifest(registered, require_portal=False):
     manifest = dict(OWNED_MODEL_TABLES)
+    for module, expected in BUDGET_MODEL_TABLES.items():
+        if registered.get(module, set()) != expected:
+            raise ValueError("Required budget model registration differs: " + module)
     for module, expected in EXTENSION_MODEL_TABLES.items():
         actual = registered.get(module, set())
         if actual:
@@ -664,13 +668,18 @@ async def test_mixed_http_session_fixture_is_refused_before_schema_reset():
 
 
 async def test_extension_manifest_is_exact_and_required_portal_cannot_be_omitted():
-    assert candidate_model_manifest({}) == OWNED_MODEL_TABLES
+    registered = {key: set(value) for key, value in BUDGET_MODEL_TABLES.items()}
+    with pytest.raises(ValueError, match="Required budget model"):
+        candidate_model_manifest({})
+    assert candidate_model_manifest(registered) == OWNED_MODEL_TABLES
     with pytest.raises(ValueError, match="Required portal model"):
-        candidate_model_manifest({}, require_portal=True)
-    declared = candidate_model_manifest({"app.models_docs_portal": {"partner_docs_sessions"}}, require_portal=True)
-    assert set().union(*declared.values()) == PARTNER_TABLES | {"partner_docs_sessions"}
+        candidate_model_manifest(registered, require_portal=True)
+    declared = candidate_model_manifest({**registered, "app.models_docs_portal": {"partner_docs_sessions"}}, require_portal=True)
+    assert set().union(*declared.values()) == PARTNER_TABLES | {"partner_docs_sessions", "product_api_budgets"}
     with pytest.raises(ValueError, match="Unexpected table"):
-        candidate_model_manifest({"app.models_docs_portal": {"partner_docs_sessions", "unreviewed_table"}})
+        candidate_model_manifest({**registered, "app.models_docs_portal": {"partner_docs_sessions", "unreviewed_table"}})
+    with pytest.raises(ValueError, match="Required budget model"):
+        candidate_model_manifest({"app.models_product_budget": {"product_api_budgets", "unreviewed_table"}})
 
 
 async def test_real_required_portal_gate_matches_registered_candidate():

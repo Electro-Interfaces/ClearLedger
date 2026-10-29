@@ -5,7 +5,7 @@
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Значение секрета по умолчанию — заведомо небезопасное. Если оно доедет до
@@ -54,6 +54,20 @@ class Settings(BaseSettings):
     partner_oauth_enabled: bool = False
     # Независимый gate продуктового /api/v1: его включает отдельная приёмка M03.
     partner_api_enabled: bool = False
+    # Распределённая квота product API, отдельно от legacy/IP limiter.
+    partner_api_budget_enabled: bool = False
+    partner_api_budget_limit: int = Field(default=120, ge=1, le=1_000_000, strict=True)
+    partner_api_budget_window_seconds: int = Field(default=60, ge=1, le=3600, strict=True)
+    partner_api_budget_timeout_ms: int = Field(default=1000, ge=50, le=5000, strict=True)
+
+    @field_validator("partner_api_budget_limit", "partner_api_budget_window_seconds",
+                     "partner_api_budget_timeout_ms", mode="before")
+    @classmethod
+    def product_budget_integer(cls, value):
+        # Environment strings are accepted; bool/float/fractional inputs are not.
+        if isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 10:
+            return int(value)
+        return value
     # Документация и интерактивный sandbox включаются отдельной приёмкой.
     partner_docs_enabled: bool = False
     partner_docs_client_id: str = ""
