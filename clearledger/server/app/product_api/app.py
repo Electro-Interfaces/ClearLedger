@@ -108,7 +108,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
         return await query.listing("objects", params)
 
     @operation("/objects/{objectId}", "objects", "getObject", dto.Object)
-    async def object_detail(objectId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
+    async def object_detail(objectId: dto.ObjectId, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("objects", [await query.detail("objects", objectId)]))[0]
 
     @operation("/objects/{objectId}/monitoring", "objects", "getObjectMonitoring", dto.Monitoring,
@@ -117,7 +117,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                    "Inclusive MSK interval [asOf - days, asOf], days 1..366. asOf date caps the endpoint at "
                    "23:59:59.999999 MSK, or earlier observed data. Successful visit: any attempt energy > 0. "
                    "No financial, ticket, customer or raw session data.")
-    async def object_monitoring(objectId: dto.Id, params: Annotated[dto.MonitoringQuery, QueryParams()],
+    async def object_monitoring(objectId: dto.ObjectId, params: Annotated[dto.MonitoringQuery, QueryParams()],
                                 query: Query = Depends(query_dependency)):
         return await monitoring.detail(query, objectId, params)
 
