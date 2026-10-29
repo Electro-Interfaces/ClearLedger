@@ -14,6 +14,7 @@
  */
 
 import { demoGet, demoPost, demoWrite } from '@/demo/demoApi'
+import { safeBackTo } from '@/lib/safeBackTo'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 const TOKEN_KEY = 'clearledger-token'
@@ -79,6 +80,7 @@ export function getToken(): string | null {
 
 /** Сохранить токен */
 export function setToken(token: string): void {
+  cancelSessionRedirect()
   localStorage.setItem(TOKEN_KEY, token)
 }
 
@@ -153,6 +155,26 @@ export function isNetworkError(err: unknown): boolean {
 
 /** Guard от множественных 401 редиректов (race condition при параллельных запросах) */
 let isRedirecting = false
+let sessionRedirectTimer: ReturnType<typeof setTimeout> | undefined
+
+function cancelSessionRedirect() {
+  if (sessionRedirectTimer !== undefined) clearTimeout(sessionRedirectTimer)
+  sessionRedirectTimer = undefined
+  isRedirecting = false
+}
+
+function redirectExpiredSession() {
+  sessionRedirectTimer = undefined
+  // За время уведомления человек мог войти снова или уже попасть на login
+  // со своим next. Старый таймер не имеет права выбросить новую сессию/intent.
+  if (getToken() || isPublicPage(window.location.pathname)) { isRedirecting = false; return }
+  const base = safeBackTo(import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/')
+  const { pathname, search, hash } = window.location
+  const path = base !== '/' && (pathname === base.slice(0, -1) || pathname.startsWith(base))
+    ? `/${pathname.slice(base.length)}` : pathname
+  const next = safeBackTo(`${path}${search}${hash}`)
+  window.location.href = `${base}login?next=${encodeURIComponent(next)}`
+}
 
 /** Страницы, доступные без сессии: увести отсюда на вход — значит сломать вход. */
 const PUBLIC_PAGES = [
@@ -176,7 +198,6 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch { /* ignore */ }
 
     if (res.status === 401 && !isRedirecting) {
-      const base = import.meta.env.BASE_URL ?? '/'
       // На публичных страницах 401 от фоновых запросов — не «истёкшая сессия»: не шумим
       // и не редиректим (иначе фоновый 401 сбивает свежий вход). Приглашение и сброс
       // пароля открывают как раз те, у кого сессии нет или она протухла: `/auth/me`
@@ -188,9 +209,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
         import('sonner').then(({ toast }) => {
           toast.error('Сессия истекла', { description: 'Войдите в систему снова' })
         })
-        setTimeout(() => {
-          window.location.href = `${base}login`
-        }, 1500)
+        sessionRedirectTimer = setTimeout(redirectExpiredSession, 1500)
       }
     }
 
