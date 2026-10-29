@@ -89,7 +89,7 @@ async def _people(db: AsyncSession, company_id: uuid.UUID,
     не может открыть «Трек», в лист не попадает — иначе лист врал бы о том, что
     документ доведён.
     """
-    from app.routers.docs_router import _docs_members  # локальный импорт: цикл
+    from app.services.doc_access import _docs_members
 
     named = {u for u in (_uuid_or_none(x) for x in (
         data.get("user_ids") or data.get("userIds") or [])) if u is not None}
@@ -146,7 +146,7 @@ def _due(data: dict[str, Any]) -> datetime | None:
 async def request(db: AsyncSession, company_id: uuid.UUID, request_id: str,
                   data: dict[str, Any]) -> ApprovalRequest:
     """Направить документ на ознакомление и запомнить, ждёт ли процесс исхода."""
-    from app.routers.docs_router import _acquaint_snapshot  # локальный импорт: цикл
+    from app.services.doc_approvals import _document_snapshot as _acquaint_snapshot
 
     if company_id is None:
         raise AcquaintRequestError("Событие пришло без компании")

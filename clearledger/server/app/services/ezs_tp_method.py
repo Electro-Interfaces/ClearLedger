@@ -91,7 +91,7 @@ async def handover_state(db, tc):
 async def create_handover(db, tc):
     from app.services import ezs_tp_workflow as tp
     from app.services.doc_approvals import _document_snapshot
-    from app.routers.docs_router import _docs_members
+    from app.services.doc_access import _docs_members
     from app.services.notify import notify_person, NOTICES_ROOM_KIND
     w = tp.data_of(tc)
     if not w.archived or (tc.workflow or {}).get('_handover'): return
