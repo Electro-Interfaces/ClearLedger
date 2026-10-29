@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
 from app.services.session_scope import station_locations_sql
 
@@ -48,7 +48,10 @@ async def monitor_locations(db, company_id, location_ids=None, station_codes=Non
     return locations
 
 
-async def visit_summary(db, company_id, start, end):
+async def visit_summary(db, company_id, start, end, *, location_ids=None):
+    # None preserves the native company-wide contract; EMPTY must stay empty.
+    # Apply the object ceiling in attempts, before visit grouping/counting.
+    location_filter = " AND location_id = ANY(CAST(:location_ids AS text[]))" if location_ids is not None else ""
     rows = (await db.execute(text("""
         WITH attempts AS (
             SELECT location_id, coalesce(visit_key, 'session:' || id::text) AS key,
@@ -56,6 +59,7 @@ async def visit_summary(db, company_id, start, end):
             FROM charge_sessions
             WHERE company_id=:company AND started_at >= :start AND started_at <= :end
               AND location_id IS NOT NULL
+        """ + location_filter + """
         ), visits AS (
             SELECT location_id, key, bool_or(energy_kwh>0) AS charged
             FROM attempts GROUP BY location_id, key
@@ -65,5 +69,33 @@ async def visit_summary(db, company_id, start, end):
                count(DISTINCT a.user_id) FILTER(WHERE NOT v.charged) AS lost
         FROM visits v JOIN attempts a USING(location_id,key)
         GROUP BY v.location_id
-    """), {"company": company_id, "start": start, "end": end})).mappings().all()
+    """), {"company": company_id, "start": start, "end": end,
+           **({"location_ids": sorted(location_ids)} if location_ids is not None else {})})).mappings().all()
     return {r["location_id"]: dict(r) for r in rows}
+
+
+def _session_conditions(company_id, location_ids):
+    from app.models import ChargeSession
+    conditions = [ChargeSession.company_id == company_id]
+    if location_ids is not None:
+        conditions.append(ChargeSession.location_id.in_(location_ids))
+    return conditions
+
+
+async def session_boundary(db, company_id, *, location_ids=None, through=None):
+    """Object-scoped observed data boundary, never a company-wide watermark."""
+    from app.models import ChargeSession
+    conditions = _session_conditions(company_id, location_ids)
+    if through is not None:
+        conditions.append(ChargeSession.started_at <= through)
+    return await db.scalar(select(func.max(ChargeSession.started_at)).where(*conditions))
+
+
+async def session_summary(db, company_id, start, end, *, location_ids=None):
+    """Read-only non-financial totals; round only after summing raw energy."""
+    from app.models import ChargeSession
+    sessions, energy = (await db.execute(select(
+        func.count(), func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
+    ).where(*_session_conditions(company_id, location_ids),
+            ChargeSession.started_at >= start, ChargeSession.started_at <= end))).one()
+    return {"sessions": int(sessions), "energyKwh": decimal_round(energy)}
