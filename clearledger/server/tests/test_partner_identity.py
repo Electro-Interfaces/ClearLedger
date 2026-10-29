@@ -1,6 +1,7 @@
 """Partner HTTP conformance and live-revocation tests, isolated PostgreSQL only.
 
-Run with TEST_DATABASE_URL ending in /api_identity_test and a dedicated UPLOAD_DIR.
+Explicitly opt in with RUN_PARTNER_IDENTITY_TESTS=1, a synthetic TEST_DATABASE_URL
+and a dedicated absolute UPLOAD_DIR whose directory name contains ``test``.
 The repository's conftest exercises the real bootstrap, including repeatable DDL.
 """
 import asyncio
@@ -20,12 +21,16 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-# Guard before any database fixture can drop schemas. The rest of the repository
-# also uses conftest, so skip this opt-in suite on an unrelated test database.
-_target = urlsplit(os.environ.get("TEST_DATABASE_URL", ""))
-if (_target.hostname != "127.0.0.1" or _target.port != 33546 or _target.path != "/api_identity_test"
-        or "partner" not in os.environ.get("UPLOAD_DIR", "")):
-    pytest.skip("Partner identity requires its isolated database and upload directory", allow_module_level=True)
+from tests.partner_test_safety import partner_test_safety_error
+
+
+# Collection runs before conftest's destructive database fixture. No opt-in is a
+# visible SKIP; an explicit opt-in with an unsafe target is a collection error.
+if os.environ.get("RUN_PARTNER_IDENTITY_TESTS") != "1":
+    pytest.skip("Opt in with RUN_PARTNER_IDENTITY_TESTS=1", allow_module_level=True)
+_safety_error = partner_test_safety_error(os.environ)
+if _safety_error:
+    raise pytest.UsageError("Refusing partner test database: " + _safety_error)
 
 from app.auth import token_for
 from app.models import App, Company, CompanyApp, ServiceLocation, User, UserCompany
@@ -52,8 +57,7 @@ def rsa_key():
 
 @pytest_asyncio.fixture(loop_scope="session")
 async def env(client, db, monkeypatch, rsa_key):
-    assert urlsplit(os.environ["TEST_DATABASE_URL"]).path == "/api_identity_test"
-    assert os.environ.get("UPLOAD_DIR") and "partner" in os.environ["UPLOAD_DIR"]
+    assert partner_test_safety_error(os.environ) is None
     monkeypatch.setattr(identity.settings, "partner_oauth_enabled", True)
     monkeypatch.setattr(identity.settings, "partner_oauth_issuer", "https://identity.example")
     monkeypatch.setattr(identity.settings, "partner_oauth_audience", "urn:elsyplus:partner-api:test")
@@ -562,11 +566,12 @@ async def test_database_company_and_typed_resource_constraints(env):
             await db.flush()
 
 
-async def test_existing_schema_upgrade_and_repeat_bootstrap_preserve_core(env):
+async def test_partner_table_recreation_and_repeat_bootstrap_preserve_core(env):
     from app import database
     from app.database import Base
-    # Reproduce a pre-M10 schema using only this isolated test DB. Existing Core
-    # rows and tables survive; bootstrap creates exclusively new partner tables.
+    # Exercise recreation of the candidate's own tables and preserve Core rows.
+    # This is NOT a historical schema upgrade; test_partner_schema_compatibility
+    # constructs the actual old schema by executing immutable old source.
     before = await env["db"].scalar(select(func.count()).select_from(User))
     from app.models import PartnerSpace
     legacy_partners = await env["db"].scalar(select(func.count()).select_from(PartnerSpace))
