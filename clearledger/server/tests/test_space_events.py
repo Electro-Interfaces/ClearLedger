@@ -368,3 +368,172 @@ async def test_transport_exception_keeps_retry_and_transaction_policy(signed_del
     assert d.sub.last_status is None and d.sub.failure_streak == 1
     db.commit.assert_not_awaited()
     _verify_delivery(d.key, d.requests[0].content, d.requests[0].headers, d.clock.value)
+
+
+async def test_url_missing_ciphertext_denied_before_network_regression(signed_delivery):
+    from app.services import space_events
+    d = signed_delivery
+    d.sub.secret_enc = None
+    error = None
+    try:
+        await space_events._send(None, d.sub, d.row)
+    except RuntimeError as exc:
+        error = exc
+    # На исходном c8 здесь захватывается один неподписанный HTTP request.
+    assert not d.requests, "URL webhook ушёл в транспорт без обязательной подписи"
+    assert not d.clients, "HTTP клиент создан до проверки обязательной подписи"
+    assert str(error) == "URL webhook: невозможно сформировать подпись"
+
+
+@pytest.mark.parametrize("broken", ["missing_ciphertext", "empty_ciphertext", "missing_key", "rotated_key",
+    "corrupt_ciphertext", "plaintext_ciphertext", "empty_decrypted", "non_utf8_decrypted",
+    "empty_whsec", "junk_whsec", "non_ascii_whsec", "bad_padding_whsec", "whitespace_whsec"])
+async def test_url_signing_failures_deny_before_client_without_secret_disclosure(signed_delivery, monkeypatch, broken):
+    from cryptography.fernet import Fernet
+    from app.services import space_events
+    d = signed_delivery
+    if broken == "missing_ciphertext":
+        d.sub.secret_enc = None
+    elif broken == "empty_ciphertext":
+        d.sub.secret_enc = ""
+    elif broken == "missing_key":
+        monkeypatch.delenv("EVENTS_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+    elif broken == "rotated_key":
+        monkeypatch.setenv("EVENTS_SECRET_KEY", "different-synthetic-stack-key")
+    elif broken == "corrupt_ciphertext":
+        d.sub.secret_enc = "not-a-valid-synthetic-fernet-token"
+    elif broken == "plaintext_ciphertext":
+        d.sub.secret_enc = d.secret
+    elif broken in {"empty_decrypted", "non_utf8_decrypted"}:
+        d.sub.secret_enc = Fernet(space_events._key()).encrypt(b"" if broken == "empty_decrypted" else b"\xff").decode()
+    else:
+        secret = {"empty_whsec": "whsec_", "junk_whsec": "whsec_!!!!", "non_ascii_whsec": "whsec_é",
+                  "bad_padding_whsec": "whsec_YQ===", "whitespace_whsec": "whsec_Y Q=="}[broken]
+        d.sub.secret_enc = space_events.encrypt_secret(secret)
+    ciphertext = d.sub.secret_enc
+    with pytest.raises(RuntimeError) as raised:
+        await space_events._send(None, d.sub, d.row)
+    assert str(raised.value) == "URL webhook: невозможно сформировать подпись"
+    assert raised.value.__suppress_context__ is True
+    assert d.secret not in str(raised.value)
+    assert not ciphertext or ciphertext not in str(raised.value)
+    assert not d.requests and not d.clients
+    assert d.row.status == "pending" and d.row.attempts == 0
+
+
+async def test_url_signer_exception_is_safe_and_never_creates_client(signed_delivery, monkeypatch):
+    from app.services import space_events
+    d = signed_delivery
+    def cannot_sign(*args):
+        raise ValueError("synthetic-secret-detail-never-retained")
+    monkeypatch.setattr(space_events, "sign", cannot_sign)
+    with pytest.raises(RuntimeError) as raised:
+        await space_events._send(None, d.sub, d.row)
+    assert str(raised.value) == "URL webhook: невозможно сформировать подпись"
+    assert "synthetic-secret-detail" not in str(raised.value)
+    assert not d.requests and not d.clients
+
+
+@pytest.mark.parametrize("legacy", ["prefixed", "raw_unicode", "stack_secret_key_fallback"])
+async def test_url_legitimate_legacy_secret_keeps_wire_hmac(signed_delivery, monkeypatch, legacy):
+    from app.services import space_events
+    d = signed_delivery
+    key = d.key
+    if legacy == "raw_unicode":
+        raw = "простой-секрет-совместимого-подписчика"
+        key = raw.encode("utf-8")
+        d.sub.secret_enc = space_events.encrypt_secret(raw)
+    elif legacy == "stack_secret_key_fallback":
+        monkeypatch.delenv("EVENTS_SECRET_KEY", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "synthetic-canonical-stack-key")
+        d.sub.secret_enc = space_events.encrypt_secret(d.secret)
+    assert await space_events._send(None, d.sub, d.row) == 204
+    request, = d.requests
+    event = _verify_delivery(key, request.content, request.headers, d.clock.value)
+    assert event["id"] == str(_EVENT_ID) and event["time"] == "2026-08-20T09:30:00Z"
+    assert event["data"] == d.row.data
+    assert request.headers["webhook-timestamp"] == str(int(d.clock.value.timestamp()))
+    assert "authorization" not in request.headers
+
+
+@pytest.mark.parametrize("optional_hmac", ["missing_ciphertext", "missing_key", "rotated_key"])
+async def test_app_without_hmac_retains_canonical_service_bearer(signed_delivery, monkeypatch, optional_hmac):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+    from app.services import space_events
+    d = signed_delivery
+    d.sub.target_kind, d.sub.app_code, d.sub.path = "app", "support", "/api/v1/eco/events"
+    if optional_hmac == "missing_ciphertext":
+        d.sub.secret_enc = None
+    elif optional_hmac == "missing_key":
+        monkeypatch.delenv("EVENTS_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("EVENTS_SECRET_KEY", "different-synthetic-stack-key")
+    target = AsyncMock(return_value=(SimpleNamespace(config={"internalUrl": "http://support:3003"}),
+                                    SimpleNamespace(external_company_id="mapped-company"), "projection-unused"))
+    # Синтетический RSA ключ только в памяти; production signer и JWT verification настоящие.
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import jwt
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                            serialization.NoEncryption())
+    monkeypatch.setattr(space_events.sso.settings, "sso_signing_key", base64.b64encode(pem).decode())
+    monkeypatch.setattr(space_events.sso.settings, "sso_issuer", "synthetic-event-unit-issuer")
+    token = Mock(wraps=space_events.sso.sign_service_token)
+    monkeypatch.setattr(space_events, "_target", target)
+    monkeypatch.setattr(space_events.sso, "sign_service_token", token)
+    assert await space_events._send(None, d.sub, d.row) == 204
+    request, = d.requests
+    bearer = request.headers["authorization"].removeprefix("Bearer ")
+    claims = jwt.decode(bearer, key.public_key(), algorithms=["RS256"],
+                        issuer="synthetic-event-unit-issuer", audience="support")
+    assert claims["svc"] == "events" and claims["sub"] == "service:events"
+    assert not any(header.startswith("webhook-") for header in request.headers)
+    assert json.loads(request.content)["data"]["companyId"] == "mapped-company"
+    assert d.row.data["companyId"] == "core-company"
+    target.assert_awaited_once_with(None, d.row.company_id, "support")
+    token.assert_called_once_with(aud="support", scope="events")
+
+
+async def test_url_signing_failure_retries_to_limit_without_success_or_network(signed_delivery):
+    from app.services import space_events
+    d = signed_delivery
+    d.sub.secret_enc = None
+    db = _delivery_db([d.row], {d.sub.id: d.sub})
+    first_failure = d.clock.value
+    for attempt in range(1, space_events.MAX_ATTEMPTS + 1):
+        assert await space_events.deliver_pending(db, d.clock.value) == 0
+        assert d.row.attempts == d.sub.failure_streak == attempt
+        assert d.row.last_error == d.sub.last_error == "URL webhook: невозможно сформировать подпись"
+        assert d.sub.last_status is None and d.row.delivered_at is None
+        assert d.sub.failing_since == first_failure
+        if attempt < space_events.MAX_ATTEMPTS:
+            assert d.row.status == "pending"
+            assert d.row.next_attempt_at == d.clock.value + _backoff(attempt)
+            d.clock.value = d.row.next_attempt_at
+        else:
+            assert d.row.status == "failed"
+    assert not d.requests and not d.clients
+    for method in (db.commit, db.rollback, db.flush):
+        method.assert_not_awaited()
+
+
+async def test_bad_signing_recipient_does_not_crash_good_recipient(signed_delivery):
+    from copy import copy
+    from app.services import space_events
+    d = signed_delivery
+    bad_sub = copy(d.sub); bad_sub.id = uuid.uuid4(); bad_sub.secret_enc = None
+    bad_row = copy(d.row); bad_row.subscription_id = bad_sub.id
+    db = _delivery_db([bad_row, d.row], {bad_sub.id: bad_sub, d.sub.id: d.sub})
+    assert await space_events.deliver_pending(db, d.clock.value) == 1
+    assert bad_row.status == "pending" and bad_row.delivered_at is None
+    assert bad_row.last_error == "URL webhook: невозможно сформировать подпись"
+    assert bad_sub.failure_streak == 1 and bad_sub.last_status is None
+    assert d.row.status == "done" and d.sub.last_status == 204
+    assert d.row.event_id == bad_row.event_id
+    assert len(d.requests) == len(d.clients) == 1
+    _verify_delivery(d.key, d.requests[0].content, d.requests[0].headers, d.clock.value)
+    db.commit.assert_not_awaited()
