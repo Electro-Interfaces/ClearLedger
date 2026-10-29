@@ -24,6 +24,7 @@ ZIP не загружается целиком в память. Размер и 
 | Site document | **data**, как старый SourceFile model default | router |
 | Shared organization PDF | attachment, исходное имя/MIME PDF, принудительный storage suffix `.pdf` | router |
 | TP handover ZIP | attachment, stream archive, прежний manifest/content; SourceFile/DocVersion size/hash/id согласованы | enclosing workflow |
+| Ops station-check photo — интеграция root | attachment, прежние name/MIME и fallback suffix `.jpg` | прежний router |
 
 `storage_suffix` — внутренний override только расширения, не пути. Имя файла
 сохраняется отдельно; каталог и filename хранения задаются UUID. Ранее сохранённые
@@ -93,9 +94,11 @@ commit. Такая ошибка может оставить orphan; cleanup по
 
 ## Проверка
 
-Только выделенная локальная PostgreSQL `api_file_store_test`, 127.0.0.1:33546,
-container `api-modernization-test-20261029`, owner clearledger. Новый модуль до
-fixtures требует этот явный TEST_DATABASE_URL. UPLOAD_DIR — абсолютный tmp path;
+У исполнителя — выделенная локальная PostgreSQL `api_file_store_test`,
+container `api-modernization-test-20261029`, owner clearledger. Координатор
+перевёл suite на общий pure safety guard: `RUN_FILE_STORE_TESTS=1`, явный
+synthetic TEST_DATABASE_URL и абсолютный test UPLOAD_DIR, без фиксированных
+имени БД/порта/машины. Guard исполняется до destructive fixtures;
 рабочие данные, VM, env и другие БД не использовались. Conftest с DROP schemas
 прочитан до запуска; отсутствующую БД создал координатор.
 
@@ -130,12 +133,20 @@ cases здесь повторно не запускались: adapters и domai
 
 | Место | Причина оставить |
 |---|---|
-| `routers/ops_router.py` initial SourceFile bytes | Ownership M08; единственный оставшийся прямой initial SourceFile writer вне helper, передан координатору |
 | `doc_exchange.place_package` | Внешняя папка обмена/DocExport, не SourceFile; external egress lifecycle не менялся |
 | `doc_text` | Временный файл извлечения текста, не shared SourceFile creation |
 | `media_shrink` | Probe/temp и in-place transform уже сохранённого файла; новый SourceFile/UUID здесь был бы несовместим |
 | `main` filesystem readiness probe | Проверка доступности каталога, не byte writer SourceFile |
 | SourceFile metadata/чтение/готовые imports | Это не новый byte ownership, не переписывались |
+
+После интеграции root единственный прямой `SourceFile(...)` в app — общий
+writer (плюс объявление модели). Ops photo также использует его; HTTP commit
+сохранения и ошибка после flush/rollback проверены двумя дополнительными cases.
+Независимый объединённый прогон координатора: 119 файловых/документных/архивных
+проверок PASS, включая исправление раннего CLASS commit observer; две прежние
+archive DELETE warning сохранены. Затем 121 closing/payment/contract regression
+и отдельные два photo HTTP cases PASS. Это доказательства синтетической
+приёмки, не изменения рабочего хранилища или гарантия распределённой атомарности.
 
 Проверены SourceFile constructors, прямые write_bytes/open и aliases/SQL inserts.
 Помимо delegated ops_router конструктор SourceFile остался только в file_store.

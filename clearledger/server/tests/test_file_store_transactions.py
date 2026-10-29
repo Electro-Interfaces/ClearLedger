@@ -13,14 +13,17 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 
-_url = make_url(os.environ.get("TEST_DATABASE_URL", "postgresql://invalid/invalid"))
-if (_url.host, _url.port, _url.database) != ("127.0.0.1", 33546, "api_file_store_test"):
-    pytest.skip("Requires explicitly dedicated api_file_store_test", allow_module_level=True)
+from tests.partner_test_safety import partner_test_safety_error
+
+if os.environ.get("RUN_FILE_STORE_TESTS") != "1":
+    pytest.skip("Opt in with RUN_FILE_STORE_TESTS=1", allow_module_level=True)
+_safety_error = partner_test_safety_error(os.environ, flag="RUN_FILE_STORE_TESTS")
+if _safety_error:
+    raise pytest.UsageError("Refusing file-store test database: " + _safety_error)
 
 from app.models import Company, SourceFile
 from app.services import file_store

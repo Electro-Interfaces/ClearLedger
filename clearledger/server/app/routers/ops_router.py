@@ -362,11 +362,7 @@ async def post_station_check(
     грузится фото на мобильном интернете, вреднее, чем принять запись, — но
     пункт с `photo` без файла в карточке помечен как неподтверждённый.
     """
-    import hashlib
-    import os
-    from pathlib import Path
-
-    from app.models import SourceFile
+    from app.services import file_store
 
     cid = await assert_company_member(company_id, current_user, db)
 
@@ -374,19 +370,12 @@ async def post_station_check(
     if file is not None:
         content = await file.read()
         if content:
-            file_id = uuid.uuid4()
-            upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            ext = Path(file.filename or "photo.jpg").suffix
-            path = upload_dir / f"{file_id}{ext}"
-            with open(path, "wb") as fh:
-                fh.write(content)
-            db.add(SourceFile(
-                id=file_id, company_id=cid, file_name=file.filename or "снимок",
-                mime_type=file.content_type or "image/jpeg", size=len(content),
-                storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest(),
-                purpose="attachment"))
-            await db.flush()
+            stored = await file_store.put_and_flush(
+                db, cid, content, file_name=file.filename or "снимок",
+                mime=file.content_type or "image/jpeg", purpose="attachment",
+                storage_suffix=None if file.filename else ".jpg",
+            )
+            file_id = stored.id
 
     try:
         res = await sc.add_check(
