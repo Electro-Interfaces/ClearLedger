@@ -22,24 +22,42 @@ import type {
 import { nanoid } from 'nanoid'
 
 let _companyId: string | null = null
+let _generation = 0
+
+// Компания и поколение фиксируются ДО await. Повторный вход в ту же компанию
+// после reset — уже другой контекст; отмена не должна превращаться в fallback.
+function captureContext(companyId = _companyId, signal?: AbortSignal) {
+  const generation = _generation
+  return {
+    companyId,
+    assertCurrent() {
+      signal?.throwIfAborted()
+      if (companyId !== _companyId || generation !== _generation) {
+        throw new DOMException('Контекст компании изменился', 'AbortError')
+      }
+    },
+  }
+}
 
 // Ключ localStorage — per-company, чтобы точки разных компаний не перемешивались.
-function lsKey(): string {
-  return `tl-locations-${_companyId ?? '_'}`
+function lsKey(companyId = _companyId): string {
+  return `tl-locations-${companyId ?? '_'}`
 }
-function lsGet(): ServiceLocation[] {
-  return getItem<ServiceLocation[]>(lsKey(), [])
+function lsGet(companyId = _companyId): ServiceLocation[] {
+  return getItem<ServiceLocation[]>(lsKey(companyId), [])
 }
-function lsSet(v: ServiceLocation[]) {
-  setItem(lsKey(), v)
+function lsSet(v: ServiceLocation[], companyId = _companyId) {
+  setItem(lsKey(companyId), v)
 }
 
 /** Активная компания (вызывается из CompanyContext) — задаёт ключ хранилища. */
 export function setActiveCompany(id: string) {
+  if (_companyId !== id) _generation++
   _companyId = id
 }
 /** Сброс модульного состояния при смене компании / выходе. */
 export function resetCache() {
+  _generation++
   _companyId = null
 }
 
@@ -126,18 +144,19 @@ function fromApi(r: ApiLocation): ServiceLocation {
   }
 }
 
-function toApiBody(l: ServiceLocation) {
+function toApiBody(l: ServiceLocation, companyId: string) {
   return {
-    id: l.id, company_id: _companyId, code: l.code, name: l.name,
+    id: l.id, company_id: companyId, code: l.code, name: l.name,
     type: l.type, status: l.status, address: l.address ?? null,
     description: l.description ?? null, sourceBindings: l.sourceBindings,
     metadata: l.metadata ?? null,
   }
 }
 
-function mirrorPush(loc: ServiceLocation) {
-  if (!isApiEnabled() || !_companyId) return
-  void post('/api/locations', toApiBody(loc)).catch((e) =>
+function mirrorPush(loc: ServiceLocation, context = captureContext()) {
+  context.assertCurrent()
+  if (!isApiEnabled() || !context.companyId) return
+  void post('/api/locations', toApiBody(loc, context.companyId)).catch((e) =>
     console.warn('locationService: push в бэкенд не удался', e),
   )
 }
@@ -158,24 +177,28 @@ function mirrorDelete(id: string) {
   )
 }
 
-/** Гидрация из бэкенда в localStorage (общие точки для всех браузеров). */
-export async function loadLocations(companyId: string): Promise<ServiceLocation[]> {
-  _companyId = companyId
-  if (!isApiEnabled()) return lsGet()
+/** Гидрация выбранной CompanyContext компании; устаревший вызов отклоняется AbortError. */
+export async function loadLocations(companyId: string, signal?: AbortSignal): Promise<ServiceLocation[]> {
+  const context = captureContext(companyId, signal)
+  context.assertCurrent()
+  if (!isApiEnabled()) return lsGet(companyId)
   try {
-    const rows = await get<ApiLocation[]>('/api/locations', { company_id: companyId })
+    const rows = await get<ApiLocation[]>('/api/locations', { company_id: companyId }, { signal })
+    context.assertCurrent()
     const backend = rows.map(fromApi)
-    const local = lsGet()
+    const local = lsGet(companyId)
     if (backend.length === 0 && local.length > 0) {
       // Бэкенд пуст, есть локальные — одноразовая миграция вверх.
-      for (const l of local) mirrorPush(l)
+      for (const l of local) mirrorPush(l, context)
       return local
     }
-    lsSet(backend)
+    lsSet(backend, companyId)
     return backend
   } catch (e) {
+    context.assertCurrent()
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
     console.warn('locationService: loadLocations упал, остаюсь на localStorage', e)
-    return lsGet()
+    return lsGet(companyId)
   }
 }
 
@@ -245,12 +268,15 @@ export interface OpStatusHistoryItem {
 export async function setOperationalStatus(
   id: string, status: string, reason?: string,
 ): Promise<void> {
+  const context = captureContext()
+  context.assertCurrent()
   await patch(`/api/locations/${id}/operational-status`, { status, reason })
-  const all = lsGet()
+  context.assertCurrent()
+  const all = lsGet(context.companyId)
   const idx = all.findIndex((l) => l.id === id)
   if (idx !== -1) {
     all[idx] = { ...all[idx], operationalStatus: status }
-    lsSet(all)
+    lsSet(all, context.companyId)
   }
 }
 

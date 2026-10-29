@@ -30,7 +30,7 @@ export function ContractDocumentsBlock({ contract: c }: { contract: Contract }) 
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const ref = `contract:${c.id}`
-  const docs = useQuery({ queryKey: ['contract-docs', c.id], queryFn: () => listDocs(companyId, { ref } as never) })
+  const docs = useQuery({ queryKey: ['contract-docs', c.id], queryFn: () => listDocs(companyId, { ref }) })
   const [adding, setAdding] = useState(false)
   const kinds = useQuery({
     queryKey: ['contract-doc-kinds', companyId], enabled: adding, staleTime: 600_000,

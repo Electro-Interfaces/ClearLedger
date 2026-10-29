@@ -239,7 +239,12 @@ function headers(extra?: Record<string, string>): Record<string, string> {
 }
 
 /** GET запрос */
-export async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+export async function get<T>(
+  path: string,
+  params?: Record<string, string | number | undefined>,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  options?.signal?.throwIfAborted()
   if (isDemoMode()) return demoGet<T>(path, params)
   // База обязательна: в контейнере VITE_API_URL пуст (API на том же origin), и без второго
   // аргумента `new URL('/api/…')` бросает «Invalid URL» — падали все GET с параметрами.
@@ -249,7 +254,7 @@ export async function get<T>(path: string, params?: Record<string, string | numb
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v))
     }
   }
-  const res = await fetch(url.toString(), { headers: headers() })
+  const res = await fetch(url.toString(), { headers: headers(), signal: options?.signal })
   return handleResponse<T>(res)
 }
 
