@@ -577,6 +577,10 @@ async def test_partner_table_recreation_and_repeat_bootstrap_preserve_core(env):
     legacy_partners = await env["db"].scalar(select(func.count()).select_from(PartnerSpace))
     new_tables = {mapper.local_table for mapper in Base.registry.mappers
                   if mapper.class_.__module__ == "app.models_partner"}
+    # M11 adds a child FK to partner_tokens; include that owned extension in
+    # the dependency-ordered reset instead of CASCADE-dropping unknown tables.
+    from app.models_docs_portal import DocsPortalSession
+    new_tables.add(DocsPortalSession.__table__)
     await env["db"].commit()
     async with database.engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):

@@ -89,6 +89,7 @@ test('real HTTPS: public gate callback → docs cookie → separate Swagger PKCE
   for (const request of traffic) {
     if (request.path.startsWith('/p/') || request.path.includes('/assets/')) assert.equal(/(?:code|state)=/.test(request.referer ?? ''), false)
   }
+  await expect(frame.locator('.opblock-summary-path[data-path="/objects"]')).toBeVisible({ timeout: 20000 })
   await page.screenshot({ path: `${output}/portal-desktop.png`, fullPage: true })
 
   // Native pinned Swagger Authorize is a SECOND real public Code+PKCE flow.
@@ -131,6 +132,7 @@ test('real HTTPS: public gate callback → docs cookie → separate Swagger PKCE
   assert.equal(traffic.filter((request) => request.path === '/api/v1/objects').length, readCount)
   await writeFile(process.env.DOCS_E2E_MODE_FILE!, 'sandbox')
   await page.setViewportSize({ width: 390, height: 844 })
+  await frame.locator('body').evaluate((body) => body.ownerDocument.defaultView?.scrollTo(0, 0))
   await page.screenshot({ path: `${output}/portal-mobile.png`, fullPage: true })
   await page.getByRole('button', { name: 'Выйти из документации', exact: true }).click()
   await expect(page.locator('iframe')).toHaveCount(0)
