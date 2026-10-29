@@ -255,7 +255,8 @@ async def serve(database,upload,settings,state,callback):
                 {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,'documents':empty},
                 [origin+'/developer/api/callback',origin+'/api/developer/docs/oauth2-redirect'])
             # Клиент портала issuer никогда не передаётся внешнему клиенту.
-            manifest['rental']={**manifest['clients']['references'],'vectors':{k:fixture['vectors'][k] for k in ('objects','counterparties','contracts')}}
+            manifest['rental']={**manifest['clients']['references'],'vectors':{k:fixture['vectors'][k] for k in ('objects','counterparties','contracts','equipment')}}
+            manifest['expectationSemantics']={'rentalEquipment':'ALL resource intersect SET installation locations intersect kind=station'}
             manifest['operations']={**manifest['clients']['monitoring'],'vectors':{k:fixture['vectors'][k] for k in ('objects','equipment')},
                 'afterNarrowObjects':fixture['objects'][:1]}
             manifest['documents']={**manifest['clients']['documents'],'redirectUri':callback,

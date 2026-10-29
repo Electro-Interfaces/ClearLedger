@@ -142,7 +142,10 @@ Manifest соответствует клиентскому wire-формату: 
 `sourceRevision`, `rental` (references), `operations` (monitoring), `documents`.
 В каждом сценарии выдаются настоящие `vectors` с `allowed`, `foreign`, `ungranted`;
 для документов — `allowedContent` с SHA-256 и `deniedContent`. References equipment
-имеет ALL в пределах location boundary и не используется как проверка SET denial.
+имеет ALL в пределах location boundary: `rental.vectors.equipment.allowed` содержит
+первые две station единицы, `ungranted` означает отказ по object boundary установки,
+а не по resource SET. `resources.equipment` — исходный каталог fixture, он не
+задаёт ожидаемый итог выдачи. Семантика пересечения записана в manifest отдельно.
 
 По запросу root реальные owner controls:
 
