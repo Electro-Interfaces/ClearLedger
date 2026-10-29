@@ -20,7 +20,7 @@ from app.models import App, Company, CompanyApp, User
 from app.models_partner import PartnerAuthorizationRequest, PartnerGrant, PartnerInstallation
 from app.schemas_partner import ApproveConsent
 from app.services.partner_identity import (NO_STORE, SCOPE_DESCRIPTIONS, PartnerAuthorizationServer, PartnerProblem, PartnerRoute,
-    ProtocolRequest, eligible_scopes, get_verified_partner_token, live_grant, now, public_jwks,
+    ProtocolRequest, eligible_scopes, get_verified_partner_token, live_grant, now, partner_bearer_headers, public_jwks,
     require_core_user, require_enabled, settings, user_info, validate_scopes)
 
 router = APIRouter(prefix="/oauth2", tags=["Partner OAuth/OIDC"], route_class=PartnerRoute)
@@ -179,7 +179,8 @@ async def jwks():
 @router.get("/userinfo")
 async def userinfo(identity=Depends(get_verified_partner_token), db: AsyncSession = Depends(get_db)):
     if identity.is_machine or "openid" not in identity.scopes:
-        return protocol_error("insufficient_scope", 403)
+        return JSONResponse({"error": "insufficient_scope"}, status_code=403,
+            headers=partner_bearer_headers("insufficient_scope"))
     return JSONResponse(await db.run_sync(lambda sync: user_info(sync, sync.get(User, identity.user_id),
         identity.client_id, set(identity.scopes))), headers=NO_STORE)
 

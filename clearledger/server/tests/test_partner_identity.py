@@ -447,6 +447,97 @@ async def test_pairwise_stability_and_userinfo_scope(env):
     assert info.json() == {"sub": v1.subject}
 
 
+def assert_userinfo_headers(response, challenge=None):
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+    assert response.headers.get("www-authenticate") == challenge
+
+
+@pytest.mark.parametrize("confidential", [False, True], ids=["public-none", "confidential-basic"])
+@pytest.mark.parametrize("scopes", [["openid", "profile", "email"], ["openid"], ["docs:read"]],
+    ids=["full-userinfo", "subject-only", "no-openid"])
+async def test_userinfo_bearer_wire_user_profiles(env, confidential, scopes):
+    app = await registration(env, confidential=confidential, scopes=scopes)
+    issued, _ = await tokens(env, app, scopes)
+    verified = await verify(issued["access_token"])
+    response = await env["client"].get("/api/oauth2/userinfo", headers={"Authorization": "Bearer " + issued["access_token"]})
+    if "openid" not in scopes:
+        assert response.status_code == 403
+        assert response.json() == {"error": "insufficient_scope"}
+        assert_userinfo_headers(response, 'Bearer realm="partner-api", error="insufficient_scope"')
+    else:
+        assert response.status_code == 200
+        expected = {"sub": verified.subject}
+        if "profile" in scopes:
+            expected["name"] = env["user"].name
+        if "email" in scopes:
+            expected["email"] = env["user"].email
+        assert response.json() == expected
+        assert verified.subject != str(env["user"].id)
+        assert jwt.decode(issued["id_token"], options={"verify_signature": False})["sub"] == verified.subject
+        assert_userinfo_headers(response)
+
+
+@pytest.mark.parametrize("state", ["missing", "unsupported", "oversized", "invalid", "revoked", "jwt-expired", "row-expired", "family-expired"])
+async def test_userinfo_bearer_wire_invalid_credentials(env, state):
+    challenge = 'Bearer realm="partner-api"'
+    detail = "Invalid partner access token"
+    headers = {}
+    if state in {"missing", "unsupported"}:
+        detail = "Partner bearer required"
+        if state == "unsupported":
+            headers["Authorization"] = "Basic c3ludGhldGljOg=="
+    elif state in {"oversized", "invalid"}:
+        headers["Authorization"] = "Bearer " + ("x" * 8193 if state == "oversized" else "invalid")
+        if state == "invalid":
+            challenge += ', error="invalid_token"'
+    else:
+        app = await registration(env)
+        issued, _ = await tokens(env, app)
+        value = issued["access_token"]
+        verified = await verify(value)
+        row = await env["db"].get(PartnerToken, verified.token_id)
+        if state == "revoked":
+            # The real revocation endpoint invalidates the issued family.
+            revoked = await env["client"].post("/api/oauth2/revoke", data={
+                "client_id": app["client_id"], "token": issued["refresh_token"]})
+            assert revoked.status_code == 200
+        elif state == "jwt-expired":
+            claims = jwt.decode(value, options={"verify_signature": False})
+            claims["exp"] = int((identity.now() - timedelta(seconds=10)).timestamp())
+            value = jwt.encode(claims, identity.signing_key(), algorithm="RS256",
+                headers={"typ": "at+jwt", "kid": identity.settings.partner_oauth_kid})
+        elif state == "row-expired":
+            row.expires_at = identity.now() - timedelta(seconds=1)
+            await env["db"].commit()
+        elif state == "family-expired":
+            family = await env["db"].get(PartnerTokenFamily, row.family_id)
+            family.expires_at = identity.now() - timedelta(seconds=1)
+            await env["db"].commit()
+        headers["Authorization"] = "Bearer " + value
+        challenge += ', error="invalid_token"'
+    response = await env["client"].get("/api/oauth2/userinfo", headers=headers)
+    assert response.status_code == 401
+    assert response.json() == {"detail": detail}
+    assert_userinfo_headers(response, challenge)
+
+
+async def test_userinfo_bearer_wire_machine_denial(env):
+    app = await registration(env, confidential=True, scopes=["objects:read"])
+    response = await env["client"].post(f'/api/developer/installations/{app["installation_id"]}/machine-grants',
+        json={"scopes": ["objects:read"]}, headers=env["headers"])
+    assert response.status_code == 201
+    issued = await env["client"].post("/api/oauth2/token", auth=(app["client_id"], app["secret"]), data={
+        "grant_type": "client_credentials", "grant_id": response.json()["grantId"], "scope": "objects:read"})
+    assert issued.status_code == 200
+    verified = await verify(issued.json()["access_token"])
+    assert verified.is_machine and verified.user_id is None
+    response = await env["client"].get("/api/oauth2/userinfo", headers={"Authorization": "Bearer " + issued.json()["access_token"]})
+    assert response.status_code == 403
+    assert response.json() == {"error": "insufficient_scope"}
+    assert_userinfo_headers(response, 'Bearer realm="partner-api", error="insufficient_scope"')
+
+
 async def test_resource_grants_typed_company_and_empty_distinct(env):
     resources = {"objects": {"mode": "SET", "ids": [env["location"].id]}, "contracts": {"mode": "ALL", "ids": []}}
     app = await registration(env, resources=resources)
