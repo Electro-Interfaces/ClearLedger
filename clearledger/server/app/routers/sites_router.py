@@ -994,30 +994,17 @@ async def upload_site_doc(
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Загрузить документ к проекту. Файл ложится в общее хранилище."""
-    import hashlib
-    import os
-    from pathlib import Path
-
-    from app.models import SourceFile
-
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
     content = await file.read()
     if not content:
         raise HTTPException(400, "Пустой файл")
 
-    file_id = uuid.uuid4()
-    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename or "file").suffix
-    path = upload_dir / f"{file_id}{ext}"
-    with open(path, "wb") as fh:
-        fh.write(content)
-    db.add(SourceFile(
-        id=file_id, company_id=cid, file_name=file.filename or "документ",
-        mime_type=file.content_type or "application/octet-stream", size=len(content),
-        storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest()))
-    await db.flush()
+    from app.services import file_store
+    source = await file_store.put_and_flush(db, cid, content,
+        file_name=file.filename or "документ", mime=file.content_type or "application/octet-stream",
+        purpose="data")
+    file_id = source.id
 
     res = await ezs_project.add_doc(db, cid, site, file_id=file_id, kind=kind,
                                     title=title, note=note, user=user)
@@ -1179,10 +1166,7 @@ async def upload_tp_shared_document(site_id: uuid.UUID, organization_id: uuid.UU
                                     kind: str, valid_until: date | None = None,
                                     company_id: str = Query(...), file: UploadFile = File(...),
                                     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    import hashlib
-    import os
-    from pathlib import Path
-    from app.models import Organization, SourceFile, TpOrganizationDocument, UserCompany
+    from app.models import Organization, TpOrganizationDocument, UserCompany
     from app.services.ezs_tp_workflow import SHARED_KINDS
     cid = await assert_company_member(company_id, user, db)
     await _owned(db, cid, site_id)
@@ -1197,27 +1181,19 @@ async def upload_tp_shared_document(site_id: uuid.UUID, organization_id: uuid.UU
         raise HTTPException(400, "Загрузите непустой PDF размером до 20 МБ")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(400, "Общий документ должен быть PDF")
-    fid = uuid.uuid4()
-    folder = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{fid}.pdf"
-    path.write_bytes(content)
-    try:
-        db.add(SourceFile(id=fid, company_id=cid, file_name=file.filename or "document.pdf",
-                          mime_type="application/pdf", purpose="attachment", size=len(content), storage_path=str(path),
-                          fingerprint=hashlib.sha256(content).hexdigest()))
-        await db.flush()
-        doc = TpOrganizationDocument(company_id=cid, organization_id=organization_id,
-                                     file_id=fid, kind=kind,
-                                     valid_until=valid_until.isoformat() if valid_until else None)
-        db.add(doc)
-        await db.flush()
-        await ezs_site_work.log_event(db, await _owned(db, cid, site_id), "doc", user=user,
-            text=f"Добавлена общая версия документа заявителя: {kind}")
-        await db.commit()
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
+    from app.services import file_store
+    source = await file_store.put_and_flush(db, cid, content,
+        file_name=file.filename or "document.pdf", mime="application/pdf", purpose="attachment",
+        storage_suffix=".pdf")
+    fid = source.id
+    doc = TpOrganizationDocument(company_id=cid, organization_id=organization_id,
+                                 file_id=fid, kind=kind,
+                                 valid_until=valid_until.isoformat() if valid_until else None)
+    db.add(doc)
+    await db.flush()
+    await ezs_site_work.log_event(db, await _owned(db, cid, site_id), "doc", user=user,
+        text=f"Добавлена общая версия документа заявителя: {kind}")
+    await db.commit()
     return {"id": str(doc.id)}
 
 

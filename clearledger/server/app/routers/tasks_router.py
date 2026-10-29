@@ -3061,16 +3061,10 @@ async def upload_attachment(
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустой файл")
 
-    file_id = uuid.uuid4()
-    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    path = upload_dir / f"{file_id}{Path(file.filename or 'file').suffix}"
-    with open(path, "wb") as fh:
-        fh.write(content)
-    db.add(SourceFile(
-        id=file_id, company_id=cid, file_name=file.filename or "файл",
-        mime_type=file.content_type or "application/octet-stream", size=len(content),
-        storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest()))
+    from app.services import file_store
+    source = file_store.put(db, cid, content, file_name=file.filename or "файл",
+        mime=file.content_type or "application/octet-stream", purpose="data")
+    file_id = source.id
     att = TaskAttachment(
         task_id=t.id, file_id=file_id, uploaded_by=current_user.id,
         event_id=_uuid_or_400(event_id, "event_id") if event_id else None)
