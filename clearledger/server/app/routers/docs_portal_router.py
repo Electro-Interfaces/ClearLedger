@@ -132,7 +132,13 @@ async def ui(request: Request, db=Depends(docs_session)):
     safe = json.dumps(config).replace("<", "\\u003c")
     html = f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Документация API</title><link rel="stylesheet" href="{portal.PREFIX}/assets/swagger-ui.css">
-<style>body{{font:14px system-ui,sans-serif;margin:16px}} input[data-name="clientSecret"],label[for^="client_secret_"]{{display:none!important}} #docs-auth-logout{{min-height:36px;padding:0 12px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#172033}}</style></head>
+<style>body{{font:14px system-ui,sans-serif;margin:16px}} input[data-name="clientSecret"],label[for^="client_secret_"]{{display:none!important}} #docs-auth-logout{{min-height:36px;padding:0 12px;border:1px solid #cbd5e1;border-radius:8px;background:white;color:#172033}}
+@media(max-width:600px){{
+  .swagger-ui .opblock-tag{{flex-wrap:wrap;gap:6px 10px}}
+  .swagger-ui .opblock-tag>a{{min-width:0;overflow-wrap:anywhere}}
+  .swagger-ui .opblock-tag small{{flex:1 0 100%;order:2;padding:0}}
+  .swagger-ui .opblock-tag button{{margin-left:auto}}
+}}</style></head>
 <body><p id="docs-mode"></p><button id="docs-auth-logout" type="button">Завершить доступ к API</button><div id="swagger-ui"></div>
 <script id="docs-config" type="application/json">{safe}</script>
 <script src="{portal.PREFIX}/assets/swagger-ui-bundle.js"></script><script src="{portal.PREFIX}/assets/portal-init.js"></script></body></html>'''
