@@ -65,7 +65,7 @@ def application(factory, settings, state):
     from fastapi.responses import FileResponse, JSONResponse, Response
     from app.database import get_db
     from app.auth import gate_ok
-    from app.routers import auth_router, partner_admin_router, partner_oauth_router, docs_portal_router
+    from app.routers import auth_router, partner_admin_router, partner_oauth_router, docs_portal_router, users_router
     from app.services import partner_identity as identity, notify
     from app.product_api import create_product_api
     from app.api_contracts import policy_registry
@@ -76,7 +76,7 @@ def application(factory, settings, state):
     app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
     app.add_exception_handler(identity.PartnerProblem,identity.problem_handler)
     for router in (auth_router.router,partner_admin_router.router,partner_oauth_router.router,
-                   partner_oauth_router.consent_router,docs_portal_router.router):
+                   partner_oauth_router.consent_router,docs_portal_router.router,users_router.router):
         app.include_router(router,prefix='/api')
     app.include_router(partner_oauth_router.well_known_router)
     async def database():
@@ -201,7 +201,8 @@ async def serve(database,upload,settings,state,callback):
             logged=await call('POST','/api/auth/login',json={k:fixture['owner'][k] for k in ('email','password')})
             headers={'Authorization':'Bearer '+logged['access_token']}
             manifest={'origin':origin,'caPath':state['caPath'],'companyId':fixture['companyId'],
-                'callback':callback,'resources':{k:v for k,v in fixture.items() if k not in ('owner','employee')},'clients':{}}
+                'callback':callback,'caFile':state['caPath'],'runId':secrets.token_hex(12),
+                'sourceRevision':state['sourceRevision'],'subjectKind':'company-owner','delegatedSubject':'synthetic-owner-admin', 'resources':{k:v for k,v in fixture.items() if k not in ('owner','employee')},'clients':{}}
             empty={'mode':'EMPTY','ids':[]}
             def selected(ids): return {'mode':'SET','ids':ids}
             async def register(name,scopes,method,resources,redirects):
@@ -230,10 +231,10 @@ async def serve(database,upload,settings,state,callback):
             obj=selected(fixture['objects'][:2])
             await register('references',['objects:read','equipment:read','counterparties:read','contracts:read'],
                 'client_secret_basic',{'objects':obj,'equipment':{'mode':'ALL','ids':[]},
-                    'counterparties':selected(fixture['counterparties']), 'contracts':selected(fixture['contracts']),
+                    'counterparties':selected(fixture['counterparties'][:2]), 'contracts':selected(fixture['contracts'][:2]),
                     'documents':empty},[callback])
-            await register('monitoring',['objects:read','monitoring:read'],'client_secret_basic',
-                {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,'documents':empty},[callback])
+            await register('monitoring',['objects:read','equipment:read','monitoring:read'],'client_secret_basic',
+                {'objects':obj,'equipment':selected(fixture['equipment'][:2]),'counterparties':empty,'contracts':empty,'documents':empty},[callback])
             await register('documents',['openid','documents:read','documents.files:download'],'none',
                 {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,
                     'documents':selected(fixture['documents'])},[callback])
@@ -241,9 +242,19 @@ async def serve(database,upload,settings,state,callback):
                 {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,'documents':empty},
                 [origin+'/developer/api/callback',origin+'/api/developer/docs/oauth2-redirect'])
             # Клиент портала issuer никогда не передаётся внешнему клиенту.
+            manifest['rental']={**manifest['clients']['references'],'vectors':{k:fixture['vectors'][k] for k in ('objects','counterparties','contracts')}}
+            manifest['operations']={**manifest['clients']['monitoring'],'vectors':{k:fixture['vectors'][k] for k in ('objects','equipment')},
+                'afterNarrowObjects':fixture['objects'][:1]}
+            manifest['documents']={**manifest['clients']['documents'],'redirectUri':callback,
+                'vectors':{'documents':fixture['vectors']['documents']},'allowedContent':fixture['allowedContent'],'deniedContent':fixture['deniedContent']}
             write_json(PRIVATE/'client-manifest.json',manifest)
             discovery=await call('GET','/.well-known/openid-configuration')
             if discovery['issuer']!=origin: raise RuntimeError('Discovery issuer mismatch')
+            unauth=await client.get('/api/v1/objects')
+            docs_closed=await client.get('/api/developer/docs/assets/swagger-ui-bundle.js')
+            if unauth.status_code!=401 or docs_closed.status_code!=401:
+                raise RuntimeError('Anonymous protected surfaces did not reject access')
+            state['verification']={'discoveryIssuer':True,'unauthProductStatus':401,'unauthDocsAssetStatus':401}
             state['status']='api-ready-building-ui'; write_json(STATE,state)
             print('API_READY '+origin+' CA='+state['caPath']+' CLIENT_MANIFEST='+str(PRIVATE/'client-manifest.json'),flush=True)
         # Используем дерево зависимостей root без установки и изменения пакетов.
@@ -258,6 +269,12 @@ async def serve(database,upload,settings,state,callback):
         if process.returncode:
             (PRIVATE/'build-error.log').write_bytes(error); (PRIVATE/'build-error.log').chmod(0o600)
             raise RuntimeError('React fixture build failed; see private build-error.log')
+        async with httpx.AsyncClient(base_url=origin,verify=ssl.create_default_context(cafile=state['caPath']),trust_env=False) as client:
+            callback_page=await client.get('/developer/api/callback',headers={'Accept':'text/html'})
+            private_asset=await client.get('/assets/synthetic-denied.js')
+            if callback_page.status_code!=200 or '/p/' not in callback_page.text or private_asset.status_code!=403:
+                raise RuntimeError('Public callback/private gate fixture delivery failed')
+        state['verification'].update(publicCallbackStatus=200,privateAssetWithoutGateStatus=403)
         state['status']='ready'; write_json(STATE,state)
         print('UI_READY OWNER_STATE='+str(STATE),flush=True)
         await task
@@ -266,7 +283,8 @@ async def serve(database,upload,settings,state,callback):
         await task
         sock.close()
         await core_db.engine.dispose()
-        state['status']='stopped'; write_json(STATE,state)
+        latest=json.loads(STATE.read_text())
+        latest['status']='stopped'; write_json(STATE,latest)
 
 
 

@@ -34,8 +34,8 @@
 
 Все данные вымышлены: две компании energy; owner с реальным admin membership и
 обычный employee с `equipment` и одним объектом; два разрешённых объекта,
-один скрытый и чужой объект второй компании; два контрагента и договора со
-строго типизированными связями; оборудование и object-scoped ChargeSessions
+один скрытый и чужой объект второй компании; два разрешённых контрагента и договора со
+строго типизированными связями, а также настоящие скрытые и чужие записи для 404; оборудование и object-scoped ChargeSessions
 с разными днями наблюдения (разрешённые 29/28 октября, скрытый 30 октября,
 чужой 31 октября 2026), визиты пересчитываются штатным `recompute_visits`.
 Разные дни позволяют обнаружить ошибочный глобальный watermark вместо
@@ -43,7 +43,11 @@ object-scoped наблюдения. Ожидаемые дни и SHA-256 synthet
 клиенту в manifest вместе с ID.
 Две private DocCard имеют версии и реальные SourceFile bytes: owner является
 автором одной, employee второй, поэтому права owner допускают только первую.
-Employee не получает document scopes через реальную серверную eligibility.
+Дополнительно созданы company-doc для второго разрешённого результата пагинации
+и документ чужой компании для реального tenant denial. Employee не получает
+document scopes через реальную серверную eligibility. Delegated subject этого
+ограниченного пилота — owner-admin (`subjectKind=company-owner`), а не обычный
+сотрудник с docs-role; проверки последнего здесь нет.
 
 Внутри процесса окружение очищается до импортов Core, `.env` не читается,
 секрет Core и RSA signing key генерируются на запуск. OAUTH/API/DOCS flags
@@ -99,7 +103,7 @@ Private assets проверяют обычный `cl_gate`/`gate_ok`, public `/p
 Клиенты:
 
 - `references`: confidential, objects/equipment/counterparties/contracts read;
-- `monitoring`: confidential, objects read + monitoring read;
+- `monitoring`: confidential, objects/equipment read + monitoring read;
 - `documents`: public delegated, `openid documents:read documents.files:download`;
 - `portal`: отдельный issuer-owned public client, две фиксированные callback:
   `/developer/api/callback` и `/api/developer/docs/oauth2-redirect`; он не передаётся
@@ -134,15 +138,26 @@ eligibility можно перед consent выполнить ту же кома�
 `--as employee --expect-denied`: document checkbox должен быть disabled,
 одобрение и code exchange при этом не выполняются.
 
-По запросу root реальный отзыв:
+Manifest соответствует клиентскому wire-формату: `origin`, `caFile`, `runId`,
+`sourceRevision`, `rental` (references), `operations` (monitoring), `documents`.
+В каждом сценарии выдаются настоящие `vectors` с `allowed`, `foreign`, `ungranted`;
+для документов — `allowedContent` с SHA-256 и `deniedContent`. References equipment
+имеет ALL в пределах location boundary и не используется как проверка SET denial.
+
+По запросу root реальные owner controls:
 
 ```sh
-python tools/partner-pilots/sandbox/control.py revoke --client documents --kind installation
-python tools/partner-pilots/sandbox/control.py revoke --client monitoring --kind grant
+python tools/partner-pilots/sandbox/control.py operations-narrow
+python tools/partner-pilots/sandbox/control.py rental-grant-revoke
+python tools/partner-pilots/sandbox/control.py documents-member-revoke
 ```
 
 `control.py` входит fake owner через HTTPS с per-request CA verification и вызывает
-настоящий DELETE admin API. HTTP bypass/control routes отсутствуют. Изменение
+настоящие admin API. `operations-narrow` повторно одобряет установку с более
+узким SET; `rental-grant-revoke` отзывает machine grant; `documents-member-revoke`
+удаляет membership фактического delegated subject. Последняя команда выполняется
+строго после остальных admin controls: в этой fixture субъект и единственный
+owner-admin совпадают, после удаления его membership admin-доступ закрывается. HTTP bypass/control routes отсутствуют. Изменение
 синтетических данных SQL возможно только в новом явно разрешённом SQL-окне.
 
 ## Завершение и проверки
