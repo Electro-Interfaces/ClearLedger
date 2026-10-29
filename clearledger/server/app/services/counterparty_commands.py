@@ -21,7 +21,7 @@ async def create_imported_counterparty(
     ограничения длины. После неуспешного flush индекс не получает карточку.
     """
     cp = Counterparty(
-        company_id=company_id, inn=inn[:20], name=name[:500],
+        company_id=company_id, inn=None if inn == "" else inn[:20], name=name[:500],
         type=cp_type, aliases=[alias] if alias else [], kind="external",
         raw={"referenceIdentity": {"name": name, "inn": inn}},
     )
