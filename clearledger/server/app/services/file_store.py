@@ -18,13 +18,74 @@ import hashlib
 import logging
 import os
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO, Callable
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models import SourceFile
 
 logger = logging.getLogger(__name__)
+_PENDING = "file_store.pending_transactions"
+
+
+@dataclass
+class _Files:
+    paths: dict[Path, uuid.UUID] = field(default_factory=dict)
+    committed: bool = False
+
+
+def _current(session):
+    return session.get_nested_transaction() or session.get_transaction()
+
+
+def _track(db, path, file_id):
+    session = db.sync_session if isinstance(db, AsyncSession) else db
+    # Lightweight adapters used by pure metadata tests have no SQL transaction.
+    # Production SQLAlchemy Sessions (including AsyncSession proxies) use events.
+    if isinstance(session, Session):
+        transaction = _current(session)
+        if transaction is None:
+            raise RuntimeError("SourceFile must belong to a Session transaction")
+        pending = session.info.setdefault(_PENDING, {})
+        pending.setdefault(transaction, _Files()).paths[path] = file_id
+
+
+@event.listens_for(Session, "after_commit")
+def _file_commit(session):
+    bucket = session.info.get(_PENDING, {}).get(_current(session))
+    if bucket is not None:
+        bucket.committed = True
+
+
+@event.listens_for(Session, "after_rollback")
+def _file_rollback(session):
+    # Also covers DBAPI rollback caused by a failed flush, before caller cleanup.
+    bucket = session.info.get(_PENDING, {}).pop(_current(session), None)
+    if bucket is not None:
+        for path, file_id in bucket.paths.items():
+            _remove_new_file(path, file_id)
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _file_transaction_end(session, transaction):
+    pending = session.info.get(_PENDING)
+    if pending is None:
+        return
+    bucket = pending.pop(transaction, None)
+    if bucket is not None:
+        if bucket.committed and transaction.parent is not None:
+            # RELEASE SAVEPOINT is provisional until its parent commits.
+            pending.setdefault(transaction.parent, _Files()).paths.update(bucket.paths)
+        elif not bucket.committed:
+            # Includes rollback and Session.close() without a commit.
+            for path, file_id in bucket.paths.items():
+                _remove_new_file(path, file_id)
+    if not pending:
+        session.info.pop(_PENDING, None)
 
 
 def _remove_new_file(path: Path, file_id: uuid.UUID) -> None:
@@ -50,6 +111,7 @@ def put(
     mime: str | None = None,
     purpose: str = "attachment",
     file_id: uuid.UUID | None = None,
+    storage_suffix: str | None = None,
 ) -> SourceFile:
     """Записать файл на диск и завести строку `source_files`.
 
@@ -60,29 +122,51 @@ def put(
     `purpose='attachment'` по умолчанию: `data` означает «сырьё для разбора» и
     попадает в счётчик документов компании, поэтому ставится осознанно.
     """
+    return put_generated(db, company_id, lambda target: target.write(data),
+        file_name=file_name, mime=mime, purpose=purpose, file_id=file_id,
+        storage_suffix=storage_suffix)
+
+
+def put_generated(
+    db: AsyncSession, company_id: uuid.UUID, write: Callable[[BinaryIO], object], *,
+    file_name: str, mime: str | None = None, purpose: str = "attachment",
+    file_id: uuid.UUID | None = None, storage_suffix: str | None = None,
+) -> SourceFile:
+    """Write bytes/archives through one exclusive, transaction-owned primitive.
+
+    The callback writes a seekable stream without creating a second temp file or
+    materializing large archives in memory. It must not commit the Session.
+    """
     # A preallocated ID is an internal caller capability, never a client path.
     if file_id is not None and not isinstance(file_id, uuid.UUID):
         raise ValueError("Предварительно выделенный file_id должен быть UUID")
     file_id = file_id or uuid.uuid4()
-    suffix = Path(file_name or "file").suffix[:20]
+    suffix = Path(file_name or "file").suffix[:20] if storage_suffix is None else storage_suffix
+    if (not isinstance(suffix, str) or len(suffix) > 20 or "/" in suffix or "\\" in suffix
+            or (suffix and not suffix.startswith("."))):
+        raise ValueError("Недопустимое расширение файла хранилища")
     path = upload_dir() / f"{file_id}{suffix}"
     created = False
     try:
         # A preallocated ID or collision must never overwrite existing bytes.
-        with path.open("xb") as target:
+        with path.open("xb+") as target:
             created = True
-            target.write(data)
+            write(target)
+            size = target.seek(0, os.SEEK_END)
+            target.seek(0)
+            fingerprint = hashlib.file_digest(target, "sha256").hexdigest()
         row = SourceFile(
             id=file_id,
             company_id=company_id,
             file_name=file_name or "файл",
             mime_type=mime or "application/octet-stream",
-            size=len(data),
+            size=size,
             storage_path=str(path),
-            fingerprint=hashlib.sha256(data).hexdigest(),
+            fingerprint=fingerprint,
             purpose="data" if purpose == "data" else "attachment",
         )
         db.add(row)
+        _track(db, path, file_id)
     except BaseException:
         if created:
             _remove_new_file(path, file_id)
@@ -91,11 +175,9 @@ def put(
 
 
 async def put_and_flush(db: AsyncSession, company_id: uuid.UUID, data: bytes, **kwargs) -> SourceFile:
-    """Общий writer с очисткой нового файла при ошибке или отмене flush.
+    """Flush convenience; commit ownership stays with the calling use case.
 
-    Commit остаётся у use case. При исключении его транзакцию необходимо
-    откатить; cleanup после более позднего rollback — отдельная ответственность.
-    Ранее сохранённые файлы этот helper не удаляет.
+    Events also clean subsequent rollback/cancel/close, including SAVEPOINT.
     """
     row = put(db, company_id, data, **kwargs)
     try:

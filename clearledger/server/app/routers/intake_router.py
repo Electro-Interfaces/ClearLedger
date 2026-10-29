@@ -22,15 +22,6 @@ from app.models import ChatMessage, ChatRoom, SourceFile, User
 
 router = APIRouter(tags=["Intake / Файлы"])
 
-# Директория хранения загруженных файлов
-UPLOAD_DIR = Path("uploads")
-
-
-def _ensure_upload_dir() -> None:
-    """Создаёт директорию для загрузок, если не существует."""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
 @router.post("/intake")
 async def upload_file(
     file: UploadFile,
@@ -44,8 +35,6 @@ async def upload_file(
     Загрузить файл. Возвращает source_id.
     Файл сохраняется на диск, метаданные — в БД (source_files).
     """
-    _ensure_upload_dir()
-
     content = await file.read()
     file_size = len(content)
 
@@ -81,28 +70,12 @@ async def upload_file(
     if двойник is not None and Path(двойник.storage_path).exists():
         return {"source_id": str(двойник.id)}
 
-    # Генерируем UUID, сохраняем файл
-    file_id = uuid.uuid4()
-    ext = Path(file.filename or "file").suffix
-    storage_name = f"{file_id}{ext}"
-    storage_path = UPLOAD_DIR / storage_name
-
-    with open(storage_path, "wb") as f:
-        f.write(content)
-
-    # Запись в БД
-    source = SourceFile(
-        id=file_id,
-        company_id=cid,
-        file_name=file.filename or "unknown",
-        mime_type=file.content_type or "application/octet-stream",
-        size=file_size,
-        storage_path=str(storage_path),
-        fingerprint=fingerprint,
-        purpose=purpose_value,
+    from app.services import file_store
+    source = await file_store.put_and_flush(
+        db, cid, content, file_name=file.filename or "unknown",
+        mime=file.content_type or "application/octet-stream", purpose=purpose_value,
     )
-    db.add(source)
-    await db.flush()
+    file_id = source.id
 
     # Видео сжимается следом, в фоне: ответ ждать нечего, а запись экрана худеет
     # в двадцать с лишним раз. `fingerprint` при этом не трогается — по нему

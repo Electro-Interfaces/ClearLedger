@@ -6,7 +6,6 @@
 from __future__ import annotations
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import uuid
@@ -131,31 +130,28 @@ async def create_handover(db, tc):
         current_revision=1, has_files=True)
     db.add(card); await db.flush()
     db.add(DocRelation(company_id=tc.company_id,doc_id=card.id,kind="related",target_ref=f"site:{site.id}"))
-    file_id=uuid.uuid4(); folder=Path(os.environ.get('UPLOAD_DIR','/app/uploads'));folder.mkdir(parents=True,exist_ok=True)
-    path=folder/f'{file_id}.zip'
-    try:
-        with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as z:
-            z.writestr('manifest.json',json.dumps(card.attrs,ensure_ascii=False,indent=2))
-            for i,f in enumerate(sources,1): z.write(f.storage_path,f'{i:03d}_{Path(f.file_name.replace(chr(92), '/')).name}')
-        with path.open('rb') as stream: fingerprint=hashlib.file_digest(stream,'sha256').hexdigest()
-        db.add(SourceFile(id=file_id,company_id=tc.company_id,file_name='Комплект ТП.zip',
-            storage_path=str(path),mime_type='application/zip',purpose='attachment',size=path.stat().st_size,fingerprint=fingerprint))
-        db.add(DocVersion(company_id=tc.company_id,doc_id=card.id,file_id=file_id,
-            file_name='Комплект ТП.zip',mime='application/zip',size_bytes=path.stat().st_size,sha256=fingerprint))
-        await db.flush()
-        snapshot, sha = await _document_snapshot(db,card)
-        for uid, person in people.items():
-            db.add(DocAcquaint(company_id=tc.company_id,doc_id=card.id,user_id=uid,
-                 document_snapshot=snapshot,snapshot_sha256=sha,reason='manual',required=True))
-            await notify_person(db,tc.company_id,person,
-                f'Ознакомьтесь с итоговым комплектом ТП: [Открыть документ](/docs/work?doc={card.id})',
-                room_kind=NOTICES_ROOM_KIND,event_category='tech_connection')
-        tc.workflow=dict(tc.workflow or {},_handover={'docId':str(card.id),'snapshot':sha,
-                         'createdAt':datetime.now(timezone.utc).isoformat()})
-        await db.flush()
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
+    from app.services import file_store
+    def write_archive(stream):
+        with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as z:
+            z.writestr('manifest.json', json.dumps(card.attrs, ensure_ascii=False, indent=2))
+            for i, f in enumerate(sources, 1):
+                z.write(f.storage_path, f"{i:03d}_{Path(f.file_name.replace(chr(92), '/')).name}")
+    stored = file_store.put_generated(db, tc.company_id, write_archive,
+        file_name='Комплект ТП.zip', mime='application/zip', purpose='attachment')
+    file_id = stored.id
+    db.add(DocVersion(company_id=tc.company_id,doc_id=card.id,file_id=file_id,
+        file_name='Комплект ТП.zip',mime='application/zip',size_bytes=stored.size,sha256=stored.fingerprint))
+    await db.flush()
+    snapshot, sha = await _document_snapshot(db,card)
+    for uid, person in people.items():
+        db.add(DocAcquaint(company_id=tc.company_id,doc_id=card.id,user_id=uid,
+             document_snapshot=snapshot,snapshot_sha256=sha,reason='manual',required=True))
+        await notify_person(db,tc.company_id,person,
+            f'Ознакомьтесь с итоговым комплектом ТП: [Открыть документ](/docs/work?doc={card.id})',
+            room_kind=NOTICES_ROOM_KIND,event_category='tech_connection')
+    tc.workflow=dict(tc.workflow or {},_handover={'docId':str(card.id),'snapshot':sha,
+                     'createdAt':datetime.now(timezone.utc).isoformat()})
+    await db.flush()
 
 
 def summary_facts(tc, w, state, handover):
