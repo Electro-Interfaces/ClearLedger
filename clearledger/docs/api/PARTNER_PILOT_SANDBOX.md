@@ -135,10 +135,13 @@ listener, callback URL сохраняется только в отдельном
 Это точечное fixture browser исключение: per-request CA verification выполняют
 независимый SDK и HTTP helper. HOME и системное хранилище доверия не меняются,
 `ignoreHTTPSErrors` и глобальный TLS disable не используются.
-Optional fonts блокируются при сохранённом source loader. Для проверки employee
-eligibility можно перед consent выполнить ту же команду с
-`--as employee --expect-denied`: document checkbox должен быть disabled,
-одобрение и code exchange при этом не выполняются.
+Optional fonts блокируются при сохранённом source loader. Для проверки employee eligibility клиент создаёт **отдельную** свежую
+PKCE/nonce transaction и передаёт отдельный negative authorize-file. Команда с
+`--as employee --expect-denied` проверяет disabled document checkbox; одобрение и
+code exchange не выполняются. GET pending request канонически связывает его с
+первым Core subject, поэтому pending request employee нельзя затем передавать
+owner для одобрения. Положительный owner flow всегда использует свой отдельный
+клиентский authorize-file; binding не меняется и не обходится.
 
 Manifest соответствует клиентскому wire-формату: `origin`, `caFile`, `runId`,
 `sourceRevision`, `rental` (references), `operations` (monitoring), `documents`.
