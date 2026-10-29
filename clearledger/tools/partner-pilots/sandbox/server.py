@@ -158,7 +158,7 @@ async def serve(database,upload,settings,state,callback):
     if 'fixture' not in state or state.get('status') != 'seeded-awaiting-serve':
         raise RuntimeError('Run separately authorized init first; implicit session restart is disabled')
     target=urlsplit(callback)
-    if target.scheme!='https' or target.hostname!='127.0.0.1' or not target.port or target.query or target.fragment:
+    if target.scheme!='https' or target.hostname!='127.0.0.2' or not target.port or target.username or target.password or target.query or target.fragment:
         raise ValueError('Explicit real HTTPS loopback callback required')
     sock=socket.socket(); sock.bind(('127.0.0.1',0)); sock.listen(128); sock.setblocking(False)
     origin='https://127.0.0.1:'+str(sock.getsockname()[1])

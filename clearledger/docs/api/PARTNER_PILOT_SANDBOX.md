@@ -71,14 +71,17 @@ python tools/partner-pilots/sandbox/server.py prepare
 
 `prepare` не импортирует Core и не подключается к БД. После этого root передаёт
 клиенту `ca.pem`, callback leaf/key и закрытый handoff-каталог. Клиент поднимает
-реальный HTTPS listener с `bind(127.0.0.1, 0)` и сообщает точный redirect URI.
-Нельзя регистрировать фиктивный callback без слушателя.
+реальный HTTPS listener с `bind(127.0.0.2, 0)` и сообщает точный redirect URI.
+Нельзя регистрировать фиктивный callback без слушателя. Callback использует
+отдельный loopback IP 127.0.0.2: host-only Core `cl_gate` cookie для issuer
+127.0.0.1 не уходит клиенту даже при навигации браузера. Cookie/Authorization
+не фильтруются тестовым перехватчиком для маскировки этой границы.
 
 После отдельного SQL-разрешения, с указанными выше переменными:
 
 ```sh
 python tools/partner-pilots/sandbox/server.py init
-python tools/partner-pilots/sandbox/server.py serve --callback https://127.0.0.1:PORT/callback
+python tools/partner-pilots/sandbox/server.py serve --callback https://127.0.0.2:PORT/callback
 ```
 
 Сервис сам удерживает сокет `127.0.0.1:0`, публикует точный origin в owner state,
