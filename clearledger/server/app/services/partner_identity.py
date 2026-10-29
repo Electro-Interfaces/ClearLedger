@@ -344,7 +344,15 @@ class ClientAdapter:
         return self.model.id
 
     def check_redirect_uri(self, uri):
-        return uri in self.model.redirect_uris
+        if uri not in self.model.redirect_uris:
+            return False
+        # Registration does not freeze development-only exceptions forever.
+        # Reclassify the exact persisted target at every authorization sink.
+        try:
+            validate_redirect(uri)
+        except HTTPException:
+            return False
+        return True
 
     def get_default_redirect_uri(self):
         # Explicit redirect required even for a single registered redirect.
@@ -421,6 +429,8 @@ class CodeGrant(AuthorizationCodeGrant):
             PartnerCode.code_hash == digest(code), PartnerCode.client_id == client.model.id
         ).with_for_update().execution_options(populate_existing=True))
         if row is None or row.consumed or row.expires_at <= now() or row.parent_expires_at <= now():
+            return None
+        if not client.check_redirect_uri(row.redirect_uri):
             return None
         self.server.code = row
         return row

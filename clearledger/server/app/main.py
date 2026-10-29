@@ -4,6 +4,8 @@ FastAPI приложение с CORS, роутерами, startup seed.
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -482,6 +484,21 @@ app.add_middleware(
 
 # Роутеры — все под /api
 API_PREFIX = "/api"
+
+# Версионированный product API имеет собственный verifier и закрытые docs URLs.
+# Mount не запускает lifespan дочернего приложения: проверяем реестр явно.
+from app.api_contracts import policy_registry
+from app.product_api import create_product_api
+
+product_api = create_product_api(
+    issuer=settings.partner_oauth_issuer or None,
+    # Стабильно между workers/restarts, с отдельным криптографическим назначением.
+    cursor_key=hmac.digest(settings.secret_key.encode(), b"elsyplus/product-api/cursor/v1", hashlib.sha256),
+    source_revision=os.environ.get("SOURCE_REVISION", "unverified"),
+)
+policy_registry(product_api)
+app.state.product_api = product_api
+app.mount("/api/v1", product_api)
 
 app.include_router(management_router.router, prefix=API_PREFIX)
 app.include_router(auth_router.router, prefix=API_PREFIX)
