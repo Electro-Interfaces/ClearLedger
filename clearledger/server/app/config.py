@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440  # 24 часа
     algorithm: str = "HS256"
 
+    # Внешний OAuth/OIDC: отдельный профиль, по умолчанию полностью закрыт.
+    # Issuer — уникальный HTTPS origin пространства, без завершающего slash.
+    partner_oauth_enabled: bool = False
+    # Независимый gate продуктового /api/v1: его включает отдельная приёмка M03.
+    partner_api_enabled: bool = False
+    partner_oauth_issuer: str = ""
+    partner_oauth_audience: str = ""
+    partner_oauth_signing_key: str = ""  # base64 PEM; пусто = RSA ключ SSO
+    partner_oauth_kid: str = "partner/1"
+    partner_oauth_allow_localhost: bool = False
+
     # Сид суперадмина. Создаётся при старте ТОЛЬКО если заданы обе переменные
     # (SEED_SUPERADMIN_EMAIL + SEED_SUPERADMIN_PASSWORD). Пусто → суперадмин на
     # старте НЕ создаётся (нет дефолтного бэкдора admin@clearledger.ru/admin123).
