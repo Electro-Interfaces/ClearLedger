@@ -21,6 +21,19 @@ from . import access, budget, dto, files, monitoring
 from .queries import Query
 
 
+RESOURCE_TAGS = {"objects": "Объекты ЭЗС", "equipment": "Оборудование",
+                 "counterparties": "Контрагенты", "contracts": "Договоры", "documents": "Документы"}
+MONITORING_TAG = "Мониторинг"
+OPENAPI_TAGS = [
+    {"name": RESOURCE_TAGS["objects"], "description": "Точки обслуживания ЭЗС в пределах выданных разрешений."},
+    {"name": RESOURCE_TAGS["equipment"], "description": "Станционное оборудование и разрешённые связи с объектами."},
+    {"name": MONITORING_TAG, "description": "Состояние объекта и зарядные агрегаты за выбранный период. Без финансовых данных."},
+    {"name": RESOURCE_TAGS["counterparties"], "description": "Карточки контрагентов доступной компании."},
+    {"name": RESOURCE_TAGS["contracts"], "description": "Карточки договоров и разрешённые связи с контрагентами и объектами."},
+    {"name": RESOURCE_TAGS["documents"], "description": "Карточки документов и разрешённые версии файлов. Требуется пользовательское согласие."},
+]
+
+
 @dataclass(frozen=True)
 class Settings:
     sessions: object
@@ -113,6 +126,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
 
     def operation(path, resource, operation_id, response_model=None, action="read", extra_scopes=(), **kwargs):
         return router.operation(path, policy=_policy(resource, action, extra_scopes), methods=["GET"],
+            tags=kwargs.pop("tags", [RESOURCE_TAGS[resource]]),
             operation_id=operation_id, response_model=response_model, responses={**problems, **kwargs.pop("responses", {})},
             openapi_extra={"x-elsy-owner": resource, "x-elsy-access-class": "partner",
                 "x-elsy-resource-policy": f"{resource}:{action}", "x-elsy-readiness": "candidate"}, **kwargs)
@@ -126,7 +140,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
         return (await query.project("objects", [await query.detail("objects", objectId)]))[0]
 
     @operation("/objects/{objectId}/monitoring", "objects", "getObjectMonitoring", dto.Monitoring,
-               extra_scopes={monitoring.SCOPE}, summary="Read object charging status",
+               extra_scopes={monitoring.SCOPE}, tags=[MONITORING_TAG], summary="Read object charging status",
                description="Energy profile only. Current catalog status; object-scoped observed data boundary. "
                    "Inclusive MSK interval [asOf - days, asOf], days 1..366. asOf date caps the endpoint at "
                    "23:59:59.999999 MSK, or earlier observed data. Successful visit: any attempt energy > 0. "
@@ -314,7 +328,7 @@ def curated_openapi(app):
             or parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in ("", "/")):
         raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI")
     policy_registry(app)
-    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes, tags=OPENAPI_TAGS)
     for path in schema["paths"].values():
         for operation in path.values():
             for status, response in operation["responses"].items():

@@ -265,3 +265,9 @@ Curated schema содержит оба условия/примера и общи
 Это request admission, не квота байтов/одновременных streaming downloads и не
 периметровый лимит неавторизованных запросов. Координатор независимо повторил41offline,12SQL/process и31Core/public schema
 проверок — PASS. Это не приёмка производственной нагрузки.
+
+Curated Swagger сгруппирован по шести предметным разделам: «Объекты ЭЗС»,
+«Оборудование», «Мониторинг», «Контрагенты», «Договоры», «Документы». Tags служат
+только навигации документации: operationId, paths, scopes и RoutePolicy
+сохраняются. Общие41offline HTTP/schema/quota checks повторены — PASS6.045с;
+wire types заново получены из canonical exporter.

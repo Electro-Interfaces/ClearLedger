@@ -162,3 +162,6 @@ fresh/upgrade/repeat, Core/public, FK/defaults/indexes и настоящие п�
 Типы12операций заново сгенерированы по текущему curated schema; свежие
 partner:types:check и consumer compilation PASS. Удалённый CI, нагрузка
 и эксплуатационные пороги по-прежнему не подтверждены.
+
+Отдельный identity table recreation/repeat bootstrap case координатора
+с обязательными DocsPortalSession и ProductAPIBudget: PASS21.91с.
