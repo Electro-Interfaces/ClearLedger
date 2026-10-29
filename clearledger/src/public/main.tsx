@@ -26,6 +26,9 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { getToken } from '@/services/apiClient'
+// Capture/strip the minimal OAuth callback before Router/Auth effects or lazy chunks.
+// This transport contains no Swagger, product spec or main-application import.
+import '@/services/developerDocsService'
 
 // Пропуск гостя-партнёра приходит во фрагменте адреса — как в основной сборке.
 if (window.location.pathname.replace(/\/$/, '').endsWith('/space-guest')
@@ -42,6 +45,7 @@ const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ de
 const InvitePage = lazy(() => import('@/pages/InvitePage').then((m) => ({ default: m.InvitePage })))
 const DocVerifyPage = lazy(() => import('@/pages/DocVerifyPage').then((m) => ({ default: m.DocVerifyPage })))
 const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage').then((m) => ({ default: m.ShowcaseLinkPage })))
+const DocsCallbackPage = lazy(() => import('./DocsCallbackPage').then((m) => ({ default: m.DocsCallbackPage })))
 
 function Loading() {
   return <div className="flex h-[50vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
@@ -87,6 +91,9 @@ function Shell() {
 }
 
 const router = createBrowserRouter([{
+  path: '/developer/api/callback',
+  element: <ErrorBoundary><AuthProvider><Suspense fallback={<Loading />}><DocsCallbackPage /></Suspense></AuthProvider></ErrorBoundary>,
+}, {
   element: <Shell />,
   children: [
     { path: '/login', element: <LoginPage /> },

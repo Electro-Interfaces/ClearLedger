@@ -180,6 +180,7 @@ function redirectExpiredSession() {
 const PUBLIC_PAGES = [
   '/login', '/invite/', '/reset-password/', '/showcase/', '/demo/shop', '/doc-share/', '/doc-verify/',
   '/space-guest',
+  '/developer/api/callback',
 ]
 export function isPublicPage(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '')
