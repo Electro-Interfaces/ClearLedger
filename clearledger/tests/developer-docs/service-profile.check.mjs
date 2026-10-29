@@ -33,6 +33,8 @@ from app.product_api.app import public_client_openapi
 print(json.dumps({'canonical':s,'projected':public_client_openapi(s)}))`], { cwd: artifacts, encoding: 'utf8' })
   ;({ canonical, projected } = JSON.parse(exported))
   config.businessScopes = Object.keys(projected.components.securitySchemes.ProductOAuth.flows.authorizationCode.scopes)
+  const routerSource = process.env.SWAGGER_UI_BASELINE ? execFileSync('git', ['show',
+    `${process.env.SWAGGER_UI_BASELINE}:clearledger/server/app/routers/docs_portal_router.py`], { cwd: root, encoding: 'utf8' }) : undefined
   // Render the actual router's HTML; direct function invocation tests its bytes,
   // not authorization. The separate ASGI/Python suite tests the HTTP docs gate.
   html = execFileSync(python, ['-c', `import asyncio,json,sys
@@ -44,13 +46,20 @@ def forbidden(*a,**kw): raise RuntimeError('SQL forbidden in metadata fixture')
 event.listen(database.engine.sync_engine,'do_connect',forbidden)
 from app.routers import docs_portal_router as r
 data=json.load(sys.stdin)
+if data.get('routerSource'):
+ import types
+ baseline=types.ModuleType('app.routers._swagger_html_baseline')
+ baseline.__package__='app.routers'
+ sys.modules[baseline.__name__]=baseline
+ exec(compile(data['routerSource'],'immutable-swagger-router.py','exec'),baseline.__dict__)
+ r=baseline
 class DB:
  async def run_sync(self,callback): return data['config']
 async def main():
  with patch.object(r.portal,'product_schema',return_value=data['schema']),patch.object(r.portal,'issuer',return_value=data['origin']):
   response=await r.ui(SimpleNamespace(app=None,query_params={}),DB())
   sys.stdout.write(response.body.decode())
-asyncio.run(main())`], { cwd: artifacts, encoding: 'utf8', input: JSON.stringify({ config, schema: projected, origin }),
+asyncio.run(main())`], { cwd: artifacts, encoding: 'utf8', input: JSON.stringify({ config, schema: projected, origin, routerSource }),
     env: { PATH: process.env.PATH, LANG: 'C.UTF-8', PYTHONPATH: path.join(root, 'server'),
       DATABASE_URL: 'postgresql+asyncpg://synthetic:synthetic@127.0.0.1:1/schema_only_test', SECRET_KEY: 'synthetic-schema-only' } })
   glue = process.env.PORTAL_GLUE_BASELINE
