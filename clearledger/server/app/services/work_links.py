@@ -16,7 +16,7 @@ def subject_clause(model, cid, ref):
 
 
 async def visible_work(db, cid, user, *, ref=None, object_id=None, unlinked_prefix=None):
-    from app.routers.docs_router import _readable_doc_clause
+    from app.services.doc_access import _readable_doc_clause
     from app.routers.tasks_router import _is_admin, _not_personal, _visible_to
 
     doc_acl = await _readable_doc_clause(db, cid, user)
@@ -48,7 +48,7 @@ async def visible_work(db, cid, user, *, ref=None, object_id=None, unlinked_pref
 
 
 async def readable_entity(db, cid, user, kind, entity_id, *, edit=False):
-    from app.routers.docs_router import _assert_doc_permission
+    from app.services.doc_access import _assert_doc_permission
     from app.routers.tasks_router import _assert_actor, _can_view_task
 
     model = DocCard if kind == "doc" else Task
