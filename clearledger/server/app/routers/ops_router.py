@@ -6,15 +6,16 @@ station_contract_settlements) — см. services/ops_dashboard.py.
 """
 import io
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
+from typing import Literal
 
 from fastapi import (
-    APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status,
+    APIRouter, Body, Depends, File, HTTPException, Query, Request, Response, UploadFile, status,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_member, get_current_user, current_token_claims
 from app.database import get_db
 from app.models import User
 from app.services import ops_closing, ops_expectations, ops_payments, ops_terms
@@ -582,37 +583,94 @@ def _period(value: str | None) -> str:
     return ops_expectations.shift_month(date.today().isoformat()[:7] + "-01", -1)
 
 
+def _closing_period(value: str | None) -> str:
+    if value is None:
+        return _period(None)
+    try:
+        parsed = date.fromisoformat(value)
+        if len(value) != 10 or parsed.day != 1 or parsed.isoformat() != value:
+            raise ValueError()
+        # A valid period must also have a representable following due month.
+        date.fromisoformat(ops_expectations.shift_month(value, 1))
+    except ValueError:
+        raise HTTPException(422, "Период должен быть первым числом месяца: YYYY-MM-01") from None
+    return value
+
+
+async def _closing_company(request: Request, company_id: str, user: User, db: AsyncSession,
+                           allowed_params: set[str]) -> uuid.UUID:
+    """Company-wide closing has no safe partial write/read adapter yet."""
+    if set(request.query_params) - allowed_params or any(len(request.query_params.getlist(k)) > 1 for k in request.query_params):
+        raise HTTPException(422, "Недопустимые параметры закрытия периода")
+    if "force" in request.query_params and request.query_params["force"] not in {"true", "false"}:
+        raise HTTPException(422, "force должен быть true или false")
+    if "expand_all" in request.query_params and request.query_params["expand_all"] not in {"true", "false"}:
+        raise HTTPException(422, "expand_all должен быть true или false")
+    if await request.body():
+        if not request.url.path.endswith("/reopen"):
+            raise HTTPException(422, "Команда не принимает тело запроса")
+        try:
+            payload = await request.json()
+        except ValueError:
+            raise HTTPException(422, "Некорректное тело команды") from None
+        if not isinstance(payload, dict) or set(payload) != {"reason"}:
+            raise HTTPException(422, "Допустимо только основание открытия периода")
+    cid = await assert_company_member(company_id, user, db)
+    from app.models import UserCompany, CompanyRole
+    from app.scope import current_object_scope, current_organization
+    member = await db.get(UserCompany, (user.id, cid), populate_existing=True)
+    if ((current_token_claims() or {}).get("scp") or current_object_scope() is not None
+            or current_organization() is not None or request.headers.get("X-Organization-Id", "").strip()
+            or (member and (member.object_scope is not None or member.own_organization_id is not None))):
+        raise HTTPException(403, "Закрытие требует полного контура компании; снимите отбор по организации или объектам")
+    if user.mail_only or not user.password_hash or (user.locked_until and user.locked_until > datetime.now(timezone.utc)):
+        raise HTTPException(403, "Нет права на закрытие периода")
+    if user.is_superadmin:
+        return cid
+    if member is None:
+        raise HTTPException(403, "Нет доступа к компании")
+    if member.role not in {"admin", "user"}:
+        raise HTTPException(403, "Роль закрытия недоступна")
+    modules = member.modules
+    if member.role_id:
+        role = await db.get(CompanyRole, member.role_id, populate_existing=True)
+        if role is None or role.company_id != cid:
+            raise HTTPException(403, "Роль закрытия недоступна")
+        modules = role.modules
+    if member.role != "admin" and modules is not None and not {"ops", "ops:ops_closing"}.intersection(modules):
+        raise HTTPException(403, "Нет права на закрытие периода")
+    return cid
+
+
 @router.get("/closing")
 async def get_ops_closing(
+    request: Request,
     company_id: str = Query(...),
     period: str | None = Query(None, description="месяц 'YYYY-MM-01'; пусто = предыдущий"),
-    scope: str = Query("location", description="location | company | all"),
-    status: str | None = Query(None, description="фильтр по статусу строки"),
+    scope: Literal["location", "company", "all"] = Query("location"),
+    status: Literal["expected", "received", "matched", "disputed", "accrued", "corrected", "waived"] | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Рабочий стол закрытия месяца: что ждали, что пришло, чем закрыли.
 
-    Ожидания разворачиваются при чтении: условие, заведённое сегодня, попадает
-    в реестр текущего месяца сразу, а не после чьего-то отдельного действия.
+    Только сохранённая проекция; новое условие помечается как неподготовленное.
     """
-    cid = await assert_company_member(company_id, current_user, db)
-    p = _period(period)
-    expanded = await ops_expectations.expand(db, cid, p)
-    period_row = await ops_closing.get_or_create(db, cid, p)
-    await db.commit()
+    cid = await _closing_company(request, company_id, current_user, db, {"company_id", "period", "scope", "status"})
+    return await ops_closing.closing_projection(db, cid, _closing_period(period), scope, status)
 
-    stats = await ops_closing.counters(db, cid, p)
-    return {
-        "period": p,
-        "status": (period_row.status if period_row.status != "open"
-                   else ops_closing.auto_status(p, date.today().isoformat())),
-        "closedAt": period_row.closed_at.isoformat() if period_row.closed_at else None,
-        "counters": stats,
-        "charges": await ops_closing.charges(db, cid, p, scope=scope, status=status),
-        "blocked": expanded["blocked"],
-        "contractsWithoutTerms": await ops_expectations.contracts_without_terms(db, cid, p),
-    }
+
+@router.post("/closing/{period}/materialize")
+async def post_ops_materialize(request: Request, period: str, company_id: str = Query(...),
+                               db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    cid = await _closing_company(request, company_id, current_user, db, {"company_id"})
+    try:
+        result = await ops_closing.materialize_period(db, cid, _closing_period(period))
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    await db.commit()
+    return result
 
 
 # ===========================================================================
@@ -818,23 +876,27 @@ async def attach_ops_doc_file(
 
 @router.get("/periods")
 async def get_ops_periods(
+    request: Request,
+    response: Response,
     company_id: str = Query(...),
     months: int = Query(12, ge=1, le=36, description="сколько месяцев показать назад"),
     ahead: int = Query(2, ge=0, le=12, description="сколько месяцев вперёд развернуть"),
-    expand_all: bool = Query(True, description="развернуть ожидания по всему диапазону"),
+    expand_all: bool = Query(False, description="deprecated: явный legacy разворот; используйте POST materialize"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Состояние каждого отчётного периода: сколько ждали и сколько закрыли.
 
-    Договоры переходящие, поэтому ожидания разворачиваются сразу по всему
-    диапазону, включая месяцы вперёд: сроки известны заранее, и собирать
-    документы надо не в последний день, а по календарю.
+    По умолчанию только чтение. Явный expand_all=true временно сохраняет
+    прежний guarded write-путь с предупреждением для legacy consumers.
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _closing_company(request, company_id, current_user, db, {"company_id", "months", "ahead", "expand_all"})
     to = ops_expectations.shift_month(date.today().isoformat()[:7] + "-01", ahead)
     frm = ops_expectations.shift_month(to, -(months + ahead - 1))
     if expand_all:
+        response.headers["Deprecation"] = "@" + str(int(datetime(2026, 10, 29, tzinfo=timezone.utc).timestamp()))
+        response.headers["Warning"] = '299 - "GET expansion is deprecated; use explicit POST closing materialize for each period"'
+        response.headers["Cache-Control"] = "no-store"
         await ops_expectations.expand_range(db, cid, frm, to)
         await db.commit()
     return await ops_closing.periods_scale(db, cid, frm, to)
@@ -893,6 +955,7 @@ async def get_ops_charges(
 
 @router.post("/closing/{period}/close")
 async def post_ops_close(
+    request: Request,
     period: str,
     company_id: str = Query(...),
     force: bool = Query(False, description="закрыть, даже если часть строк нечем закрыть"),
@@ -905,9 +968,9 @@ async def post_ops_close(
     договорной суммы, ни истории: закрыть их нулём — значит записать в отчёт
     «платили ноль» вместо «не из чего считать».
     """
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _closing_company(request, company_id, current_user, db, {"company_id", "force"})
     try:
-        result = await ops_closing.close_period(db, cid, _period(period),
+        result = await ops_closing.close_period(db, cid, _closing_period(period),
                                                 user_id=current_user.id, force=force)
     except ValueError as e:
         await db.rollback()
@@ -918,16 +981,17 @@ async def post_ops_close(
 
 @router.post("/closing/{period}/reopen")
 async def post_ops_reopen(
+    request: Request,
     period: str,
     company_id: str = Query(...),
-    reason: str = Body(..., embed=True),
+    reason: str = Body(..., embed=True, min_length=1, max_length=2000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Открыть закрытый месяц заново. Причина обязательна и остаётся навсегда."""
-    cid = await assert_company_member(company_id, current_user, db)
+    cid = await _closing_company(request, company_id, current_user, db, {"company_id"})
     try:
-        result = await ops_closing.reopen_period(db, cid, _period(period), reason,
+        result = await ops_closing.reopen_period(db, cid, _closing_period(period), reason,
                                                  user_id=current_user.id)
     except ValueError as e:
         await db.rollback()
