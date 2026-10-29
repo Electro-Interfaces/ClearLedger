@@ -187,7 +187,7 @@ export function isPublicPage(pathname: string): boolean {
   return PUBLIC_PAGES.some((s) => p.endsWith(s.replace(/\/$/, '')) || p.includes(s))
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
+async function handleResponse<T>(res: Response, sentAuthorization: string | undefined, signal?: AbortSignal): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
     let body: Record<string, unknown> | undefined
@@ -198,7 +198,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
       detail = (body?.detail as string) || JSON.stringify(body) || res.statusText
     } catch { /* ignore */ }
 
-    if (res.status === 401 && !isRedirecting) {
+    // Parsing the body is asynchronous too: compare the exact Bearer sent by
+    // this request with the session that is current now, after that await.
+    const currentToken = getToken()
+    if (res.status === 401 && !isRedirecting && !signal?.aborted && currentToken
+        && sentAuthorization === `Bearer ${currentToken}`) {
       // На публичных страницах 401 от фоновых запросов — не «истёкшая сессия»: не шумим
       // и не редиректим (иначе фоновый 401 сбивает свежий вход). Приглашение и сброс
       // пароля открывают как раз те, у кого сессии нет или она протухла: `/auth/me`
@@ -274,51 +278,56 @@ export async function get<T>(
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v))
     }
   }
-  const res = await fetch(url.toString(), { headers: headers(), signal: options?.signal })
-  return handleResponse<T>(res)
+  const requestHeaders = headers()
+  const res = await fetch(url.toString(), { headers: requestHeaders, signal: options?.signal })
+  return handleResponse<T>(res, requestHeaders.Authorization, options?.signal)
 }
 
 /** POST запрос (JSON) */
 export async function post<T>(path: string, body?: unknown): Promise<T> {
   if (isDemoMode()) return demoPost<T>(path)
+  const requestHeaders = headers({ 'Content-Type': 'application/json' })
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers: headers({ 'Content-Type': 'application/json' }),
+    headers: requestHeaders,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization)
 }
 
 /** PATCH запрос */
 export async function patch<T>(path: string, body: unknown): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers({ 'Content-Type': 'application/json' })
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
-    headers: headers({ 'Content-Type': 'application/json' }),
+    headers: requestHeaders,
     body: JSON.stringify(body),
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization)
 }
 
 /** PUT запрос */
 export async function put<T>(path: string, body: unknown): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers({ 'Content-Type': 'application/json' })
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PUT',
-    headers: headers({ 'Content-Type': 'application/json' }),
+    headers: requestHeaders,
     body: JSON.stringify(body),
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization)
 }
 
 /** DELETE запрос */
 export async function del<T = void>(path: string): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers()
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
-    headers: headers(),
+    headers: requestHeaders,
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization)
 }
 
 /** POST multipart (файлы) */
@@ -334,18 +343,19 @@ export async function upload<T>(
   onProgress?: (доля: number) => void,
 ): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers()
   if (!onProgress) {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: headers(), // НЕ ставим Content-Type — browser сам добавит boundary
+      headers: requestHeaders, // НЕ ставим Content-Type — browser сам добавит boundary
       body: formData,
     })
-    return handleResponse<T>(res)
+    return handleResponse<T>(res, requestHeaders.Authorization)
   }
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${BASE_URL}${path}`)
-    for (const [k, v] of Object.entries(headers())) xhr.setRequestHeader(k, v)
+    for (const [k, v] of Object.entries(requestHeaders)) xhr.setRequestHeader(k, v)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
     }
@@ -357,7 +367,7 @@ export async function upload<T>(
         statusText: xhr.statusText,
         headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
       })
-      handleResponse<T>(тело).then(resolve, reject)
+      handleResponse<T>(тело, requestHeaders.Authorization).then(resolve, reject)
     }
     xhr.onerror = () => reject(new ApiError(0, 'Не удалось связаться с сервером'))
     xhr.ontimeout = () => reject(new ApiError(0, 'Загрузка не уложилась во время ожидания'))
