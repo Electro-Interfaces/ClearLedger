@@ -3,7 +3,7 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: 91c10d9170375b320f7689f526707b894789a9192345efefd25e957acb6f9cf0
+// openapi-typescript 7.10.1; curated schema sha256: 712b46f2260c5d5431b736be5535b0fb526e45049490e35ffe00394fc60b1570
 export interface paths {
     "/contracts": {
         parameters: {

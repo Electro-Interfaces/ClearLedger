@@ -50,3 +50,11 @@ Baseline loader читает старый router через git show без из
 JSON `.artifacts/service-openapi-browser/layout-{baseline,candidate}.json`.
 Снимки в том же каталоге: `layout-candidate-390.png`, `layout-candidate-1200.png`
 и соответствующие `layout-baseline-*`. Данные синтетические; SQL, VM и env не трогались.
+
+
+Координатор независимо повторил итоговый pinned UI batch на общем составе:
+7PASS за12.219с. Дополнительно полный actual HTTPS Swagger браузер со штатными
+main/public сборками и PostgreSQL PASS110.21с. Визуально просмотрены mobile
+390px и desktop: описания групп читаются отдельной строкой, горизонтального
+переполнения в bounded cases нет. Проверка не распространяется на все экраны
+продукта и все устройства. Vendor bytes не менялись.

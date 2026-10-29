@@ -119,3 +119,15 @@ exports `.artifacts/service-openapi-{offline,runtime}.json` локальные �
 это не сертификация полной OAuth/OIDC conformance. Root переносит пакет, регенерирует
 artifacts/types и отдельно принимает live SQL/HTTPS. Мобильный layout fix согласован
 как следующий отдельный commit и не входит в этот schema пакет.
+
+
+## Независимая интеграционная проверка
+
+Root перенёс canonical/browser пакет как e1818fae. На общем составе:
+56 offline Python checks PASS7.808с;6 actual interceptor/pinned Swagger
+checks PASS8.431с;22 реальных HTTP/PostgreSQL docs cases PASS61.76с, включая
+новый server contract, protected access, expiry/revocation/default-off/override
+отказы. Canonical12-operation wire types заново сгенерированы, freshness check
+PASS. После отдельной responsive правки086eb928 полный настоящий HTTPS Swagger
+(main/public/CodePKCE/SQL/Try/logout/revoke) PASS110.21с. Это не production
+conformance/нагрузка и не permission на merge или выпуск.
