@@ -17,10 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
-from app.services import object_control, space_projection
+from app.services import location_commands, object_control, space_projection
 from app.services.export_policy import (
     PUBLIC_FIELDS, filter_for_export, is_publishable)
-from app.services.object_freeze import freeze_reasons, number_changed
+from app.services.location_commands import merge_metadata as _merge_metadata
 from app.services.station_passport import passport_value, stations_by_location
 from app.models import (
     AuditEvent, Company, ObjectExportLog, ServiceLocation, User, location_bindings)
@@ -128,71 +128,6 @@ def _passport(l: ServiceLocation, unit=None) -> dict[str, Any] | None:
     return out or None
 
 
-# Ключи снимка, которые ведут конвейеры загрузки, а не человек в форме:
-# по ним карточка находится при следующей выгрузке. Правка объекта из интерфейса
-# присылает `metadata` целиком, и до 12.08.2026 запись заменяла снимок ЦЕЛИКОМ —
-# редактирование одного поля сносило `asuimStationId`/`hubexAssetId`/историю
-# номеров, карточка выпадала из индексов витрины и заводилась заново дублем.
-_SERVICE_META_KEYS = {
-    "ext_id", "stationId", "ocppId", "ocppUrl", "source", "nameSource",
-    "nameHistory", "numberHistory", "zoi1", "buNumber", "connectorsSource",
-}
-
-
-# Ключи, которые человек ЗАПОЛНЯЕТ руками, но которые нельзя терять, если форма
-# их не прислала: привязка к активу HubEx заводится вручную (поля типа
-# «Электрозарядная станция»), а стирать её молчаливым PATCH-ем нельзя.
-_EDITABLE_LINK_KEYS = {"hubexAssetId", "hubexName", "hubexNote", "linkStatus",
-                       "zoi1", "buNumber", "ocppUrl"}
-
-
-def _is_service_meta(key: str, value: Any) -> bool:
-    """Служебный ключ снимка: его ведёт загрузка, форма его не трогает вовсе.
-
-    Структурные значения (списки/словари: `connectors`, история) тоже служебные —
-    форма их всё равно не редактирует и присылает обратно потерянными."""
-    return (key.startswith("asuim")
-            or key in _SERVICE_META_KEYS
-            or isinstance(value, (dict, list)))
-
-
-def _merge_metadata(current: dict | None, incoming: dict | None) -> dict | None:
-    """Снимок после правки из интерфейса: служебное — из базы, остальное — из формы.
-
-    Три категории: служебные ключи загрузки берутся только из базы; ключи связи
-    (`hubexAssetId` и соседи) — из формы, если она их прислала, иначе из базы;
-    все прочие — только из формы, поэтому очистка поля по-прежнему работает."""
-    cur, inc = current or {}, incoming or {}
-    kept = {k: v for k, v in cur.items()
-            if _is_service_meta(k, v) or (k in _EDITABLE_LINK_KEYS and k not in inc)}
-    edited = {k: v for k, v in inc.items() if not _is_service_meta(k, v)}
-    merged = {**kept, **edited}
-    return merged or None
-
-
-def _sync_station_number(loc: ServiceLocation) -> None:
-    """Номер из формы — в колонку паспорта, а не только в снимок.
-
-    Поле «Номер станции» правится через `metadata.number`, а резолв сессий идёт по
-    колонке `station_number`. Без синхронизации правка выглядела применённой, но
-    заезды продолжали ходить по старому номеру."""
-    num = (loc.extra_metadata or {}).get("number")
-    num = str(num).strip() if num is not None else ""
-    if num and str(loc.station_number or "").strip() != num:
-        loc.station_number = num[:60]
-
-
-async def _assert_code_free(db: AsyncSession, company_id, code: str, except_id: str | None = None):
-    """Код объекта уникален в компании (уникальный индекс v2.16) — 409 вместо 500."""
-    stmt = select(ServiceLocation.id).where(
-        ServiceLocation.company_id == company_id, ServiceLocation.code == code,
-        ServiceLocation.is_test.is_(False))
-    if except_id:
-        stmt = stmt.where(ServiceLocation.id != except_id)
-    if (await db.execute(stmt)).first():
-        raise HTTPException(409, f"Код «{code}» уже занят другим объектом компании")
-
-
 def _out(l: ServiceLocation, unit=None) -> LocationOut:
     return LocationOut(
         id=l.id, code=l.code, name=l.name, type=l.type, status=l.status,
@@ -285,33 +220,14 @@ async def create_location(
 ):
     cid = await assert_company_member(payload.company_id, current_user, db)
     new_id = (payload.id or "").strip() or f"ezs-{uuid.uuid4().hex[:20]}"
-    existing = await db.get(ServiceLocation, new_id)
-    if existing:
-        # upsert по клиентскому id — но чужую точку (другой компании) перехватить
-        # нельзя: get_owned бросит 404, если нет членства в её компании.
-        await get_owned(ServiceLocation, new_id, current_user, db)
-        existing.company_id = cid
-        existing.code = payload.code
-        existing.name = payload.name
-        existing.type = payload.type
-        existing.status = payload.status
-        existing.address = payload.address
-        existing.description = payload.description
-        existing.source_bindings = payload.sourceBindings
-        existing.extra_metadata = _merge_metadata(existing.extra_metadata, payload.metadata)
-        _sync_station_number(existing)
-        if payload.code != existing.code:
-            await _assert_code_free(db, cid, payload.code, except_id=existing.id)
-        loc = existing
-    else:
-        await _assert_code_free(db, cid, payload.code)
-        loc = ServiceLocation(
-            id=new_id, company_id=cid, code=payload.code, name=payload.name,
-            type=payload.type, status=payload.status, address=payload.address,
-            description=payload.description, source_bindings=payload.sourceBindings,
-            extra_metadata=payload.metadata,
-        )
-        db.add(loc)
+    data = payload.model_dump(exclude={"id", "company_id"})
+    if "metadata" not in payload.model_fields_set:
+        # Omission is not an explicit request to erase the object number.
+        data.pop("metadata")
+    try:
+        loc = await location_commands.upsert(db, cid, new_id, data)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
     await db.flush()
     # onupdate=func.now() истекает updated_at после flush на UPDATE-ветке upsert
     # → _out не должен триггерить синхронную дозагрузку (MissingGreenlet).
@@ -334,27 +250,16 @@ async def update_location(
     current_user: User = Depends(get_current_user),
 ):
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
+    # Establish both object and own-organization context for path-only admission.
+    cid = await assert_company_member(str(loc.company_id), current_user, db)
     data = payload.model_dump(exclude_unset=True)
-
-    # Номер объекта после замораживающего события не меняется (СТО п. 7.5): по нему
-    # объект уже нашли снаружи — в договоре, в проводке, в чужой системе, — и правка
-    # рвёт эти ссылки молча. Причину называем: «нельзя» без объяснения провоцирует
-    # обход системы, а по названному событию видно, что делать дальше.
-    new_number = (data.get("metadata") or {}).get("number") if "metadata" in data else None
-    if number_changed(loc, data.get("code"), new_number):
-        reasons = await freeze_reasons(db, loc.company_id, loc.id)
-        if reasons:
-            raise HTTPException(409, "Номер объекта изменить нельзя: " + ", ".join(reasons))
-
-    if data.get("code") and data["code"] != loc.code:
-        await _assert_code_free(db, loc.company_id, data["code"], except_id=loc.id)
-    if "sourceBindings" in data:
-        loc.source_bindings = data.pop("sourceBindings")
-    if "metadata" in data:
-        loc.extra_metadata = _merge_metadata(loc.extra_metadata, data.pop("metadata"))
-        _sync_station_number(loc)
-    for k, v in data.items():
-        setattr(loc, k, v)
+    try:
+        mutation = await location_commands.update(db, cid, location_id, data)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+    if mutation is None:
+        raise HTTPException(404, "Не найдено")
+    loc = mutation.location
     await db.flush()
     await db.refresh(loc)
     # Станция подтягивается и здесь: иначе карточка после сохранения показывала бы
@@ -372,26 +277,16 @@ async def delete_location(
     current_user: User = Depends(get_current_user),
 ):
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
-    if loc.type == "warehouse":
-        # Удаление склада каскадом стирало остатки запчастей и обнуляло место у единиц
-        # и в истории движений — без единого документа.
-        from sqlalchemy import func
-        from app.models import EzsEquipmentUnit, EzsSparePartStock
-        units = (await db.execute(select(func.count()).select_from(EzsEquipmentUnit).where(
-            EzsEquipmentUnit.current_location_id == loc.id))).scalar_one()
-        stock = (await db.execute(select(func.count()).select_from(EzsSparePartStock).where(
-            EzsSparePartStock.location_id == loc.id, EzsSparePartStock.qty > 0))).scalar_one()
-        if units or stock:
-            raise HTTPException(409, f"На складе числится оборудование ({units} ед.) и запчасти ({stock} поз.) — "
-                                     "сначала переместите или спишите их документами")
-        from app.models import EzsEquipmentMovement as EM, EzsSparePartMovement as SM
-        for M in (EM, SM):
-            if (await db.execute(select(M.id).where(
-                    (M.from_location_id == loc.id) | (M.to_location_id == loc.id)).limit(1))).first():
-                raise HTTPException(409, "По складу есть история движений — удаление стёрло бы её из отчётов. "
-                                         "Пустой склад можно закрыть, но не удалить")
-    await db.delete(loc)
-    return {"ok": True}
+    cid = await assert_company_member(str(loc.company_id), current_user, db)
+    try:
+        # Reuse mandatory scope/tenant checks without changing or retiring data.
+        mutation = await location_commands.update(db, cid, location_id, {})
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+    if mutation is None:
+        raise HTTPException(404, "Не найдено")
+    raise HTTPException(409,
+        "Физическое удаление объекта недоступно: требуется вывод из эксплуатации с сохранением истории")
 
 
 class OpStatusBody(BaseModel):
