@@ -142,3 +142,23 @@ recreation включает новый FK child в dependency-ordered drop. Herm
 подключает декларацию модели через schema-only Base без runtime engine.
 Root владеет интеграцией, generated wire types/OpenAPI artifacts/package locks,
 полной schema matrix, независимым repeat и решением о дальнейшей поставке.
+
+
+## Независимая проверка интеграционного кандидата
+
+Координатор перенёс patch в21e60c76. В собственном процессе из пустого cwd
+с явным абсолютным PYTHONPATH:41offline tests PASS за6.262с; отдельные12
+PostgreSQL/HTTP/process tests PASS за7.677с, включая три независимых процесса.
+Первый запуск координатора из server без PYTHONPATH дал11PASS/1FAIL: дочерний
+script не нашёл app. Это ошибка конфигурации запуска; повтор выполнен ровно
+по описанному выше admission, без изменения runtime/test expectations.
+
+Полный отдельный schema suite наapi_schema_final_test, profile=both,
+require_portal=1 и обязательной бюджетной моделью:31PASS за301.22с. Проверены
+fresh/upgrade/repeat, Core/public, FK/defaults/indexes и настоящие прежние
+исходники; роль менялась только DB-local внутри owned synthetic DB с
+восстановлением исходного search_path. Это не восстановление рабочего dump.
+
+Типы12операций заново сгенерированы по текущему curated schema; свежие
+partner:types:check и consumer compilation PASS. Удалённый CI, нагрузка
+и эксплуатационные пороги по-прежнему не подтверждены.

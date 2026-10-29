@@ -252,3 +252,16 @@ Security Requirement со всеми scopes в одном AND-списке со�
 `_problem`, query dependency, `_policy`, `create_product_api` и runtime registry
 exporter. Прежний текст отчёта сохранён побайтно как prefix этого документа;
 `git diff --check` проходит. Изменение схемы сообщено координатору до коммита.
+
+
+Дополнение M15, composed21e60c76: появился отключённый по умолчанию общий
+PostgreSQL budget после live identity/ACL и до domain/parameter validation.
+Его собственный BudgetExceeded возвращает429 code=rate_limited и integer
+Retry-After>=1; generic injected HTTPException429 сохраняет internal_error.
+Curated schema содержит оба условия/примера и общий429 на12операциях;
+приведённые выше baseline строки относятся к исходному M09. Fail-closed503
+при недоступности quota store не заменяет401/403 проверки до него.
+Точный алгоритм, ограничения и evidence: [product-budget-20261030.md](product-budget-20261030.md).
+Это request admission, не квота байтов/одновременных streaming downloads и не
+периметровый лимит неавторизованных запросов. Координатор независимо повторил41offline,12SQL/process и31Core/public schema
+проверок — PASS. Это не приёмка производственной нагрузки.
