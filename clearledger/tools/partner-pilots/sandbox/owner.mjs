@@ -45,11 +45,14 @@ try {
   })
   stage = 'login'
   page.on('requestfailed', (r) => trace.push({ path: new URL(r.url()).pathname, failed: r.failure()?.errorText }))
-  await page.goto(`${state.origin}/login`)
+  await page.goto(`${state.origin}/developer/api`)
+  await page.waitForURL((url) => url.pathname === '/login', { timeout: 30000 })
   await page.getByLabel('Email', { exact: true }).fill(state.fixture[who].email)
   await page.getByLabel('Пароль', { exact: true }).fill(state.fixture[who].password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.waitForURL((url) => url.pathname !== '/login', { timeout: 30000 })
+  // Ждём настоящий public → gate → private переход и загрузку Core-профиля,
+  // прежде чем начинать внешнюю навигацию; токен или cookie не внедряем.
+  await page.getByRole('heading', { name: 'API для разработчиков', exact: true }).waitFor({ timeout: 30000 })
   stage = 'login-complete'
   if (action === 'login-check') {
     console.info('OWNER_BROWSER_LOGIN_OK')
