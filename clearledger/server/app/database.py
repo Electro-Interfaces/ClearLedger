@@ -2214,10 +2214,12 @@ async def _assert_bootstrap_namespace(conn) -> None:
     if namespace is None:
         raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
     names = sorted({table.name for table in Base.metadata.tables.values() if table.schema is None})
+    # Те же table-like relkind, что у PostgreSQL has_table в SQLAlchemy; не индексы/последовательности.
     foreign = await conn.scalar(text("""SELECT EXISTS (
         SELECT 1 FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
         WHERE c.relname = ANY(CAST(:names AS text[]))
+          AND c.relkind IN ('r', 'p', 'f', 'v', 'm')
           AND pg_catalog.pg_table_is_visible(c.oid)
           AND n.nspname <> :namespace
     )"""), {"names": names, "namespace": namespace})
