@@ -143,9 +143,10 @@ incremental migration phase не запускается. Guard не меняет
 и не пытается автоматически «починить» чужую таблицу.
 
 Fail-closed означает, что ошибочно подготовленный shared namespace теперь
-блокирует startup вместо ложного успеха или поздней поломки. Возможна проверка
-существующих relation других типов с тем же именем: это консервативный барьер,
-а не доказательство совпадения структуры. Guard не устанавливает эксклюзивную
+блокирует startup вместо ложного успеха или поздней поломки. Проверяются только
+table-like relkind `r,p,f,v,m`, как у PostgreSQL has_table SQLAlchemy; foreign
+namespace INDEX/SEQUENCE не запрещают допустимый CREATE в своей schema.
+Принадлежность namespace не доказывает совпадение структуры. Guard не устанавливает эксклюзивную
 блокировку от DDL другого приложения между проверкой и CREATE; provisioning
 нескольких приложений должен координироваться отдельно.
 
@@ -205,3 +206,85 @@ SQL profile controls и old immutable ORM controls сохранились. Ло�
 После прогона fixture cleanup завершён, test engines/old ORM child processes
 закрыты и SQL окно возвращено координатору. `git diff --check` проходит;
 повторных широких DB suites, remote CI, deployment и customer migrations не было.
+
+## Уточнение relkind после `863607cca632794aca9043fcc6adf0d98428c906`
+
+Отдельный bounded slice исправляет availability false positive прежнего guard.
+Предыдущие namespace baseline/9 PASS выше сохранены как результаты исходного
+slice; они не покрывали чужие INDEX и SEQUENCE с именем отсутствующей Core-таблицы.
+
+### Первичный источник и необходимая граница
+
+В установленном **SQLAlchemy 2.0.36** фактический `PGDialect._has_table_query`
+передаёт в relkind condition `RELKINDS_ALL_TABLE_LIKE`. Точная константа:
+`('r', 'p', 'f', 'v', 'm')`, построенная из TABLE/VIEW/MAT_VIEW. Константы
+`RELKINDS_ALL_TABLES` в этой версии нет. Это проверено по installed source и
+[исходнику SQLAlchemy tag rel_2_0_36](https://github.com/sqlalchemy/sqlalchemy/blob/rel_2_0_36/lib/sqlalchemy/dialects/postgresql/pg_catalog.py).
+[Inspector.has_table](https://docs.sqlalchemy.org/en/20/core/reflection.html#sqlalchemy.engine.reflection.Inspector.has_table)
+поддерживает table-like объекты, включая обычные и materialized views;
+[PostgreSQL pg_class](https://www.postgresql.org/docs/current/catalog-pg-class.html)
+отдельно различает relkind индексов `i`, последовательностей `S` и таблиц/представлений.
+Одна лишь `pg_table_is_visible` не воспроизводит фильтр has_table.
+
+### Реальный контрпример и положительный control
+
+Новые SQL-проверки используют настоящий Core bootstrap и ту же own test DB.
+После создания Core masters удалены только новые partner/portal tables.
+В public создаётся index на synthetic host table либо sequence с именем
+`partner_clients`; Core-таблица с таким именем отсутствует. Это test fixtures,
+новые production tables/models не добавлены.
+
+| Объект public | Видимость по OID | Inspector.has_table | Настоящий metadata CREATE в SAVEPOINT |
+| --- | --- | --- | --- |
+| INDEX, OID **1145974** | true, kind `i` | false | Создал отдельную core.partner_clients OID **1145975**, обе FK target schema = core |
+| SEQUENCE, OID **1154420** | true, kind `S` | false | Создал отдельную core.partner_clients OID **1154421**, обе FK target schema = core |
+
+SAVEPOINT откатывается до вызова guarded bootstrap, и отсутствие Core-таблицы
+проверяется снова. Таким образом контроль не маскирует дефект заранее созданной
+Core-таблицей и не оставляет результат raw CREATE для bootstrap. Оригинальный
+guard `863607cc` после этого ошибочно выдаёт RuntimeError на INDEX и SEQUENCE.
+Trace: `create_all:2234` → `_assert_bootstrap_namespace:2217–2226` → EXISTS по
+любой visible relation из другого namespace; пропущен relkind condition.
+
+Корректный baseline: **3 tests, 1 PASS / 2 ERROR, 68.529 s**, session25050 reaped.
+Negative partitioned TABLE/VIEW/materialized VIEW controls при этом PASS: has_table
+true, early denial до DDL/functions, public OID/definition и Core catalog неизменны.
+Первый fixture-only прогон session35479 не является этим evidence: сравнивался
+asyncpg `char` bytes со строкой; исправлено только чтение каталога через
+`relkind::text`, затем baseline полностью повторён на неизменённом runtime.
+
+### Исправление и остающиеся границы
+
+Единственное функциональное изменение runtime — условие
+`c.relkind IN ('r', 'p', 'f', 'v', 'm')` в существующем namespace EXISTS.
+Вызов до PHONE_FUNCTION_DDL, missing current_schema denial, полный набор
+unqualified Base tables и generic errors сохранены. Это не prefix exemption,
+не отключение проверки namespace и не изменение FK/CASCADE.
+
+Обычная чужая TABLE продолжает проверяться прежним тестом; новые реальные SQL
+контроли отдельно проверяют partitioned TABLE, VIEW и materialized VIEW. Kind `f`
+сохранён по точному dialect source; новые FDW/server/network connections ради
+этой проверки не создавались. INDEX/SEQUENCE проходят полный guarded bootstrap:
+проверяются собственные Core OID и FK targets, неизменность public OID/owner/ACL/
+definition/host rows, а у sequence также `last_value=17,is_called=false`.
+Прежние standalone public, Core repeat, explicit edge, old ORM и negative table
+cases остаются в том же полном наборе; их expectations не ослаблены.
+
+Полный финальный прогон тем же isolated unittest command: **12 PASS за
+221.976 s** (все прежние 9 cases и три новых, с subTest по `p/v/m`). Для финальных
+положительных контролей public INDEX OID **1223015** и rollback-only Core OID
+**1223016** различаются; public SEQUENCE OID **1231787**, rollback-only Core OID
+**1231788**. После rollback в обоих случаях реальный guarded bootstrap также
+успешен и создаёт собственные Core relation/FK; public identity и sequence state
+сохранены. Negative `p/v/m` имеют реальные OID **1197198 / 1197203 / 1197207**,
+has_table=true и неизменный каталог после раннего отказа. Прежний ordinary
+TABLE negative отдельно остаётся PASS.
+
+Final process session68804 завершён exit 0 и reaped; baseline35479/25050 и old ORM
+children также завершены. Cleanup synthetic schemas/engines выполнен, SQL окно
+возвращено root **до worker_done** для его независимого candidate repeat.
+Логи: `.artifacts/namespace-relkind-baseline.log` (ошибка fixture encoding),
+`.artifacts/namespace-relkind-baseline-corrected.log` (настоящий negative baseline),
+`.artifacts/namespace-relkind-final.log` (12 PASS). `git diff --check` проходит;
+новых SDK dependencies, role/cluster changes, customer migrations, SSH/production,
+PR/merge/release не было. Root compose candidate repeat не приписывается этому прогону.

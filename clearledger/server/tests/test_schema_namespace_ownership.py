@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from sqlalchemy import Column, ForeignKey, Table, text
+from sqlalchemy import Column, ForeignKey, Table, inspect, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -128,6 +128,14 @@ class SchemaNamespaceOwnership(unittest.IsolatedAsyncioTestCase):
             return [tuple(row) for row in (await conn.execute(text("SELECT p.oid,p.proname,p.prosrc,p.proowner,p.proacl::text "
                 "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                 "WHERE n.nspname=:schema ORDER BY p.oid"), {"schema": namespace})).all()]
+
+    async def public_relation(self, name):
+        async with self.control.connect() as conn:
+            return tuple((await conn.execute(text("SELECT c.oid,n.nspname,c.relkind::text,c.relowner,c.relacl::text,"
+                "CASE WHEN c.relkind='i' THEN pg_get_indexdef(c.oid) "
+                "WHEN c.relkind IN ('v','m') THEN pg_get_viewdef(c.oid,true) END "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname='public' AND c.relname=:name"), {"name": name})).one())
 
     async def public_snapshot(self):
         result = {}
@@ -281,6 +289,84 @@ asyncio.run(main())
         self.assertEqual(await self.catalog("public"), before)
         self.assertEqual(await self.functions("public"), functions)
         self.assertEqual(await self.catalog("core"), [])
+
+    async def non_table_shadow_control(self, kind):
+        await self.bootstrap("core")
+        await self.remove_partner_tables()
+        async with self.control.begin() as conn:
+            if kind == "i":
+                await conn.execute(text("CREATE TABLE public.namespace_index_host (id integer PRIMARY KEY,marker text)"))
+                await conn.execute(text("INSERT INTO public.namespace_index_host VALUES (1,'foreign index host')"))
+                await conn.execute(text("CREATE INDEX partner_clients ON public.namespace_index_host(marker)"))
+            else:
+                await conn.execute(text("CREATE SEQUENCE public.partner_clients START 17"))
+        sentinel = await self.public_snapshot()
+        relation = await self.public_relation("partner_clients")
+        self.assertEqual(relation[2], kind)
+        engine = self.engine("core, public")
+        async with engine.begin() as conn:
+            self.assertTrue(await conn.scalar(text("SELECT pg_table_is_visible(:oid)"), {"oid": relation[0]}))
+            self.assertFalse(await conn.run_sync(lambda sync: inspect(sync).has_table("partner_clients")))
+            self.assertIsNone(await conn.scalar(text("SELECT to_regclass('core.partner_clients')::oid")))
+            # Actual library CREATE control, rolled back before the guarded bootstrap.
+            savepoint = await conn.begin_nested()
+            await conn.run_sync(lambda sync: self.database.Base.metadata.create_all(sync,
+                tables=[self.database.Base.metadata.tables["partner_clients"]]))
+            core_oid = await conn.scalar(text("SELECT to_regclass('core.partner_clients')::oid"))
+            self.assertIsNotNone(core_oid)
+            self.assertNotEqual(core_oid, relation[0])
+            target_schemas = (await conn.execute(text("SELECT n.nspname FROM pg_constraint k "
+                "JOIN pg_class c ON c.oid=k.confrelid JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE k.conrelid=:oid AND k.contype='f'"), {"oid": core_oid})).scalars().all()
+            self.assertEqual(target_schemas, ["core", "core"])
+            await savepoint.rollback()
+            self.assertIsNone(await conn.scalar(text("SELECT to_regclass('core.partner_clients')::oid")))
+        print("RELKIND_CONTROL " + json.dumps(dict(kind=kind, public_oid=relation[0],
+            visible=True, has_table=False, savepoint_core_oid=core_oid)), flush=True)
+        engine = await self.bootstrap("core, public")
+        await self.assert_owned(engine, "core")
+        self.assertEqual(await self.public_relation("partner_clients"), relation)
+        self.assertEqual(await self.public_snapshot(), sentinel)
+        self.assertEqual(await self.foreign_fks(), [])
+        if kind == "S":
+            async with self.control.connect() as conn:
+                self.assertEqual(tuple((await conn.execute(text("SELECT last_value,is_called FROM public.partner_clients"))).one()),
+                                 (17, False))
+
+    async def test_visible_foreign_index_allows_owned_table_creation(self):
+        await self.non_table_shadow_control("i")
+
+    async def test_visible_foreign_sequence_allows_owned_table_creation(self):
+        await self.non_table_shadow_control("S")
+
+    async def test_foreign_partitioned_table_views_and_matviews_remain_early_denials(self):
+        await self.bootstrap("core")
+        await self.remove_partner_tables()
+        before = await self.catalog("core")
+        functions = await self.functions("core")
+        for kind, ddl, drop in (
+            ("p", "CREATE TABLE public.partner_clients (id varchar(64) PRIMARY KEY) PARTITION BY RANGE(id)", "TABLE"),
+            ("v", "CREATE VIEW public.partner_clients AS SELECT 'support-view'::varchar(64) AS id", "VIEW"),
+            ("m", "CREATE MATERIALIZED VIEW public.partner_clients AS SELECT 'support-matview'::varchar(64) AS id", "MATERIALIZED VIEW"),
+        ):
+            with self.subTest(kind=kind):
+                async with self.control.begin() as conn:
+                    await conn.execute(text(ddl))
+                relation = await self.public_relation("partner_clients")
+                self.assertEqual(relation[2], kind)
+                engine = self.engine("core, public")
+                async with engine.connect() as conn:
+                    self.assertTrue(await conn.run_sync(lambda sync: inspect(sync).has_table("partner_clients")))
+                    self.assertTrue(await conn.scalar(text("SELECT pg_table_is_visible(:oid)"), {"oid": relation[0]}))
+                with self.assertRaisesRegex(RuntimeError, "schema ownership"):
+                    await self.bootstrap("core, public")
+                self.assertEqual(await self.public_relation("partner_clients"), relation)
+                self.assertEqual(await self.catalog("core"), before)
+                self.assertEqual(await self.functions("core"), functions)
+                self.assertEqual(await self.foreign_fks(), [])
+                print("RELKIND_DENIAL " + json.dumps(dict(kind=kind, public_oid=relation[0], has_table=True)), flush=True)
+                async with self.control.begin() as conn:
+                    await conn.execute(text("DROP " + drop + " public.partner_clients"))
 
     async def test_core_without_shadow_creates_owned_tables_and_repeats(self):
         await self.bootstrap("core")
