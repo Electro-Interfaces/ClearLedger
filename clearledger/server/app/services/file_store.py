@@ -35,6 +35,7 @@ _PENDING = "file_store.pending_transactions"
 @dataclass
 class _Files:
     paths: dict[Path, uuid.UUID] = field(default_factory=dict)
+    commit_started: bool = False
     committed: bool = False
 
 
@@ -52,6 +53,18 @@ def _track(db, path, file_id):
             raise RuntimeError("SourceFile must belong to a Session transaction")
         pending = session.info.setdefault(_PENDING, {})
         pending.setdefault(transaction, _Files()).paths[path] = file_id
+
+
+@event.listens_for(Session, "before_commit")
+def _file_before_commit(session):
+    # after_commit observers may raise after durability and prevent our own
+    # observer from running. Mark the attempt BEFORE that point: absence of a
+    # success callback must never be treated as proof of rollback.
+    transaction = _current(session)
+    if transaction is not None:
+        pending = session.info.setdefault(_PENDING, {})
+        # Also track bytes added by later before_commit/flush observers.
+        pending.setdefault(transaction, _Files()).commit_started = True
 
 
 @event.listens_for(Session, "after_commit")
@@ -77,13 +90,20 @@ def _file_transaction_end(session, transaction):
         return
     bucket = pending.pop(transaction, None)
     if bucket is not None:
-        if bucket.committed and transaction.parent is not None:
-            # RELEASE SAVEPOINT is provisional until its parent commits.
+        if (bucket.committed or bucket.commit_started) and transaction.parent is not None:
+            # A successful or uncertain RELEASE is provisional until its parent
+            # commits. Transfer paths only: it says nothing about parent commit.
             pending.setdefault(transaction.parent, _Files()).paths.update(bucket.paths)
-        elif not bucket.committed:
-            # Includes rollback and Session.close() without a commit.
+        elif not bucket.committed and not bucket.commit_started:
+            # No commit attempt: rollback/close cannot hide a durable commit.
             for path, file_id in bucket.paths.items():
                 _remove_new_file(path, file_id)
+        elif not bucket.committed and bucket.paths:
+            # A skipped callback or ambiguous commit failure cannot be resolved
+            # using public Session events on close. Prefer orphan bytes over
+            # deleting bytes of a committed row; explicit rollback cleans above.
+            logger.warning("Исход commit файла не подтверждён; bytes сохранены: %s",
+                           ", ".join(str(file_id) for file_id in bucket.paths.values()))
     if not pending:
         session.info.pop(_PENDING, None)
 
