@@ -1,0 +1,138 @@
+"""Public allowlists. No ORM/raw/secret objects are serialized implicitly."""
+from datetime import date
+import re
+from typing import Annotated, Generic, Literal, TypeAliasType, TypeVar
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.alias_generators import to_camel
+
+Id = TypeAliasType("Id", Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:\-]*$")])
+
+
+class DTO(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True,
+                              extra="forbid", allow_inf_nan=False)
+
+
+class ListQuery(BaseModel):
+    # Direct wire names avoid FastAPI 0.115/Pydantic alias metadata rebuilding.
+    model_config = ConfigDict(extra="forbid")
+    pageSize: int = Field(default=50, ge=1, le=200)
+    cursor: str | None = Field(default=None, min_length=1, max_length=4096)
+    q: str | None = Field(default=None, min_length=1, max_length=100)
+    dateFrom: date | None = None
+    dateTo: date | None = None
+
+    @field_validator("dateFrom", "dateTo", mode="before")
+    @classmethod
+    def iso_date_only(cls, value):
+        if value is None or type(value) is date:
+            return value
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            raise ValueError("ISO calendar date required")
+        return value
+
+    @property
+    def page_size(self):
+        return self.pageSize
+
+    @property
+    def date_from(self):
+        return self.dateFrom
+
+    @property
+    def date_to(self):
+        return self.dateTo
+
+    @model_validator(mode="after")
+    def valid_window(self):
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("Invalid date window")
+        return self
+
+
+class EmptyQuery(DTO):
+    pass
+
+
+class Object(DTO):
+    id: Id
+    level: Literal["servicePoint"] = "servicePoint"
+    code: str
+    name: str
+    type: str
+    status: str
+    address: str | None
+    latitude: float | None
+    longitude: float | None
+
+
+class Equipment(DTO):
+    id: Id
+    level: Literal["station"] = "station"
+    vendor: str | None
+    model: str | None
+    serial_number: str | None
+    power_kw: float | None
+    state: str
+    object_id: Id | None
+
+
+class Counterparty(DTO):
+    id: Id
+    name: str
+    inn: str | None
+    kpp: str | None
+
+
+class Contract(DTO):
+    id: Id
+    number: str
+    date: date | None
+    title: str | None
+    is_closed: bool
+    scope_type: str
+    counterparty_id: Id | None
+
+
+class Document(DTO):
+    id: Id
+    title: str
+    status: str
+    registration_number: str | None
+    registration_date: date | None
+    current_revision: int
+    object_id: Id | None
+    counterparty_id: Id | None
+
+
+class Version(DTO):
+    id: Id
+    revision: int
+    role: str
+    file_name: str
+    mime_type: str | None
+    size_bytes: int
+
+
+class DocumentDetail(Document):
+    versions: list[Version]
+    versions_truncated: bool
+
+
+T = TypeVar("T", bound=DTO)
+
+
+class Page(DTO, Generic[T]):
+    items: list[T]
+    next_cursor: str | None
+    total: int
+
+
+class Problem(DTO):
+    type: str = "about:blank"
+    title: str
+    status: int
+    code: str
+    request_id: str
+    detail: str
