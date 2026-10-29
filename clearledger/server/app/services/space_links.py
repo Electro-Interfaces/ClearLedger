@@ -30,7 +30,9 @@ from app.models import (
 )
 from app.services.reestr_normalize import _clean_cp_name, _cp_type, _normname
 from app.services.reference_identity import lock_manual_creation
-from app.services.reference_overrides import apply_import_values
+from app.services.counterparty_commands import (
+    add_imported_counterparty_alias, create_imported_counterparty,
+)
 from app.services.reference_identity import CounterpartyIndex, IdentityConflict
 
 # (ключ, что за роль, модель, текстовое поле, поле ссылки, метка в aliases карточки)
@@ -107,18 +109,14 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
                 if len(samples) < 5:
                     samples.append(_clean_cp_name(raw)[:80])
                 if write:
-                    cp = Counterparty(
-                        company_id=company_id, inn="", name=_clean_cp_name(raw)[:500],
-                        type=_cp_type(raw), aliases=[alias], kind="external",
-                        raw={"referenceIdentity": {"name": _clean_cp_name(raw), "inn": ""}},
+                    cp = await create_imported_counterparty(
+                        db, company_id, cp_index, name=_clean_cp_name(raw), inn="",
+                        cp_type=_cp_type(raw), alias=alias,
                     )
-                    db.add(cp)
-                    await db.flush()
-                    cp_index.add(cp)
             else:
                 matched += 1
-                if write and alias not in (cp.aliases or []):
-                    apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + [alias]))})
+                if write:
+                    add_imported_counterparty_alias(cp, alias)
             linked += cnt
             if write and cp is not None:
                 await db.execute(update(model).where(
