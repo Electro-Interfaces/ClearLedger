@@ -600,6 +600,8 @@ app.add_exception_handler(PartnerProblem, problem_handler)
 app.include_router(partner_admin_router.router, prefix=API_PREFIX)
 app.include_router(partner_oauth_router.router, prefix=API_PREFIX)
 app.include_router(partner_oauth_router.well_known_router)
+from app.routers import docs_portal_router
+app.include_router(docs_portal_router.router, prefix=API_PREFIX)
 app.include_router(partner_oauth_router.consent_router, prefix=API_PREFIX)
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
 app.include_router(space_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр объектов пространства

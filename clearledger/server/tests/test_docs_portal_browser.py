@@ -22,7 +22,10 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 import uvicorn
 
-from tests.test_docs_portal import env, application, SCOPES
+if os.environ.get("RUN_DOCS_PORTAL_BROWSER_TESTS") != "1":
+    pytest.skip("RUN_DOCS_PORTAL_BROWSER_TESTS=1 is required", allow_module_level=True)
+
+from tests.test_docs_portal import env, application, SCOPES, DOCS_FLAG, partner_test_safety_error
 from app.auth import gate_ok
 from app.services import partner_identity as identity, docs_portal as portal
 
@@ -31,7 +34,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 async def test_real_https_browser_pkce_public_gate_swagger_and_product(env, tmp_path, monkeypatch):
     # env/db guard runs before any fixture can touch another database.
-    assert urlsplit(os.environ["TEST_DATABASE_URL"]).path == "/api_docs_portal_test"
+    assert partner_test_safety_error(os.environ, flag=DOCS_FLAG) is None
     # Delivery is outside this acceptance; never send synthetic login notifications.
     async def no_email(*args, **kwargs): pass
     from app.routers import auth_router

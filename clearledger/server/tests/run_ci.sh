@@ -35,6 +35,10 @@ for file in tests/test_*.py; do
     echo "отдельный job partner-schema: $file"
     continue
   fi
+  if [ "$file" = tests/test_docs_portal_browser.py ] && [ "${RUN_DOCS_PORTAL_BROWSER_TESTS:-}" != 1 ]; then
+    echo "отдельный job docs-browser: $file"
+    continue
+  fi
   if grep -qxF "$file" "$quarantine"; then
     echo "карантин, пропущен: $file"
     continue

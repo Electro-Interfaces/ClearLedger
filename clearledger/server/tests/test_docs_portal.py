@@ -13,9 +13,14 @@ from httpx import ASGITransport, AsyncClient
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import select
 
-_target = urlsplit(os.environ.get("TEST_DATABASE_URL", ""))
-if (_target.hostname, _target.port, _target.path) != ("127.0.0.1", 33546, "/api_docs_portal_test") or "docs-portal" not in os.environ.get("UPLOAD_DIR", ""):
-    pytest.skip("Docs portal requires api_docs_portal_test and its upload directory", allow_module_level=True)
+from tests.partner_test_safety import partner_test_safety_error
+
+DOCS_FLAG = "RUN_DOCS_PORTAL_TESTS"
+if os.environ.get(DOCS_FLAG) != "1":
+    pytest.skip(DOCS_FLAG + "=1 is required", allow_module_level=True)
+_safety_error = partner_test_safety_error(os.environ, flag=DOCS_FLAG)
+if _safety_error:
+    raise pytest.UsageError("Refusing docs portal test database: " + _safety_error)
 
 from app.auth import token_for, hash_password
 from app.database import get_db
@@ -56,7 +61,7 @@ def application(factory, issuer):
 
 @pytest_asyncio.fixture(loop_scope="session")
 async def env(db, monkeypatch):
-    assert db.bind.url.database == "api_docs_portal_test"
+    assert partner_test_safety_error(os.environ, flag=DOCS_FLAG) is None
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
     for name, value in {"partner_oauth_enabled": True, "partner_api_enabled": True, "partner_docs_enabled": True,

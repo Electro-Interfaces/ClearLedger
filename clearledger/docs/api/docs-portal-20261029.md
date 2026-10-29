@@ -136,7 +136,8 @@ host/port/database до destructive fixtures; identity/product тестовые 
 ```bash
 cd clearledger/server
 TEST_DATABASE_URL=postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/api_docs_portal_test \
-UPLOAD_DIR=/tmp/docs-portal-upload \
+UPLOAD_DIR=/tmp/docs-portal-test-upload \
+RUN_DOCS_PORTAL_TESTS=1 RUN_DOCS_PORTAL_BROWSER_TESTS=1 \
 /srv/projects/api-modernization-test-env-20261029/.venv/bin/python -m pytest \
   tests/test_docs_portal.py tests/test_docs_portal_browser.py -q
 
@@ -195,3 +196,15 @@ Internal auth wrapActions закреплены точной версией; пр
 несколько backend workers/нагрузка и независимая приёмка здесь не проверялись.
 Flags не включались на стендах, PR и выпуск не выполнялись. Результат локальных
 проверок не объявляет всю M10/M11 программу или candidate API принятыми.
+
+
+## Интеграция координатора
+
+Роутер зарегистрирован в основном Core до startup/create_all. Тесты переведены
+на общий portable safety guard: HTTP требует `RUN_DOCS_PORTAL_TESTS=1`, реальный
+browser дополнительно `RUN_DOCS_PORTAL_BROWSER_TESTS=1`; обязательны явная
+локальная либо CI test DB и абсолютный test upload directory. Фиксированное
+имя локальной базы больше не скрывает проверки в CI. Browser выполняется
+отдельным job с Node/Playwright, а общий backend job проверяет HTTP/SQL.
+Workflow остаётся `disabled_manually`; изменения конфигурации не означают
+подтверждённый удалённый CI. Независимый повторный integration прогон ещё идёт.
