@@ -1,5 +1,5 @@
 """Public allowlists. No ORM/raw/secret objects are serialized implicitly."""
-from datetime import date
+from datetime import date, datetime
 import re
 from typing import Annotated, Generic, Literal, TypeAliasType, TypeVar
 
@@ -53,6 +53,55 @@ class ListQuery(BaseModel):
 
 class EmptyQuery(DTO):
     pass
+
+
+class MonitoringQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: int = Field(default=90, ge=1, le=366)
+    asOf: date | None = None
+
+    @field_validator("asOf", mode="before")
+    @classmethod
+    def iso_date_only(cls, value):
+        return ListQuery.iso_date_only(value)
+
+
+class MonitoringWindow(DTO):
+    days: int = Field(ge=1, le=366)
+    start: datetime
+    end: datetime
+    time_zone: Literal["Europe/Moscow"] = "Europe/Moscow"
+    interval: Literal["inclusive"] = "inclusive"
+
+
+class MonitoringTotals(DTO):
+    sessions: int = Field(ge=0)
+    visits: int = Field(ge=0)
+    successful_visits: int = Field(ge=0)
+    unsuccessful_visits: int = Field(ge=0)
+    energy_kwh: float
+
+
+class MonitoringProvenance(DTO):
+    as_of: datetime
+    data_through: datetime | None
+    data_lag_hours: float | None
+    requested_date: date | None
+    catalog_mode: Literal["current"]
+    snapshot_note: str
+    boundary_scope: Literal["object"] = "object"
+    source: Literal["charge_sessions"] = "charge_sessions"
+    visit_success: Literal["any attempt energy_kwh > 0"] = "any attempt energy_kwh > 0"
+
+
+class Monitoring(DTO):
+    point_id: Id
+    status: Literal["working", "no_link", "disabled", "decommissioned", "on_repair",
+                    "maintenance", "not_working", "unknown"]
+    window: MonitoringWindow
+    totals: MonitoringTotals
+    last_seen_at: datetime | None
+    provenance: MonitoringProvenance
 
 
 class Object(DTO):

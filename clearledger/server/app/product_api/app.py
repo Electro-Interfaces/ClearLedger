@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException
 
 from app.api_contracts import (AccessContext, PolicyRouter, PrincipalKind, RoutePolicy,
                                create_policy_app, get_access_context, policy_registry)
-from . import access, dto, files
+from . import access, dto, files, monitoring
 from .queries import Query
 
 
@@ -52,8 +52,8 @@ async def query_dependency(request: Request, context: AccessContext = Depends(ge
         yield Query(db, request.state.product_facts, context, settings.cursor_key)
 
 
-def _policy(resource, action="read"):
-    scopes = {access.READ_SCOPES[resource]}
+def _policy(resource, action="read", extra_scopes=()):
+    scopes = {access.READ_SCOPES[resource], *extra_scopes}
     if action == "download":
         scopes.add(access.DOWNLOAD_SCOPE)
     return RoutePolicy(owner=resource, accepted_kinds=({PrincipalKind.PARTNER} if resource == "documents"
@@ -97,8 +97,8 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
     problems = {status: {"model": dto.Problem, "content": {"application/problem+json": {}}}
                 for status in (400, 401, 403, 404, 422, 503)}
 
-    def operation(path, resource, operation_id, response_model=None, action="read", **kwargs):
-        return router.operation(path, policy=_policy(resource, action), methods=["GET"],
+    def operation(path, resource, operation_id, response_model=None, action="read", extra_scopes=(), **kwargs):
+        return router.operation(path, policy=_policy(resource, action, extra_scopes), methods=["GET"],
             operation_id=operation_id, response_model=response_model, responses={**problems, **kwargs.pop("responses", {})},
             openapi_extra={"x-elsy-owner": resource, "x-elsy-access-class": "partner",
                 "x-elsy-resource-policy": f"{resource}:{action}", "x-elsy-readiness": "candidate"}, **kwargs)
@@ -110,6 +110,16 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
     @operation("/objects/{objectId}", "objects", "getObject", dto.Object)
     async def object_detail(objectId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("objects", [await query.detail("objects", objectId)]))[0]
+
+    @operation("/objects/{objectId}/monitoring", "objects", "getObjectMonitoring", dto.Monitoring,
+               extra_scopes={monitoring.SCOPE}, summary="Read object charging status",
+               description="Energy profile only. Current catalog status; object-scoped observed data boundary. "
+                   "Inclusive MSK interval [asOf - days, asOf], days 1..366. asOf date caps the endpoint at "
+                   "23:59:59.999999 MSK, or earlier observed data. Successful visit: any attempt energy > 0. "
+                   "No financial, ticket, customer or raw session data.")
+    async def object_monitoring(objectId: dto.Id, params: Annotated[dto.MonitoringQuery, QueryParams()],
+                                query: Query = Depends(query_dependency)):
+        return await monitoring.detail(query, objectId, params)
 
     @operation("/equipment", "equipment", "listEquipment", dto.Page[dto.Equipment])
     async def equipment(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
@@ -197,12 +207,16 @@ def curated_openapi(app):
             "authorizationUrl": issuer.rstrip("/") + "/api/oauth2/authorize",
             "tokenUrl": issuer.rstrip("/") + "/api/oauth2/token",
             "scopes": {**{access.READ_SCOPES[key]: f"Read {key}" for key in access.RESOURCES},
-                       access.DOWNLOAD_SCOPE: "Download an authorized document version"}}}}
+                       access.DOWNLOAD_SCOPE: "Download an authorized document version",
+                       monitoring.SCOPE: monitoring.DESCRIPTION}}}}
     schema["x-elsy-runtime-registry"] = export_runtime_registry(app)
     schema["x-elsy-capabilities"] = {
         "implemented": {"servicePoint": "ServiceLocation read", "station": "EzsEquipmentUnit(kind=station) read",
-            "counterparty": "read", "contract": "read", "document": "user read and native authorized version content"},
+            "counterparty": "read", "contract": "read", "document": "user read and native authorized version content",
+            "monitoring": "energy service-point status and non-financial charging aggregates"},
         "gaps": {"site": "not exposed", "evse": "not exposed", "connector": "not exposed",
             "machineDocumentAccess": "denied", "sharedDomainFileContent": "denied pending canonical shared-file policy",
-            "writes": "not implemented", "historicalVersionListing": "not exposed"}}
+            "writes": "not implemented", "historicalVersionListing": "not exposed",
+            "monitoringFinance": "not exposed; separate financial scopes required",
+            "monitoringTickets": "not exposed; separate ticket scopes required"}}
     return schema
