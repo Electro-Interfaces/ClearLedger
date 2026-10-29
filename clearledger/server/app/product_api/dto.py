@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic.alias_generators import to_camel
 
 Id = TypeAliasType("Id", Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:\-]*$")])
+# Native ServiceLocation String(40), including exact Unicode/space identity.
+# Path addressability is a separate transport limitation; never normalize IDs.
+ObjectId = TypeAliasType("ObjectId", Annotated[str, Field(min_length=1, max_length=40, pattern=r"^[^\x00]+$")])
 
 
 class DTO(BaseModel):
@@ -95,7 +98,7 @@ class MonitoringProvenance(DTO):
 
 
 class Monitoring(DTO):
-    point_id: Id
+    point_id: ObjectId
     status: Literal["working", "no_link", "disabled", "decommissioned", "on_repair",
                     "maintenance", "not_working", "unknown"]
     window: MonitoringWindow
@@ -105,7 +108,7 @@ class Monitoring(DTO):
 
 
 class Object(DTO):
-    id: Id
+    id: ObjectId
     level: Literal["servicePoint"] = "servicePoint"
     code: str
     name: str
@@ -124,7 +127,7 @@ class Equipment(DTO):
     serial_number: str | None
     power_kw: float | None
     state: str
-    object_id: Id | None
+    object_id: ObjectId | None
 
 
 class Counterparty(DTO):
@@ -151,7 +154,7 @@ class Document(DTO):
     registration_number: str | None
     registration_date: date | None
     current_revision: int
-    object_id: Id | None
+    object_id: ObjectId | None
     counterparty_id: Id | None
 
 
