@@ -140,6 +140,8 @@ async def initialize(database,upload,state):
         if count:
             raise RuntimeError('Dedicated database is nonempty; refusing implicit reset/reseed')
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS edge'))
+    state.update(status='initializing',databaseOwned=True,uploadDir=str(upload))
+    write_json(STATE,state)
     await core_db.create_all()  # actual bootstrap includes safe phone function first
     state['fixture']=await seed(core_db.async_session_factory,upload)
     state['uploadDir']=str(upload)
@@ -271,7 +273,8 @@ async def serve(database,upload,settings,state,callback):
 async def cleanup(database,upload,state):
     import asyncpg
     import shutil
-    if state.get('status')!='stopped' or 'fixture' not in state or state.get('uploadDir')!=str(upload):
+    if (state.get('status') not in ('stopped','initializing') or state.get('databaseOwned') is not True
+            or state.get('uploadDir')!=str(upload)):
         raise RuntimeError('Cleanup requires the stopped owned fixture and matching test upload directory')
     admin=await asyncpg.connect(database.replace('postgresql+asyncpg:','postgresql:').rsplit('/',1)[0]+'/postgres')
     try:

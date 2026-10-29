@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import ssl
+from urllib.parse import urlsplit
 from runtime import PRIVATE
 
 
@@ -15,6 +16,9 @@ async def main():
     parser.add_argument('--kind',choices=['grant','installation','credential'],default='installation')
     args=parser.parse_args()
     state=json.loads((PRIVATE/'owner-state.json').read_text())
+    origin=urlsplit(state['origin'])
+    if origin.scheme!='https' or origin.hostname!='127.0.0.1' or not origin.port or origin.username or origin.query or origin.fragment:
+        raise RuntimeError('Owner control requires the exact loopback issuer')
     row=state['clients'][args.client]
     root='/api/developer/'
     paths={'installation':root+'installations/'+row['installationId']}
