@@ -2203,11 +2203,35 @@ TASK_ASSIGNMENT_MIGRATION_DDL = (
 )
 
 
+async def _assert_bootstrap_namespace(conn) -> None:
+    """Refuse search_path fallback to another application's table namespace.
+
+    Unqualified metadata belongs to current_schema(), including standalone public.
+    Explicitly qualified tables retain their own namespace (for example edge).
+    checkfirst alone tests visibility, which does not establish this ownership.
+    """
+    namespace = await conn.scalar(text("SELECT pg_catalog.current_schema()"))
+    if namespace is None:
+        raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
+    names = sorted({table.name for table in Base.metadata.tables.values() if table.schema is None})
+    foreign = await conn.scalar(text("""SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+        WHERE c.relname = ANY(CAST(:names AS text[]))
+          AND pg_catalog.pg_table_is_visible(c.oid)
+          AND n.nspname <> :namespace
+    )"""), {"names": names, "namespace": namespace})
+    if foreign:
+        # Provisioning failure, not a data migration; do not expose catalog names.
+        raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
+
+
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     from app.services.phone_e164 import PHONE_FUNCTION_DDL
 
     async with engine.begin() as conn:
+        await _assert_bootstrap_namespace(conn)
         # Функция — раньше таблиц: на ней стоят генерируемые колонки телефонов,
         # и в новой базе create_all заводит их сразу вместе с таблицей.
         await conn.execute(text(PHONE_FUNCTION_DDL))
