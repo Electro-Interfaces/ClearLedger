@@ -41,6 +41,8 @@ def prepare():
         .serial_number(x509.random_serial_number()).not_valid_before(at-timedelta(minutes=5))
         .not_valid_after(at+timedelta(days=3)).add_extension(x509.BasicConstraints(ca=True, path_length=0), True)
         .add_extension(x509.KeyUsage(True,False,False,False,False,True,True,False,False),True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()),False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),False)
         .sign(key, hashes.SHA256()))
     def save(target, data):
         fd = os.open(root/target, os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -55,7 +57,9 @@ def prepare():
             .not_valid_before(at-timedelta(minutes=5)).not_valid_after(at+timedelta(days=2))
             .add_extension(x509.BasicConstraints(ca=False,path_length=None),True)
             .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address('127.0.0.1' if label=='issuer' else '127.0.0.2'))]),False)
-            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),False).sign(key,hashes.SHA256()))
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),False)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(leaf.public_key()),False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),False).sign(key,hashes.SHA256()))
         save(label+'.pem',cert.public_bytes(serialization.Encoding.PEM))
         save(label+'.key',leaf.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
     state={'status':'tls-ready-awaiting-sql-window', 'caPath':str(root/'ca.pem'),

@@ -168,7 +168,9 @@ async def serve(database,upload,settings,state,callback):
     import app.database as core_db
     import uvicorn
     import httpx
-    if 'fixture' not in state or state.get('status') != 'seeded-awaiting-serve':
+    preprovision_retry=(state.get('status')=='stopped' and not state.get('clients')
+        and not (PRIVATE/'client-manifest.json').exists())
+    if 'fixture' not in state or (state.get('status')!='seeded-awaiting-serve' and not preprovision_retry):
         raise RuntimeError('Run separately authorized init first; implicit session restart is disabled')
     target=urlsplit(callback)
     if target.scheme!='https' or target.hostname!='127.0.0.2' or not target.port or target.username or target.password or target.query or target.fragment:
