@@ -135,7 +135,7 @@ RUN_PARTNER_SCHEMA_TESTS=1 ../../.venv/bin/python -m pytest \
 
 ## Локальная проверка и границы
 
-Для этой задачи создана только собственная `api_schema_test` в локальном
+В первоначальном M16 прогоне создана только собственная `api_schema_test` в локальном
 `api-modernization-test-20261029` (PostgreSQL 16). Обе команды выполнялись
 последовательно на ней, uploads — `/tmp/partner-schema-test-uploads`.
 Занятая координатором `api_identity_test`, `api_integrated_test`, VM, customer DB,
@@ -159,11 +159,114 @@ PK/FK/unique/check/indexes новых таблиц, validation state и нова
 schema suite только с identity opt-in дал **1 SKIP**, exit 5 за 0.06 с, подтвердив
 независимость flags до попытки подключения/запроса fixture.
 
-Профиль этой проверки — `public`/`edge` штатного test bootstrap. Внешнее
-provisioning `edge.item`, отдельный production search_path `core`, большие
-данные и полная матрица старых бизнес-операций не проверялись. Привязка CI service
+Первоначальный профиль этой проверки — `public`/`edge`; ниже добавлена отдельная
+двухсхемная проверка Core. Внешнее provisioning `edge.item`, большие данные
+и полная матрица старых бизнес-операций не проверялись. Привязка CI service
 host проверена чистыми положительными/отрицательными guard cases; реальный CI
 runner и его сеть здесь не запускались.
+
+## Двухсхемный Core и изоляция Поддержки
+
+Дополнение выполняется только на новой synthetic `api_schema_core_test` того же
+локального PostgreSQL. Другие тестовые БД в этом дополнении не используются.
+`PARTNER_SCHEMA_PROFILE` валидируется до fixtures: `public` (по умолчанию),
+`core` либо `both`. Default сохраняет все прежние 25 публичных проверок;
+дополнительная проверка смешанного запуска не ослабляет их. Номер порта/hostname
+не участвуют в выборе/пропуске профиля; общий guard и явный opt-in сохраняются.
+
+Fixture не использует session-scoped setup_database. Если вместе с ней выбраны
+чужие HTTP tests с этой DB fixture, она отказывает до подключения/очистки.
+Это дополнительно проверяется настоящим nested pytest на недоступном loopback
+порту: ошибка должна говорить о смешанном запуске, не ConnectionRefusedError.
+
+Порядок профиля core:
+
+1. После проверки фактических current_database/current_user создаются пустые
+   core/public/edge. Через **ALTER ROLE current_user IN DATABASE current_database**
+   задаётся `search_path=core`; глобальная роль и другие БД не меняются.
+2. Настоящий current/old bootstrap создаёт начальный Core при core-only path.
+   Проверяются current_schema и разрешение unqualified users/companies в core.
+3. После создания Core добавляются маленькие **public.users/public.companies**
+   sentinel-таблицы Поддержки. В upgrade сценариях их PK совпадают с Core user/
+   company, а содержимое и минимальная структура различаются: ошибочный выбор
+   public не может незаметно выглядеть тем же пользователем/компанией.
+4. Только в этой БД path переключается на `core, public`, pool пересоздаётся.
+   Повтор current/old bootstrap, регистрации и реальные old HTTP/ORM операции
+   должны работать с Core. SQL observers current и old запрещают явные обращения
+   к public sentinel rows; контрольные чтения sentinel выполняются отдельным
+   fixture connection. Их полные строки и определения остаются неизменны.
+5. После прогона восстанавливается прежняя DB-local search_path запись либо
+   RESET только этого GUC в этой БД; восстановление проверяется. Fixture владеет
+   только схемами своей validated synthetic DB и закрывает собственные pools.
+
+Очистка удаляет таблицы пакетами по восемь в отдельных транзакциях, затем пустые
+схемы. Это ограничивает число удерживаемых DDL locks на общем локальном PostgreSQL.
+Массовый DROP SCHEMA в пробном прогоне исчерпал общий lock pool на teardown;
+`max_locks_per_transaction`, настройки сервера и других БД не менялись.
+Общий lock budget остаётся общим даже для разных БД: тяжёлые bootstrap/drop jobs
+на одном сервере требуют согласованных последовательных окон.
+
+Semantic catalog включает **core/public/edge**. Старые definitions сравниваются
+со снимком вместе с public sentinel metadata. Новые 12 partner tables разрешены
+только в schema профиля: core для core, public для public; копии в соседней schema
+запрещены. Новые columns проверяются по type, nullable и server default; FK — ещё
+и по реальной referred_schema с postgresql_ignore_search_path. PK/unique/check/
+indexes и validity проверяются, как и раньше.
+Для новых индексов сравниваются также порядок колонок и unique, а не только имя.
+
+Новые таблицы разрешаются точным `OWNED_MODEL_TABLES`: `app.models_partner` →
+фиксированные 12 имён. Неизвестный extra не допускается ни из metadata, ни из DDL.
+В `EXTENSION_MODEL_TABLES` строго объявлено только
+`app.models_docs_portal` → `{docs_portal_sessions}` (класс DocsPortalSession).
+Extension учитывается только при регистрации этого exact module; лишняя таблица
+в нём тоже является ошибкой. Режим `PARTNER_SCHEMA_REQUIRE_PORTAL=1` отказывает
+на collection до DB fixtures, если модель не зарегистрирована. Проверяются
+как чистые positive/negative manifest cases, так и настоящий nested pytest
+--collect-only require gate на недоступном loopback target.
+
+На текущем M10 runtime модели M11 ещё нет: negative require gate обязан FAIL,
+а не выдавать 13-table доказательство по одним тестовым ожиданиям. Координатор
+поручил передать этот Core slice с **pending Portal gate**; после M11+wiring нужен
+отдельный прогон exact archived candidate с require-portal. Он не подтверждён
+результатом текущего M10 и не объявляется завершённым заранее.
+
+```sh
+# Отдельная свободная synthetic DB, TEST_DATABASE_URL задаёт оператор/CI.
+RUN_PARTNER_SCHEMA_TESTS=1 PARTNER_SCHEMA_PROFILE=both \
+UPLOAD_DIR="${RUNNER_TEMP:-/tmp}/partner-schema-core-test-uploads" \
+../../.venv/bin/python -m pytest tests/test_partner_schema_compatibility.py -q \
+  --junitxml=partner-schema-core-test-results.xml -o junit_family=xunit1
+```
+
+Для проверки immutable candidate без изменения runtime рабочего дерева можно
+извлечь его git archive в отдельный каталог и перенести туда только этот test
+module. `PARTNER_SCHEMA_GIT_REPO` указывает на исходный локальный Git-клон с ce94/
+5ce objects; сам test запускается из candidate/server. Он не подменяет проверяемый
+runtime исходниками из Git repo. Во всех случаях нужен отдельный pytest процесс.
+
+```sh
+# В candidate/server после переноса только обновлённого harness:
+RUN_PARTNER_SCHEMA_TESTS=1 PARTNER_SCHEMA_PROFILE=both \
+PARTNER_SCHEMA_REQUIRE_PORTAL=1 PARTNER_SCHEMA_GIT_REPO=/absolute/local/git/clone \
+UPLOAD_DIR="${RUNNER_TEMP:-/tmp}/partner-schema-core-test-uploads" \
+/absolute/test-venv/bin/python -m pytest tests/test_partner_schema_compatibility.py -q
+```
+
+Полный public+core прогон после изменения cleanup: **31 PASS**, 302.10 с.
+Runtime candidate — `487e5344d33b7b07ad9bc914ad90d3533f36472d`; в этой задаче
+меняются только harness и документ. Исходные 25 public cases сохранены, добавлены
+три core DB cases и три проверки isolation/extension/require gate. В public осталось
+325→337 таблиц; в core upgrade снимке 325 Core + 2 public sentinels = 327, после
+добавления 12 Core partner tables — 339. Fresh Core содержит 337 до добавления
+sentinels. Обе исторические ревизии прошли core,public old-code coexistence;
+проверка последнего M11 состава фиксируется отдельно после получения commit.
+После финального усиления index assertions отдельно повторены fresh public и
+core: **2 PASS**, 29 deselected, 40.14 с. `compileall` этого модуля и
+`git diff --check` — PASS. Результат не означает готовность schema последнего
+M11 состава.
+
+Sentinel — минимальная модель границы Support, не полная схема/процессы Support.
+Это не customer dump, не нагрузочная проверка и не приёмка VM permissions.
 
 ## Откат
 

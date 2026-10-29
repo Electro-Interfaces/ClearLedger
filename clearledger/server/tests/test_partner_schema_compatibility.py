@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -22,7 +23,7 @@ import pytest_asyncio
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import CheckConstraint, UniqueConstraint, inspect, select, text
+from sqlalchemy import CheckConstraint, UniqueConstraint, event, inspect, literal, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from tests.partner_test_safety import partner_test_safety_error
@@ -33,6 +34,10 @@ if os.environ.get(SCHEMA_FLAG) != "1":
 _safety_error = partner_test_safety_error(os.environ, flag=SCHEMA_FLAG)
 if _safety_error:
     raise pytest.UsageError("Refusing partner schema test database: " + _safety_error)
+PROFILE = os.environ.get("PARTNER_SCHEMA_PROFILE", "public")
+if PROFILE not in {"public", "core", "both"}:
+    raise pytest.UsageError("PARTNER_SCHEMA_PROFILE must be public, core or both")
+PROFILES = ("public", "core") if PROFILE == "both" else (PROFILE,)
 
 from app import database
 from app.auth import token_for
@@ -44,33 +49,80 @@ from app.services import partner_identity
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 REPO = Path(__file__).resolve().parents[3]
+GIT_REPO = Path(os.environ.get("PARTNER_SCHEMA_GIT_REPO", str(REPO))).resolve()
 OLD_REVISIONS = ("ce94e2bf", "5ce5779b")
 PARTNER_TABLES = frozenset({
     "partner_clients", "partner_credentials", "partner_installations", "partner_installation_locations",
     "partner_resource_scopes", "partner_resource_items", "partner_grants", "partner_authorization_requests",
     "partner_subjects", "partner_codes", "partner_token_families", "partner_tokens",
 })
+OWNED_MODEL_TABLES = {"app.models_partner": PARTNER_TABLES}
+EXTENSION_MODEL_TABLES = {"app.models_docs_portal": frozenset({"docs_portal_sessions"})}
+REQUIRE_PORTAL = os.environ.get("PARTNER_SCHEMA_REQUIRE_PORTAL", "0")
+if REQUIRE_PORTAL not in {"0", "1"}:
+    raise pytest.UsageError("PARTNER_SCHEMA_REQUIRE_PORTAL must be 0 or 1")
+
+
+def candidate_model_manifest(registered, require_portal=False):
+    manifest = dict(OWNED_MODEL_TABLES)
+    for module, expected in EXTENSION_MODEL_TABLES.items():
+        actual = registered.get(module, set())
+        if actual:
+            if actual != expected:
+                raise ValueError("Unexpected table in owned extension module: " + module)
+            manifest[module] = expected
+    if require_portal and "app.models_docs_portal" not in manifest:
+        raise ValueError("Required portal model app.models_docs_portal.DocsPortalSession is not registered")
+    return manifest
+
+
+_registered = {}
+for _mapper in Base.registry.mappers:
+    _registered.setdefault(_mapper.class_.__module__, set()).add(_mapper.local_table.name)
+try:
+    CANDIDATE_MODEL_TABLES = candidate_model_manifest(_registered, REQUIRE_PORTAL == "1")
+except ValueError as exc:
+    raise pytest.UsageError(str(exc)) from None
+SUPPORT_SQL = re.compile(r'\b(?:from|join|into|update|table)\s+"?public"?\s*\.\s*"?(?:users|companies)"?\b', re.I)
+
+
+def forbid_support_rows(conn, cursor, statement, parameters, context, executemany):
+    assert not SUPPORT_SQL.search(statement), "Core operation explicitly addressed a public Support sentinel"
 
 # No inheritance of production .env, keys, seed passwords, connector settings or
 # proxy credentials. The archive has no .env and the child gets a minimal env.
 OLD_SERVER_SCRIPT = r'''
-import asyncio, json, os, sys, uuid
+import asyncio, json, os, re, sys, uuid
 from pathlib import Path
 assert os.environ["RUN_PARTNER_IDENTITY_TESTS"] == "1"
 assert not (Path.cwd() / ".env").exists()
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select, text
 from app.main import app
 from app import database
 from app.auth import token_for
 from app.models import (Company, User, UserCompany, Organization, Counterparty, Contract,
     ServiceLocation, EzsEquipmentUnit, DocKind, DocCard, App, CompanyApp)
 assert database.settings.database_url == os.environ["TEST_DATABASE_URL"]
+if os.environ.get("PARTNER_SCHEMA_TEST_PROFILE") == "core":
+    @event.listens_for(database.engine.sync_engine, "before_cursor_execute")
+    def forbid_support_rows(conn,cursor,statement,parameters,context,executemany):
+        assert not re.search(r'\b(?:from|join|into|update|table)\s+"?public"?\s*\.\s*"?(?:users|companies)"?\b', statement, re.I), "Old Core addressed Support sentinel"
+
+async def check_namespace():
+    if os.environ.get("PARTNER_SCHEMA_TEST_PROFILE") == "core":
+        async with database.engine.connect() as conn:
+            assert await conn.scalar(text("SELECT current_schema()")) == "core"
+            for name in ("users", "companies"):
+                found = await conn.scalar(text("SELECT n.nspname FROM pg_class c JOIN pg_namespace n "
+                    "ON n.oid=c.relnamespace WHERE c.oid=to_regclass(:name)"), {"name": name})
+                assert found == "core"
 
 async def main():
     mode = sys.argv[1]
     if mode == "bootstrap":
         await database.create_all()
+        await check_namespace()
         async with database.async_session_factory.begin() as db:
             company = Company(name="Synthetic schema company", slug="schema-test", profile_id="energy")
             db.add(company)
@@ -101,10 +153,12 @@ async def main():
         # Settle the same pre-existing bootstrap/backfill twice before taking the
         # baseline; this is the actual old code, not reconstructed candidate DDL.
         await database.create_all()
+        await check_namespace()
     else:
         result = json.loads(sys.argv[2])
         # A rolled-back old binary may execute its ordinary bootstrap too.
         await database.create_all()
+        await check_namespace()
         async with database.async_session_factory.begin() as db:
             user = await db.get(User, uuid.UUID(result["user"]))
             for model, key in ((Company,"company"), (Organization,"organization"),
@@ -126,6 +180,7 @@ async def main():
                 headers={"Authorization": "Bearer " + bearer}) as client:
             response = await client.get("/api/auth/me")
             assert response.status_code == 200, response.text
+            assert response.json()["email"] == "schema-test@example.invalid"
             response = await client.get("/api/references/counterparties", params={"company_id": result["company"]})
             assert response.status_code == 200, response.text
             assert any(v["id"] == result["counterparty"] for v in response.json())
@@ -143,12 +198,12 @@ asyncio.run(main())
 '''
 
 
-async def run_old_server(tmp_path: Path, revision: str, mode: str, state=None) -> dict:
+async def run_old_server(tmp_path: Path, revision: str, mode: str, state=None, profile="public") -> dict:
     """Export and execute immutable source; never copy any current .env file."""
     source = tmp_path / revision
     server = source / "clearledger" / "server"
     if not server.exists():
-        archive = subprocess.run(["git", "archive", revision, "clearledger/server"], cwd=REPO,
+        archive = subprocess.run(["git", "archive", revision, "clearledger/server"], cwd=GIT_REPO,
             check=True, capture_output=True).stdout
         source.mkdir()
         with tarfile.open(fileobj=io.BytesIO(archive)) as data:
@@ -164,6 +219,7 @@ async def run_old_server(tmp_path: Path, revision: str, mode: str, state=None) -
         "RUN_PARTNER_IDENTITY_TESTS": "1", "UPLOAD_DIR": os.environ["UPLOAD_DIR"],
         "SECRET_KEY": "synthetic-partner-schema-test-secret-only",
         "APP_ENV": "test", "ECOSYSTEM_COMPANIES": "", "PARTNER_OAUTH_ENABLED": "false", "PARTNER_API_ENABLED": "false",
+        "PARTNER_SCHEMA_TEST_PROFILE": profile,
     }
     if "CI" in os.environ:
         env["CI"] = os.environ["CI"]
@@ -184,101 +240,241 @@ async def run_old_server(tmp_path: Path, revision: str, mode: str, state=None) -
     return json.loads(results[0])
 
 
-@pytest_asyncio.fixture(loop_scope="session")
-async def schema_db(monkeypatch):
-    assert partner_test_safety_error(os.environ, flag=SCHEMA_FLAG) is None
-    engine = create_async_engine(os.environ["TEST_DATABASE_URL"], pool_size=5, max_overflow=5)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.connect() as conn:
-        actual = (await conn.execute(text("SELECT current_database()"))).scalar_one()
-        from sqlalchemy.engine import make_url
-        assert actual == make_url(os.environ["TEST_DATABASE_URL"]).database
-    async def reset():
+class SchemaDatabase:
+    def __init__(self, profile):
+        self.profile = profile
+        self.namespace = profile
+        url = os.environ["TEST_DATABASE_URL"]
+        # Control operations are explicit schema SQL, outside ORM observers.
+        self.control = create_async_engine(url, connect_args={"server_settings": {"search_path": "pg_catalog"}})
+        self.engine = create_async_engine(url, pool_size=5, max_overflow=5)
+        self.factory = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.role_clause = None
+        self.prior_path = None
+        self.prepared = False
+        self.path_changed = False
+        self.sentinel = None
+        if profile == "core":
+            event.listen(self.engine.sync_engine, "before_cursor_execute", forbid_support_rows)
+
+    def __iter__(self):
+        yield self.engine
+        yield self.factory
+
+    async def initialize(self):
         assert partner_test_safety_error(os.environ, flag=SCHEMA_FLAG) is None
-        async with engine.begin() as conn:
-            await conn.execute(text("DROP SCHEMA IF EXISTS edge CASCADE"))
-            await conn.execute(text("DROP SCHEMA public CASCADE"))
-            await conn.execute(text("CREATE SCHEMA public"))
-            await conn.execute(text("CREATE SCHEMA edge"))
-    await reset()
-    monkeypatch.setattr(database, "engine", engine)
-    monkeypatch.setattr(database, "async_session_factory", factory)
-    async def isolated_db():
-        async with factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except BaseException:
-                await session.rollback()
-                raise
-    monkeypatch.setitem(app.dependency_overrides, get_db, isolated_db)
-    yield engine, factory
-    from tests.helpers import drain_application_tasks
-    await drain_application_tasks()
-    await reset()
-    await engine.dispose()
+        async with self.control.begin() as conn:
+            actual, role = (await conn.execute(text("SELECT current_database(), current_user"))).one()
+            from sqlalchemy.engine import make_url
+            assert actual == make_url(os.environ["TEST_DATABASE_URL"]).database
+            quote = conn.dialect.identifier_preparer.quote_identifier
+            # Never ALTER ROLE globally or ALTER a different database.
+            self.role_clause = f"ALTER ROLE {quote(role)} IN DATABASE {quote(actual)}"
+            self.prior_path = await conn.scalar(text("""SELECT substring(setting FROM 13)
+                FROM pg_db_role_setting s JOIN pg_database d ON d.oid=s.setdatabase
+                JOIN pg_roles r ON r.oid=s.setrole CROSS JOIN LATERAL unnest(s.setconfig) setting
+                WHERE d.datname=current_database() AND r.rolname=current_user
+                AND setting LIKE 'search_path=%'"""))
+        self.prepared = True
+        await self.reset()
+        await self.set_path(self.namespace)
+
+    async def reset(self):
+        assert partner_test_safety_error(os.environ, flag=SCHEMA_FLAG) is None
+        await self.engine.dispose()
+        # A schema-wide CASCADE holds every table/index/FK lock until commit.
+        # Bound our cleanup footprint when other isolated jobs share Postgres;
+        # changing global max_locks_per_transaction is outside this fixture.
+        async with self.control.connect() as conn:
+            tables = (await conn.execute(text("""SELECT n.nspname,c.relname
+                FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname IN ('core','public','edge') AND c.relkind IN ('r','p')
+                ORDER BY n.nspname,c.relname"""))).all()
+            quote = conn.dialect.identifier_preparer.quote_identifier
+        for offset in range(0, len(tables), 8):
+            names = ", ".join(f"{quote(schema)}.{quote(table)}"
+                              for schema, table in tables[offset:offset + 8])
+            async with self.control.begin() as conn:
+                await conn.execute(text(f"DROP TABLE IF EXISTS {names} CASCADE"))
+        for schema in ("edge", "core", "public"):
+            async with self.control.begin() as conn:
+                await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        for schema in ("public", "core", "edge"):
+            async with self.control.begin() as conn:
+                await conn.execute(text(f"CREATE SCHEMA {schema}"))
+
+    async def set_path(self, path):
+        assert path in {"public", "core", "core, public"}
+        async with self.control.begin() as conn:
+            await conn.execute(text(f"{self.role_clause} SET search_path TO {path}"))
+        self.path_changed = True
+        await self.engine.dispose()  # New pool connections get DB-local role defaults.
+
+    async def check_resolution(self):
+        async with self.engine.connect() as conn:
+            assert await conn.scalar(text("SELECT current_schema()")) == self.namespace
+            for name in ("users", "companies"):
+                schema = await conn.scalar(text("SELECT n.nspname FROM pg_class c JOIN pg_namespace n "
+                    "ON n.oid=c.relnamespace WHERE c.oid=to_regclass(:name)"), {"name": name})
+                assert schema == self.namespace
+
+    async def finish_provisioning(self, state=None):
+        if self.profile != "core":
+            return
+        ids = state or {"user": str(uuid.uuid4()), "company": str(uuid.uuid4())}
+        async with self.control.begin() as conn:
+            await conn.execute(text("CREATE TABLE public.users (id uuid PRIMARY KEY, email text NOT NULL, name text NOT NULL)"))
+            await conn.execute(text("CREATE TABLE public.companies (id uuid PRIMARY KEY, name text NOT NULL)"))
+            await conn.execute(text("INSERT INTO public.users VALUES (:id, 'support-sentinel@example.invalid', 'Support sentinel user')"),
+                {"id": uuid.UUID(ids["user"])})
+            await conn.execute(text("INSERT INTO public.companies VALUES (:id, 'Support sentinel company')"),
+                {"id": uuid.UUID(ids["company"])})
+        self.sentinel = await self.sentinel_rows()
+        await self.set_path("core, public")
+        await self.check_resolution()
+
+    async def sentinel_rows(self):
+        async with self.control.connect() as conn:
+            return {name: (await conn.execute(text(f"SELECT * FROM public.{name} ORDER BY id"))).all()
+                    for name in ("users", "companies")}
+
+    async def assert_sentinels(self):
+        if self.profile == "core":
+            assert await self.sentinel_rows() == self.sentinel
+
+    async def close(self):
+        try:
+            if self.prepared:
+                await self.reset()
+        finally:
+            if self.path_changed:
+                async with self.control.begin() as conn:
+                    if self.prior_path is None:
+                        await conn.execute(text(f"{self.role_clause} RESET search_path"))
+                    else:
+                        value = literal(self.prior_path).compile(dialect=conn.dialect, compile_kwargs={"literal_binds": True})
+                        await conn.execute(text(f"{self.role_clause} SET search_path TO {value}"))
+                async with self.control.connect() as conn:
+                    restored = await conn.scalar(text("""SELECT substring(setting FROM 13)
+                        FROM pg_db_role_setting s JOIN pg_database d ON d.oid=s.setdatabase
+                        JOIN pg_roles r ON r.oid=s.setrole CROSS JOIN LATERAL unnest(s.setconfig) setting
+                        WHERE d.datname=current_database() AND r.rolname=current_user
+                        AND setting LIKE 'search_path=%'"""))
+                    assert restored == self.prior_path
+            await self.engine.dispose()
+            await self.control.dispose()
+
+
+@pytest_asyncio.fixture(params=PROFILES, loop_scope="session")
+async def schema_db(monkeypatch, request):
+    # Refuse to reset a DB that another selected HTTP suite has seeded through
+    # session-scoped conftest fixtures; a separate flag alone is insufficient.
+    foreign_db_items = [item.nodeid for item in request.session.items
+                       if Path(item.path) != Path(__file__) and "setup_database" in item.fixturenames]
+    if foreign_db_items:
+        pytest.fail("Run schema compatibility in a separate pytest process from HTTP DB suites")
+    target = SchemaDatabase(request.param)
+    try:
+        await target.initialize()
+        monkeypatch.setattr(database, "engine", target.engine)
+        monkeypatch.setattr(database, "async_session_factory", target.factory)
+        async def isolated_db():
+            async with target.factory() as session:
+                try:
+                    yield session
+                    await session.commit()
+                except BaseException:
+                    await session.rollback()
+                    raise
+        monkeypatch.setitem(app.dependency_overrides, get_db, isolated_db)
+        yield target
+    finally:
+        from tests.helpers import drain_application_tasks
+        await drain_application_tasks()
+        await target.close()
 
 
 async def schema_catalog(engine) -> dict:
     """Semantic definitions, excluding OIDs which change on idempotent bootstrap."""
     statements = {
         "tables": """SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname IN ('public','edge') AND c.relkind IN ('r','p') ORDER BY 1,2""",
+            WHERE n.nspname IN ('core','public','edge') AND c.relkind IN ('r','p') ORDER BY 1,2""",
         "columns": """SELECT n.nspname,c.relname,a.attnum,a.attname,format_type(a.atttypid,a.atttypmod),
             a.attnotnull,a.attidentity,a.attgenerated,pg_get_expr(d.adbin,d.adrelid)
             FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
             LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
-            WHERE n.nspname IN ('public','edge') AND c.relkind IN ('r','p') AND a.attnum>0 AND NOT a.attisdropped ORDER BY 1,2,3""",
+            WHERE n.nspname IN ('core','public','edge') AND c.relkind IN ('r','p') AND a.attnum>0 AND NOT a.attisdropped ORDER BY 1,2,3""",
         "constraints": """SELECT n.nspname,c.relname,k.conname,k.contype,k.convalidated,pg_get_constraintdef(k.oid,true)
             FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname IN ('public','edge') ORDER BY 1,2,3""",
+            WHERE n.nspname IN ('core','public','edge') ORDER BY 1,2,3""",
         "indexes": """SELECT schemaname,tablename,indexname,indexdef FROM pg_indexes
-            WHERE schemaname IN ('public','edge') ORDER BY 1,2,3""",
+            WHERE schemaname IN ('core','public','edge') ORDER BY 1,2,3""",
         "triggers": """SELECT n.nspname,c.relname,t.tgname,pg_get_triggerdef(t.oid,true)
             FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname IN ('public','edge') AND NOT t.tgisinternal ORDER BY 1,2,3""",
+            WHERE n.nspname IN ('core','public','edge') AND NOT t.tgisinternal ORDER BY 1,2,3""",
     }
     async with engine.connect() as conn:
         return {name: [tuple(row) for row in (await conn.execute(text(sql))).all()]
                 for name, sql in statements.items()}
 
 
-def assert_additive(before, after):
+def assert_additive(before, after, namespace="public"):
     old_tables = set(before["tables"])
-    assert set(after["tables"]) - old_tables == {("public", table) for table in PARTNER_TABLES}
+    allowed = set().union(*CANDIDATE_MODEL_TABLES.values())
+    assert set(after["tables"]) - old_tables == {(namespace, table) for table in allowed}
     assert old_tables <= set(after["tables"])
     for key in ("columns", "constraints", "indexes", "triggers"):
         assert [row for row in after[key] if row[:2] in old_tables] == before[key], key
 
 
-async def assert_partner_catalog(engine):
-    tables = {mapper.local_table for mapper in Base.registry.mappers if mapper.class_.__module__ == "app.models_partner"}
-    assert {table.name for table in tables} == PARTNER_TABLES
+async def assert_partner_catalog(engine, namespace="public"):
+    tables = set()
+    for module, expected in CANDIDATE_MODEL_TABLES.items():
+        declared = {mapper.local_table for mapper in Base.registry.mappers if mapper.class_.__module__ == module}
+        assert {table.name for table in declared} == expected, module
+        tables.update(declared)
     def check(conn):
         inspector = inspect(conn)
         for table in tables:
-            assert {c["name"] for c in inspector.get_columns(table.name)} == set(table.columns.keys())
-            expected_fk = {(tuple(e.parent.name for e in fk.elements), fk.referred_table.name,
+            columns = {c["name"]: c for c in inspector.get_columns(table.name, schema=namespace)}
+            assert set(columns) == set(table.columns.keys())
+            for column in table.columns:
+                actual = columns[column.name]
+                assert str(actual["type"].compile(dialect=conn.dialect)) == str(column.type.compile(dialect=conn.dialect))
+                assert actual["nullable"] == column.nullable
+                expected_default = str(column.server_default.arg) if column.server_default is not None else None
+                assert actual["default"] == expected_default, (table.name, column.name)
+            expected_fk = {(tuple(e.parent.name for e in fk.elements), fk.referred_table.schema or namespace, fk.referred_table.name,
                 tuple(e.column.name for e in fk.elements), fk.ondelete or "NO ACTION") for fk in table.foreign_key_constraints}
-            actual_fk = {(tuple(fk["constrained_columns"]), fk["referred_table"], tuple(fk["referred_columns"]),
-                fk.get("options", {}).get("ondelete", "NO ACTION")) for fk in inspector.get_foreign_keys(table.name)}
+            actual_fk = {(tuple(fk["constrained_columns"]), fk["referred_schema"] or namespace, fk["referred_table"], tuple(fk["referred_columns"]),
+                fk.get("options", {}).get("ondelete", "NO ACTION")) for fk in inspector.get_foreign_keys(table.name,
+                    schema=namespace, postgresql_ignore_search_path=True)}
             assert actual_fk == expected_fk, table.name
-            assert inspector.get_pk_constraint(table.name)["constrained_columns"] == [c.name for c in table.primary_key.columns]
-            assert {tuple(v["column_names"]) for v in inspector.get_unique_constraints(table.name)} == {
+            assert inspector.get_pk_constraint(table.name, schema=namespace)["constrained_columns"] == [c.name for c in table.primary_key.columns]
+            assert {tuple(v["column_names"]) for v in inspector.get_unique_constraints(table.name, schema=namespace)} == {
                 tuple(c.name for c in constraint.columns) for constraint in table.constraints
                 if isinstance(constraint, UniqueConstraint)}, table.name
-            assert {v["name"] for v in inspector.get_check_constraints(table.name)} == {
+            assert {v["name"] for v in inspector.get_check_constraints(table.name, schema=namespace)} == {
                 c.name for c in table.constraints if isinstance(c, CheckConstraint)}
-            actual_indexes = {i["name"] for i in inspector.get_indexes(table.name) if not i.get("duplicates_constraint")}
-            assert actual_indexes == {i.name for i in table.indexes}, table.name
+            actual_indexes = {i["name"]: (tuple(i["column_names"]), bool(i["unique"]))
+                              for i in inspector.get_indexes(table.name, schema=namespace)
+                              if not i.get("duplicates_constraint")}
+            expected_indexes = {i.name: (tuple(c.name for c in i.expressions), bool(i.unique))
+                                for i in table.indexes}
+            assert actual_indexes == expected_indexes, table.name
+            locations = conn.execute(text("SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE c.relname=:name AND c.relkind IN ('r','p') AND n.nspname IN ('core','public','edge')"),
+                {"name": table.name}).scalars().all()
+            assert locations == [namespace], (table.name, locations)
         invalid = conn.execute(text("""SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid
-            JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
-            AND c.relname=ANY(:names) AND (NOT i.indisvalid OR NOT i.indisready)"""), {"names": list(PARTNER_TABLES)}).all()
+            JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=:schema
+            AND c.relname=ANY(:names) AND (NOT i.indisvalid OR NOT i.indisready)"""),
+            {"names": [t.name for t in tables], "schema": namespace}).all()
         assert not invalid
         unvalidated = conn.execute(text("""SELECT c.relname,k.conname FROM pg_constraint k
             JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='public' AND c.relname=ANY(:names) AND NOT k.convalidated"""),
-            {"names": list(PARTNER_TABLES)}).all()
+            WHERE n.nspname=:schema AND c.relname=ANY(:names) AND NOT k.convalidated"""),
+            {"names": [t.name for t in tables], "schema": namespace}).all()
         assert not unvalidated
     async with engine.connect() as conn:
         await conn.run_sync(check)
@@ -292,6 +488,7 @@ async def assert_registration_consistency(factory, state, monkeypatch):
         monkeypatch.setattr(partner_identity.settings, field, value)
     async with factory() as db:
         user = await db.get(User, uuid.UUID(state["user"]))
+        assert user.email == "schema-test@example.invalid" and user.name == "Synthetic schema admin"
         headers = {"Authorization": "Bearer " + token_for(user)}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=headers) as client:
         response = await client.post("/api/developer/clients", json={"companyId": state["company"],
@@ -328,31 +525,46 @@ async def test_fresh_and_repeat_bootstrap(schema_db, record_property):
     assert not (await schema_catalog(engine))["tables"]
     await database.create_all()
     first = await schema_catalog(engine)
+    await schema_db.check_resolution()
+    record_property("profile", schema_db.profile)
     record_property("fresh_tables", len(first["tables"]))
-    await assert_partner_catalog(engine)
+    await assert_partner_catalog(engine, schema_db.namespace)
     await database.create_all()
     assert await schema_catalog(engine) == first
+    if schema_db.profile == "core":
+        await schema_db.finish_provisioning()
+        with_support = await schema_catalog(engine)
+        await database.create_all()
+        assert await schema_catalog(engine) == with_support
+        await assert_partner_catalog(engine, schema_db.namespace)
+        await schema_db.assert_sentinels()
 
 
 @pytest.mark.parametrize("revision", OLD_REVISIONS)
 async def test_old_core_upgrade_repeat_and_old_code_coexistence(schema_db, tmp_path, monkeypatch, revision, record_property):
     engine, factory = schema_db
-    state = await run_old_server(tmp_path, revision, "bootstrap")
+    state = await run_old_server(tmp_path, revision, "bootstrap", profile=schema_db.profile)
+    await schema_db.check_resolution()
+    await schema_db.finish_provisioning(state)
     old = await schema_catalog(engine)
-    record_property("baseline_revision", subprocess.run(["git", "rev-parse", revision], cwd=REPO,
+    record_property("profile", schema_db.profile)
+    record_property("baseline_revision", subprocess.run(["git", "rev-parse", revision], cwd=GIT_REPO,
         capture_output=True, text=True, check=True).stdout.strip())
     record_property("baseline_tables", len(old["tables"]))
     assert not {table for _, table in old["tables"]} & PARTNER_TABLES
     await database.create_all()
     upgraded = await schema_catalog(engine)
-    assert_additive(old, upgraded)
-    record_property("additive_tables", len(PARTNER_TABLES))
-    await assert_partner_catalog(engine)
+    assert_additive(old, upgraded, schema_db.namespace)
+    record_property("additive_tables", len(set().union(*CANDIDATE_MODEL_TABLES.values())))
+    await assert_partner_catalog(engine, schema_db.namespace)
     await database.create_all()
     assert await schema_catalog(engine) == upgraded
     client_id, installation_id = await assert_registration_consistency(factory, state, monkeypatch)
-    result = await run_old_server(tmp_path, revision, "roundtrip", state)
+    await schema_db.assert_sentinels()
+    result = await run_old_server(tmp_path, revision, "roundtrip", state, profile=schema_db.profile)
     assert await schema_catalog(engine) == upgraded
+    await schema_db.check_resolution()
+    await schema_db.assert_sentinels()
     async with factory() as db:
         assert (await db.get(Counterparty, uuid.UUID(state["counterparty"]))).name.endswith("written by old HTTP")
         assert (await db.get(Counterparty, uuid.UUID(result["created_counterparty"]))).company_id == uuid.UUID(state["company"])
@@ -427,4 +639,58 @@ async def test_real_pytest_guard_stops_before_database_fixture(opt_in, expected_
         raise
     assert process.returncode == expected_code, output.decode()
     assert expected_message in output.decode(), output.decode()
+    assert "ConnectionRefusedError" not in output.decode()
+
+
+async def test_mixed_http_session_fixture_is_refused_before_schema_reset():
+    env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "SECRET_KEY": "synthetic-test-only",
+        "RUN_PARTNER_SCHEMA_TESTS": "1", "PARTNER_SCHEMA_PROFILE": "core",
+        "TEST_DATABASE_URL": "postgresql+asyncpg://synthetic:synthetic@127.0.0.1:1/synthetic_test",
+        "UPLOAD_DIR": "/tmp/partner-mixed-test-uploads", "PYTHONDONTWRITEBYTECODE": "1"}
+    process = await asyncio.create_subprocess_exec(sys.executable, "-m", "pytest",
+        "tests/test_partner_schema_compatibility.py::test_fresh_and_repeat_bootstrap",
+        "tests/test_auth.py::test_login_success", "-x", "-q", cwd=REPO / "clearledger" / "server", env=env,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+    except BaseException:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+        raise
+    assert process.returncode == 1, output.decode()
+    assert "Run schema compatibility in a separate pytest process" in output.decode()
+    assert "ConnectionRefusedError" not in output.decode()
+
+
+async def test_extension_manifest_is_exact_and_required_portal_cannot_be_omitted():
+    assert candidate_model_manifest({}) == OWNED_MODEL_TABLES
+    with pytest.raises(ValueError, match="Required portal model"):
+        candidate_model_manifest({}, require_portal=True)
+    declared = candidate_model_manifest({"app.models_docs_portal": {"docs_portal_sessions"}}, require_portal=True)
+    assert set().union(*declared.values()) == PARTNER_TABLES | {"docs_portal_sessions"}
+    with pytest.raises(ValueError, match="Unexpected table"):
+        candidate_model_manifest({"app.models_docs_portal": {"docs_portal_sessions", "unreviewed_table"}})
+
+
+async def test_real_required_portal_gate_matches_registered_candidate():
+    env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "SECRET_KEY": "synthetic-test-only",
+        "RUN_PARTNER_SCHEMA_TESTS": "1", "PARTNER_SCHEMA_REQUIRE_PORTAL": "1",
+        "TEST_DATABASE_URL": "postgresql+asyncpg://synthetic:synthetic@127.0.0.1:1/synthetic_test",
+        "UPLOAD_DIR": "/tmp/partner-portal-gate-test-uploads", "PYTHONDONTWRITEBYTECODE": "1"}
+    process = await asyncio.create_subprocess_exec(sys.executable, "-m", "pytest",
+        "tests/test_partner_schema_compatibility.py", "--collect-only", "-q",
+        cwd=REPO / "clearledger" / "server", env=env,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+    except BaseException:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+        raise
+    present = "app.models_docs_portal" in CANDIDATE_MODEL_TABLES
+    assert process.returncode == (0 if present else 2), output.decode()
+    if not present:
+        assert "Required portal model app.models_docs_portal.DocsPortalSession is not registered" in output.decode()
     assert "ConnectionRefusedError" not in output.decode()
