@@ -3,7 +3,7 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: 17b966b54c988a8d35330b18ee8eb3d5404cb7f3111cfc45f0763deb8d06bed3
+// openapi-typescript 7.10.1; curated schema sha256: 13397f9beda6d08862c4224e08bb7021c0d16501403241c8968843625d2f8ab3
 export interface paths {
     "/contracts": {
         parameters: {
@@ -247,7 +247,7 @@ export interface components {
             /** Currentrevision */
             currentRevision: number;
             id: components["schemas"]["Id"];
-            objectId: components["schemas"]["Id"] | null;
+            objectId: components["schemas"]["ObjectId"] | null;
             /** Registrationdate */
             registrationDate: string | null;
             /** Registrationnumber */
@@ -263,7 +263,7 @@ export interface components {
             /** Currentrevision */
             currentRevision: number;
             id: components["schemas"]["Id"];
-            objectId: components["schemas"]["Id"] | null;
+            objectId: components["schemas"]["ObjectId"] | null;
             /** Registrationdate */
             registrationDate: string | null;
             /** Registrationnumber */
@@ -288,7 +288,7 @@ export interface components {
             level?: "station";
             /** Model */
             model: string | null;
-            objectId: components["schemas"]["Id"] | null;
+            objectId: components["schemas"]["ObjectId"] | null;
             /** Powerkw */
             powerKw: number | null;
             /** Serialnumber */
@@ -303,7 +303,7 @@ export interface components {
         Monitoring: {
             /** Lastseenat */
             lastSeenAt: string | null;
-            pointId: components["schemas"]["Id"];
+            pointId: components["schemas"]["ObjectId"];
             provenance: components["schemas"]["MonitoringProvenance"];
             /**
              * Status
@@ -398,7 +398,7 @@ export interface components {
             address: string | null;
             /** Code */
             code: string;
-            id: components["schemas"]["Id"];
+            id: components["schemas"]["ObjectId"];
             /** Latitude */
             latitude: number | null;
             /**
@@ -416,6 +416,7 @@ export interface components {
             /** Type */
             type: string;
         };
+        ObjectId: string;
         /** Page[Contract] */
         Page_Contract_: {
             /** Items */
@@ -494,10 +495,88 @@ export interface components {
             sizeBytes: number;
         };
     };
-    responses: never;
+    responses: {
+        /** @description Only an explicitly raised application HTTPException(429). No built-in product rate limiter is claimed; the current generic code is internal_error. Proxy-generated 429 responses are outside this contract. */
+        ProductInjectedRateLimit: {
+            headers: {
+                "Cache-Control": components["headers"]["ProductCacheControl"];
+                "Retry-After": components["headers"]["ProductRetryAfter"];
+                "X-Request-Id": components["headers"]["ProductRequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "internal_error",
+                 *       "detail": "Request could not be completed",
+                 *       "requestId": "00000000-0000-4000-8000-000000000001",
+                 *       "status": 429,
+                 *       "title": "Too Many Requests",
+                 *       "type": "about:blank"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description Unsupported method on a known application path; this is not a registered write operation. */
+        ProductMethodNotAllowed: {
+            headers: {
+                Allow: components["headers"]["ProductAllow"];
+                "Cache-Control": components["headers"]["ProductCacheControl"];
+                "X-Request-Id": components["headers"]["ProductRequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "method_not_allowed",
+                 *       "detail": "Request could not be completed",
+                 *       "requestId": "00000000-0000-4000-8000-000000000001",
+                 *       "status": 405,
+                 *       "title": "Method Not Allowed",
+                 *       "type": "about:blank"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+    };
     parameters: never;
     requestBodies: never;
-    headers: never;
+    headers: {
+        /**
+         * @description Methods permitted on a matched application path (RFC 9110 section 15.5.6).
+         * @example GET
+         */
+        ProductAllow: "GET";
+        /** @description Bearer challenge with parameters (RFC 6750 section 3). Generic denials use realm only; precise trusted verifier parameters are preserved, never inferred. */
+        ProductBearerChallenge: string;
+        /**
+         * @description Application response caching policy.
+         * @example no-store
+         */
+        ProductCacheControl: "no-store";
+        /**
+         * @description Attachment basename encoded as UTF-8 filename* (RFC 6266).
+         * @example attachment; filename*=UTF-8''%D0%A1%D0%BA%D0%B0%D0%BD%201.pdf
+         */
+        ProductContentDisposition: string;
+        /**
+         * @description Application binary content must not be MIME-sniffed.
+         * @example nosniff
+         */
+        ProductNoSniff: "nosniff";
+        /**
+         * @description Server-generated request ID; equals requestId in Problem bodies.
+         * @example 00000000-0000-4000-8000-000000000001
+         */
+        ProductRequestId: string;
+        /**
+         * @description Optional upstream application retry delay or HTTP-date; only present when supplied by a trusted HTTPException, not generated by a limiter here.
+         * @example 17
+         */
+        ProductRetryAfter: string;
+    };
     pathItems: never;
 }
 export type $defs = Record<string, never>;
@@ -520,6 +599,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -529,54 +610,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -596,6 +773,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -605,54 +784,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -676,6 +951,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -685,54 +962,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -752,6 +1125,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -761,54 +1136,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -832,6 +1303,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -841,54 +1314,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -908,6 +1477,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -917,54 +1488,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -985,6 +1652,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Content-Disposition": components["headers"]["ProductContentDisposition"];
+                    "X-Content-Type-Options": components["headers"]["ProductNoSniff"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -994,54 +1665,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -1065,6 +1832,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1074,54 +1843,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -1141,6 +2006,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1150,54 +2017,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -1221,6 +2184,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1230,54 +2195,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -1288,7 +2349,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                objectId: components["schemas"]["Id"];
+                objectId: components["schemas"]["ObjectId"];
             };
             cookie?: never;
         };
@@ -1297,6 +2358,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1306,54 +2369,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
@@ -1367,7 +2526,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                objectId: components["schemas"]["Id"];
+                objectId: components["schemas"]["ObjectId"];
             };
             cookie?: never;
         };
@@ -1376,6 +2535,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -1385,54 +2546,150 @@ export interface operations {
             /** @description Bad Request */
             400: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unauthorized */
             401: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Forbidden */
             403: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Not Found */
             404: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
