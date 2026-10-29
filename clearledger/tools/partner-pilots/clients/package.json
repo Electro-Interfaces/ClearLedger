@@ -1,0 +1,15 @@
+{
+  "name": "elsyplus-synthetic-partner-pilots",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test:unit": "node --experimental-strip-types --test guards.test.ts",
+    "callback": "node --experimental-strip-types callback.ts",
+    "pilot": "node --experimental-strip-types run.ts"
+  },
+  "dependencies": { "openid-client": "6.8.3" },
+  "devDependencies": { "@types/node": "22.19.0", "typescript": "5.9.3" }
+}
