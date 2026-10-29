@@ -63,6 +63,7 @@ jobs:
       RUN_FILE_STORE_TESTS: '1'
       RUN_OPS_CLOSING_TESTS: '1'
       RUN_OBJECT_COMMAND_TESTS: '1'
+      RUN_MONITORING_SQL_TESTS: '1'
       RUN_DOCS_PORTAL_TESTS: '1'
     steps:
       - uses: actions/checkout@v4

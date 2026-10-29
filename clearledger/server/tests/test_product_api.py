@@ -420,7 +420,10 @@ async def test_schema_and_registry_match_actual_child_routes_without_public_docs
     schema = curated_openapi(api.app)
     registry = export_runtime_registry(api.app)
     assert registry["kind"] == "policy-runtime-registry" and registry["sourceRevision"] == "synthetic-candidate"
-    assert len(registry["operations"]) == 11
+    assert len(registry["operations"]) == 12
+    monitored = schema["paths"]["/objects/{objectId}/monitoring"]["get"]
+    assert monitored["operationId"] == "getObjectMonitoring"
+    assert monitored["security"] == [{"ProductOAuth": ["monitoring:read", "objects:read"]}]
     assert registry["mountPath"] == "/api/v1"
     assert {entry["path"] for entry in registry["operations"]} == set(schema["paths"])
     assert {entry["accessClass"] for entry in registry["operations"]} == {"partner"}
