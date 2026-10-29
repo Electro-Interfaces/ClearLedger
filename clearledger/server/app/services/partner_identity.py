@@ -60,15 +60,26 @@ RESOURCE_MODELS = {"objects": (ServiceLocation, "object_id"), "equipment": (EzsE
     "counterparties": (Counterparty, "counterparty_id"), "contracts": (Contract, "contract_id"), "documents": (DocCard, "document_id")}
 
 
+def partner_bearer_headers(error: Literal["invalid_token", "insufficient_scope"] | None = None) -> dict[str, str]:
+    """Resource-server challenge; an error is supplied only by an explicit decision."""
+    challenge = 'Bearer realm="partner-api"'
+    if error is not None:
+        challenge += f', error="{error}"'
+    return {**NO_STORE, "WWW-Authenticate": challenge}
+
+
 class PartnerProblem(Exception):
-    def __init__(self, status: int, code: str, detail: str):
+    def __init__(self, status: int, code: str, detail: str, *, headers: Mapping[str, str] | None = None):
         self.status, self.code, self.detail = status, code, detail
+        self.headers = headers or {}
 
 
 async def problem_handler(request, error: PartnerProblem):
+    # Only protocol metadata is opt-in; never forward cookies, locations or debug headers.
+    headers = {name: value for name, value in error.headers.items() if name.lower() == "www-authenticate"}
     return JSONResponse({"type": "about:blank", "title": error.detail, "status": error.status,
         "code": error.code, "detail": error.detail, "requestId": getattr(request.state, "request_id", None) or uuid.uuid4().hex},
-        status_code=error.status, media_type="application/problem+json", headers=NO_STORE)
+        status_code=error.status, media_type="application/problem+json", headers={**headers, **NO_STORE})
 
 
 class PartnerRoute(APIRoute):
@@ -727,8 +738,21 @@ def verify_access(db: Session, token: str) -> VerifiedPartnerToken:
 
 async def verify_partner_access_token(token: str, db: AsyncSession) -> VerifiedPartnerToken:
     if len(token) > 8192:
-        raise HTTPException(401, "Invalid partner access token", headers=NO_STORE)
-    return await db.run_sync(verify_access, token)
+        raise HTTPException(401, "Invalid partner access token", headers=partner_bearer_headers())
+    try:
+        return await db.run_sync(verify_access, token)
+    except (HTTPException, PartnerProblem) as exc:
+        status = exc.status_code if isinstance(exc, HTTPException) else exc.status
+        if status in (401, 403):
+            headers = dict(exc.headers or {})
+            challenge = next((value for name, value in headers.items() if name.lower() == "www-authenticate"), None)
+            # Preserve the canonical verifier's explicit invalid_token. Generic
+            # denial/status/detail does not establish an OAuth error or scope.
+            error = "invalid_token" if challenge == 'Bearer error="invalid_token"' else None
+            headers = {name: value for name, value in headers.items()
+                if name.lower() not in {"www-authenticate", "cache-control", "pragma"}}
+            exc.headers = {**headers, **partner_bearer_headers(error)}
+        raise
 
 
 partner_bearer = HTTPBearer(auto_error=False)
@@ -737,5 +761,5 @@ partner_bearer = HTTPBearer(auto_error=False)
 async def get_verified_partner_token(credentials: HTTPAuthorizationCredentials | None = Depends(partner_bearer),
                                      db: AsyncSession = Depends(get_db)) -> VerifiedPartnerToken:
     if credentials is None:
-        raise HTTPException(401, "Partner bearer required", headers={**NO_STORE, "WWW-Authenticate": "Bearer"})
+        raise HTTPException(401, "Partner bearer required", headers=partner_bearer_headers())
     return await verify_partner_access_token(credentials.credentials, db)
