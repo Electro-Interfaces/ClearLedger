@@ -57,7 +57,7 @@ PARTNER_TABLES = frozenset({
     "partner_subjects", "partner_codes", "partner_token_families", "partner_tokens",
 })
 OWNED_MODEL_TABLES = {"app.models_partner": PARTNER_TABLES}
-EXTENSION_MODEL_TABLES = {"app.models_docs_portal": frozenset({"docs_portal_sessions"})}
+EXTENSION_MODEL_TABLES = {"app.models_docs_portal": frozenset({"partner_docs_sessions"})}
 REQUIRE_PORTAL = os.environ.get("PARTNER_SCHEMA_REQUIRE_PORTAL", "0")
 if REQUIRE_PORTAL not in {"0", "1"}:
     raise pytest.UsageError("PARTNER_SCHEMA_REQUIRE_PORTAL must be 0 or 1")
@@ -667,10 +667,10 @@ async def test_extension_manifest_is_exact_and_required_portal_cannot_be_omitted
     assert candidate_model_manifest({}) == OWNED_MODEL_TABLES
     with pytest.raises(ValueError, match="Required portal model"):
         candidate_model_manifest({}, require_portal=True)
-    declared = candidate_model_manifest({"app.models_docs_portal": {"docs_portal_sessions"}}, require_portal=True)
-    assert set().union(*declared.values()) == PARTNER_TABLES | {"docs_portal_sessions"}
+    declared = candidate_model_manifest({"app.models_docs_portal": {"partner_docs_sessions"}}, require_portal=True)
+    assert set().union(*declared.values()) == PARTNER_TABLES | {"partner_docs_sessions"}
     with pytest.raises(ValueError, match="Unexpected table"):
-        candidate_model_manifest({"app.models_docs_portal": {"docs_portal_sessions", "unreviewed_table"}})
+        candidate_model_manifest({"app.models_docs_portal": {"partner_docs_sessions", "unreviewed_table"}})
 
 
 async def test_real_required_portal_gate_matches_registered_candidate():

@@ -217,7 +217,7 @@ indexes и validity проверяются, как и раньше.
 Новые таблицы разрешаются точным `OWNED_MODEL_TABLES`: `app.models_partner` →
 фиксированные 12 имён. Неизвестный extra не допускается ни из metadata, ни из DDL.
 В `EXTENSION_MODEL_TABLES` строго объявлено только
-`app.models_docs_portal` → `{docs_portal_sessions}` (класс DocsPortalSession).
+`app.models_docs_portal` → `{partner_docs_sessions}` (класс DocsPortalSession).
 Extension учитывается только при регистрации этого exact module; лишняя таблица
 в нём тоже является ошибкой. Режим `PARTNER_SCHEMA_REQUIRE_PORTAL=1` отказывает
 на collection до DB fixtures, если модель не зарегистрирована. Проверяются
