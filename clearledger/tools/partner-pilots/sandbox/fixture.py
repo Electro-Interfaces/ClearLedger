@@ -1,4 +1,4 @@
-"""Owned synthetic Core records only. No production seed_data or OAuth ORM grants."""
+"""Только вымышленные записи Ядра; без production seed и OAuth grant через ORM."""
 from datetime import datetime, timedelta
 import hashlib
 import secrets
@@ -50,7 +50,10 @@ async def seed(factory, upload):
         at = datetime(2026,10,29,10)
         for i,p in enumerate([*points, foreign]):
             for n,energy in enumerate((0,12,7)):
-                start = at + timedelta(minutes=n*8)
+                # Разные дни выявляют ошибочную общую границу наблюдений:
+                # второй разрешённый объект старше, скрытый и чужой новее.
+                day_offset=(0,-1,1,2)[i]
+                start = at + timedelta(days=day_offset,minutes=n*8)
                 db.add(ChargeSession(company_id=p.company_id, location_id=p.id, station_code=p.code,
                     source_station_id=p.id, user_id='synthetic-visitor-'+str(i),
                     session_ext_id=f'synthetic-{i}-{n}', started_at=start,
@@ -80,11 +83,14 @@ async def seed(factory, upload):
         for c in companies:
             await recompute_visits(db,c.id)
         await db.commit()
-        # Credentials stay exclusively in the server-owner state; never copy to client manifest.
+        # Учётки Ядра остаются у владельца сервера и не попадают в manifest клиента.
         return {'companyId':str(cid), 'foreignCompanyId':str(foreign_cid),
             'owner':{'email':owner.email,'password':password,'userId':str(owner.id)},
             'employee':{'email':employee.email,'password':password,'userId':str(employee.id)},
             'objects':[p.id for p in points], 'foreignObject':foreign.id,
             'counterparties':[str(p.id) for p in parties], 'contracts':[str(c.id) for c in contracts],
             'equipment':[str(e.id) for e in equipment], 'documents':[str(d.id) for d in docs],
-            'documentVersions':[str(v.id) for v in versions], 'asOf':'2026-10-29'}
+            'documentVersions':[str(v.id) for v in versions],
+            'expectedDocumentHashes':{str(d.id):v.sha256 for d,v in zip(docs,versions)},
+            'objectObservationDays':{p.id:day for p,day in zip(points,['2026-10-29','2026-10-28','2026-10-30'])},
+            'asOf':'2026-10-29'}

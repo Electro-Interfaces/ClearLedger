@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in standalone HTTPS fixture; never import production app.main or conftest."""
+"""Явно включаемая HTTPS fixture без импорта production app.main и conftest."""
 import argparse
 import asyncio
 from contextlib import asynccontextmanager
@@ -24,8 +24,8 @@ STATE = PRIVATE/'owner-state.json'
 
 def configure():
     database, upload = validate()
-    # Settings never see inherited credentials or a real .env. Run from our empty
-    # private directory before importing any Core modules; env_file disabled too.
+    # Настройки не получают унаследованные credentials или настоящий .env.
+    # До импорта Ядра переходим в свой закрытый каталог; env_file тоже отключён.
     preserved = {name:os.environ[name] for name in ('PATH','HOME','LANG') if name in os.environ}
     os.environ.clear()
     os.environ.update(preserved)
@@ -40,13 +40,13 @@ def configure():
     from app.config import Settings, get_settings
     Settings.model_config['env_file']=None
     get_settings.cache_clear()
-    # The initial config import has no .env at this empty cwd and no secret env.
+    # При первом импорте config здесь нет .env и секретов в окружении.
     import app.config as config
     config.settings=get_settings()
     for name in ('hubex_base_url','asr_url','calendar_reply_imap_host','smtp_host',
         'tradecorp_api_url','msto_api_url','app_public_url'):
         setattr(config.settings,name,'')
-    # Enforce no egress even if a router accidentally attempts a connector.
+    # Запрещаем исходящие соединения даже при случайном вызове коннектора.
     def network_guard(event,args):
         if event == 'socket.getaddrinfo' and args[0] not in ('127.0.0.1','::1',None):
             raise RuntimeError('Sandbox DNS egress is disabled')
@@ -69,7 +69,7 @@ def application(factory, settings, state):
     from app.services import partner_identity as identity, notify
     from app.product_api import create_product_api
     from app.api_contracts import policy_registry
-    # Delivery alone is mocked. Passwords, Core gate, grants and verifier stay real.
+    # Заглушена только доставка; пароли, gate Ядра, grants и verifier настоящие.
     async def no_notice(*args,**kwargs): pass
     auth_router.email_service.send_notice=no_notice
     notify.dispatch_async=lambda *args,**kwargs:None
@@ -124,7 +124,7 @@ async def initialize(database,upload,state):
     import asyncpg
     from sqlalchemy import text
     import app.database as core_db
-    import app.models, app.models_partner, app.models_docs_portal  # register actual metadata
+    import app.models, app.models_partner, app.models_docs_portal  # зарегистрировать реальные модели
     from fixture import seed
     if upload.exists() and any(upload.iterdir()):
         raise RuntimeError('Test upload directory is nonempty; refusing to mix fixture ownership')
@@ -142,7 +142,7 @@ async def initialize(database,upload,state):
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS edge'))
     state.update(status='initializing',databaseOwned=True,uploadDir=str(upload))
     write_json(STATE,state)
-    await core_db.create_all()  # actual bootstrap includes safe phone function first
+    await core_db.create_all()  # штатный bootstrap сначала создаёт безопасную телефонную функцию
     state['fixture']=await seed(core_db.async_session_factory,upload)
     state['uploadDir']=str(upload)
     state['status']='seeded-awaiting-serve'
@@ -240,13 +240,13 @@ async def serve(database,upload,settings,state,callback):
             settings.partner_docs_client_id=await register('portal',['openid','docs:read','objects:read'],'none',
                 {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,'documents':empty},
                 [origin+'/developer/api/callback',origin+'/api/developer/docs/oauth2-redirect'])
-            # The issuer-owned portal registration is never exported to the external client.
+            # Клиент портала issuer никогда не передаётся внешнему клиенту.
             write_json(PRIVATE/'client-manifest.json',manifest)
             discovery=await call('GET','/.well-known/openid-configuration')
             if discovery['issuer']!=origin: raise RuntimeError('Discovery issuer mismatch')
             state['status']='api-ready-building-ui'; write_json(STATE,state)
             print('API_READY '+origin+' CA='+state['caPath']+' CLIENT_MANIFEST='+str(PRIVATE/'client-manifest.json'),flush=True)
-        # Reuse the read-only root dependency tree without installing or mutating it.
+        # Используем дерево зависимостей root без установки и изменения пакетов.
         process=await asyncio.create_subprocess_exec('node',str(HERE/'build.mjs'),origin,str(PRIVATE/'front'),
             cwd=PROJECT,stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.PIPE)
         communication=asyncio.create_task(process.communicate())
@@ -278,7 +278,7 @@ async def cleanup(database,upload,state):
         raise RuntimeError('Cleanup requires the stopped owned fixture and matching test upload directory')
     admin=await asyncpg.connect(database.replace('postgresql+asyncpg:','postgresql:').rsplit('/',1)[0]+'/postgres')
     try:
-        # No FORCE: an active owner/client query must prevent destructive cleanup.
+        # Без FORCE: активное соединение владельца или клиента запрещает очистку.
         await admin.execute('DROP DATABASE api_partner_pilots_test')
     finally:
         await admin.close()
@@ -304,7 +304,7 @@ def main():
         state=json.loads(STATE.read_text())
         pid=state.get('pid')
         if state.get('status')=='stopped' or not pid: return
-        # Never signal a recycled PID belonging to a different program.
+        # Нельзя отправлять сигнал повторно использованному PID чужой программы.
         if str(HERE/'server.py') not in Path('/proc/'+str(pid)+'/cmdline').read_bytes().decode().replace('\0',' '):
             raise RuntimeError('Recorded PID is not the owned sandbox')
         os.kill(pid,signal.SIGTERM)

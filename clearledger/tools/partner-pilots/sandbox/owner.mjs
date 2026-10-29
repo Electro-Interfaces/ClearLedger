@@ -1,4 +1,4 @@
-// Server-owner browser: knows only Core credentials, never client PKCE state/verifier.
+// Браузер владельца знает только учётку Ядра, но не PKCE verifier клиента.
 import { chromium } from '@playwright/test'
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises'
 import { X509Certificate, createHash } from 'node:crypto'
@@ -22,17 +22,17 @@ for (const leaf of ['issuer.pem', 'callback.pem']) {
 const browser = await chromium.launch({ headless: true,
   args: ['--disable-background-networking', '--disable-component-update', '--no-proxy-server',
     `--ignore-certificate-errors-spki-list=${pins.join(',')}`] })
-// Owner browser trusts exactly two fixture leaf SPKIs plus the loopback route
-// allowlist. Independent SDK/server HTTP requests validate the fixture CA.
-// No HOME override, host trust-store changes, global TLS bypass or TLS-ignore context.
+// Браузер владельца доверяет двум SPKI fixture leaf и ограничен loopback
+// allowlist. Независимый SDK и серверные HTTP helpers проверяют fixture CA.
+// Без изменения HOME, системного доверия, глобального TLS bypass и TLS-ignore.
 const context = await browser.newContext({ viewport: { width: 1360, height: 1000 } })
 const trace = []
 try {
   await context.route('**/*', (route) => {
     const url = new URL(route.request().url())
     if ([state.origin, new URL(state.callback).origin].includes(url.origin)) return route.continue()
-    // The production source font-loader is preserved; optional font delivery is
-    // deliberately unavailable in a hermetic fixture, with system-font fallback.
+    // Исходный загрузчик шрифтов сохранён; необязательная доставка шрифтов
+    // отключена в герметичной fixture, действует системный fallback.
     return route.abort()
   })
   const page = await context.newPage()
@@ -67,8 +67,8 @@ try {
         await context.close(); await browser.close(); process.exit(0)
       }
       for (const scope of scopes) {
-        // Actual UI may describe scopes more precisely; checkbox values are
-        // bound to real server eligibility, never alter disabled controls.
+        // В актуальном UI подписи scopes могут уточняться; доступность checkbox
+        // задаёт серверная eligibility, disabled controls не изменяем.
         const checkbox = page.locator(`input[type="checkbox"][value="${scope}"]`)
         if (await checkbox.count()) await checkbox.check()
         else if (labels[scope]) await page.getByRole('checkbox', { name: new RegExp(labels[scope]) }).check()
@@ -83,7 +83,7 @@ try {
     console.info('OWNER_BROWSER_CALLBACK_WRITTEN')
   }
 } catch (error) {
-  // Never dump URLs, bodies, localStorage, tokens, password, state or code.
+  // Не печатаем URL, тела, localStorage, tokens, пароли, state или code.
   await writeFile(resolve(privateDir, 'owner-browser-status.json'), JSON.stringify({ status: 'failed', trace }), { mode: 0o600 })
   console.error('Owner browser failed; private status paths are recorded')
   process.exitCode = 1

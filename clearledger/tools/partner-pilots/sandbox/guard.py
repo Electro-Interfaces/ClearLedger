@@ -1,4 +1,4 @@
-"""Sandbox authorization checks; importing never opens a database or loads Core."""
+"""Проверки допуска: импорт не открывает БД и не загружает Ядро."""
 from pathlib import Path
 from urllib.parse import urlsplit
 import os
@@ -22,7 +22,7 @@ def validate(environ=None, *, ddl=False):
     upload = Path(env.get('UPLOAD_DIR', ''))
     if not upload.is_absolute() or 'test' not in upload.name.lower():
         raise ValueError('Explicit absolute test UPLOAD_DIR is required')
-    # This is a separate operator assertion, not an automatic inference from a flag.
+    # Это отдельное подтверждение оператора, а не разрешение из общего флага.
     if ddl and not env.get('PARTNER_SANDBOX_SQL_WINDOW', '').strip():
         raise ValueError('Separate root SQL-window authorization is required')
     return raw, upload

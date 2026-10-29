@@ -1,4 +1,4 @@
-// Real current public/main React sources; deliberately excludes release/PWA emitters.
+// Актуальные public/main React исходники без генераторов release/PWA.
 import { build } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'

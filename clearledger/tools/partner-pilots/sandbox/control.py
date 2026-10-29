@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owner-only actual admin HTTP revocation; no control route or ORM access."""
+"""Реальный отзыв через admin HTTP владельцем; без control routes или ORM."""
 import argparse
 import asyncio
 import json

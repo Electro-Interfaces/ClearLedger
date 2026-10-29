@@ -1,4 +1,4 @@
-"""Destructive-operation boundary checks, deliberately independent of conftest."""
+"""Проверки границ разрушительных операций отдельно от conftest."""
 import unittest
 from guard import validate
 

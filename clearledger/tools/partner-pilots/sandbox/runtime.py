@@ -1,4 +1,4 @@
-"""Private files and short-lived fixture certificates, no Core imports."""
+"""Закрытые файлы и краткоживущие сертификаты fixture; без импорта Ядра."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import ipaddress
