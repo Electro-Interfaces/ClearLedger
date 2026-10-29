@@ -45,7 +45,8 @@ class MonitoringContractTest(unittest.TestCase):
         schema = curated_openapi(app)
         path = "/objects/{objectId}/monitoring"
         operation = schema["paths"][path]["get"]
-        self.assertEqual(operation["security"], [{"ProductOAuth": ["monitoring:read", "objects:read"]}])
+        self.assertEqual(operation["security"], [{"ProductOAuth": ["monitoring:read", "objects:read"]},
+                                                {"ProductServiceOAuth": ["monitoring:read", "objects:read"]}])
         self.assertEqual(operation["operationId"], "getObjectMonitoring")
         scopes = schema["components"]["securitySchemes"]["ProductOAuth"]["flows"]["authorizationCode"]["scopes"]
         self.assertIn("monitoring:read", scopes)

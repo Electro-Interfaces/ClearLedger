@@ -227,7 +227,10 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
             with self.subTest(path=entry["path"]):
                 operation = schema["paths"][entry["path"]]["get"]
                 scopes = set(entry["scopes"])
-                self.assertEqual(operation["security"], [{"ProductOAuth": sorted(scopes)}])
+                expected = [{"ProductOAuth": sorted(scopes)}]
+                if "service" in operation["x-access-policy"]["principalKinds"]:
+                    expected.append({"ProductServiceOAuth": sorted(scopes)})
+                self.assertEqual(operation["security"], expected)
                 self.assertEqual(operation["operationId"], entry["operationId"])
                 for status in ("400", "401", "403", "404", "422", "503"):
                     self.assertEqual(set(operation["responses"][status]["content"]), {"application/problem+json"})

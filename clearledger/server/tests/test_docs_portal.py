@@ -134,7 +134,7 @@ async def session(env, access=None):
     return response, access
 
 
-@pytest.mark.parametrize("path", ["/ui", "/openapi.json", "/assets/swagger-ui-bundle.js", "/assets/swagger-ui.css", "/assets/portal-init.js", "/oauth2-redirect"])
+@pytest.mark.parametrize("path", ["/ui", "/openapi.json", "/openapi.server.json", "/assets/swagger-ui-bundle.js", "/assets/swagger-ui.css", "/assets/portal-init.js", "/oauth2-redirect"])
 async def test_each_surface_needs_docs_cookie_not_core_or_product_bearer(env, path):
     ac = env["client"]
     for headers in [{}, {"Authorization": "Bearer " + env["core"]}, {"Authorization": "Bearer " + await token(env, ["objects:read"])}]:
@@ -151,7 +151,7 @@ async def test_cookie_session_actual_curated_schema_assets_and_no_product_permis
     db = env["db"]
     record = (await db.execute(select(DocsPortalSession).where(DocsPortalSession.token_id == env["tokenId"]))).scalar_one()
     assert record and len(record.cookie_hash) == 64 and record.expires_at <= identity.now() + timedelta(seconds=180)
-    for path in ["/ui", "/openapi.json", "/assets/swagger-ui-bundle.js", "/assets/swagger-ui.css", "/assets/portal-init.js", "/oauth2-redirect"]:
+    for path in ["/ui", "/openapi.json", "/openapi.server.json", "/assets/swagger-ui-bundle.js", "/assets/swagger-ui.css", "/assets/portal-init.js", "/oauth2-redirect"]:
         view = await env["client"].get(portal.PREFIX + path)
         assert view.status_code == 200, view.text[:200]
         assert view.headers["cache-control"] == "no-store"
@@ -159,6 +159,11 @@ async def test_cookie_session_actual_curated_schema_assets_and_no_product_permis
     spec = (await env["client"].get(portal.PREFIX + "/openapi.json")).json()
     assert spec["servers"] == [{"url": ORIGIN + "/api/v1"}]
     assert "/objects" in spec["paths"] and "/auth/login" not in spec["paths"]
+    assert set(spec["components"]["securitySchemes"]) == {"ProductOAuth"}
+    assert spec["x-elsy-authentication-projection"]["kind"] == "public-code-pkce"
+    canonical = (await env["client"].get(portal.PREFIX + "/openapi.server.json")).json()
+    assert "clientCredentials" in canonical["components"]["securitySchemes"]["ProductServiceOAuth"]["flows"]
+    assert set(canonical["paths"]) == set(spec["paths"])
     assert (await env["client"].get("/api/v1/objects")).status_code == 401
     assert (await env["client"].get("/api/v1/objects", headers={"Authorization": "Bearer " + access})).status_code == 403
 
@@ -182,7 +187,7 @@ async def test_every_subsequent_byte_rechecks_canonical_live_authority(env, caus
     elif cause == "expiry": row.expires_at = identity.now() - timedelta(seconds=1)
     elif cause == "profile": monkeypatch.setattr(identity.settings, "partner_oauth_kid", "rotated-docs-key")
     await db.commit()
-    for path in ["/ui", "/openapi.json", "/assets/swagger-ui-bundle.js", "/assets/swagger-ui.css", "/oauth2-redirect"]:
+    for path in ["/ui", "/openapi.json", "/openapi.server.json", "/assets/swagger-ui-bundle.js", "/assets/swagger-ui.css", "/oauth2-redirect"]:
         response = await env["client"].get(portal.PREFIX + path)
         assert response.status_code == 401, response.text
         assert response.headers["cache-control"] == "no-store"
@@ -219,7 +224,7 @@ async def test_separate_configured_client_and_scope_gate(env):
 async def test_no_override_no_cdn_defaultoff_and_read_only_sandbox_metadata(env, monkeypatch):
     await session(env)
     ac = env["client"]
-    for path in ["/ui?url=https://evil.example", "/openapi.json?server=evil", "/assets/swagger-ui.css?configUrl=x"]:
+    for path in ["/ui?url=https://evil.example", "/openapi.json?server=evil", "/openapi.server.json?access_token=synthetic", "/assets/swagger-ui.css?configUrl=x"]:
         assert (await ac.get(portal.PREFIX + path)).status_code == 400
     assert (await ac.get(portal.PREFIX + "/assets/manifest.json")).status_code == 404
     html = (await ac.get(portal.PREFIX + "/ui")).text
@@ -231,6 +236,8 @@ async def test_no_override_no_cdn_defaultoff_and_read_only_sandbox_metadata(env,
         assert "sandbox-api" in metadata.json()["setupRequired"]
     monkeypatch.setattr(portal.settings, "partner_docs_enabled", False)
     assert (await ac.get(portal.PREFIX + "/ui")).status_code == 503
+    disabled = await ac.get(portal.PREFIX + "/openapi.server.json")
+    assert disabled.status_code == 503 and disabled.headers["cache-control"] == "no-store"
 
 
 async def test_setup_required_and_missing_pinned_assets_fail_closed(env, monkeypatch, tmp_path):

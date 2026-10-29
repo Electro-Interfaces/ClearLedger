@@ -57,7 +57,8 @@ def metadata(db):
         "setupRequired": missing, "clientId": client.id if client else None,
         "authorizationUrl": origin + "/api/oauth2/authorize", "tokenUrl": origin + "/api/oauth2/token",
         "revokeUrl": origin + "/api/oauth2/revoke", "redirectUri": origin + "/developer/api/callback",
-        "docsScopes": ["openid", "docs:read"]}
+        "docsScopes": ["openid", "docs:read"], "browserOAuthProfile": "authorization_code_pkce",
+        "serverContractUrl": PREFIX + "/openapi.server.json"}
 
 
 def mutation_origin(request: Request):
@@ -153,10 +154,11 @@ def close_session(db, raw):
         db.flush()
 
 
-def product_schema(app):
+def product_schema(app, *, browser=True):
     # Deferred import: never publish generic main.openapi or a made-up schema.
     try:
         from app.product_api import curated_openapi
+        from app.product_api.app import public_client_openapi
     except ImportError:
         raise HTTPException(503, "Product API setup required", headers=HEADERS) from None
     child = getattr(app.state, "product_api", None)
@@ -169,7 +171,10 @@ def product_schema(app):
     origin = issuer()
     if schema.get("servers") != [{"url": origin + "/api/v1"}]:
         raise HTTPException(503, "Same-space product issuer required", headers=HEADERS)
-    return schema
+    try:
+        return public_client_openapi(schema) if browser else schema
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(503, "Public documentation profile unavailable", headers=HEADERS) from None
 
 
 def asset(name):

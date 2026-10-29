@@ -108,6 +108,12 @@ async def spec(request: Request, db=Depends(docs_session)):
     return portal.product_schema(request.app)
 
 
+@router.get("/openapi.server.json")
+async def server_spec(request: Request, db=Depends(docs_session)):
+    no_overrides(request)
+    return portal.product_schema(request.app, browser=False)
+
+
 @router.get("/assets/{name}")
 async def asset(name: str, request: Request, db=Depends(docs_session)):
     no_overrides(request)
