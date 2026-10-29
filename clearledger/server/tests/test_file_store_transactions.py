@@ -1,5 +1,6 @@
 """Actual PostgreSQL transactions + tmpfiles, including SAVEPOINT and close."""
 import asyncio
+from contextlib import contextmanager
 import hashlib
 import io
 import os
@@ -15,6 +16,7 @@ from sqlalchemy import event, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import Session
 
 _url = make_url(os.environ.get("TEST_DATABASE_URL", "postgresql://invalid/invalid"))
 if (_url.host, _url.port, _url.database) != ("127.0.0.1", 33546, "api_file_store_test"):
@@ -218,6 +220,118 @@ async def test_post_commit_observer_error_never_deletes_committed_bytes(storage)
     assert path.exists()
     async with factory() as session:
         assert await session.get(SourceFile, identifier) is not None
+
+
+@contextmanager
+def early_class_commit_observer(observer):
+    # Model import order: an app-wide CLASS observer is registered before the
+    # writer's CLASS listener. An instance listener runs too late to test this.
+    event.remove(Session, "after_commit", file_store._file_commit)
+    event.listen(Session, "after_commit", observer)
+    event.listen(Session, "after_commit", file_store._file_commit)
+    try:
+        yield
+    finally:
+        event.remove(Session, "after_commit", observer)
+
+
+@pytest.mark.parametrize("observer_raises", [False, True])
+async def test_early_class_observer_preserves_durable_commit(storage, observer_raises):
+    factory, cid, root = storage
+    observed = []
+
+    def observer(session):
+        bucket = session.info[file_store._PENDING][file_store._current(session)]
+        assert not bucket.committed  # Prove the observer runs before the writer.
+        observed.append(True)
+        if observer_raises:
+            raise RuntimeError("early CLASS observer after durable commit")
+
+    with early_class_commit_observer(observer):
+        async with factory() as session:
+            row = put(session, cid)
+            identifier, path = row.id, Path(row.storage_path)
+            await session.flush()
+            if observer_raises:
+                with pytest.raises(RuntimeError, match="early CLASS observer"):
+                    await session.commit()
+            else:
+                await session.commit()
+            # Verify durability through an independent PostgreSQL transaction,
+            # before close can hide the distinction between commit and rollback.
+            async with factory() as verification:
+                assert await verification.get(SourceFile, identifier) is not None
+            assert path.read_bytes() == b"new bytes"
+        assert path.read_bytes() == b"new bytes"
+        assert file_store._PENDING not in session.info
+    assert observed == [True]
+
+
+@pytest.mark.parametrize("parent_outcome", ["commit", "rollback", "close"])
+async def test_early_class_observer_on_savepoint_keeps_parent_ownership(storage, parent_outcome):
+    factory, cid, root = storage
+
+    def observer(session):
+        assert session.in_nested_transaction()
+        bucket = session.info[file_store._PENDING][file_store._current(session)]
+        assert not bucket.committed
+        raise RuntimeError("early CLASS observer after RELEASE")
+
+    async with factory() as session:
+        outer = put(session, cid)
+        outer_id, outer_path = outer.id, Path(outer.storage_path)
+        await session.flush()
+        nested = await session.begin_nested()
+        inner = put(session, cid)
+        inner_id, inner_path = inner.id, Path(inner.storage_path)
+        await session.flush()
+        with early_class_commit_observer(observer):
+            with pytest.raises(RuntimeError, match="after RELEASE"):
+                await nested.commit()
+        # after_commit raised before SQLAlchemy could finish closing the nested
+        # SessionTransaction. Close through its PUBLIC API, keeping the parent.
+        await session.run_sync(lambda sync: sync.get_nested_transaction().close())
+        assert outer_path.exists() and inner_path.exists()
+        if parent_outcome == "commit":
+            await session.commit()
+        elif parent_outcome == "rollback":
+            await session.rollback()
+    for path in (outer_path, inner_path):
+        assert path.exists() is (parent_outcome == "commit")
+    async with factory() as verification:
+        for identifier in (outer_id, inner_id):
+            assert (await verification.get(SourceFile, identifier) is not None) is (parent_outcome == "commit")
+
+
+@pytest.mark.parametrize("explicit_rollback", [False, True])
+async def test_unconfirmed_commit_close_retains_bytes_but_rollback_cleans(storage, explicit_rollback, caplog):
+    factory, cid, root = storage
+
+    def fail_commit(connection):
+        raise RuntimeError("synthetic commit failure with unknown outcome")
+
+    engine = factory.kw["bind"].sync_engine
+    async with factory() as session:
+        row = put(session, cid)
+        identifier, path = row.id, Path(row.storage_path)
+        await session.flush()
+        event.listen(engine, "commit", fail_commit)
+        try:
+            with pytest.raises(RuntimeError, match="unknown outcome"):
+                await session.commit()
+        finally:
+            event.remove(engine, "commit", fail_commit)
+        if explicit_rollback:
+            await session.rollback()
+    # A public commit-attempt event does not prove whether commit reached DB.
+    # Without a rollback event, retention is intentional, even though this test
+    # injected the error before DBAPI commit and can independently prove no row.
+    assert path.exists() is not explicit_rollback
+    if not explicit_rollback:
+        assert "bytes сохранены" in caplog.text
+    assert file_store._PENDING not in session.info
+    async with factory() as verification:
+        assert await verification.get(SourceFile, identifier) is None
 
 
 async def test_collision_same_id_different_extension_preserves_original(storage):
