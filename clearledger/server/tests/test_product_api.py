@@ -13,11 +13,13 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlalchemy.engine import make_url
+from tests.partner_test_safety import partner_test_safety_error
 
-_test_url = make_url(os.environ.get("TEST_DATABASE_URL", "postgresql://invalid/invalid"))
-if (_test_url.host, _test_url.port, _test_url.database) != ("127.0.0.1", 33546, "api_product_test"):
-    pytest.skip("Product SQL acceptance requires the explicitly dedicated api_product_test database", allow_module_level=True)
+if os.environ.get("RUN_PRODUCT_API_TESTS") != "1":
+    pytest.skip("Opt in with RUN_PRODUCT_API_TESTS=1", allow_module_level=True)
+_safety_error = partner_test_safety_error(os.environ, flag="RUN_PRODUCT_API_TESTS")
+if _safety_error:
+    raise pytest.UsageError("Refusing product test database: " + _safety_error)
 
 from app.models import (Company, Contract, ContractLocation, Counterparty, DocAccessGrant,
     DocCard, DocKind, DocVersion, EzsEquipmentUnit, Organization, ServiceLocation, SourceFile, User, UserCompany)
@@ -52,9 +54,8 @@ class VerifiedFixture:
 
 @pytest_asyncio.fixture
 async def api(db, tmp_path):
-    # conftest has destructive teardown: require the exact dedicated test database.
-    assert db.bind.url.host == "127.0.0.1" and db.bind.url.port == 33546
-    assert db.bind.url.database == "api_product_test"
+    # The shared guard validates explicit synthetic targets before DB fixtures.
+    assert partner_test_safety_error(os.environ, flag="RUN_PRODUCT_API_TESTS") is None
     suffix = uuid.uuid4().hex[:12]
     companies = [Company(id=uuid.uuid4(), name=f"Synthetic {i}", slug=f"product-{suffix}-{i}", profile_id="energy") for i in range(2)]
     db.add_all(companies)

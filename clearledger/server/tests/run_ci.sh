@@ -29,6 +29,12 @@ mapfile -t deselect < <(grep -E '::' "$quarantine" | grep -v '^#' | sed 's/^/--d
 failed=""
 skipped_files=""
 for file in tests/test_*.py; do
+  # Эта проверка сама пересоздаёт старую/новую схему. Её запускает отдельный
+  # partner-schema job со своей БД, не общий session-scoped набор HTTP тестов.
+  if [ "$file" = tests/test_partner_schema_compatibility.py ] && [ "${RUN_PARTNER_SCHEMA_TESTS:-}" != 1 ]; then
+    echo "отдельный job partner-schema: $file"
+    continue
+  fi
   if grep -qxF "$file" "$quarantine"; then
     echo "карантин, пропущен: $file"
     continue
