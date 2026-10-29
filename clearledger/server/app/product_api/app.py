@@ -171,7 +171,14 @@ def export_runtime_registry(app, *, prefix=""):
 
 def curated_openapi(app):
     issuer = app.state.product_settings.issuer
-    parsed = urlsplit(issuer or "")
+    try:
+        if not isinstance(issuer, str) or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in issuer) or "\\" in issuer:
+            raise ValueError("Invalid issuer characters")
+        parsed = urlsplit(issuer)
+        if parsed.port is not None and parsed.port < 1:
+            raise ValueError("Invalid issuer port")
+    except ValueError:
+        raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI") from None
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
             or parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in ("", "/")):
         raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI")

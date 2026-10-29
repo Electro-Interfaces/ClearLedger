@@ -225,3 +225,32 @@ async def test_unredeemed_development_code_is_closed_after_policy_change(flow, m
         "client_id": flow["client_id"], "redirect_uri": flow["redirect"], "code": code, "code_verifier": VERIFIER})
     assert token.status_code == 400 and token.json()["error"] == "invalid_grant"
     assert "access_token" not in token.json()
+
+
+@pytest.mark.parametrize("issuer", ["https://synthetic-space.example:99999", "https://synthetic-space.example:invalid",
+    "https://synthetic-space.example:0", "https://synthetic-space.exa\nmple", "https://synthetic-space.example\t",
+    "https://synthetic-space.example\\suffix", "https://synthetic-space.example\u00a0"])
+async def test_invalid_issuer_is_closed_before_registration_or_discovery(flow, monkeypatch, issuer):
+    from sqlalchemy import func, select
+    before = await flow["db"].scalar(select(func.count()).select_from(PartnerClient))
+    monkeypatch.setattr(flow["settings"], "partner_oauth_issuer", issuer)
+    registration = await flow["client"].post("/api/developer/clients", headers=flow["core_headers"], json={
+        "companyId": str(flow["company"].id), "name": "Invalid issuer registration",
+        "redirectUris": [REDIRECT], "scopes": ["openid"], "authMethod": "none"})
+    assert registration.status_code == 503, registration.text
+    discovery = await flow["client"].get("/api/oauth2/.well-known/openid-configuration")
+    assert discovery.status_code == 503, discovery.text
+    after = await flow["db"].scalar(select(func.count()).select_from(PartnerClient))
+    assert after == before
+    from app.product_api import create_product_api, curated_openapi
+    with pytest.raises(ValueError, match="Configured HTTPS space issuer"):
+        curated_openapi(create_product_api(issuer=issuer))
+
+
+async def test_valid_explicit_https_port_preserves_discovery(flow, monkeypatch):
+    issuer = "https://synthetic-space.example:443"
+    monkeypatch.setattr(flow["settings"], "partner_oauth_issuer", issuer)
+    response = await flow["client"].get("/api/oauth2/.well-known/openid-configuration")
+    assert response.status_code == 200 and response.json()["issuer"] == issuer
+    from app.product_api import create_product_api, curated_openapi
+    assert curated_openapi(create_product_api(issuer=issuer))["servers"][0]["url"] == issuer + "/api/v1"

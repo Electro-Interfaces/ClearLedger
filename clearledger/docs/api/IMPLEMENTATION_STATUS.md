@@ -14,7 +14,7 @@ token API. Реестр child проверяется явно при сборк�
 значение `unverified` не подтверждает готовность публикации.
 
 Независимая интеграционная проверка: 52 identity и 57 product тестов PASS;
-11 тестов настоящей цепочки Core login → consent → code/PKCE → mounted API
+19 тестов настоящей цепочки Core login → consent → code/PKCE → mounted API
 PASS. Без подмены verifier проверены SQL scope/total/detail/pagination,
 редакция полей, token confusion, живой отзыв client/installation/account,
 изменение object scope и привязки cursor, отдельные default-off gates.
@@ -27,6 +27,16 @@ Canonical exact-match теперь также проверяет действу�
 authorize/consent, а token endpoint закрывает непогашенный code с запрещённым
 теперь redirect. Regression проверяет dev → prod и выключение loopback flag;
 раньше согласованная конфигурация не остаётся бессрочным исключением.
+
+Также issuer проверяется до записей в реестр: порт обязан быть допустимым,
+а исходная строка не может содержать control/whitespace/backslash, которые
+URL parser способен нормализовать или проверить позднее. Проверено отсутствие
+новой регистрации при отказе 503; discovery и curated OpenAPI также закрыты
+при непригодном origin. Повторены восемь изменённых issuer/exporter случаев.
+
+Удалённый workflow `.github/workflows/checks.yml` имеет состояние
+`disabled_manually`; его не включали. Отсутствие GitHub checks не означает
+прохождение CI: приведённые выше результаты относятся к локальным прогонам.
 
 Это часть программы модернизации. Write API, все уровни объектов, общий
 идентификатор предметных команд, события, оптимизация и перевод всех старых

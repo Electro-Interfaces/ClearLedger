@@ -105,7 +105,13 @@ def require_enabled() -> None:
     if not settings.partner_oauth_enabled:
         raise PartnerProblem(503, "PARTNER_API_DISABLED", "Доступ внешних приложений выключен")
     try:
+        # urlsplit strips some raw controls and delays port validation until
+        # .port is accessed. Do both before any registry/token side effect.
+        if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in settings.partner_oauth_issuer) or "\\" in settings.partner_oauth_issuer:
+            raise ValueError("Invalid issuer characters")
         issuer = urlsplit(settings.partner_oauth_issuer)
+        if issuer.port is not None and issuer.port < 1:
+            raise ValueError("Invalid issuer port")
     except ValueError:
         raise HTTPException(503, "Partner identity is not configured", headers=NO_STORE) from None
     if (issuer.scheme != "https" or not issuer.hostname or issuer.query or issuer.fragment
