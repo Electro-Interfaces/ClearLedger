@@ -40,7 +40,8 @@
       if (!config.sandboxReady) return fail(system, redirect.auth, "Сначала настройте тестовый API");
       const target = new URL(url, origin);
       const scopes = (target.searchParams.get("scope") || "").split(" ").filter(Boolean);
-      if (target.href.split("?")[0] !== config.authorizationUrl || target.searchParams.get("client_id") !== config.clientId
+      if (redirect.auth.name !== "ProductOAuth"
+          || target.href.split("?")[0] !== config.authorizationUrl || target.searchParams.get("client_id") !== config.clientId
           || !scopes.length || scopes.some((scope) => !config.businessScopes.includes(scope))
           || redirect.auth.clientSecret) return fail(system, redirect.auth, "Недопустимые параметры публичного клиента");
       popup = window.open("about:blank", "elsy-docs-business-consent");
@@ -66,6 +67,7 @@
     },
     authorizeOauth2: (original) => (payload) => {
       const token = payload.token;
+      if (payload.auth.name !== "ProductOAuth" || payload.auth.clientSecret) throw new Error("Public code authorization required");
       if (payload.auth.docsGeneration !== generation || payload.auth.docsExpiresAt <= Date.now()) {
         void revoke(token?.access_token).catch(() => {});
         throw new Error("Запрос авторизации отменён или просрочен");
@@ -90,15 +92,24 @@
       const authorization = new Headers(request.headers).get("Authorization");
       const method = (request.method || "GET").toUpperCase();
       if (target.origin !== origin) throw new Error("External requests are disabled");
+      const credentialFields = new Set(["access_token", "token", "refresh_token", "client_secret", "client_id", "code", "nonce", "grant_id", "grant_type"]);
+      if (target.username || target.password || [...target.searchParams.keys()].some((key) => credentialFields.has(key.toLowerCase()))) {
+        throw new Error("Credentials in request URLs are disabled");
+      }
       if (target.pathname === "/api/developer/docs/openapi.json" && !target.search && method === "GET") {
         request.credentials = "same-origin";
-        delete request.headers.Authorization; delete request.headers.authorization;
+        if (request.headers instanceof Headers) request.headers.delete("Authorization");
+        else for (const name of Object.keys(request.headers || {})) if (name.toLowerCase() === "authorization") delete request.headers[name];
       } else if (target.href === config.tokenUrl && method === "POST") {
         const body = new URLSearchParams(request.body);
         if (body.get("client_id") !== config.clientId || body.get("grant_type") !== "authorization_code"
             || body.get("redirect_uri") !== config.swaggerRedirectUri || body.get("client_secret")
             || authorization) throw new Error("Invalid public code exchange");
-        body.delete("client_secret"); request.body = body.toString(); request.credentials = "omit";
+        body.delete("client_secret"); // Swagger's empty public-client placeholder is never sent.
+        const allowed = new Set(["grant_type", "client_id", "redirect_uri", "code", "code_verifier"]);
+        if ([...body.keys()].some((key) => !allowed.has(key) || body.getAll(key).length !== 1)
+            || !body.get("code") || !body.get("code_verifier")) throw new Error("Invalid public code parameters");
+        request.body = body.toString(); request.credentials = "omit";
       } else if (target.pathname.startsWith("/api/v1/") && config.sandboxReady && method === "GET") {
         const live = await fetch("/api/developer/docs/session", { credentials: "same-origin", cache: "no-store" });
         if (!live.ok || !(await live.json()).sandboxReady) throw new Error("Тестовый контур недоступен. Выполнение запроса отключено.");

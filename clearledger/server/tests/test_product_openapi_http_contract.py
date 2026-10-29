@@ -227,7 +227,10 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         for entry in policy_registry(self.app):
             operation = self.schema["paths"][entry["path"]]["get"]
             self.assertEqual(operation["operationId"], entry["operationId"])
-            self.assertEqual(operation["security"], [{"ProductOAuth": sorted(entry["scopes"])}])
+            expected = [{"ProductOAuth": sorted(entry["scopes"])}]
+            if "service" in entry["principalKinds"]:
+                expected.append({"ProductServiceOAuth": sorted(entry["scopes"])})
+            self.assertEqual(operation["security"], expected)
             self.assertEqual(operation["x-elsy-readiness"], "candidate")
             self.assertEqual(operation["x-elsy-owner"], entry["owner"])
 

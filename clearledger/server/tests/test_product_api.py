@@ -423,7 +423,8 @@ async def test_schema_and_registry_match_actual_child_routes_without_public_docs
     assert len(registry["operations"]) == 12
     monitored = schema["paths"]["/objects/{objectId}/monitoring"]["get"]
     assert monitored["operationId"] == "getObjectMonitoring"
-    assert monitored["security"] == [{"ProductOAuth": ["monitoring:read", "objects:read"]}]
+    assert monitored["security"] == [{"ProductOAuth": ["monitoring:read", "objects:read"]},
+                                     {"ProductServiceOAuth": ["monitoring:read", "objects:read"]}]
     assert registry["mountPath"] == "/api/v1"
     assert {entry["path"] for entry in registry["operations"]} == set(schema["paths"])
     assert {entry["accessClass"] for entry in registry["operations"]} == {"partner"}

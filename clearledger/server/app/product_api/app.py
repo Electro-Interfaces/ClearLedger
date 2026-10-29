@@ -1,5 +1,6 @@
 """Opt-in versioned read API. Never mounts itself onto the legacy application."""
 from dataclasses import dataclass
+from copy import deepcopy
 from http import HTTPStatus
 import os
 from pathlib import Path
@@ -327,7 +328,7 @@ def curated_openapi(app):
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
             or parsed.password is not None or parsed.query or parsed.fragment or parsed.path not in ("", "/")):
         raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI")
-    policy_registry(app)
+    entries = policy_registry(app)
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes, tags=OPENAPI_TAGS)
     for path in schema["paths"].values():
         for operation in path.values():
@@ -337,13 +338,55 @@ def curated_openapi(app):
                 elif operation["operationId"] == "downloadDocumentVersion" and status == "200":
                     response["content"].pop("application/json", None)
     schema["servers"] = [{"url": issuer.rstrip("/") + "/api/v1"}]
-    schema.setdefault("components", {}).setdefault("securitySchemes", {})["ProductOAuth"] = {
+    descriptions = {**{access.READ_SCOPES[key]: f"Read {key}" for key in access.RESOURCES},
+                    access.DOWNLOAD_SCOPE: "Download an authorized document version",
+                    monitoring.SCOPE: monitoring.DESCRIPTION}
+    service_scopes = {scope for entry in entries if PrincipalKind.SERVICE.value in entry["principalKinds"]
+                      for scope in entry["scopes"]}
+    schemes = schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    schemes["ProductOAuth"] = {
+        "description": "User authorization. Public documentation client uses Authorization Code with PKCE S256; "
+            "no client secret. Resource and current user/company permissions remain mandatory.",
         "type": "oauth2", "flows": {"authorizationCode": {
             "authorizationUrl": issuer.rstrip("/") + "/api/oauth2/authorize",
             "tokenUrl": issuer.rstrip("/") + "/api/oauth2/token",
-            "scopes": {**{access.READ_SCOPES[key]: f"Read {key}" for key in access.RESOURCES},
-                       access.DOWNLOAD_SCOPE: "Download an authorized document version",
-                       monitoring.SCOPE: monitoring.DESCRIPTION}}}}
+            "scopes": descriptions}}}
+    schemes["ProductServiceOAuth"] = {
+        "type": "oauth2", "description": "Server-to-server confidential client only; never enter credentials in Swagger. "
+            "POST form grant_type=client_credentials, explicit grant_id UUID and nonempty scope. "
+            "Authenticate the registered client using client_secret_basic (HTTP Basic), not body/query credentials. "
+            "grant_id is an application-specific required extension, not a standard OAuth parameter. "
+            "The approved machine grant, installation and live resource scopes are still required. "
+            "No user identity scopes, document access or refresh token; client secret is not an API Bearer token.",
+        "flows": {"clientCredentials": {"tokenUrl": issuer.rstrip("/") + "/api/oauth2/token",
+            "scopes": {scope: descriptions[scope] for scope in sorted(service_scopes)}}},
+        "x-elsy-token-request": {
+            "method": "POST", "contentType": "application/x-www-form-urlencoded",
+            "clientAuthentication": "client_secret_basic", "browserExecution": False,
+            "body": {"type": "object", "required": ["grant_type", "grant_id", "scope"], "properties": {
+                "grant_type": {"type": "string", "const": "client_credentials"},
+                "grant_id": {"type": "string", "format": "uuid", "description": "Required custom extension: approved machine grant of this client and installation."},
+                "scope": {"type": "string", "minLength": 1, "description": "Space-separated explicit requested business scopes; all required operation scopes must be granted."}}},
+            "forbiddenCredentialLocations": ["query", "body.client_id", "body.client_secret"],
+            "refreshTokenIssued": False},
+        "x-elsy-protocol-reference": "https://www.rfc-editor.org/rfc/rfc6749.html#section-4.4",
+    }
+    # OpenAPI alternatives describe the very same runtime policy: OR between
+    # principal profiles, AND between scopes inside each security requirement.
+    for entry in entries:
+        alternatives = []
+        for kind, name in ((PrincipalKind.PARTNER.value, "ProductOAuth"),
+                           (PrincipalKind.SERVICE.value, "ProductServiceOAuth")):
+            if kind in entry["principalKinds"]:
+                alternatives.append({name: sorted(entry["scopes"])})
+        if not alternatives:
+            raise ValueError("Product principal policy has no documented OAuth profile")
+        for method in entry["methods"]:
+            schema["paths"][entry["path"]][method.lower()]["security"] = deepcopy(alternatives)
+    schema["info"]["description"] = ("Canonical product contract. User Authorization Code and confidential "
+        "server client_credentials are alternatives only where the runtime accepts that principal kind. "
+        "Machine requests need the custom grant_id form parameter and HTTP Basic client authentication at the token endpoint. "
+        "Documents require a user grant. The browser documentation uses a separate public Code+PKCE execution projection.")
     schema["x-elsy-runtime-registry"] = export_runtime_registry(app)
     schema["x-elsy-capabilities"] = {
         "implemented": {"servicePoint": "ServiceLocation read", "station": "EzsEquipmentUnit(kind=station) read",
@@ -356,3 +399,33 @@ def curated_openapi(app):
             "monitoringTickets": "not exposed; separate ticket scopes required"}}
     _describe_http_responses(schema)
     return schema
+
+
+def public_client_openapi(schema):
+    """Deep-copy the canonical contract into a public Code+PKCE execution view.
+
+    Confidential profiles remain readable metadata, never Swagger auth widgets.
+    Refuse a future server-only operation until it has an explicit browser view.
+    """
+    projected = deepcopy(schema)
+    schemes = projected["components"]["securitySchemes"]
+    service = schemes.pop("ProductServiceOAuth")
+    if set(schemes) != {"ProductOAuth"} or set(schemes["ProductOAuth"]["flows"]) != {"authorizationCode"}:
+        raise ValueError("Public docs require the public authorization-code profile")
+    for path in projected["paths"].values():
+        for operation in path.values():
+            if not isinstance(operation, dict) or "operationId" not in operation:
+                continue
+            alternatives = [item for item in operation["security"] if set(item) == {"ProductOAuth"}]
+            if len(alternatives) != 1:
+                raise ValueError("Operation has no unambiguous public-client projection")
+            operation["security"] = alternatives
+    projected["x-elsy-authentication-projection"] = {
+        "kind": "public-code-pkce", "executionSecuritySchemes": ["ProductOAuth"],
+        "canonicalContract": "/api/developer/docs/openapi.server.json",
+        "serverOnlyProfiles": {"ProductServiceOAuth": service},
+    }
+    projected["info"]["description"] += "\n\nThis is the public Code+PKCE browser execution projection. " \
+        "[Download the full server contract](/api/developer/docs/openapi.server.json) " \
+        "with the same protected documentation session. Machine authentication is documented for server developers only."
+    return projected
