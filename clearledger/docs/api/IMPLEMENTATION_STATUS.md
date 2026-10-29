@@ -46,8 +46,7 @@ Identity/product тесты переведены на явный opt-in с об�
 отдельным процессом/job: у исполнителя 25 fresh/upgrade/repeat/guard проверок
 PASS с настоящими предыдущими исходниками. Автор подтвердил 31 Core/public case и 2 финальные проверки индексов
 с неизменными public sentinels. Манифест новой таблицы уточнён по фактическому
-immutable M11 `partner_docs_sessions`; обязательный финальный portal gate
-и полный повторный schema прогон координатора ещё в работе.
+immutable M11 `partner_docs_sessions`; финальный portal gate и schema прогон координатора завершены: 31 PASS на immutable ef5f6ee2, 295.47 с.
 
 Это часть программы модернизации. Write API, все уровни объектов, общий
 идентификатор предметных команд, события, оптимизация и перевод всех старых
@@ -60,5 +59,41 @@ immutable M11 `partner_docs_sessions`; обязательный финальны
 M11 HTTP/SQL **21 PASS**; первая browser-проверка остановилась на гонке теста:
 удаление nginx gate до загрузки private consent chunk давало ожидаемый 403.
 Тест исправлен (`ef5f6ee2`): gate удаляется после отрисовки согласия перед
-отправкой, чтобы проверить именно public callback. Повтор browser ещё ожидается.
+отправкой, чтобы проверить именно public callback. Повтор browser на том же executable/test составе завершён: PASS за111.44с, реальные main/public build, HTTPS, native Swagger Authorize/Try SQL/logout/revoke.
 Эта запись не переносит авторские 22 PASS на непроверенный общий состав.
+
+
+Продолжение 30.10.2026, кандидат28f6b7e2. Общий PostgreSQL/HTTP набор identity,
+product, resource budgets SQL-count, ObjectId, monitoring и docs portal: **296 PASS
+за268.31с**, без SKIP/DESELECTED. Старый identity table recreation manifest теперь
+включает partner_docs_sessions; ошибка DROP не скрыта исключением теста.
+Пакетная загрузка live resource profiles/items уменьшает число statements на4–8
+при pageSize1/50/200, права продолжают перечитываться. Кириллица/пробелы
+ServiceLocation IDs сохраняются во внешнем контракте, ACL и cursor.
+
+M09 центральный Problem formatter сохраняет status-specific protocol headers;
+curated OpenAPI описывает actual 12operations/errors/header examples. Root:
+20PASS+36subtests,28schemaPASS+132subtests. Это ASGI с synthetic verifier/domain
+seams, не повтор настоящей OAuth/SQL цепочки на этом patch. Официальный
+openapi-typescript7.10.1 с изолированным lock генерирует wiretypes реального
+curated exporter:6generation/parity/drift/negative PASS, consumer/check/typecheck
+PASS. Прямая сеть/.env в exporter запрещены; transport/refresh в types не входят.
+
+M14 root61mock-transportPASS: подпись каждой попытки свежая, ID/time факта
+сохранены; невозможность расшифровать signing secret запрещает URL-доставку
+до сети. DNS/SSRF и полныйchangefeed ещё не закрыты.
+
+M16 root independently **12 real PostgreSQL PASS за229.213с** на28f6b7e2:
+guard выполняется до DDL/functions, не позволяет принять public tables за Core,
+сохраняет public/Core/explicitEdge/oldORM compatibility и не блокирует чужие
+INDEX/SEQUENCE, которые SQLAlchemyhas_table не считает таблицами. Foreign
+TABLE/partitionedTABLE/VIEW/MATVIEW отклоняются раньше изменений. Read-only
+preflight фактического rushydro по333modelnames: currentSchema core,
+transactionReadOnly on, visibleForeignRelations=[]; это не backup/restore
+или release validation. Старый initialRuntime snapshot требует fresh сверки
+перед будущим выпуском.
+
+M18 standalone synthetic HTTPS sandbox и официальныеopenid-client клиенты
+подготовлены отдельно, actualHTTPpilots ещё не приняты. M15distributedquota
+implementation идёт отдельно, ни ratebudget/SLO, ни productionreadiness этим
+отчётом не заявлены. Все изменения остаются draft без merge/выкатки.
