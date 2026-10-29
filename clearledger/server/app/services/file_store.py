@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -22,6 +23,15 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SourceFile
+
+logger = logging.getLogger(__name__)
+
+
+def _remove_new_file(path: Path, file_id: uuid.UUID) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Не удалось удалить новый файл после ошибки: %s", file_id)
 
 
 def upload_dir() -> Path:
@@ -39,6 +49,7 @@ def put(
     file_name: str,
     mime: str | None = None,
     purpose: str = "attachment",
+    file_id: uuid.UUID | None = None,
 ) -> SourceFile:
     """Записать файл на диск и завести строку `source_files`.
 
@@ -49,22 +60,49 @@ def put(
     `purpose='attachment'` по умолчанию: `data` означает «сырьё для разбора» и
     попадает в счётчик документов компании, поэтому ставится осознанно.
     """
-    file_id = uuid.uuid4()
+    # A preallocated ID is an internal caller capability, never a client path.
+    if file_id is not None and not isinstance(file_id, uuid.UUID):
+        raise ValueError("Предварительно выделенный file_id должен быть UUID")
+    file_id = file_id or uuid.uuid4()
     suffix = Path(file_name or "file").suffix[:20]
     path = upload_dir() / f"{file_id}{suffix}"
-    path.write_bytes(data)
+    created = False
+    try:
+        # A preallocated ID or collision must never overwrite existing bytes.
+        with path.open("xb") as target:
+            created = True
+            target.write(data)
+        row = SourceFile(
+            id=file_id,
+            company_id=company_id,
+            file_name=file_name or "файл",
+            mime_type=mime or "application/octet-stream",
+            size=len(data),
+            storage_path=str(path),
+            fingerprint=hashlib.sha256(data).hexdigest(),
+            purpose="data" if purpose == "data" else "attachment",
+        )
+        db.add(row)
+    except BaseException:
+        if created:
+            _remove_new_file(path, file_id)
+        raise
+    return row
 
-    row = SourceFile(
-        id=file_id,
-        company_id=company_id,
-        file_name=file_name or "файл",
-        mime_type=mime or "application/octet-stream",
-        size=len(data),
-        storage_path=str(path),
-        fingerprint=hashlib.sha256(data).hexdigest(),
-        purpose="data" if purpose == "data" else "attachment",
-    )
-    db.add(row)
+
+async def put_and_flush(db: AsyncSession, company_id: uuid.UUID, data: bytes, **kwargs) -> SourceFile:
+    """Общий writer с очисткой нового файла при ошибке или отмене flush.
+
+    Commit остаётся у use case. При исключении его транзакцию необходимо
+    откатить; cleanup после более позднего rollback — отдельная ответственность.
+    Ранее сохранённые файлы этот helper не удаляет.
+    """
+    row = put(db, company_id, data, **kwargs)
+    try:
+        await db.flush()
+    except BaseException:
+        _remove_new_file(Path(row.storage_path), row.id)
+        raise
     return row
 
 
