@@ -1,0 +1,13 @@
+{
+  "name": "elsyplus-partner-wire-types-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated build-only OpenAPI wire type generation",
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "@redocly/openapi-core": "1.34.22",
+    "openapi-typescript": "7.10.1",
+    "typescript": "5.9.3"
+  }
+}

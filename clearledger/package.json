@@ -4,6 +4,10 @@
   "version": "1.2.857",
   "type": "module",
   "scripts": {
+    "partner:types": "node tools/partner-api-types/generate.mjs generate",
+    "partner:types:check": "node tools/partner-api-types/generate.mjs check",
+    "partner:types:consumer": "node tools/partner-api-types/node_modules/typescript/bin/tsc -p tools/partner-api-types/tsconfig.json",
+    "partner:types:test": "node --test tools/partner-api-types/generation.test.mjs",
     "dev": "vite",
     "build": "vite build && vite build -c vite.public.config.ts",
     "typecheck": "tsc -b",
