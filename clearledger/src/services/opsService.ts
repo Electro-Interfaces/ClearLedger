@@ -1329,6 +1329,16 @@ export interface OpsPaymentsUploadResult {
   batch_id: string
   saved: number
   counterparties_matched: number
+  /** Additive fields: older backends do not return matching diagnostics. */
+  counterparties_ambiguous?: number
+  counterparties_unmatched?: number
+  counterparties_retained?: number
+  identity_issues?: Array<{
+    external_key: string
+    counterparty_name: string
+    status: 'ambiguous' | 'unmatched' | 'existing_link_retained'
+  }>
+  identity_issues_truncated?: boolean
   unknown_items: string[]
 }
 

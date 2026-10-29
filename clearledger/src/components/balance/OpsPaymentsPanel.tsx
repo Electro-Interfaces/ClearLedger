@@ -64,9 +64,9 @@ function UploadBar({ companyId }: { companyId: string }) {
     onSuccess: (data) => {
       setResult(data)
       setError(null)
-      qc.invalidateQueries({ queryKey: ['ops-payments'] })
-      qc.invalidateQueries({ queryKey: ['ops-payments-parties'] })
-      qc.invalidateQueries({ queryKey: ['ops-payments-coverage'] })
+      qc.invalidateQueries({ queryKey: ['ops-payments', companyId] })
+      qc.invalidateQueries({ queryKey: ['ops-payments-parties', companyId] })
+      qc.invalidateQueries({ queryKey: ['ops-payments-coverage', companyId] })
     },
     onError: (e: unknown) => {
       setResult(null)
@@ -95,9 +95,10 @@ function UploadBar({ companyId }: { companyId: string }) {
           }} />
       </div>
       {result && (
-        <p className="text-xs text-muted-foreground">
+        <div role="status" className="space-y-1 text-xs text-muted-foreground">
+        <p>
           Принято строк: <b className="text-foreground">{result.saved}</b>
-          {' · '}контрагентов опознано: {result.counterparties_matched}
+          {' · '}{result.identity_issues !== undefined ? 'однозначно сопоставлено' : 'сопоставлено'}: {result.counterparties_matched}
           {result.unknown_items.length > 0 && (
             <> · незнакомые статьи попали в «Прочее»:{' '}
               <span className="text-amber-600 dark:text-amber-500">
@@ -106,6 +107,26 @@ function UploadBar({ companyId }: { companyId: string }) {
             </>
           )}
         </p>
+        {!!result.counterparties_retained && <p>
+          Сохранены прежние связи: {result.counterparties_retained}. Повторная загрузка их не заменяет.
+        </p>}
+        {!!result.counterparties_ambiguous && <p className="text-foreground">
+          Требуют сверки: {result.counterparties_ambiguous}. Найдено несколько одноимённых контрагентов.
+        </p>}
+        {!!result.counterparties_unmatched && <p>
+          Однозначное совпадение не найдено: {result.counterparties_unmatched}.
+        </p>}
+        {!!result.identity_issues?.length && <details>
+          <summary className="min-h-11 cursor-pointer py-3 text-foreground underline underline-offset-4">Проверить сопоставление</summary>
+          <ul className="list-disc space-y-1 pl-5">
+            {result.identity_issues.map((issue) => <li key={issue.external_key} className="break-words">
+              {issue.counterparty_name}: {issue.status === 'ambiguous' ? 'несколько кандидатов'
+                : issue.status === 'existing_link_retained' ? 'сохранена прежняя связь' : 'совпадение не найдено'}
+            </li>)}
+          </ul>
+          {result.identity_issues_truncated && <p className="mt-1">Показаны первые {result.identity_issues.length} строк.</p>}
+        </details>}
+        </div>
       )}
       {error && (
         <p className="flex items-center gap-2 text-xs text-destructive">
@@ -199,7 +220,7 @@ export function OpsPaymentsPanel() {
   if (!periods.length) {
     return (
       <div className="space-y-4">
-        {companyId && <UploadBar companyId={companyId} />}
+        {companyId && <UploadBar key={companyId} companyId={companyId} />}
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
           Кассовый факт не загружен. Пока его нет, «Хозяйство» показывает только
           ожидания по договорам — сколько должно быть начислено, но не сколько
@@ -213,7 +234,7 @@ export function OpsPaymentsPanel() {
 
   return (
     <div className="space-y-5">
-      {companyId && <UploadBar companyId={companyId} />}
+      {companyId && <UploadBar key={companyId} companyId={companyId} />}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card><CardContent className="py-4">
