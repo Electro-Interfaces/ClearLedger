@@ -132,6 +132,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("clearledger")
+from app.api_access_logging import install_oauth_access_filters
+
+install_oauth_access_filters()
 
 settings = get_settings()
 

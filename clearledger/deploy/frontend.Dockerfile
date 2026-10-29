@@ -45,11 +45,29 @@ FROM nginx:alpine
 # (Контейнер nginx-router в compose стоит ПЕРЕД frontend и роутит /api/.)
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY <<'EOF' /etc/nginx/conf.d/default.conf
+map $args $frontend_logged_request {
+    default $request;
+    ~(^|&)(code|state|access_token|refresh_token|id_token|token)= "$request_method $uri $server_protocol";
+}
+log_format frontend_safe '$remote_addr [$time_local] "$frontend_logged_request" '
+                         '$status $body_bytes_sent "$http_user_agent"';
 server {
     listen 80 default_server;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
+    # @public сохраняет исходные args при rewrite в /p/public.html; только
+    # location callback недостаточно для защиты журнала второго nginx.
+    access_log /var/log/nginx/access.log frontend_safe;
+
+    # OAuth callback не должен оказаться в журнале второго nginx или Referer
+    # чанков до загрузки React. Внешний auth gate стека остаётся обязательным.
+    location = /developer/api/callback {
+        access_log off;
+        add_header Cache-Control "no-store" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files /index.html =404;
+    }
 
     # Хэшированные ассеты Vite — кэшировать намертво (имя меняется при пересборке).
     # Отсутствующий чанк = честный 404 (НЕ HTML-fallback: иначе браузер получает
