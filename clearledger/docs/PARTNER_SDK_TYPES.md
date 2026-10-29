@@ -126,7 +126,10 @@ TS не валидирует входной JSON, UUID/pattern/числовой 
 После получения защищённой spec внешний разработчик может:
 
 1. Получить её штатным одобренным portal flow с docs consent/session через
-   `/api/developer/docs/openapi.json`; защищённая spec не становится public.
+   `/api/developer/docs/openapi.server.json`: это canonical contract с пользовательским
+   и машинным OAuth-профилями. `/api/developer/docs/openapi.json` — отдельное
+   browser execution представление только Code+PKCE; для серверного клиента
+   использовать полный server contract. Оба файла защищены docs session.
    Это существующая portal boundary, а не обычный ID-token Authorization header.
 2. Сохранить spec в своём private workspace вне Git/публичных артефактов.
    В этом задании production spec/response не запрашивались и не сохранялись.
