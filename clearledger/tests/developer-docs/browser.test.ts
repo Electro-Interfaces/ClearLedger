@@ -42,12 +42,16 @@ test('real HTTPS: public gate callback → docs cookie → separate Swagger PKCE
   })
   const page = await context.newPage()
   const errors: string[] = []
-  page.on('pageerror', (e) => errors.push(e.message))
   const traffic: { path: string; authorization?: string; referer?: string; body?: string }[] = []
   const statuses: { path: string; status: number }[] = []
-  page.on('response', (response) => statuses.push({ path: new URL(response.url()).pathname, status: response.status() }))
-  page.on('request', (request) => traffic.push({ path: new URL(request.url()).pathname,
-    authorization: request.headers().authorization, referer: request.headers().referer, body: request.postData() ?? undefined }))
+  function observe(target: Page) {
+    target.on('pageerror', (e) => errors.push(e.message))
+    target.on('response', (response) => statuses.push({ path: new URL(response.url()).pathname, status: response.status() }))
+    target.on('request', (request) => traffic.push({ path: new URL(request.url()).pathname,
+      authorization: request.headers().authorization, referer: request.headers().referer, body: request.postData() ?? undefined }))
+  }
+  observe(page)
+  context.on('page', observe)
   async function approve(target: Page, docs = true, loseGateBeforeSubmit = false) {
     await expect(target.getByLabel('Компания', { exact: true })).toBeVisible({ timeout: 20000 })
     await target.getByLabel('Компания', { exact: true }).selectOption(company)
@@ -160,6 +164,13 @@ test('real HTTPS: public gate callback → docs cookie → separate Swagger PKCE
   } catch (error) {
     await writeFile(`${output}/failure.json`, JSON.stringify({ path: new URL(page.url()).pathname,
       text: await page.locator('body').innerText(), frames: await Promise.all(page.frames().filter((frame) => frame !== page.mainFrame()).map(async (frame) => ({ text: await frame.locator('body').innerText() }))), errors, statuses }, null, 2))
+    for (const [index, target] of context.pages().entries()) {
+      if (target.isClosed()) continue
+      await writeFile(`${output}/failure-page-${index}.json`, JSON.stringify({
+        path: new URL(target.url()).pathname, text: await target.locator('body').innerText(),
+      }, null, 2))
+      await target.screenshot({ path: `${output}/failure-page-${index}.png`, fullPage: true })
+    }
     await page.screenshot({ path: `${output}/failure.png`, fullPage: true })
     throw error
   }
