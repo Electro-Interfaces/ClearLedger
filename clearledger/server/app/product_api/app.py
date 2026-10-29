@@ -32,7 +32,7 @@ class Settings:
     source_revision: str
 
 
-def _problem(request, status):
+def _problem(request, status, error_headers=None):
     codes = {400: "invalid_cursor", 401: "invalid_credentials", 403: "access_denied",
              404: "not_found", 405: "method_not_allowed", 422: "invalid_request", 503: "api_unavailable"}
     safe = {400: "Cursor is invalid or belongs to another query", 401: "Valid partner Bearer credentials are required",
@@ -41,9 +41,19 @@ def _problem(request, status):
     value = dto.Problem(title=HTTPStatus(status).phrase, status=status,
         code=codes.get(status, "internal_error"), request_id=getattr(request.state, "request_id", str(uuid.uuid4())),
         detail=safe.get(status, "Request could not be completed"))
+    # Preserve protocol metadata, not arbitrary exception headers or debug data.
+    allowed = {401: {"www-authenticate"}, 403: {"www-authenticate"}, 405: {"allow"},
+               429: {"retry-after"}, 503: {"retry-after"}}.get(status, set())
+    headers = {name.lower(): content for name, content in (error_headers or {}).items() if name.lower() in allowed}
+    if status in (401, 403) and (not headers.get("www-authenticate")
+            or headers["www-authenticate"].strip().lower() == "bearer"):
+        # RFC6750 challenge parameters; never infer invalid_token/insufficient_scope
+        # from a generic denial. Preserve a canonical verifier's precise challenge.
+        headers["www-authenticate"] = 'Bearer realm="product-api"'
+    # ServerErrorMiddleware invokes the 500 handler outside user middleware.
+    headers.update({"Cache-Control": "no-store", "X-Request-Id": value.request_id})
     return JSONResponse(value.model_dump(by_alias=True), status_code=status,
-                        media_type="application/problem+json",
-                        headers={"WWW-Authenticate": "Bearer"} if status == 401 else None)
+                        media_type="application/problem+json", headers=headers)
 
 
 async def query_dependency(request: Request, context: AccessContext = Depends(get_access_context)):
@@ -83,7 +93,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
 
     @app.exception_handler(HTTPException)
     async def http_problem(request, error):
-        return _problem(request, error.status_code)
+        return _problem(request, error.status_code, error.headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_problem(request, error):
