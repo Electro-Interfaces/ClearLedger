@@ -1,5 +1,9 @@
 # M14: время попытки исходящего Core event
 
+> Разделы до «Отдельный пакет: обязательная подпись URL webhook» сохраняют отчёт
+> timestamp-пакета `c8b99684`. Актуальное закрытие его signing GAP описано в
+> добавленном разделе ниже; исходный отчёт остаётся доступен в immutable commit.
+
 Ограниченный пакет на immutable Ledger integration `9e9170da`, в ветке
 `agent/api-events-delivery-20261030`. Меняется только выбор timestamp подписи
 в `services/space_events.py`; существующие event tests дополнены, сеть и БД
@@ -170,3 +174,113 @@ Focused runtime diff: приватный keyword-only `now` и выбор вре
 `_send`; `deliver_pending`, fanout, scheduler, models, main, identity, receivers
 и registration не меняются. Существующий network/signing GAP зафиксирован
 отдельно, без изменения политики получателей.
+
+
+## Отдельный пакет: обязательная подпись URL webhook
+
+Outcome: **fixed** в границе URL signing. Основа — immutable `c8b99684`,
+та же owned ветка `agent/api-events-delivery-20261030`; timestamp commit
+не переписывается. Меняются только sender, его существующие tests и этот report.
+
+### Уязвимый путь и воспроизведение
+
+Источник — сохранённый `EventSubscription.secret_enc` и каноническая функция
+`decrypt_secret`. При отсутствующем ciphertext/ключе или неуспешной расшифровке
+возвращалась пустая строка. Условие `if secret` пропускало всю подпись, после чего
+`_send` создавал AsyncClient и делал URL POST без HMAC. В URL ветке нет service
+Bearer. Повреждение/rotation encryption key — подтверждённый lifecycle trigger;
+это не утверждение о неаутентифицированном доступе к регистрации подписок.
+
+Regression до правки на c8: **1 expected FAIL**, MockTransport захватил один
+неподписанный POST, приложение посчитало HTTP 204 успешной доставкой.
+Проверка на missing ciphertext охватывает legacy/неконсистентное состояние:
+текущая registration/DB constraint требуют ciphertext, но само наличие ciphertext
+не доказывает его расшифровываемость. `database.py:ck_eco_event_subs_target` и
+router разрешают только app/url; их схемы и права не меняются.
+
+### Выбранная граница
+
+Инвариант: **target_kind=url не достигает AsyncClient/post, пока невозможно
+сформировать подпись**. Проверка находится в общем `_send`, через который идёт
+`deliver_pending`, до HTTP клиента и всех его сетевых побочных эффектов.
+
+Для URL требуется непустой расшифрованный секрет. У `whsec_` проверяется строгий
+Base64 и непустой decoded key: прежний permissive decoder мог игнорировать мусор
+и получить пустой ключ. Непрефиксный legacy секрет остаётся UTF-8 ключом по
+существующему контракту; новые ограничения длины/миграция ключей не вводятся.
+В plaintext вместо ciphertext не переходим, новые секреты не генерируем.
+`_key` и существующий выбор EVENTS_SECRET_KEY/SECRET_KEY не меняются.
+
+Ошибка расшифровки, формата или signer превращается для URL в безопасный
+`RuntimeError("URL webhook: невозможно сформировать подпись")` без деталей
+ключа/ciphertext и без исходного exception chain в отображаемом traceback.
+`deliver_pending` сохраняет эту общую причину, `last_status=None`, failure streak
+и backoff; `delivered_at` не устанавливается, после 12 попыток — failed.
+Ошибка одного адресата не прерывает delivery другого; commit остаётся у caller.
+
+Для `target_kind=app` сохраняется прежний optional HMAC: если секрет недоступен,
+service Bearer остаётся обязательным и используется прежний canonical signer
+с `aud=app_code`, `svc=events`. Company mapping и отказ при отсутствии mapping
+или service token не меняются. Ошибки присутствующего malformed app signer
+перекидываются как прежде; политика URL не переносится на app.
+
+### Проверка границы и совместимости
+
+По запрету делегирования два прохода investigation/review выполнены самим
+исполнителем: сначала data flow decrypt→sign→AsyncClient и direct caller,
+затем отдельная проверка обеих ветвей app/url, malformed key representations,
+legacy secrets, безопасной ошибки и retry/recipient isolation. Чужие файлы,
+receiver, registration, models/main/identity и network policy не менялись.
+
+Команда из `clearledger/server`:
+
+```sh
+/path/to/venv/bin/python -m compileall -q app/services/space_events.py tests/test_space_events.py
+/path/to/venv/bin/python -m pytest tests/test_space_events.py tests/test_space_events_router.py -q --tb=short
+```
+
+Результат после проверки: **61 PASS**, 1.34 s, предупреждений нет; `git diff --check`
+PASS. Это исходные 38 timestamp/router tests и новые focused signing controls:
+
+- Missing/empty ciphertext, missing encryption key, rotation, corrupt token,
+  ciphertext в plaintext, empty/non-UTF8 decrypted value и malformed whsec
+  (empty/junk/non-ASCII/padding/whitespace) — строго **0 requests и 0 clients**.
+- Ошибка signer не раскрывает crypto details и не создаёт HTTP клиента.
+- Корректный whsec, legacy Unicode secret и прежний stack-key fallback дают
+  настоящие wire bytes/HMAC, проходящие независимую проверку свежести и подписи.
+- App без HMAC при missing ciphertext/key/rotation отправляется с настоящим
+  **синтетическим RS256 service JWT**: locally verified issuer/aud/support,
+  svc/events и sub/service:events. `_target` заменён fake mapping, не реальной БД;
+  JWT signer и cryptographic verification настоящие, keys созданы только в памяти.
+- 12 signing failures дают retry→failed, не done; другая подписка получает 204
+  и корректную подпись. Сохраняются ID/body/occurred_at и ownership транзакции.
+
+Все HTTP клиенты в tests используют только MockTransport, requests не покидают
+процесс. Нет DB fixtures, DNS, sockets, SQL окна, живых API или рабочих keys.
+Это unit/transport validation, не PostgreSQL integration, network audit или
+end-to-end Support тест. Установленный test tooling и зависимости не менялись.
+
+### Rollout/rollback и оставшийся GAP
+
+Перед разрешённым rollout отдельно проверить доступность encryption key и
+расшифровываемость URL secrets на стороне владельца поставки: прежние скрытые
+ошибки теперь станут видимыми retries/failed. Не печатать секреты и не заменять
+потерянный ключ произвольным новым. Состояние очереди/ключей здесь не читается и
+не исправляется; генерация, rotation и восстановление — отдельная операция.
+Миграций данных нет, TTL/backoff/MAX_ATTEMPTS прежние.
+
+Rollback focused fail-closed commit сохраняет timestamp fix c8, но **возвращает
+риск неподписанного URL POST**. Его нельзя считать безопасным способом починить
+missing key; владельцу следует восстановить совместимую конфигурацию/секрет либо
+прекратить проблемную подписку по действующему процессу. При rollback не менять
+receipt ID/occurred_at и не отключать проверку подписи у получателя.
+
+Signing fail-open GAP из исторической таблицы выше закрыт только для URL.
+**SSRF/DNS/rebinding/egress остаются explicit GAP**: нужен отдельный согласованный
+профиль внешних адресов, проверка resolved IPv4/IPv6 и connect/redirect без TOCTOU,
+миграция существующих URL и раздельные правила для trusted internal apps.
+Административный gate registration не делает egress безопасным и не равен
+unauthenticated bypass. Этот commit не меняет network policy, не открывает
+новые endpoints/партнёрские URL и не означает готовность M14 целиком.
+
+Пакет только commit/push; merge, PR, release и изменения ВМ не выполнялись.
