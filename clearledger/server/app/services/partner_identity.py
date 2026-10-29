@@ -50,6 +50,7 @@ SCOPE_DESCRIPTIONS = {
     "openid": "Вход через пространство", "profile": "Имя пользователя",
     "email": "Адрес электронной почты", "offline_access": "Продление согласованного доступа",
     "docs:read": "Чтение документации API",
+    "monitoring:read": "Чтение статуса и агрегатов зарядных визитов разрешённых объектов",
     "objects:read": "Чтение объектов компании", "equipment:read": "Чтение оборудования компании",
     "counterparties:read": "Чтение контрагентов компании", "contracts:read": "Чтение договоров компании",
     "documents:read": "Чтение карточек документов", "documents.files:download": "Скачивание файлов документов",
@@ -203,6 +204,10 @@ def eligible_scopes(db: Session, user: User, company_id: uuid.UUID) -> set[str]:
         modules = role.modules
     if modules is None or "developer" in modules or "developer:docs" in modules:
         allowed.add("docs:read")
+    # Explicit server-side mapping to existing operational modules. Financial
+    # overview and unrelated ops modules do not confer station monitoring.
+    if modules is None or {"ops", "ops:ops_state", "ops:ops_reliability"}.intersection(modules):
+        allowed.add("monitoring:read")
     # Each domain keeps its finer resource/field policy in M03. Do not infer
     # domain rights from an unrelated product or a generic membership.
     domain_modules = {"objects:read": "equipment", "equipment:read": "equipment",
