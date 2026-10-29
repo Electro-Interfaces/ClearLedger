@@ -1,6 +1,8 @@
 # M15: производительность и пределы внешнего API
 
 30.10.2026. Статический разбор **`32c0d77d74b4f0cfba223a9ce944f63095216e53`**.
+Разделы P1/P2 ниже сохраняют исходный source-only анализ; в конце добавлен
+отдельный измеренный runtime slice на новой базе `9e9170da`.
 Источник: локальный Git integration worktree, чтение через `git show`/`git archive`;
 checkout, runtime и настройки не менялись. Все пути и номера строк ниже относятся
 именно к этому SHA, а не к текущему HEAD интеграции.
@@ -10,12 +12,12 @@ checkout, runtime и настройки не менялись. Все пути �
 широкие ORM rows, обход связей файла и отсутствие отдельного product rate budget
 нуждаются в измерениях. Ускорение в миллисекундах, пропускная способность и предел
 конкурентных клиентов **не подтверждены**: БД, серверы, HTTP и нагрузка здесь
-не запускались, окно M11 принадлежит координатору.
+не запускались в source-only этапе, окно M11 принадлежало координатору.
 
-Изменение этого этапа — только документ. Новый static test не добавлен:
+Изменение исходного этапа — только документ. Новый static test не добавлялся:
 проверка наличия `.limit()`/имён функций в AST не доказывает SQL budget и обход
 ACL. Ниже определены наблюдаемые SQL/HTTP проверки для следующего runtime этапа;
-существующие DB suites в этом этапе не перезапускались. M11 Portal sessions
+существующие DB suites тогда не перезапускались. M11 Portal sessions
 отсутствуют в анализируемом составе и требуют отдельного анализа final candidate.
 
 ## Источники immutable состава
@@ -361,3 +363,171 @@ revoke vs cleanup, parent limit, nonce повтор после expiry и пос�
 `git show`, проверены границы строк и Python AST в своей venv Python 3.13;
 `git diff --check` — PASS. Приложение при этом не импортировалось и DB connections
 не создавались. Это проверка достоверности source references, не runtime тест.
+
+## Реализация M15: batch resource loader на root 9e9170da
+
+Отдельный runtime этап, 30.10.2026. База:
+`9e9170da553d38313c4f23498c8c13634d79ad98`, новая ветка
+`agent/api-resource-loader-20261030`; прежняя identity-ветка сохранена.
+Source-only report перенесён отдельной dependency `1f9da783` (patch `b1b29ed3`);
+runtime patch следует отдельным commit. Выводы исходного анализа `32c0d77d`
+не объявляются измерениями нового состава.
+
+### Состав и сохранённые ограничения
+
+Runtime изменён только в `server/app/services/partner_identity.py`, функция
+`resource_scopes` (на baseline начинается со строки 259). AST остального модуля
+сверен с `9e9170da` и совпадает. Mapping/catalog/protocol, row locks,
+account/member/role/token_version/client/App/CompanyApp/installation/credential/
+family checks не меняются. DDL, indexes, GC/retention, pools, main/config, DTO
+и schema compatibility harness не менялись.
+
+Вместо пяти `fresh(PartnerResourceScope)` — один SELECT всех profiles своей
+installation с `populate_existing=True`. Вместо S чтений typed items — один
+SELECT scalar columns своей installation только для SET kinds. Валидация
+каждого SET по canonical model и company_id сохранена, включая виды, отсутствующие
+в текущем endpoint/OAuth scope. Сохраняются native UUID/string values, затем
+прежние frozensets/MappingProxyType. Profile отсутствует → EMPTY; SET потерял
+все items → EMPTY; пересечение с пустыми installation locations → EMPTY.
+Нет cache authority, усечения IDs и новой доверенной информации из запроса.
+
+### Метод A/B и граница измерений
+
+`tests/test_partner_resource_query_budget.py` извлекает **точную функцию**
+`resource_scopes` из immutable `9e9170da` через Git/AST; не переписывает baseline
+вручную и не импортирует старые настройки/.env. На одинаковых данных поочерёдно
+устанавливает baseline и batch function, исполняя остальные настоящие verifier,
+models, transactions и product policy/handlers. Отдельный static AST check
+подтвердил, что runtime diff вне этой функции отсутствует.
+
+Все счётчики — реальные события SQLAlchemy `before_cursor_execute`, а не stub
+DB и не число вызовов функций. Записывается только SQL text без parameters;
+JWT, credential secret и personal IDs в JUnit properties не сохраняются.
+Fixtures создают синтетический RS256 key, корректный JWT и настоящие persisted
+client/App/CompanyApp/installation/grant/credential/family/subject/token rows.
+Verifier не подставляется. HTTP исполняется через ASGI product app с настоящим
+resolver/verifier; outer Core middleware не входит в эти HTTP budgets. Его
+наличие отдельно сохраняется в protocol revoke control через основной app.
+Implicit BEGIN/ROLLBACK, driver health checks вне этих events, сетевые пакеты,
+EXPLAIN/BUFFERS, latency/RSS и production throughput здесь не измерялись.
+
+Fixtures HTTP содержат **201 row каждого из пяти видов**, с одинаковым
+created_at и разными id. На pageSize 1/50/200 фактически возвращаются 1/50/200
+items и cursor, total=201. Сравниваются весь успешный JSON и cursor baseline/
+batch, SQL count и число profile/item SELECT; на denied responses исключается
+только случайный requestId. EMPTY возвращает прежний 403 без доменных rows.
+
+### Реальные SQL counts
+
+User: confidential client, обычный member с CompanyRole; legacy locations
+не ограничены. Это fixture profile, не универсальный budget всех ролей.
+
+| SET profiles S, остальные ALL | Baseline verifier | Batch verifier | Уменьшение |
+|---:|---:|---:|---:|
+| 0 | 20 | 16 | 4 |
+| 1 | 22 | 18 | 4 |
+| 2 | 24 | 19 | 5 |
+| 3 | 26 | 20 | 6 |
+| 4 | 28 | 21 | 7 |
+| 5 | 30 | 22 | 8 |
+| Все profiles EMPTY | 20 | 16 | 4 |
+
+Machine verifier: ALL **15→11**, пять SET **25→17**. Document access machine
+по-прежнему запрещён; foreign document ID в stored SET отклоняет весь grant
+даже на `/objects`, хотя documents отсутствует в machine OAuth scopes.
+
+Ниже каждая цифра одинакова на pageSize **1, 50 и 200**; это полный product
+HTTP path с verifier/adapter/domain SQL, без outer middleware.
+
+| Endpoint | ALL baseline→batch | Пять SET baseline→batch | EMPTY baseline→batch (403) |
+|---|---:|---:|---:|
+| objects | 24→20 | 34→26 | 20→16 |
+| equipment | 25→21 | 35→27 | 20→16 |
+| counterparties | 24→20 | 34→26 | 20→16 |
+| contracts | 25→21 | 35→27 | 20→16 |
+| documents | 29→25 | 39→31 | 20→16 |
+
+Profile SELECT **5→1**; item SELECT **S→1** при S>0, при S=0 остаётся ноль.
+Canonical validation SELECT по каждому SET сохранён. Получено рассчитанное
+снижение **4…8 actual statements** без page N+1, изменения predicates/total/
+cursor/DTO или пропуска live checks. Это не утверждение о снижении latency
+на такой же процент.
+
+### Negative controls и воспроизводимость
+
+Обе функции проходят одни и те же проверки следующего HTTP-вызова после
+role/module change, удаления membership, mail_only/lock/tv, disable client/App/
+CompanyApp/install/grant/credential, credential/token/family expiry, parent
+session limit, family/token revoke и сужения client/install/grant scopes.
+Есть настоящий `/api/oauth2/revoke` и последующий product 401.
+
+Проверяются foreign resource ID **каждого** вида вне текущего endpoint,
+отсутствующий profile, удаление canonical equipment с cascade typed items,
+held ORM profile/typed item после commit второй сессии, данные другой installation
+и мусорные items в ALL profile. Ничто из последнего не создаёт доступ.
+Live membership subset сужает фактический результат. У пустого membership scope
+старый контракт — **200, items=[], total=0**, а не 403; первоначальное неверное
+ожидание теста исправлено. EMPTY resource profile/installation scope отдельно
+остаётся 403. Runtime ради унификации этих ответов не менялся.
+
+Тесты запускаются только с собственным `RUN_PARTNER_RESOURCE_TESTS=1` и общим
+portable guard: явные TEST_DATABASE_URL/test DB/absolute test uploads, loopback
+либо single CI service при CI=true/1, без connection overrides/default fallback.
+Нет привязки admission к порту или конкретному DB name. CI clone должен содержать
+baseline Git object; отсутствие baseline — ошибка, не скрытый SKIP.
+
+Создана и использована только новая `api_resource_budget_test` в локальном
+`api-modernization-test-20261029`, localhost:33546; uploads —
+`/tmp/partner-resource-budget-test-uploads`. Старт — только после сообщения root
+об эксклюзивном окне. Другие DB, VM, реальные app credentials и prod .env не
+использовались; конфигурация контейнера/роль/search_path не менялись.
+
+```sh
+# clearledger/server; TEST_DATABASE_URL явно задаётся для своей synthetic DB.
+RUN_PARTNER_RESOURCE_TESTS=1 \
+UPLOAD_DIR="${RUNNER_TEMP:-/tmp}/partner-resource-budget-test-uploads" \
+../../.venv/bin/python -m pytest tests/test_partner_resource_query_budget.py -q \
+  --junitxml=partner-resource-budget.xml -o junit_family=xunit1
+```
+
+Legacy regression gate имеет отдельное ограничение: старый
+`test_partner_identity.py::test_partner_table_recreation_and_repeat_bootstrap_preserve_core`
+выбирает для DROP только `app.models_partner`, но в новой базе M11
+`partner_docs_sessions.token_id` ссылается на `partner_tokens`. Прогон дошёл до
+**134 PASS + 1 FAIL** на этом DROP; ошибка `DependentObjectsStillExistError`
+передана root. Loader там не вызывается; legacy test/schema в этом patch не
+меняются и FK не обходится. Повтор остальных regression cases делается с одним
+явно указанным deselect, не объявляется полным green identity suite.
+
+Итог согласованного partial-regression прогона: **193 PASS, 1 SKIP,
+1 DESELECTED**, 127.51 с. В составе: **86/86 новых budget cases PASS**,
+51 identity PASS (legacy DROP case deselected), 56 product PASS и 1 product SKIP.
+Skip — `test_formal_openapi_31_validation`: в своей venv отсутствует optional
+`openapi_spec_validator`. Это не пройденная формальная OpenAPI проверка; runtime
+loader не меняет schema/OpenAPI. Root подтвердил отдельное исправление legacy
+M11 table recreation manifest и повтор этого case, не бессрочное исключение.
+Новые tests не скрывают этот failure и не редактируют чужой test module.
+Root сообщил immutable исправление `e94427bf`; оно не применялось в этой ветке
+и не входит в её результат. Повтор исправленного case остаётся за root.
+
+```sh
+# TEST_DATABASE_URL уже явно задан для своей свободной synthetic DB.
+RUN_PARTNER_RESOURCE_TESTS=1 RUN_PARTNER_IDENTITY_TESTS=1 RUN_PRODUCT_API_TESTS=1 \
+UPLOAD_DIR="${RUNNER_TEMP:-/tmp}/partner-resource-budget-test-uploads" \
+../../.venv/bin/python -m pytest tests/test_partner_resource_query_budget.py \
+  tests/test_partner_identity.py tests/test_product_api.py \
+  --deselect=tests/test_partner_identity.py::test_partner_table_recreation_and_repeat_bootstrap_preserve_core \
+  -q --junitxml=partner-resource-budget-final.xml -o junit_family=xunit1
+```
+
+Статические проверки: `compileall` loader/new tests и `git diff --check` PASS;
+AST вне resource_scopes совпадает с immutable baseline. Финальный pytest process
+и teardown завершены; root получил точную границу освобождения SQL окна.
+После этой границы дополнительные DB процессы не запускались. Проверки CI
+service networking, профиля core/public schema, полноценного EXPLAIN/load/SLO и
+перезапуска VM этим slice не объявляются выполненными.
+
+Откат runtime slice: вернуть commit с loader, без DDL/изменения persisted
+grants. Initial source report остаётся отдельной dependency. Сохранённые
+ограничения count/index/download/rate/retention и потребность измерений следующих
+этапов остаются в силе; этот slice не закрывает весь M15 или программу API.
