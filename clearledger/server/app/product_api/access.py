@@ -8,6 +8,7 @@ import uuid
 from fastapi import HTTPException, Request
 
 from app.api_contracts import AccessContext, Principal, PrincipalKind, ResourcePermission, ResourceScope
+from . import budget
 
 RESOURCES = ("objects", "equipment", "counterparties", "contracts", "documents")
 POLICY_VERSION = "product-read-1"
@@ -142,4 +143,8 @@ async def resolve(request: Request) -> AccessContext:
                             for resource in RESOURCES for action in ("read", "download"))
         context = AccessContext(principal, str(cid), POLICY_VERSION, token.scopes, permissions, valid=True)
         request.state.product_facts = Facts(cid, user, objects, own_org, grants)
-        return context
+    # Release the identity connection before checking out the independent quota
+    # transaction. Every request still performs the current live ACL above.
+    await budget.enforce(settings.budget_policy(), settings.sessions,
+                         budget.Key(cid, uuid.UUID(str(token.installation_id)), token.client_id))
+    return context

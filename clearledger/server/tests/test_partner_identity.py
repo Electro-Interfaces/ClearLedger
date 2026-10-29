@@ -581,6 +581,8 @@ async def test_partner_table_recreation_and_repeat_bootstrap_preserve_core(env):
     # the dependency-ordered reset instead of CASCADE-dropping unknown tables.
     from app.models_docs_portal import DocsPortalSession
     new_tables.add(DocsPortalSession.__table__)
+    from app.models_product_budget import ProductAPIBudget
+    new_tables.add(ProductAPIBudget.__table__)
     await env["db"].commit()
     async with database.engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):

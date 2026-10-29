@@ -2231,6 +2231,7 @@ async def _assert_bootstrap_namespace(conn) -> None:
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     from app.services.phone_e164 import PHONE_FUNCTION_DDL
+    from app import models_product_budget  # noqa: F401 — register before namespace guard/create_all
 
     async with engine.begin() as conn:
         await _assert_bootstrap_namespace(conn)
