@@ -214,7 +214,7 @@ def _backoff(attempts: int) -> timedelta:
 
 
 async def _send(db: AsyncSession, sub: EventSubscription,
-                row: OutboxEvent) -> int:
+                row: OutboxEvent, *, now: datetime | None = None) -> int:
     """Отдать событие подписчику. Возвращает код ответа, бросает при обрыве."""
     body_obj = envelope(row.event_id, row.type, row.subject, row.occurred_at,
                         row.data or {})
@@ -242,7 +242,10 @@ async def _send(db: AsyncSession, sub: EventSubscription,
     body = json.dumps(body_obj, ensure_ascii=False, separators=(",", ":"))
     secret = decrypt_secret(sub.secret_enc)
     if secret:
-        timestamp = int(row.occurred_at.timestamp())
+        # Standard Webhooks подписывает время попытки, CloudEvents.time — факта.
+        # Часы читаем здесь, а не в начале батча: медленные предыдущие доставки
+        # не должны съесть окно свежести этой попытки. Явный now нужен тестам.
+        timestamp = int((now if now is not None else datetime.now(timezone.utc)).timestamp())
         headers["webhook-id"] = str(row.event_id)
         headers["webhook-timestamp"] = str(timestamp)
         headers["webhook-signature"] = sign(secret, str(row.event_id),
