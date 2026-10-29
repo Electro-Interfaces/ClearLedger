@@ -257,14 +257,25 @@ class LiveGrant:
 
 
 def resource_scopes(db: Session, installation_id, company_id, member_locations):
+    # All profiles stay live, including SET kinds unused by the current endpoint.
+    # Scalar item columns avoid stale values from a previously loaded ORM item.
+    profiles = {profile.kind: profile for profile in db.scalars(select(PartnerResourceScope).where(
+        PartnerResourceScope.installation_id == installation_id).execution_options(populate_existing=True)).all()}
+    set_kinds = {kind for kind in RESOURCE_MODELS if kind in profiles and profiles[kind].mode == "SET"}
+    raw_by_kind = {kind: [] for kind in set_kinds}
+    if set_kinds:
+        columns = [getattr(PartnerResourceItem, column) for _, column in RESOURCE_MODELS.values()]
+        rows = db.execute(select(PartnerResourceItem.kind, *columns).where(
+            PartnerResourceItem.installation_id == installation_id, PartnerResourceItem.kind.in_(set_kinds)))
+        for row in rows:
+            raw_by_kind[row.kind].append(getattr(row, RESOURCE_MODELS[row.kind][1]))
     result = {}
     for kind, (model, column) in RESOURCE_MODELS.items():
-        profile = fresh(db, PartnerResourceScope, (installation_id, kind))
+        profile = profiles.get(kind)
         mode = profile.mode if profile else "EMPTY"
         ids = frozenset()
         if mode == "SET":
-            raw = db.scalars(select(getattr(PartnerResourceItem, column)).where(
-                PartnerResourceItem.installation_id == installation_id, PartnerResourceItem.kind == kind)).all()
+            raw = raw_by_kind[kind]
             ids = frozenset(str(v) for v in raw)
             valid = frozenset(str(v) for v in db.scalars(select(model.id).where(
                 model.company_id == company_id, model.id.in_(raw))).all())
