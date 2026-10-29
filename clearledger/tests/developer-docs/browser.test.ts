@@ -48,13 +48,17 @@ test('real HTTPS: public gate callback → docs cookie → separate Swagger PKCE
   page.on('response', (response) => statuses.push({ path: new URL(response.url()).pathname, status: response.status() }))
   page.on('request', (request) => traffic.push({ path: new URL(request.url()).pathname,
     authorization: request.headers().authorization, referer: request.headers().referer, body: request.postData() ?? undefined }))
-  async function approve(target: Page, docs = true) {
+  async function approve(target: Page, docs = true, loseGateBeforeSubmit = false) {
     await expect(target.getByLabel('Компания', { exact: true })).toBeVisible({ timeout: 20000 })
     await target.getByLabel('Компания', { exact: true }).selectOption(company)
     if (docs) {
       await target.getByRole('checkbox', { name: /Вход через пространство/ }).check()
       await target.getByRole('checkbox', { name: /Чтение документации API/ }).check()
     } else await target.getByRole('checkbox', { name: /Чтение объектов компании/ }).check()
+    // The real private consent chunk must finish loading before simulating an
+    // expired gate. Clearing on URL commit races the chunk and tests a different
+    // condition (correct 403 for private assets), rather than the public callback.
+    if (loseGateBeforeSubmit) await context.clearCookies({ name: 'cl_gate' })
     await target.getByRole('button', { name: 'Разрешить выбранные действия' }).click()
   }
 
@@ -72,9 +76,8 @@ test('real HTTPS: public gate callback → docs cookie → separate Swagger PKCE
   assert.ok(core)
   await page.getByRole('button', { name: 'Открыть документацию', exact: true }).click()
   await page.waitForURL((url) => url.pathname === '/developer/authorize')
-  // Lose only nginx gate, keeping the real Core session: callback must run public build.
-  await context.clearCookies({ name: 'cl_gate' })
-  await approve(page)
+  // Lose only nginx gate after consent loads; callback must run public build.
+  await approve(page, true, true)
   const frame = page.frameLocator('iframe[title="Защищённая Swagger документация"]')
   await expect(frame.locator('.swagger-ui')).toBeVisible({ timeout: 30000 })
   assert.equal(new URL(page.url()).pathname, '/developer/api')
