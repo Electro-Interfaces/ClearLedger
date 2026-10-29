@@ -165,6 +165,18 @@ python tools/partner-pilots/sandbox/control.py documents-member-revoke
 owner-admin совпадают, после удаления его membership admin-доступ закрывается. HTTP bypass/control routes отсутствуют. Изменение
 синтетических данных SQL возможно только в новом явно разрешённом SQL-окне.
 
+После согласованного root исправления frontend можно обновить обе actual сборки
+без изменения backend/PID/issuer/keys/grants:
+
+```sh
+python tools/partner-pilots/sandbox/rebuild.py
+```
+
+Сборка выполняется в закрытый временный каталог и заменяет static frontend после
+успеха; `frontendSourceRevision` записывается отдельно от backend `sourceRevision`.
+Root сначала останавливает browser consent, затем выдаёт новую клиентскую PKCE
+transaction после rebuild. AuthProvider и apiClient не замещаются harness-кодом.
+
 ## Завершение и проверки
 
 По команде root:
