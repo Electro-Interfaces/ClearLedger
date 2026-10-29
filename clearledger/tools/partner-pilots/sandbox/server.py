@@ -120,12 +120,23 @@ def application(factory, settings, state):
     return app
 
 
-async def initialize(database,upload,state):
+async def initialize(database,upload,state,*,resume=False):
     import asyncpg
     from sqlalchemy import text
     import app.database as core_db
     import app.models, app.models_partner, app.models_docs_portal  # зарегистрировать реальные модели
     from fixture import seed
+    if resume:
+        if state.get('status')!='initializing' or state.get('databaseOwned') is not True:
+            raise RuntimeError('Seed resume requires the owned interrupted bootstrap')
+        async with core_db.engine.connect() as conn:
+            for table in ('companies','users','partner_clients'):
+                if await conn.scalar(text('SELECT count(*) FROM '+table)):
+                    raise RuntimeError('Seed resume refused: existing identity/domain records')
+        state['fixture']=await seed(core_db.async_session_factory,upload)
+        state['status']='seeded-awaiting-serve'; write_json(STATE,state)
+        await core_db.engine.dispose()
+        return
     if upload.exists() and any(upload.iterdir()):
         raise RuntimeError('Test upload directory is nonempty; refusing to mix fixture ownership')
     admin=await asyncpg.connect(database.replace('postgresql+asyncpg:','postgresql:').rsplit('/',1)[0]+'/postgres')
@@ -313,6 +324,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=['prepare','init','serve','stop','cleanup'])
     parser.add_argument('--callback')
+    parser.add_argument('--resume-seed',action='store_true')
     args=parser.parse_args()
     if args.action=='prepare':
         state=prepare()
@@ -335,7 +347,7 @@ def main():
     state=prepare()
     if authorization: state['sqlWindowReference']=authorization
     if args.action=='cleanup': asyncio.run(cleanup(database,upload,state))
-    elif args.action=='init': asyncio.run(initialize(database,upload,state))
+    elif args.action=='init': asyncio.run(initialize(database,upload,state,resume=args.resume_seed))
     else:
         if not args.callback: parser.error('--callback required')
         asyncio.run(serve(database,upload,settings,state,args.callback))

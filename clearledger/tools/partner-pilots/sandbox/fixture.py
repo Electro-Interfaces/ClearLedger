@@ -7,7 +7,7 @@ import uuid
 
 async def seed(factory, upload):
     from app.auth import hash_password
-    from app.models import (Company, User, UserCompany, ServiceLocation, Counterparty,
+    from app.models import (Company, User, UserCompany, ServiceLocation, Counterparty, Organization,
         Contract, ContractLocation, EzsEquipmentUnit, ChargeSession, DocKind, DocCard,
         DocVersion, SourceFile)
     from app.services.charge_visits import recompute_visits
@@ -18,8 +18,12 @@ async def seed(factory, upload):
         db.add_all(companies)
         await db.flush()
         cid, foreign_cid = [c.id for c in companies]
+        organizations=[Organization(id=uuid.uuid4(),company_id=c.id,name='Вымышленная организация '+str(i),
+            inn='99999999'+str(i).zfill(2)) for i,c in enumerate(companies)]
+        db.add_all(organizations)
+        await db.flush()
         password = secrets.token_urlsafe(24)
-        users = [User(id=uuid.uuid4(), company_id=cid, email=name+'@example.invalid',
+        users = [User(id=uuid.uuid4(), company_id=cid, email=name+'@example.com',
             name='Вымышленный '+name, password_hash=hash_password(password),
             role='user', is_superadmin=False, mail_only=False)
             for name in ('pilot-owner', 'pilot-employee')]
@@ -39,7 +43,8 @@ async def seed(factory, upload):
         db.add_all(parties)
         await db.flush()
         contracts = [Contract(id=uuid.uuid4(), company_id=p.company_id, number='SYN-'+str(i),
-            date='2026-10-29', type='service', counterparty_id=p.id, scope_type='locations')
+            date='2026-10-29', type='service', counterparty_id=p.id,
+            organization_id=organizations[1 if i==3 else 0].id,scope_type='locations')
             for i,p in enumerate(parties)]
         db.add_all(contracts)
         await db.flush()
