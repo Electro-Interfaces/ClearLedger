@@ -574,6 +574,12 @@ work_contexts.register(ObjectsContext())
 app.include_router(work_contexts_router.router, prefix=API_PREFIX)
 app.include_router(info_router.router, prefix=API_PREFIX)   # «Инфо»: знание пространства
 app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаза 0): лаунчер + handoff + JWKS
+from app.routers import partner_admin_router, partner_oauth_router
+from app.services.partner_identity import PartnerProblem, problem_handler
+app.add_exception_handler(PartnerProblem, problem_handler)
+app.include_router(partner_admin_router.router, prefix=API_PREFIX)
+app.include_router(partner_oauth_router.router, prefix=API_PREFIX)
+app.include_router(partner_oauth_router.consent_router, prefix=API_PREFIX)
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
 app.include_router(space_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр объектов пространства
 app.include_router(core_router.router, prefix=API_PREFIX)  # ElsyPlus Core: состояние Ядра (Центр управления)
