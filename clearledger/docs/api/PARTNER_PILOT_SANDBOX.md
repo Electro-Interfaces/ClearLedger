@@ -122,12 +122,14 @@ Private assets проверяют обычный `cl_gate`/`gate_ok`, public `/p
 ```sh
 node tools/partner-pilots/sandbox/owner.mjs consent \
   --authorize-file /absolute/private/authorize.json \
-  --callback-file /absolute/private/callback.json
+  --callback-file /absolute/owner-private/owner-callback-receipt.json
 ```
 
 Браузер вводит fake Core credentials из owner state, выбирает компанию и
 разрешённые scopes в настоящем UI; callback обслуживается клиентским HTTPS
-listener, callback URL сохраняется только в закрытом файле. Клиент сам выполняет
+listener, callback URL сохраняется только в отдельном закрытом owner receipt.
+Настоящий callback listener сам пишет клиентский callback capture; helper запрещает
+использовать его путь как owner receipt и проверяет реальное HTTP 200/ack listener. Клиент сам выполняет
 настоящий code exchange своим процессом. Owner Chromium ограничен двумя SPKI pins конкретных fixture issuer/callback leaf
 через `--ignore-certificate-errors-spki-list` и строгим loopback route allowlist.
 Это точечное fixture browser исключение: per-request CA verification выполняют

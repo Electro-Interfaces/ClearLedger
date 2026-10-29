@@ -27,32 +27,44 @@ const browser = await chromium.launch({ headless: true,
 // Без изменения HOME, системного доверия, глобального TLS bypass и TLS-ignore.
 const context = await browser.newContext({ viewport: { width: 1360, height: 1000 } })
 const trace = []
+let page, stage = 'launch', callbackStatus
 try {
   await context.route('**/*', (route) => {
     const url = new URL(route.request().url())
     if ([state.origin, new URL(state.callback).origin].includes(url.origin)) return route.continue()
     // Исходный загрузчик шрифтов сохранён; необязательная доставка шрифтов
     // отключена в герметичной fixture, действует системный fallback.
+    trace.push({ blockedOrigin: url.origin, path: url.pathname })
     return route.abort()
   })
-  const page = await context.newPage()
-  page.on('response', (r) => trace.push({ path: new URL(r.url()).pathname, status: r.status() }))
+  page = await context.newPage()
+  page.on('response', (r) => {
+    const target = new URL(r.url()), callback = new URL(state.callback)
+    trace.push({ path: target.pathname, status: r.status() })
+    if (target.origin === callback.origin && target.pathname === callback.pathname) callbackStatus = r.status()
+  })
+  stage = 'login'
+  page.on('requestfailed', (r) => trace.push({ path: new URL(r.url()).pathname, failed: r.failure()?.errorText }))
   await page.goto(`${state.origin}/login`)
   await page.getByLabel('Email', { exact: true }).fill(state.fixture[who].email)
   await page.getByLabel('Пароль', { exact: true }).fill(state.fixture[who].password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.waitForURL((url) => url.pathname !== '/login', { timeout: 30000 })
+  stage = 'login-complete'
   if (action === 'login-check') {
     console.info('OWNER_BROWSER_LOGIN_OK')
   } else {
     if (!args.includes('--authorize-file') || !args.includes('--callback-file')) throw Error('Private file paths required')
     const raw = (await readFile(value('--authorize-file'), 'utf8')).trim()
-    let authorize
-    try { const item = JSON.parse(raw); authorize = item.authorizeUrl ?? item.authorizationUrl ?? item.url } catch { authorize = raw }
+    let authorize, clientCapturePath
+    try { const item = JSON.parse(raw); authorize = item.authorizeUrl ?? item.authorizationUrl ?? item.url; clientCapturePath = item.callbackFile } catch { authorize = raw }
+    if (clientCapturePath && resolve(clientCapturePath) === resolve(value('--callback-file'))) throw Error('Owner receipt must be separate from actual client callback capture')
     const url = new URL(authorize)
     if (url.origin !== state.origin || url.pathname !== '/api/oauth2/authorize') throw Error('Unexpected authorize origin/path')
+    stage = 'authorize'
     await page.goto(url.toString())
     await page.getByLabel('Компания', { exact: true }).waitFor({ timeout: 30000 })
+    stage = 'company-visible'
     await page.getByLabel('Компания', { exact: true }).selectOption(state.fixture.companyId)
     if (args.includes('--deny')) {
       await page.getByRole('button', { name: /Отклонить|Отказать/ }).click()
@@ -73,10 +85,14 @@ try {
         if (await checkbox.count()) await checkbox.check()
         else if (labels[scope]) await page.getByRole('checkbox', { name: new RegExp(labels[scope]) }).check()
       }
+      stage = 'scopes-selected'
       await page.getByRole('button', { name: 'Разрешить выбранные действия', exact: true }).click()
     }
+    stage = 'approval-submitted'
     await page.waitForURL((target) => target.origin === new URL(state.callback).origin
       && target.pathname === new URL(state.callback).pathname, { timeout: 30000 })
+    await page.getByText('Authorization callback received. Return to the synthetic client runner.', { exact: true }).waitFor()
+    if (callbackStatus !== 200) throw Error('Actual client callback did not acknowledge HTTP navigation')
     const output = resolve(value('--callback-file'))
     await writeFile(output, JSON.stringify({ callbackUrl: page.url() }), { mode: 0o600 })
     await chmod(output, 0o600)
@@ -84,7 +100,10 @@ try {
   }
 } catch (error) {
   // Не печатаем URL, тела, localStorage, tokens, пароли, state или code.
-  await writeFile(resolve(privateDir, 'owner-browser-status.json'), JSON.stringify({ status: 'failed', trace }), { mode: 0o600 })
+  await writeFile(resolve(privateDir, 'owner-browser-status.json'), JSON.stringify({ status: 'failed', stage, trace, pathname: page ? new URL(page.url()).pathname : null,
+      hasCoreToken: page ? await page.evaluate(() => !!localStorage.getItem('clearledger-token')).catch(() => null) : null,
+      visibleText: page ? (await page.locator('body').innerText().catch(() => '')).slice(0, 4000) : null,
+      errorType: error?.constructor?.name }), { mode: 0o600 })
   console.error('Owner browser failed; private status paths are recorded')
   process.exitCode = 1
 } finally {
