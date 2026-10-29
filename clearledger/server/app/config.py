@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     partner_oauth_enabled: bool = False
     # Независимый gate продуктового /api/v1: его включает отдельная приёмка M03.
     partner_api_enabled: bool = False
+    # Документация и интерактивный sandbox включаются отдельной приёмкой.
+    partner_docs_enabled: bool = False
+    partner_docs_client_id: str = ""
+    partner_docs_environment: str = "unconfigured"
+    partner_docs_sandbox_api_url: str = ""
     partner_oauth_issuer: str = ""
     partner_oauth_audience: str = ""
     partner_oauth_signing_key: str = ""  # base64 PEM; пусто = RSA ключ SSO
