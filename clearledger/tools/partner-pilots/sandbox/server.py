@@ -12,6 +12,7 @@ import signal
 import socket
 import ssl
 import subprocess
+import time
 import sys
 from urllib.parse import urlsplit
 
@@ -192,6 +193,7 @@ async def serve(database,upload,settings,state,callback):
     async def lifespan(_app):
         yield
         await core_db.engine.dispose()
+        write_json(PRIVATE/'engine-disposed.json',{'pid':os.getpid(),'disposed':True})
     app.router.lifespan_context=lifespan
     server=uvicorn.Server(uvicorn.Config(app,host='127.0.0.1',port=0,access_log=False,log_level='critical',
         ssl_certfile=str(PRIVATE/'issuer.pem'),ssl_keyfile=str(PRIVATE/'issuer.key'),proxy_headers=False))
@@ -337,10 +339,27 @@ def main():
         state=json.loads(STATE.read_text())
         pid=state.get('pid')
         if state.get('status')=='stopped' or not pid: return
+        process=Path('/proc/'+str(pid))
         # Нельзя отправлять сигнал повторно использованному PID чужой программы.
-        if str(HERE/'server.py') not in Path('/proc/'+str(pid)+'/cmdline').read_bytes().decode().replace('\0',' '):
-            raise RuntimeError('Recorded PID is not the owned sandbox')
-        os.kill(pid,signal.SIGTERM)
+        if process.exists():
+            if str(HERE/'server.py') not in (process/'cmdline').read_bytes().decode().replace('\0',' '):
+                raise RuntimeError('Recorded PID is not the owned sandbox')
+            os.kill(pid,signal.SIGTERM)
+            deadline=time.monotonic()+15
+            while process.exists() and time.monotonic()<deadline: time.sleep(.1)
+        if process.exists(): raise RuntimeError('Owned sandbox exit not yet proven')
+        port=urlsplit(state['origin']).port
+        try:
+            with socket.create_connection(('127.0.0.1',port),timeout=1):
+                raise RuntimeError('Owned API port is still open')
+        except ConnectionRefusedError: pass
+        # Uvicorn повторно поднимает SIGTERM после lifespan; внешний stop владеет
+        # финальным receipt, даже если Python finally не успеет записать status.
+        latest=json.loads(STATE.read_text())
+        latest['status']='stopped'
+        latest['stopVerification']={'processGone':True,'portClosed':True,'signal':'SIGTERM'}
+        write_json(STATE,latest)
+        print('OWNED_API_STOPPED')
         return
     authorization=None
     if args.action in ('init','cleanup'):

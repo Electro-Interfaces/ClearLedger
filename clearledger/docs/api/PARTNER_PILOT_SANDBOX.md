@@ -213,8 +213,8 @@ main/public smoke build выполняется из текущих исходн�
 Fixture запущена из source revision `71611507ba652bb88edb3f4f0f73a9662de5a0fd`
 в отдельном Ledger Orca worktree `api-pilot-sandbox-20261030`, ветка
 `MagLook/telescopefish`, с зависимостями guard из root `eb22cc56` и `28f6b7e2`
-(локальные cherry-pick `e7b96d08`, `634aeb16`). Runtime приложения и код клиента
-этим исполнителем не правились; guard перенесён без собственных изменений.
+(локальные cherry-pick `e7b96d08`, `634aeb16`). Собственных правок продуктового runtime и кода клиента нет; принятые root
+зависимости guard и shared auth перенесены без изменений.
 
 После отдельного разрешения `root-m18-20261030-2240` созданы только
 `api_partner_pilots_test` и собственный test upload-каталог. Штатный bootstrap
@@ -230,7 +230,7 @@ initializer подтверждены, setup SQL-окно освобождено.
 и последующие HTTPX-запросы с обычной CA verification прошли. Эти два исправления
 относятся к fixture, а не к обнаруженным дефектам приложения.
 
-На момент передачи сервис явно оставлен работающим для независимых клиентов:
+На промежуточной API_READY передаче сервис был явно оставлен работающим для независимых клиентов:
 origin `https://127.0.0.1:52361`, callback `https://127.0.0.2:34639/callback`,
 PID `1326890`, owned shell session `4833`. Это снимок ресурсов конкретного запуска,
 не постоянный адрес сервиса. Владелец жизненного цикла — root-координатор;
@@ -257,3 +257,75 @@ Client manifest не содержит Core учёток, паролей или a
 сценариев. Их результаты и последующие controls фиксирует root отдельно.
 Обычный сотрудник с docs-role, внешний партнёр, production/nginx/SSO,
 release/restore и внешняя доставка этим запуском не проверялись.
+
+
+## Итог пилотного прогона и остановка
+
+По подтверждению root независимый клиент завершил **14 actual HTTP случаев**:
+8 machine и 6 docs. Проверены OIDC discovery/Code/PKCE/nonce/signature/UserInfo,
+пагинация и границы tenant/resource, typed links, effective ALL/EMPTY, monitoring,
+изменение доступной области на текущем токене, точные bytes/SHA-256 версии,
+native doc/file denials и отказ использовать ID token как API credential.
+Это результат ограниченного synthetic pilot с `subjectKind=company-owner`.
+
+Owner controls выполнены по отдельным командам root, настоящими admin API:
+
+| Control | Фактическое действие | Receipt |
+| --- | --- | --- |
+| `operations-narrow` | повторное одобрение установки с objects/equipment SET до first1 | HTTP 201 |
+| `rental-grant-revoke` | DELETE machine grant | HTTP 200, `revoked=true` |
+| `documents-member-revoke` | DELETE membership delegated owner, последняя admin-операция | HTTP 204 |
+
+Клиент подтвердил применение сужения без переиздания токена: старый cursor дал
+400, новый обход вернул строгий subset, прежний monitoring — 404. После отзыва
+machine grant текущий токен получил 401, перевыпуск — `invalid_grant`. После
+DELETE membership тот же ещё не истёкший delegated token получил 401.
+
+Положительный consent выполнен отдельным owner Chrome через реальный UI;
+callback listener на 127.0.0.2 получил обычную HTTPS-навигацию, HTTP 200 и свой
+acknowledgement. Listener сам создал client capture, helper сохранил отдельный
+owner receipt 0600. Core credentials не передавались внешнему клиенту, подпись
+и code exchange выполнял клиент своим процессом. Ранее истёкшие transactions
+закрыты без replay; старые helper-процессы завершены и reap подтверждён.
+
+В ходе UI выявилась общая гонка shared AuthProvider/apiClient. Root принял
+исправление `0dbcb0d0d74d5e303c28a8469fd40e1cdb9e1e48`, перенесённое без изменений
+как `56f7c674a810f5ee0bd33f7919e105051206a931`. Обе actual React сборки пересобраны
+без перезапуска backend, изменения issuer/keys/grants или SQL. Это **frontend
+source revision**; backend остался на `71611507ba652bb88edb3f4f0f73a9662de5a0fd`.
+Отдельно helper стал ждать видимый настоящий main heading после штатного gate,
+а не только смену URL; это исправление готовности harness, не подмена auth.
+
+Промежуточный отказ SDK уточнён как ошибка клиентского transport adapter:
+стандартный UserInfo GET с `body:null` отвергался до HTTP. Strict ID signature,
+nonce и claims уже проходили; provider OIDC ради этого не изменялся. После
+исправления adapter клиент выполнил новую свежую транзакцию с автоматическим
+обменом после native callback capture. Этот исход не учитывается как app defect.
+
+**Ограничения:** employee UI negative — **SKIP** по финальному решению root;
+его нельзя исполнять на pending request owner из-за canonical subject binding.
+Обычный сотрудник с docs-role не проверен. Client ledger подтверждает ноль
+business-write HTTP requests; business-table fingerprint baseline до запуска
+не снимался, поэтому неизменность всей БД не утверждается. Production acceptance,
+nginx, SSO, внешний партнёр, release/restore и внешняя доставка не проверялись.
+
+По отдельной финальной команде root остановлен только owned API PID 1326890.
+UVicorn получил SIGTERM; session 4833 завершён/reaped с exit 143 (повторная
+передача SIGTERM после graceful shutdown). Подтверждены отсутствие PID в `/proc`,
+закрытый TCP порт 52361 и **0** соединений `pg_stat_activity` к собственной
+`api_partner_pilots_test` при bounded read-only запросе через `postgres`.
+`owner-state.status=stopped`; completed controls и frontend revision сохранены.
+Private `stop-receipt.json` содержит проверяемый cleanup receipt без секретов.
+
+Сами DB, test uploads, сборки и private artifacts сохранены по прямой команде
+root как локальное synthetic evidence. DROP/reset не выполнялись. Их последующая
+очистка требует нового отдельного SQL-разрешения root; `cleanup` остаётся готовым
+инструментом. Callback listener клиента принадлежит клиентскому worker и этим
+исполнителем не останавливался.
+
+Выявленная при остановке особенность UVicorn учтена в lifecycle helper: внешний
+`stop` теперь фиксирует stopped только после положительной проверки выхода PID
+и закрытия порта, поскольку повторный SIGTERM может прервать Python `finally`.
+Для будущих запусков lifespan записывает private marker после engine dispose;
+для завершённого прогона отдельного такого marker не было, доказательства
+остановки — exit/reap, closed port и измеренные 0 DB connections, перечисленные выше.
