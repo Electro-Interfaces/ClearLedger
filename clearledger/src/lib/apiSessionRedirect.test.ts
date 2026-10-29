@@ -12,7 +12,7 @@ const baselineSource = process.env.CONSENT_API_BASELINE
   : undefined
 
 async function fixture(base = '/') {
-  const originals = new Map(['window', 'localStorage', 'sessionStorage', 'fetch']
+  const originals = new Map(['window', 'localStorage', 'sessionStorage', 'fetch', 'XMLHttpRequest']
     .map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   const memory = () => {
     const data = new Map<string, string>()
@@ -123,4 +123,119 @@ test('401 redirect учитывает basename и не добавляет его
   f.api.setToken('synthetic-expired'); f.location.pathname = '/space/developer/authorize'
   f.location.search = '?requestId=opaque'; await f.expired(); f.runTimers()
   assert.equal(f.location.href, '/space/login?next=%2Fdeveloper%2Fauthorize%3FrequestId%3Dopaque')
+})
+
+test('поздний 401 всех fetch transport сохраняет новую сессию после чтения body', async (t) => {
+  const f = await fixture(); t.after(() => f.close())
+  const transports = {
+    GET: () => f.api.get('/api/protected'),
+    POST: () => f.api.post('/api/protected', {}),
+    PATCH: () => f.api.patch('/api/protected', {}),
+    PUT: () => f.api.put('/api/protected', {}),
+    DELETE: () => f.api.del('/api/protected'),
+    'upload fetch': () => f.api.upload('/api/protected', new FormData()),
+  }
+  for (const [name, call] of Object.entries(transports)) {
+    await t.test(name, async () => {
+      f.api.setToken('synthetic-A'); f.location.pathname = '/protected'; f.toast.messages.length = 0
+      let releaseBody!: (body: object) => void
+      let enterBody!: () => void
+      const entered = new Promise<void>((resolve) => { enterBody = resolve })
+      const body = new Promise<object>((resolve) => { releaseBody = resolve })
+      const request = mock.method(globalThis, 'fetch', (async (_url, options) => {
+        assert.equal((options?.headers as Record<string, string>).Authorization, 'Bearer synthetic-A')
+        const response = new Response('{}', { status: 401, headers: { 'Content-Type': 'application/json' } })
+        response.json = async () => { enterBody(); return body }
+        return response
+      }) as typeof fetch)
+      try {
+        const failed = assert.rejects(call(), { status: 401 })
+        await entered
+        f.api.setToken('synthetic-B')
+        releaseBody({ detail: 'Synthetic A expired' })
+        await failed
+        assert.equal(f.api.getToken(), 'synthetic-B')
+        assert.equal(f.timers.size, 0)
+        assert.equal(f.toast.messages.length, 0)
+      } finally { request.mock.restore() }
+    })
+  }
+})
+
+test('анонимный поздний 401 не удаляет новую Core сессию', async (t) => {
+  const f = await fixture(); t.after(() => f.close())
+  f.api.clearToken(); f.location.pathname = '/protected'
+  let release!: (response: Response) => void
+  const request = mock.method(globalThis, 'fetch', (async (_url, options) => {
+    assert.equal((options?.headers as Record<string, string>).Authorization, undefined)
+    return new Promise<Response>((resolve) => { release = resolve })
+  }) as typeof fetch)
+  try {
+    const failed = assert.rejects(f.api.get('/api/protected'), { status: 401 })
+    f.api.setToken('synthetic-B')
+    release(new Response('{"detail":"Synthetic anonymous denial"}', { status: 401 }))
+    await failed
+    assert.equal(f.api.getToken(), 'synthetic-B')
+    assert.equal(f.timers.size, 0)
+    assert.equal(f.toast.messages.length, 0)
+  } finally { request.mock.restore() }
+})
+
+test('abort при чтении 401 body не завершает действующую сессию', async (t) => {
+  const f = await fixture(); t.after(() => f.close())
+  f.api.setToken('synthetic-A'); f.location.pathname = '/protected'
+  const controller = new AbortController()
+  let releaseBody!: (body: object) => void
+  let enterBody!: () => void
+  const entered = new Promise<void>((resolve) => { enterBody = resolve })
+  const body = new Promise<object>((resolve) => { releaseBody = resolve })
+  const request = mock.method(globalThis, 'fetch', (async () => {
+    const response = new Response('{}', { status: 401 })
+    response.json = async () => { enterBody(); return body }
+    return response
+  }) as typeof fetch)
+  try {
+    const failed = assert.rejects(f.api.get('/api/protected', undefined, { signal: controller.signal }), { status: 401 })
+    await entered
+    controller.abort()
+    releaseBody({ detail: 'Synthetic canceled response' })
+    await failed
+    assert.equal(f.api.getToken(), 'synthetic-A')
+    assert.equal(f.timers.size, 0)
+    assert.equal(f.toast.messages.length, 0)
+  } finally { request.mock.restore() }
+})
+
+test('XHR upload401 относится к отправленному Bearer, текущий401 остаётся logout', async (t) => {
+  const f = await fixture(); t.after(() => f.close())
+  let active!: SyntheticXHR
+  class SyntheticXHR {
+    upload: { onprogress?: (event: ProgressEvent) => void } = {}
+    onload?: () => void
+    onerror?: () => void
+    ontimeout?: () => void
+    response = '{"detail":"Synthetic XHR expired"}'
+    status = 401
+    statusText = 'Unauthorized'
+    sent: Record<string, string> = {}
+    constructor() { active = this }
+    open() {}
+    setRequestHeader(key: string, value: string) { this.sent[key] = value }
+    getResponseHeader() { return 'application/json' }
+    send() {}
+  }
+  Object.defineProperty(globalThis, 'XMLHttpRequest', { configurable: true, value: SyntheticXHR })
+  f.location.pathname = '/protected'
+  for (const replace of [true, false]) {
+    f.api.setToken('synthetic-A'); f.toast.messages.length = 0
+    const failed = assert.rejects(f.api.upload('/api/protected', new FormData(), () => {}), { status: 401 })
+    assert.equal(active.sent.Authorization, 'Bearer synthetic-A')
+    if (replace) f.api.setToken('synthetic-B')
+    active.onload!()
+    await failed
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.equal(f.api.getToken(), replace ? 'synthetic-B' : null)
+    assert.equal(f.timers.size, replace ? 0 : 1)
+    assert.equal(f.toast.messages.length, replace ? 0 : 1)
+  }
 })
