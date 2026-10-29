@@ -22,7 +22,10 @@ Excel, «не пришло» неотличимо от «не смотрели»
 from __future__ import annotations
 
 import calendar
+import hashlib
 import uuid
+from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy import func, select
@@ -35,6 +38,7 @@ from app.models import (
     OpsContractTerm,
     OpsCostItem,
     OpsPeriodCharge,
+    OpsPeriodClose,
     StationEnergyPeriod,
 )
 
@@ -366,21 +370,53 @@ def estimate(ctx: ExpandCtx, term: OpsContractTerm, period: str,
 
 # ── Разворот ───────────────────────────────────────────────────────────────
 
-async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
-                 ctx: ExpandCtx | None = None,
-                 terms: list[OpsContractTerm] | None = None) -> dict[str, Any]:
-    """Развернуть ожидания месяца. Повтор безопасен.
+async def lock_period(db: AsyncSession, company_id: uuid.UUID, period: str) -> None:
+    """One transaction barrier for expansion, materialization, close and reopen."""
+    key = int.from_bytes(hashlib.sha256(f"ops-period:{company_id}:{period}".encode()).digest()[:8], "big", signed=True)
+    await db.execute(select(func.pg_advisory_xact_lock(key)))
 
-    Возвращает счётчики и список условий, которые развернуть не удалось — он же
-    и есть рабочее задание: без охвата строка реестра была бы пустым местом.
-    """
+
+@dataclass(frozen=True)
+class ExpectationChange:
+    row_id: uuid.UUID | None
+    values: dict[str, Any]
+    changed: bool
+
+
+@dataclass(frozen=True)
+class ExpectationPlan:
+    period: str
+    changes: tuple[ExpectationChange, ...]
+    skipped: int
+    blocked: tuple[dict[str, Any], ...]
+
+    @property
+    def missing(self) -> int:
+        return sum(c.row_id is None for c in self.changes)
+
+    @property
+    def stale(self) -> int:
+        return sum(c.row_id is not None and c.changed for c in self.changes)
+
+
+async def plan_expectations(db: AsyncSession, company_id: uuid.UUID, period: str,
+                            ctx: ExpandCtx | None = None,
+                            terms: list[OpsContractTerm] | None = None) -> ExpectationPlan:
+    """Read-only plan; no ORM mutation, add, flush, commit or temporary rollback."""
+    with db.no_autoflush:
+        return await _plan_expectations(db, company_id, period, ctx, terms)
+
+
+async def _plan_expectations(db: AsyncSession, company_id: uuid.UUID, period: str,
+                 ctx: ExpandCtx | None = None,
+                 terms: list[OpsContractTerm] | None = None) -> ExpectationPlan:
     ctx = ctx or await build_ctx(db, company_id)
     first, last = month_bounds(period)
     if terms is None:
         terms = (await db.execute(select(OpsContractTerm).where(
             OpsContractTerm.company_id == company_id,
             OpsContractTerm.valid_from <= last,
-        ))).scalars().all()
+        ).execution_options(populate_existing=True))).scalars().all()
 
     # Уже развёрнутое этого месяца — чтобы не задваивать и не затирать чужую работу.
     existing = {
@@ -390,7 +426,7 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
             OpsPeriodCharge.period == period,
             OpsPeriodCharge.seq == 0,
             OpsPeriodCharge.term_id.isnot(None),
-        ))).scalars().all()
+        ).execution_options(populate_existing=True))).scalars().all()
     }
 
     # Уникальность строки — (период, условие), без объекта: у договора сменилась
@@ -401,7 +437,8 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
     for r in existing.values():
         по_условию.setdefault(r.term_id, []).append(r)
 
-    created = updated = skipped = 0
+    skipped = 0
+    changes: list[ExpectationChange] = []
     blocked: list[dict[str, Any]] = []
 
     for term in terms:
@@ -422,21 +459,27 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
                             "costItem": term.cost_item,
                             "reason": "у договора не заполнен охват по объектам"})
             continue
+        # The real unique key is company+period+term+seq, without location.
+        # Do not invent a financial split or turn ambiguous coverage into 500.
+        if len(locations) > 1:
+            blocked.append({"termId": str(term.id), "contractId": str(term.contract_id),
+                            "costItem": term.cost_item,
+                            "reason": "у условия несколько объектов; укажите объект в условии"})
+            continue
 
         сироты = [r for r in по_условию.get(term.id, []) if r.location_id not in locations]
         for location_id in locations:
             row = existing.get((term.id, location_id))
             if row is None and сироты:
                 row = сироты.pop()
-                if row.status != "expected" or row.doc_id is not None:
+                if row.status != "expected" or row.doc_id is not None or row.expected_basis == "manual":
                     blocked.append({"termId": str(term.id), "contractId": str(term.contract_id),
                                     "costItem": term.cost_item,
                                     "reason": f"строка ведётся по прежнему объекту {row.location_id}"})
                     continue
-                row.location_id = location_id
             # Строку, которую уже ведёт человек, разворот не трогает: документ
             # привязан, сумма поставлена руками или расхождение оспаривается.
-            if row is not None and (row.status != "expected" or row.doc_id is not None):
+            if row is not None and (row.status != "expected" or row.doc_id is not None or row.expected_basis == "manual"):
                 skipped += 1
                 continue
 
@@ -444,35 +487,49 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
             note = f"объём взят за {est['qtyFrom'][:7]}" if est.get("qtyFrom") else None
             due = _due_on(period, term.doc_due_day)
 
+            values = dict(location_id=location_id, expected_gross=est["gross"], expected_net=est["net"],
+                          expected_qty=est["qty"], expected_basis=est["basis"], vat_pct=term.vat_pct,
+                          doc_due_on=due)
+            if note or row is None:
+                values["note"] = note
+            # Compare at actual numeric column precision; extra meter decimals
+            # must not make every subsequent GET claim the plan is stale.
+            for field, precision in (("expected_gross", 2), ("expected_net", 2), ("expected_qty", 3), ("vat_pct", 2)):
+                if values[field] is not None:
+                    values[field] = Decimal(str(values[field])).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_HALF_UP)
             if row is None:
-                db.add(OpsPeriodCharge(
-                    company_id=company_id, period=period, cost_item=term.cost_item,
+                values.update(company_id=company_id, period=period, cost_item=term.cost_item,
                     term_id=term.id, contract_id=term.contract_id,
-                    # Колонка строковая: UUID asyncpg в неё не пропускает, и новая строка
-                    # роняла весь разворот (14.10.2026).
-                    counterparty_id=(str(ctx.counterparty[term.contract_id])
-                                     if ctx.counterparty.get(term.contract_id) else None),
-                    location_id=location_id, seq=0,
-                    expected_gross=est["gross"], expected_net=est["net"],
-                    expected_qty=est["qty"], vat_pct=term.vat_pct,
-                    expected_basis=est["basis"], doc_due_on=due, status="expected",
-                    note=note,
-                ))
-                created += 1
-            else:
-                row.expected_gross = est["gross"]
-                row.expected_net = est["net"]
-                row.expected_qty = est["qty"]
-                row.expected_basis = est["basis"]
-                row.vat_pct = term.vat_pct
-                row.doc_due_on = due
-                if note:
-                    row.note = note
-                updated += 1
+                    counterparty_id=str(ctx.counterparty[term.contract_id]) if ctx.counterparty.get(term.contract_id) else None,
+                    seq=0, status="expected")
+            changes.append(ExpectationChange(row.id if row is not None else None, values,
+                row is None or any(getattr(row, k) != v for k, v in values.items())))
+    return ExpectationPlan(period, tuple(changes), skipped, tuple(blocked))
 
+
+async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
+                 ctx: ExpandCtx | None = None,
+                 terms: list[OpsContractTerm] | None = None) -> dict[str, Any]:
+    """Apply the shared pure plan, serialized with period close/reopen."""
+    await lock_period(db, company_id, period)
+    state = await db.scalar(select(OpsPeriodClose.status).where(
+        OpsPeriodClose.company_id == company_id, OpsPeriodClose.period == period))
+    if state == "closed":
+        return {"period": period, "created": 0, "updated": 0, "skipped": 0, "blocked": []}
+    plan = await plan_expectations(db, company_id, period, ctx, terms)
+    created = updated = 0
+    for change in plan.changes:
+        if change.row_id is None:
+            db.add(OpsPeriodCharge(**change.values))
+            created += 1
+        elif change.changed:
+            row = await db.get(OpsPeriodCharge, change.row_id, populate_existing=True)
+            for key, value in change.values.items():
+                setattr(row, key, value)
+            updated += 1
     await db.flush()
     return {"period": period, "created": created, "updated": updated,
-            "skipped": skipped, "blocked": blocked}
+            "skipped": plan.skipped, "blocked": list(plan.blocked)}
 
 
 async def expand_range(db: AsyncSession, company_id: uuid.UUID,
