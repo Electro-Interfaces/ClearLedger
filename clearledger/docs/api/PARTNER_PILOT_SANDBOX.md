@@ -187,3 +187,53 @@ python tools/partner-pilots/sandbox/server.py cleanup
 main/public smoke build выполняется из текущих исходников. SQL/HTTP/browser результаты
 относятся только к конкретному запуску и передаются root отдельно с origin, PID,
 путями CA/client manifest/owner state, SHA и фактическими ограничениями.
+
+## Зафиксированный запуск 30.10.2026
+
+Fixture запущена из source revision `71611507ba652bb88edb3f4f0f73a9662de5a0fd`
+в отдельном Ledger Orca worktree `api-pilot-sandbox-20261030`, ветка
+`MagLook/telescopefish`, с зависимостями guard из root `eb22cc56` и `28f6b7e2`
+(локальные cherry-pick `e7b96d08`, `634aeb16`). Runtime приложения и код клиента
+этим исполнителем не правились; guard перенесён без собственных изменений.
+
+После отдельного разрешения `root-m18-20261030-2240` созданы только
+`api_partner_pilots_test` и собственный test upload-каталог. Штатный bootstrap
+прошёл; первый seed откатился, поскольку фактическая миграция требует
+`contracts.organization_id`. Fixture дополнена настоящими Organizations и
+типизированными ссылками. Повтор seed выполнен после проверки отсутствия
+companies/users/partner_clients, без DROP/reset; seed COMMIT и завершение
+initializer подтверждены, setup SQL-окно освобождено.
+
+Первый запуск HTTPS остановился до Core HTTP-запроса из-за требования строгой
+проверки X509 в Python 3.13 к AuthorityKeyIdentifier. Fixture CA и оба leaf
+перевыпущены с SKI/AKI, сохранены ключи/SPKI; `openssl verify -x509_strict`
+и последующие HTTPX-запросы с обычной CA verification прошли. Эти два исправления
+относятся к fixture, а не к обнаруженным дефектам приложения.
+
+На момент передачи сервис явно оставлен работающим для независимых клиентов:
+origin `https://127.0.0.1:52361`, callback `https://127.0.0.2:34639/callback`,
+PID `1326890`, owned shell session `4833`. Это снимок ресурсов конкретного запуска,
+не постоянный адрес сервиса. Владелец жизненного цикла — root-координатор;
+worker исполняет конкретные owner controls по сообщениям Orca.
+
+Закрытый каталог:
+`/home/mag/orca/workspaces/ledger-app/api-pilot-sandbox-20261030/clearledger/.artifacts/partner-pilot-sandbox`.
+Файлы для передачи root: `ca.pem`, `client-manifest.json`, отдельно owner-only
+`owner-state.json`. Режимы каталога 0700, JSON/ключей 0600; Git ignore проверен.
+Client manifest не содержит Core учёток, паролей или access tokens.
+
+Подтверждены:
+
+- три независимые проверки destructive guard;
+- сборка обоих актуальных React entrypoints на matching-lock dependencies root;
+- импорт actual routers и curated policy registry без `app.main` и соединения с БД;
+- реальные Core login и все M10 register/enable/install/credential/machine-grant HTTP;
+- discovery exact issuer, анонимные product/docs asset 401;
+- public callback без gate 200, private asset без gate 403;
+- реальный отдельный Chrome login через React UI с двумя leaf SPKI pins;
+- реальный callback listener с назначенной CA и проверкой IP 127.0.0.2.
+
+`API_READY`, `UI_READY` и owner login не означают принятия независимых пилотных
+сценариев. Их результаты и последующие controls фиксирует root отдельно.
+Обычный сотрудник с docs-role, внешний партнёр, production/nginx/SSO,
+release/restore и внешняя доставка этим запуском не проверялись.
