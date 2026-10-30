@@ -313,3 +313,28 @@ page2365.177→43.119ms в single fixture run. Root проверил source/arti
 SQL-shape parity с независимым baseline и cleanup; повторного root SQL не было.
 Это не source/prodSLO speedup, runtime/JIT/autovacuum/index не менялись.
 [Контроль](PRODUCT_DOCUMENT_STATISTICS_20261030.md).
+
+
+Матрица document ACL принята по 8 авторским PASS, 74 логическим ячейкам
+и 16 HTTP, с независимой проверкой исходников и артефактов без повторного SQL.
+Исправление позднего JSON 401 сохраняет новую сессию после повторного входа
+с тем же токеном: root596 PASS, TypeScript и предметный lint PASS.
+[ACL](DOCUMENT_READ_ACL_EQUIVALENCE_20261030.md),
+[JSON session](JSON_SESSION_GENERATION_20261030.md).
+
+Приняты M16 design, отдельный CLI Foundation (root14 pure +13 PostgreSQL PASS)
+и default-off managed budget startup gate (root2 PASS/0FAIL/0ERROR/0SKIP за
+73,353 с). Gate проверяет фактическую БД/пользователя/схему и frozen revision
+до marker/DDL/seed, сохраняет данные при повторном запуске и отказывает при
+повреждениях каталога/журнала. Проверены fresh/repeat legacy public/Core,
+managed adoption, native readiness и copied-runtime import. Тестовые БД
+штатно удалены. Actual Docker build, полный lifespan, рабочий restore и
+остальные владельцы DDL не проверены; режим выключен, M16 остаётся открытой.
+[Runner](SCHEMA_MIGRATION_RUNNER_20261030.md),
+[Cutover](SCHEMA_MIGRATION_CUTOVER_20261030.md),
+[независимый source review](SCHEMA_GATE_REVIEW_20261030.md).
+
+Scoped identity/docs security review: 10 primary файлов, 0 findings, partial
+coverage app envelope, sequential fallback; host context подтверждён root.
+Это source review в указанных границах, не приёмка всего API или рабочего
+окружения. [Отчёт](PARTNER_IDENTITY_SECURITY_REVIEW_20261030.md).

@@ -265,3 +265,20 @@ ce94/5ce archive execution, production backup/restore/permissions/activation,
 полный CI и ownership остальных legacy/lazy DDL owners **NOT RUN / OPEN**.
 Полный runtime DDL privilege withdrawal не входит в пакет. Общая программа
 M00–M19 не объявляется завершённой.
+
+
+## Интеграционная приёмка координатора
+
+Source commit `f6588d191a3e81b431cdda42d039df4fa33bc419` перенесён в
+integration как `46c0b53169d9a353c277c18962106e13bee76d74`. Проверены ровно восемь
+файлов изменения, source HEAD=origin и отсутствие незакоммиченных правок.
+Все восемь integration files совпали с исходным коммитом по SHA256; семь
+runtime/test/Dockerfile файлов — с составом единственного ROOT SQL-прогона.
+Frozen Foundation из 16 файлов также неизменён. После переноса повторного SQL
+не было: исходники проверенного пакета не менялись. Обновлён только этот отчёт.
+
+Независимый source review обнаружил недоставленный `schema_migrations` в
+прежнем Dockerfile. Исправление COPY и copied-runtime import проверены до
+прогона. Actual Docker build, полный lifespan, исторические архивы и рабочий
+backup/restore остаются непроверенными. Новый режим выключен по умолчанию,
+рабочие настройки и сервисы не менялись; M16 целиком не закрыта.
