@@ -216,3 +216,24 @@ SHA-256 итоговых runtime/test:
 SHA самого отчёта и exact immutable commit передаются координатору после commit;
 self-hash внутрь файла не включается. Игнорируемые TAP/logs остаются в собственном
 дереве для локальной приёмки и не содержат реальных данных.
+
+
+## Независимая приёмка координатора
+
+Source commit `c4fb1761ce1241a2846bc8f6c6c11b005daad435` перенесён в
+integration как `9d9607cf`. Root измерил SHA runtime, теста и отчёта, проверил
+точный состав из трёх файлов. TypeScript AST подтверждает ограничение десятью
+согласованными функциями и одним приватным счётчиком. Остальные top-level
+statements, binary tail, 53 прежних lib test files совпадают с baseline.
+
+На интеграционном составе независимо пройдены те же девять Node suites:
+**596 PASS / 0 FAIL / 0 SKIP / 0 CANCELLED / 0 TODO, 73,256 с**. App/node
+TypeScript и targeted ESLint runtime/test завершились с exit 0; все процессы
+завершены и reaped. Проверки после PASS не повторялись. Приватные доказательства:
+`.artifacts/root-json-session-{boundaries,old-tests-proof,acceptance}.json`
+и `.artifacts/root-json-session-final.log`.
+
+Это bounded Node/SSR и source/type validation. Реальный браузер, серверные
+ACL, direct-storage ABA и отложенный sonner-import callback после законного
+normal401 не проверялись. Уже отправленные серверные изменения не отменяются.
+Полный CI, merge, выпуск и закрытие M00–M19 не заявляются.
