@@ -160,3 +160,18 @@ paired summary и stdout (`cmp`, exit 0). Targeted ESLint для двух нов
 с Node globals и существующим `@eslint/js` recommended: 0 errors/0 warnings;
 новый конфиг и зависимости не добавлялись. `node --check` и `git diff --check`
 проходят. Общий app TypeScript/lint не перезапускался, поскольку runtime не менялся.
+
+
+## Независимая приёмка координатора
+
+Source `f4229831c9e1af39b3a66e13ed8f06f290ffb5f6` принят в интеграцию
+коммитом `81281f4b`. Координатор повторил 9 pure tests (PASS, без SKIP) и полный
+AST scan на общей ветке. Private JSON, bounded paired JSON и stdout побайтно
+совпали с авторским результатом; все 1147 selected Git blobs, текущие байты,
+SHA и счётчики строк независимо сверены с pin `06e02207`.
+
+Counts и разбиения совпали: 1459 shared, 43 native AST records, 3769 unresolved;
+692 static / 773 dynamic / 37 unknown paths, 10 unknown methods, 0 diagnostics.
+Полные записи сохранены только в `.artifacts/private/root-api-consumer-inventory.json`;
+проверка pin — `.artifacts/root-api-consumer-pin-proof.py`. Runtime ownership,
+внешние партнёры и поведение сервера этой приёмкой не подтверждены.

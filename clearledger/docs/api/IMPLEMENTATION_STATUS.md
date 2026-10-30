@@ -218,3 +218,10 @@ credentials include; отдельные fetch/auth/error удалены. Раз�
 accept остаются разными действиями. Root: 392 transport/session/export PASS
 за 4,749 с, app/node TypeScript и targeted ESLint PASS. Реальный CORS/cookie
 обмен не проверялся. [Отчёт](INTAKE_UPLOAD_TRANSPORT_20261030.md).
+
+
+Принят воспроизводимый AST-каталог клиентских обращений: 1147 production files,
+1459 shared / 43 native records / 3769 unresolved candidates. Root повторил
+9 pure tests и полный scan, сверил все source blobs и побайтовый результат.
+Динамические вызовы и внешние партнёры не считаются установленным runtime
+ownership. [Отчёт](API_CONSUMER_INVENTORY_20261030.md).
