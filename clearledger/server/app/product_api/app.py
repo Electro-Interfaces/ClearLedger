@@ -317,6 +317,46 @@ def _describe_http_responses(schema):
     }
 
 
+def _canonical_object_id_paths(schema):
+    """Keep the named SDK contract across equivalent FastAPI path schemas."""
+    expected = {"/objects/{objectId}": "getObject",
+                "/objects/{objectId}/monitoring": "getObjectMonitoring"}
+    reference = {"$ref": "#/components/schemas/ObjectId"}
+    component = schema.get("components", {}).get("schemas", {}).get("ObjectId")
+    if not isinstance(component, dict) or not component or "$ref" in component:
+        raise ValueError("Canonical ObjectId component is missing or indirect")
+    seen, replacements = set(), []
+    for path, item in schema["paths"].items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict) or "operationId" not in operation:
+                continue
+            parameters = [p for p in operation.get("parameters", [])
+                          if p.get("name") == "objectId" and p.get("in") == "path"]
+            if path not in expected:
+                if parameters or "{objectId}" in path:
+                    raise ValueError("Unreviewed ObjectId path: " + path)
+                continue
+            if (method != "get" or operation["operationId"] != expected[path]
+                    or len(parameters) != 1 or parameters[0].get("required") is not True):
+                raise ValueError("Canonical ObjectId path metadata differs: " + path)
+            parameter = parameters[0]
+            actual = parameter.get("schema")
+            if actual != reference:
+                # Only the framework's display title may differ. All validation
+                # keywords, including future/unknown ones, must match exactly.
+                if (not isinstance(actual, dict)
+                        or {k: v for k, v in actual.items() if k != "title"}
+                        != {k: v for k, v in component.items() if k != "title"}):
+                    raise ValueError("Canonical ObjectId path constraints differ: " + path)
+                replacements.append(parameter)
+            seen.add(path)
+    if seen != set(expected):
+        raise ValueError("Canonical ObjectId paths are missing")
+    # Validate the whole boundary before changing any parameter.
+    for parameter in replacements:
+        parameter["schema"] = dict(reference)
+
+
 def curated_openapi(app):
     issuer = app.state.product_settings.issuer
     try:
@@ -332,6 +372,7 @@ def curated_openapi(app):
         raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI")
     entries = policy_registry(app)
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes, tags=OPENAPI_TAGS)
+    _canonical_object_id_paths(schema)
     for path in schema["paths"].values():
         for operation in path.values():
             for status, response in operation["responses"].items():
