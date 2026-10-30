@@ -357,6 +357,8 @@ export async function upload<T>(
    * узнать ход отправки в браузере нет, у `fetch` его не существует.
    */
   onProgress?: (доля: number) => void,
+  /** Сохранить cross-origin cookies для явно запросившего их consumer. */
+  options?: { credentials?: 'include' },
 ): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
   const requestHeaders = headers()
@@ -365,12 +367,14 @@ export async function upload<T>(
       method: 'POST',
       headers: requestHeaders, // НЕ ставим Content-Type — browser сам добавит boundary
       body: formData,
+      credentials: options?.credentials,
     })
     return handleResponse<T>(res, requestHeaders.Authorization)
   }
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${BASE_URL}${path}`)
+    if (options?.credentials === 'include') xhr.withCredentials = true
     for (const [k, v] of Object.entries(requestHeaders)) xhr.setRequestHeader(k, v)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
