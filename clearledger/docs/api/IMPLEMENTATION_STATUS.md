@@ -348,3 +348,19 @@ PASS75,607с, app/node TypeScript и предметный lint PASS. Семь н
 statements и шесть старых модулей неизменны. Это synthetic client proof,
 без actual browser/server/Jitsi, отмены серверных действий и гарантий после
 возврата функции. [Отчёт](MEETING_START_CONTEXT_20261030.md).
+
+
+M16: завершена bounded synthetic dump/restore проверка: root attempt5 — один
+сквозной item PASS за55,476с, 0FAIL/ERROR/SKIP. Реальный custom pg_dump и
+pg_restore, 347 relations/943 rows, logical catalog/data/sequence parity,
+SOURCE/TARGET native type/cast/operator/collation/NULL controls, restored gate,
+readonly runner, повтор marker/readiness, ORM rollback, checksum negative и
+точное восстановление положительного состояния прошли. Raw расхождения
+45 CHECK/5index cast representation сохранены; узкий test-only parser проверен
+20 positive/38 negative/37 raw-unknown controls и всеми50 парами. Четыре
+исторические ошибки тестов/сравнения не переписаны в PASS. Обе БД штатно
+удалены. Код приложения и frozen verifier неизменны; рабочий restore, actual
+Docker build/full lifespan и выпуск не подтверждены.
+[Финальная проверка](SCHEMA_RESTORE_PROOF_20261030.md),
+[семантический review](SCHEMA_RESTORE_CAST_REVIEW_20261030.md),
+[review реализации c79](SCHEMA_RESTORE_CANONICALIZER_REVIEW_20261030.md).

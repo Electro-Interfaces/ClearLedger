@@ -508,3 +508,18 @@ dump/raw rows/metadata lists в Git/preview не переносились.
 pure/SQL/старые accepted suites не повторялись. Production restore, Docker build,
 full lifespan/ASGI/HTTP/browser, старые binary, CI, merge/deploy/release и активация
 managed mode **NOT RUN**. Вся M16/M00–M19 и рабочая миграция остаются открыты.
+
+
+## Интеграционная приёмка координатора
+
+Source `4a963a5cfe1e7f123446226d918783a875377dd8` перенесён как
+`88fdef78bab8c8ced97b29d6d24c2a47c472799a`. Проверены exact base, три новых
+файла, clean source HEAD=origin и совпадение integration bytes. Оба файла
+тестов сохранили SHA состава единственного успешного attempt5; существующие
+app489 и frozen package16 не менялись. Повторных SQL или pure после переноса
+не было. После PASS обновлён только отчёт.
+
+Независимые source-only semantic и implementation reviews сохранены отдельно;
+второй относится к c79, а исправление R1 и final784 проверял ROOT. Все четыре
+неудачные actual попытки сохранены отдельно. Тестовые БД штатно удалены;
+результат не подтверждает рабочий backup/restore, Docker build или выпуск.
