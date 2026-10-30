@@ -181,3 +181,17 @@ manager, серверного архива/ACL, production exploit, Full Auditor
 SQL/DB, настоящие HTTP/WS, SSH, браузер, реальные env, установка пакетов,
 merge/deploy и изменения данных рабочего пространства не выполнялись. Полный CI
 не запускался; этот пакет не завершает программу M00–M19 и не разрешает выпуск.
+
+
+## Независимая приёмка интеграции
+
+Координатор перенёс только own source0bb5fb5a в интеграцию коммитом3ddf84ff;
+общая зависимость уже была принята отдельно. Те же восемь Node-модулей дали
+**509 PASS за75,638с**, FAIL/SKIP/CANCELLED/TODO0, child EXIT0/reaped. App и
+node TypeScript, targeted ESLint сервиса и нового теста также EXIT0/reaped.
+Проверены две финальные SHA256, AST изменения только import/exportWork,
+побайтовая неизменность11прежних runtime/test modules. Root отдельно сверил
+SHA исходного34-case файла и его точные bytes в итоговом тесте.
+Private evidence: `.artifacts/root-auditor-export-final.log` и
+`.artifacts/root-auditor-export-boundaries.mjs`. Реальные запросы, архивы
+клиентов, браузер и серверные права этой проверкой не принимались.

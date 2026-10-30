@@ -278,3 +278,12 @@ organization/global/superadmin semantics не объявляются покры�
 ESLint PASS; binary/error/setters и9прежних source/test modules сохранены.
 Другие unguarded JSON callers и уже отправленные серверные действия этой
 гарантией не покрыты. [Отчёт](CONF_CONTEXT_BOUNDARY_20261030.md).
+
+
+Экспорт наработок Auditor использует тот же context guard и finally cleanup:
+после смены контекста старый ответ не инициирует скачивание, временный URL
+освобождается при ошибках create/click/remove. Отдельный same-origin proxy,
+Bearer, имя архива и Auditor error semantics сохранены. Root509PASS75.638с,
+app/nodeTypeScript и targeted ESLint PASS;11прежних runtime/test modules
+сохранены. Browser download manager/server ACL/SSE/PTY не проверялись.
+[Отчёт](AUDITOR_EXPORT_CONTEXT_20261030.md).
