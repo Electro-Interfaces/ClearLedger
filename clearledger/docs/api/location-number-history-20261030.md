@@ -140,3 +140,13 @@ audit остаются вне этого пакета. Global no-reuse, полн
 миграция старых данных, retirement и temporal semantics этим изменением не обещаны.
 Models/auth/scope/DDL/dependencies, UI и рабочие данные не менялись. Проверки
 браузера, полный CI, production API и развёртывание не выполнялись.
+
+
+Независимая проверка координатора после переноса32c1788a какd858840a:
+**190PASS за31.64с**, без SKIP/DESELECTED, те же43новых+147прежних.
+Пустойcwd/абсолютныепути/явныеtestURLs/UPLOAD_DIR, HOMEсохранён безoverride.
+После завершенияpytest fresh0connections/publictables0/maxlocks64; owntestDB
+удалена обычнымDROP безFORCE/terminate, freshDBexists0/connections0.
+Это проверка данного состава, не global no-reuse: отдельный source review
+проверяет, не скрывает ли ORM object scope чужие alias rows от company-wide
+проверки занятости. Scope чтения для пользователя расширять не предлагается.

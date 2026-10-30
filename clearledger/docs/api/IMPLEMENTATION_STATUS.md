@@ -105,6 +105,11 @@ Contract SELECT перечитывается после прежнегоflush/lo
 Даты mapping/повторное закрытие/собственные commits и остальные writer bypass
 этими пакетами не исправлялись.
 
+Общая native/registry команда сохраняет уходящие code/number aliases в
+numberHistory, не меняя ключ объекта и не выдавая это за valid-time ledger.
+Root190PASS31.64с; импорты/bulk и проверка глобальной занятости при scoped ORM
+остаются отдельными границами.
+
 ## Что остаётся
 
 Write API, site/EVSE/connector и temporal retirement, shared-file GC, все
@@ -130,6 +135,7 @@ backup с фактическим восстановлением, состав р
 [WS logging](WS_LOG_PRIVACY_20261030.md),
 [export consumers](CORE_EXPORT_CONSUMERS_20261030.md),
 [mapping admission](station-mapping-admission-20261030.md),
-[Contract manual fields](contract-manual-freshness-20261030.md).
+[Contract manual fields](contract-manual-freshness-20261030.md),
+[история номеров](location-number-history-20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.
