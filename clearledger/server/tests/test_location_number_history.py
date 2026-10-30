@@ -26,6 +26,10 @@ def aliases(metadata):
     return [entry["было"] for entry in metadata["numberHistory"]]
 
 
+def code_aliases(metadata):
+    return [entry["old"] for entry in metadata.get("identifierHistory", []) if entry["domain"] == "code"]
+
+
 async def persisted(w):
     async with w.factory() as session:
         return await session.get(ServiceLocation, w.locations[0].id)
@@ -37,9 +41,11 @@ async def test_allowed_rename_records_old_alias(world, path):
     response = await mutate(w, path, {"code": "new-code"})
     assert response.status_code == 200, response.text
     row = await persisted(w)
-    assert aliases(row.extra_metadata) == ["old-0", "code-0"]
-    entry = row.extra_metadata["numberHistory"][-1]
+    assert aliases(row.extra_metadata) == ["old-0"]
+    assert code_aliases(row.extra_metadata) == ["code-0"]
+    entry = row.extra_metadata["identifierHistory"][-1]
     assert entry["field"] == "code"
+    assert entry["domain"] == "code" and entry["new"] == "new-code"
     assert entry["source"] == ("registry.objects" if path == "registry" else "native.locations")
     assert entry["actor"] == str(w.user.id)
     assert datetime.fromisoformat(entry["recordedAt"]).utcoffset().total_seconds() == 0
@@ -182,7 +188,8 @@ async def test_repeat_does_not_duplicate_history_audit_or_projection(world, path
         response = await mutate(w, path, changes)
         assert response.status_code == 200, response.text
     row = await persisted(w)
-    assert aliases(row.extra_metadata) == ["old-0", "code-0"]
+    assert aliases(row.extra_metadata) == ["old-0"]
+    assert code_aliases(row.extra_metadata) == ["code-0"]
     if path == "registry":
         assert w.projections == []
         async with w.factory() as session:
@@ -191,13 +198,14 @@ async def test_repeat_does_not_duplicate_history_audit_or_projection(world, path
         details = json.loads(audits[0].details)
         assert details["code"] == {"from": "code-0", "to": "new-code"}
         assert details["extra_metadata"]["from"] == w.locations[0].extra_metadata
-        assert aliases(details["extra_metadata"]["to"]) == ["old-0", "code-0"]
+        assert aliases(details["extra_metadata"]["to"]) == ["old-0"]
+        assert code_aliases(details["extra_metadata"]["to"]) == ["code-0"]
     else:
         assert w.projections == [(w.cid, w.locations[0].id, "new-code")] * 2
 
 
 @pytest.mark.parametrize("history", [None, [], "absent"])
-async def test_absent_or_empty_history_starts_on_first_outgoing_value(world, history):
+async def test_code_change_preserves_absent_or_empty_number_history(world, history):
     w = world
     async with w.factory() as session:
         loc = await session.get(ServiceLocation, w.locations[0].id)
@@ -207,7 +215,12 @@ async def test_absent_or_empty_history_starts_on_first_outgoing_value(world, his
         await session.commit()
     response = await mutate(w, "native", {"code": "new-code"})
     assert response.status_code == 200, response.text
-    assert aliases((await persisted(w)).extra_metadata) == ["code-0"]
+    md = (await persisted(w)).extra_metadata
+    assert code_aliases(md) == ["code-0"]
+    if history == "absent":
+        assert "numberHistory" not in md
+    else:
+        assert md["numberHistory"] == history
 
 
 @pytest.mark.parametrize("history", [{"было": "old"}, "old", 7, False, [None], ["old"], [7]])
@@ -242,7 +255,8 @@ async def test_direct_command_rollback_is_atomic_and_snapshots_are_not_mutated(w
         assert original_history == [{"было": "old-0"}]
         assert set(mutation.changes) == {"code", "station_number", "extra_metadata"}
         assert mutation.changes["extra_metadata"]["from"] == original_md
-        assert aliases(mutation.changes["extra_metadata"]["to"]) == ["old-0", "code-0", "number-0"]
+        assert aliases(mutation.changes["extra_metadata"]["to"]) == ["old-0", "number-0"]
+        assert code_aliases(mutation.changes["extra_metadata"]["to"]) == ["code-0"]
         entry = mutation.location.extra_metadata["numberHistory"][-1]
         assert entry["actor"] is None and entry["source"] == "unknown"
         await session.flush()
@@ -298,7 +312,8 @@ async def test_initial_create_does_not_invent_history_and_existing_ids_stay_opaq
     response = await w.client.patch("/api/locations/" + identifier, json={"code": "next-code"})
     assert response.status_code == 200, response.text
     assert response.json()["id"] == identifier
-    assert aliases(response.json()["metadata"]) == ["initial-code"]
+    assert "numberHistory" not in response.json()["metadata"]
+    assert code_aliases(response.json()["metadata"]) == ["initial-code"]
 
 
 async def test_preexisting_double_station_number_is_not_reconciled_or_renumbered(world):
