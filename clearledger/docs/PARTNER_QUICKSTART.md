@@ -1,5 +1,20 @@
 # Подключение внешнего приложения: кандидат API
 
+M06-R3 добавляет required nullable `typeCode` и `validUntil` в Contract list/detail.
+Оба source-valued: код не является глобальным enum, срок хранится строкой до 20
+символов без гарантии ISO date; null не означает бессрочность. В `/contracts`
+поддерживается точный фильтр `typeCode` (1..256, без NUL, без trim/case folding).
+Для кода из доступного договора можно прочитать подпись через
+`GET /api/v1/contract-types?typeCode=...` (`getContractTypeMetadata`): нужны
+`contracts:read`, typed contract grant и все текущие user/service ограничения.
+Скрытый/неиспользуемый в доступных договорах код даёт 404; видимый unknown code
+даёт 200 с nullable metadata, inactive сохраняет историческую подпись. Всего 15 GET
+(11 user/service + 4 user-only). ROOT принял отдельные new103 и regression84/152
+subtests, SDK15 generation/freshness, 6 generator checks и 4 consumers;
+[границы и остаток M06](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
+
+Ниже сохранены датированные сведения прежних срезов NEXT-R2/R1/M12.
+
 Текущий NEXT-R2 добавляет `GET /api/v1/contracts/{contractId}/documents`
 (`listContractDocuments`): явные subject/graph связи с независимо доступными
 документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,

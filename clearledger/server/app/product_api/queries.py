@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime, time, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import and_, false, func, or_, select
+from sqlalchemy import and_, column, false, func, or_, select, table
 from sqlalchemy.sql.sqltypes import Uuid
 
 from app.api_contracts import ScopeMode
@@ -19,6 +19,9 @@ MODELS = {"objects": ServiceLocation, "equipment": EzsEquipmentUnit, "counterpar
           "contracts": Contract, "documents": DocCard}
 SEARCH = {"objects": ServiceLocation.name, "equipment": EzsEquipmentUnit.serial_number,
           "counterparties": Counterparty.name, "contracts": Contract.number, "documents": DocCard.title}
+# Native classifier is a global raw-DDL catalog, not an ORM/business model.
+CONTRACT_TYPES = table("contract_types", *(column(name) for name in
+    ("code", "label", "gk_basis", "direction", "is_active")))
 
 
 def native_id(column, value):
@@ -135,6 +138,8 @@ class Query:
     async def listing(self, resource, params):
         model = MODELS[resource]
         conditions = await self.conditions(resource)
+        if resource == "contracts" and getattr(params, "typeCode", None) is not None:
+            conditions.append(Contract.type_code == params.typeCode)
         if params.q is not None:
             conditions.append(SEARCH[resource].ilike("%" + params.q + "%"))
         if params.date_from is not None:
@@ -166,6 +171,19 @@ class Query:
         if row is None:
             raise HTTPException(404, "Not found")
         return row
+
+    async def contract_type_metadata(self, params):
+        """Catalog labels only after independently visible contract evidence."""
+        visible = await self.db.scalar(select(select(Contract.id).where(
+            *await self.conditions("contracts"), Contract.type_code == params.typeCode).exists()))
+        if not visible:
+            raise HTTPException(404, "Not found")
+        row = (await self.db.execute(select(CONTRACT_TYPES.c.label, CONTRACT_TYPES.c.gk_basis,
+            CONTRACT_TYPES.c.direction, CONTRACT_TYPES.c.is_active).where(
+                CONTRACT_TYPES.c.code == params.typeCode))).mappings().one_or_none()
+        return dto.ContractTypeMetadata(type_code=params.typeCode,
+            label=row["label"] if row else None, gk_basis=row["gk_basis"] if row else None,
+            direction=row["direction"] if row else None, is_active=row["is_active"] if row else None)
 
     async def contract_objects(self, identifier, params):
         """Visible explicit current associations; company scope never implies ALL."""
@@ -249,7 +267,8 @@ class Query:
                     contract_date = date.fromisoformat(row.date)
                 except (ValueError, TypeError):
                     contract_date = None
-                value = dto.Contract(id=str(row.id), number=row.number, date=contract_date, title=row.title,
+                value = dto.Contract(type_code=row.type_code, valid_until=row.valid_until,
+                    id=str(row.id), number=row.number, date=contract_date, title=row.title,
                     is_closed=row.is_closed, scope_type=row.scope_type,
                     counterparty_id=str(row.counterparty_id) if row.counterparty_id in parties else None)
             else:

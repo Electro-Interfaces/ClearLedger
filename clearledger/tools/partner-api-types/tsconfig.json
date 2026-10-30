@@ -16,6 +16,7 @@
   "files": [
     "consumer.ts",
     "contract-objects-consumer.ts",
-    "contract-documents-consumer.ts"
+    "contract-documents-consumer.ts",
+    "contract-classification-consumer.ts"
   ]
 }
