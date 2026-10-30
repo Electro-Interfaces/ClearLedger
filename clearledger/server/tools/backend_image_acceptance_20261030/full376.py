@@ -30,7 +30,6 @@ import traceback
 from urllib.parse import urlsplit
 
 SERVER = Path(__file__).resolve().parents[2]
-REPO = SERVER.parents[1]
 SELF = Path(__file__).resolve()
 OTHER_RUNNER = Path(__file__).resolve().parent / 'main8.py'
 APPROVED_OTHER_SHA = None
