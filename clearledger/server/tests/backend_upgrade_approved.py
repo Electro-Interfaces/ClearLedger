@@ -21,6 +21,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from urllib.parse import urlsplit
 
 SERVER = Path(__file__).resolve().parents[1]
@@ -28,7 +29,7 @@ REPO = SERVER.parents[1]
 SELF = Path(__file__).resolve()
 CANDIDATE = Path('/srv/projects/api-modernization-upgrade-test-env-20261030/.venv')
 SITE = CANDIDATE / 'lib/python3.13/site-packages'
-RUN = REPO / '.artifacts/backend-upgrade-functional-execution-20261030'
+RUN = REPO / '.artifacts/backend-upgrade-functional-execution-20261030-attempt2'
 EMPTY, UPLOAD, EVIDENCE = (RUN / n for n in ('empty-test', 'upgrade-test-uploads', 'evidence'))
 DSN = 'postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/api_backend_upgrade_test_20261030'
 RAW_DSN = DSN.replace('postgresql+asyncpg:', 'postgresql:', 1)
@@ -45,6 +46,8 @@ EXPECTED_CASES = {'backend_upgrade_approved.py': 6, 'test_api_contracts_context.
 PREPARATION_RECEIPTS = {'runtime-prepare-proof.json': 'abbd7b18db3ba39bc18ad6ded7158347e8964af1126128472f9b9868a8863a42', 'test-tools-prepare-proof.json': 'f183375c1a42089673fe47824868e0670874aa3a884a32c0a3296cd5990bfe39'}
 FORBIDDEN_COUNTERS = ('blocked_network', 'blocked_subprocess', 'denied_env_reads')
 SENDER_COUNTS = {}
+AUDIT_DIAGNOSTICS = []
+IMPORT_CAPABILITY_PROOF = {}
 BOUNDARY = {'blocked_network': 0, 'allowed_pg_connects': 0, 'blocked_subprocess': 0,
             'denied_env_reads': 0, 'db_connections': 0}
 
@@ -130,34 +133,65 @@ def write_json(path, value):
 
 
 def install_boundaries():
+    def diagnostic(event):
+        if len(AUDIT_DIAGNOSTICS) >= 32:
+            return
+        stack = traceback.StackSummary.extract(traceback.walk_stack(None), limit=12, lookup_lines=False)
+        def safe_file(filename):
+            path = Path(filename)
+            if path.is_relative_to(SERVER):
+                return 'server/' + str(path.relative_to(SERVER))
+            if path.is_relative_to(SITE):
+                return 'site/' + str(path.relative_to(SITE))
+            return path.name
+        AUDIT_DIAGNOSTICS.append({'event': event, 'stack': [
+            {'file': safe_file(frame.filename), 'function': frame.name, 'line': frame.lineno}
+            for frame in stack]})
     def audit(event, args):
         if event == 'socket.connect':
             sock, address = args
             if sock.family not in (socket.AF_INET, socket.AF_INET6) or address != ('127.0.0.1', 33546):
+                diagnostic(event)
                 BOUNDARY['blocked_network'] += 1
                 raise RuntimeError('Only approved PostgreSQL loopback socket allowed')
             BOUNDARY['allowed_pg_connects'] += 1
         elif event in {'socket.bind', 'socket.sendto', 'socket.sendmsg'}:
+            diagnostic(event)
             BOUNDARY['blocked_network'] += 1
             raise RuntimeError('No listeners/datagrams in candidate tests')
         elif event == 'socket.getaddrinfo':
             if args[0] != '127.0.0.1' or int(args[1]) != 33546:
+                diagnostic(event)
                 BOUNDARY['blocked_network'] += 1
                 raise RuntimeError('External DNS prohibited')
         elif event in {'subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.exec', 'os.fork', 'os.forkpty'}:
+            diagnostic(event)
             BOUNDARY['blocked_subprocess'] += 1
             raise RuntimeError('Subprocesses prohibited inside test child')
         elif event == 'open' and isinstance(args[0], (str, bytes, os.PathLike)):
             if Path(os.fsdecode(args[0])).name == '.env':
+                diagnostic(event)
                 BOUNDARY['denied_env_reads'] += 1
                 raise RuntimeError('Reading .env prohibited')
     sys.addaudithook(audit)
     # Low-level socket restriction remains even if a test replaces an HTTP seam.
-    import aiohttp
-    import aiosmtplib
-    import httpx
-    import pywebpush
-    import requests
+    # ROOT-approved isolation of urllib3's import-only IPv6 bind capability probe.
+    # No bind is allowed: report IPv6 unavailable during exactly these imports.
+    # Restore the exact old flag before all later application imports/fixtures.
+    ipv6_before = socket.has_ipv6
+    try:
+        socket.has_ipv6 = False
+        import aiohttp
+        import aiosmtplib
+        import httpx
+        import pywebpush
+        import requests
+    finally:
+        socket.has_ipv6 = ipv6_before
+        IMPORT_CAPABILITY_PROOF.update(
+            scope=['aiohttp', 'aiosmtplib', 'httpx', 'pywebpush', 'requests'],
+            suppressed=True, restored=socket.has_ipv6 is ipv6_before,
+            old_value=ipv6_before, bind_allowance=False)
     import smtplib
     stack = ExitStack()
     def captured(label, result=None, *, asynchronous=False):
@@ -169,11 +203,13 @@ def install_boundaries():
             return call(*args, **kwargs)
         return acall if asynchronous else call
     def deny(*args, **kwargs):
+        diagnostic('blocked-external-transport')
         BOUNDARY['blocked_network'] += 1
         raise RuntimeError('External sender blocked')
     async def adeny(*args, **kwargs):
         return deny(*args, **kwargs)
     from unittest.mock import patch
+    stack.enter_context(patch.object(socket.socket, 'listen', deny))
     for owner, name, replacement in (
         (aiosmtplib, 'send', captured('smtp.aiosmtplib.send', asynchronous=True)),
         (aiosmtplib.SMTP, 'connect', captured('smtp.aiosmtplib.connect', asynchronous=True)),
@@ -308,6 +344,9 @@ def child(approved_sha):
     code = 2
     try:
         with install_boundaries():
+            if not (IMPORT_CAPABILITY_PROOF.get('suppressed') is True and
+                    IMPORT_CAPABILITY_PROOF.get('restored') is True):
+                raise RuntimeError('Import capability isolation/restore proof required')
             asyncio.run(database_preflight())
             import pytest
             class Record:
@@ -353,7 +392,9 @@ def child(approved_sha):
         if os.environ.get('HOME') != pwd.getpwuid(os.getuid()).pw_dir:
             code = code or 5
         record.update(status='PASS' if code == 0 else 'FAIL', boundary=dict(BOUNDARY),
-                      sender_counts=dict(SENDER_COUNTS),
+                      sender_counts=dict(SENDER_COUNTS), audit_diagnostics=list(AUDIT_DIAGNOSTICS),
+                      import_capability_proof=dict(IMPORT_CAPABILITY_PROOF),
+                      ipv6_import_probe_suppressed=IMPORT_CAPABILITY_PROOF.get('suppressed') is True,
                       home_preserved=os.environ.get('HOME') == pwd.getpwuid(os.getuid()).pw_dir)
         write_json(EVIDENCE / 'boundary-proof.json', record)
     return code
@@ -367,7 +408,8 @@ def clean_environment():
             'ECOSYSTEM_COMPANIES': '', 'DATABASE_URL': DSN, 'TEST_DATABASE_URL': DSN,
             'UPLOAD_DIR': str(UPLOAD), 'TMPDIR': str(EMPTY), 'PYTHONDONTWRITEBYTECODE': '1',
             'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1', 'RUN_PARTNER_IDENTITY_TESTS': '1',
-            'RUN_PRODUCT_API_TESTS': '1', 'SEED_SUPERADMIN_EMAIL': 'admin@clearledger.ru',
+            'RUN_PRODUCT_API_TESTS': '1', 'RUN_DOCS_PORTAL_TESTS': '1',
+            'RUN_PRODUCT_OBJECT_ID_TESTS': '1', 'SEED_SUPERADMIN_EMAIL': 'admin@clearledger.ru',
             'SEED_SUPERADMIN_PASSWORD': 'admin123'}
 
 
@@ -432,7 +474,10 @@ def supervise(approved_sha):
             boundary = json.loads(proof.read_text())
             accepted = (accepted and boundary.get('home_preserved') is True and
                         all(boundary.get('boundary', {}).get(name) == 0 for name in FORBIDDEN_COUNTERS) and
-                        isinstance(boundary.get('sender_counts'), dict) and bool(boundary['sender_counts']))
+                        isinstance(boundary.get('sender_counts'), dict) and bool(boundary['sender_counts']) and
+                        boundary.get('import_capability_proof', {}).get('suppressed') is True and
+                        boundary.get('import_capability_proof', {}).get('restored') is True and
+                        boundary.get('import_capability_proof', {}).get('bind_allowance') is False)
     except Exception as exc:
         accepted = False
         reason = 'JUnit/proof validation failed: ' + type(exc).__name__

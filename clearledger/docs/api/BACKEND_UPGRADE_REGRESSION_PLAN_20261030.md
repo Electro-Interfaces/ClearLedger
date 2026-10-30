@@ -202,7 +202,7 @@ Runner сохраняет full nodeids/outcomes и точный inventory; эт�
 | schema_migrations | `c641925633181647d39f788fd29765322d3a2027f6fcaeaefe533e870d1f1f0e` |
 | tests | `faa034c1241dabd15aceb82f1ed6e90e47a0131b9af6ab0342cf00f7a898e722` |
 
-Runner SHA-256: `d4377eb31c0823d2cfe4379f32590647f49801dd61d2ed8860c143669d5b9e8f`.
+Runner SHA-256: `489636f3de7dbe325abf86658930945fa868f1146a4cdc490e6168ed54ae8ef1`.
 
 ROOT получает отдельный private frozen proposal с commit, full file hashes,
 источниками16 tools без копирования retained40MB, принятыми installation receipts,
@@ -226,3 +226,44 @@ Requirements/Dockerfile/Compose/features/CI, baseline locks, прежние app/
 импорта application sender modules. RLIMIT проверен против unchanged fixture
 sources; pin/runtime/порядок expected tests и все прежние assertions сохранены.
 Actual execution остаётся ROOT-only; source-only v2 proposal имеет отдельный hash.
+
+
+## ROOT attempt1: collection gate stopped, 0 testcase calls
+
+ROOT исполнил reviewedv2 в новом host candidate: outer18.514903652481735s,
+supervisor17.64159861486405s, childexit4. Собрано327case; два unchanged модуля
+(docs_portal22 и product_object_ids27) дали module-level SKIP из-за отсутствующих
+opt-in flags. Collection guard сохранил expected376 и остановил запуск до
+fixtures/test calls; testcase assertions не исполнялись. В boundary proof:
+blocked_network1, blocked_subprocess0, denied_env_reads0, PGconnect2; БД пустая
+7,765,015bytes, HOME сохранён, exact77. Все sender stub counts0. Это **не PASS**
+и не обнаруженная application assertion regression.
+
+ROOT выполнил normal DROP только own dedicated DB: relations0, connections0,
+exists0; max_locks_per_transaction64 сохранён. Worker SQL не вызывал. Все v2
+артефакты остаются неизменными; новый запуск использует fresh attempt2 directory.
+
+| Сохранённое evidence первого actual attempt | SHA-256 |
+|---|---|
+| boundary proof | `985ec83bbc3d062e2c09780636dc1e68705defd95f915fa9e81e2f356069c7b6` |
+| supervisor proof | `cadf2c6028c41770342829ab23bc2f2b5e5deaef35973627c4a5196b58cc4191` |
+| run.log | `fc7e087ac35aa74d009b832bb0009de27ceff10f7a2d3342f20a2d10c85c3dbd` |
+| JUnit | `d6e4afafa23512f635ac37af08756027dc1281873b683ed367fdd90e36c01f2c` |
+
+Для v3 добавлены только требуемые unchanged suites opt-ins
+`RUN_DOCS_PORTAL_TESTS=1` и `RUN_PRODUCT_OBJECT_ID_TESTS=1`. Count376 и testcase
+expectations не меняются. Первые ≤32 запрещённых audit events сохраняют только
+kind и ≤12 code-file/function/line frames; source lines, args, addresses,
+environment values, locals и tokens в диагностике отсутствуют.
+
+Source review retained urllib3/util/connection.py114–137 и независимое чтение
+ROOT объясняют startup counter1: `_has_ipv6("::1")` вызывает bind и подавляет
+Exception. Actual stack первого attempt не собирался, поэтому это source-backed
+объяснение. ROOT разрешил временно назначить socket.has_ipv6=False **только на
+пять explicit initial imports** aiohttp/aiosmtplib/httpx/pywebpush/requests,
+затем восстановить exact original в finally до любых application imports и
+fixtures. Это подавляет import capability probe без выполнения bind. Никаких
+разрешений socket bind/listen/network не добавлено, counter discounts нет;
+strictzero в child/supervisor сохранён. Evidence записывает suppressed/restored,
+original capability boolean и bind_allowance=False. IPv6/реальный HTTP transport
+этот ASGI прогон не валидирует. Любая иная запрещённая попытка означает FAIL.
