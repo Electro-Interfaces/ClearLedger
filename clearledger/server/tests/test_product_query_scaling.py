@@ -297,12 +297,17 @@ def domain_shape(observed, resource, restricted, machine, *, listing):
 
 def evidence(observed, response, **case):
     # Keep SQL shapes hashed and parameters/tokens/row IDs out of artifacts.
-    return {**case, "status": response.status_code, "response_bytes": len(response.content),
+    sample = {**case, "status": response.status_code, "response_bytes": len(response.content),
         "sql_statements": len(observed["statements"]), "hydrated_rows": dict(observed["hydrated"]),
         "cursor_returned_rows": [item["cursor_rows"] for item in observed["statements"]],
         "sql_shape_sha256": [hashlib.sha256(item["sql"].encode()).hexdigest()
             for item in observed["statements"]],
         "wall_seconds": observed["wall_seconds"], "peak_python_bytes": observed["peak_python_bytes"]}
+    # Persist completed samples even when a later assertion aborts this scale;
+    # writing is outside the observed request, and never goes into Git.
+    with (EVIDENCE / f"samples-scale-{case['scale']}.jsonl").open("a") as output:
+        output.write(json.dumps(sample, sort_keys=True) + "\n")
+    return sample
 
 
 @pytest.mark.parametrize("scale", SCALES)
@@ -386,10 +391,20 @@ async def test_product_query_scaling(budget, scale, record_property):
         if machine:
             with observations(b.engine) as observed:
                 response = await b.http.get("/documents", params={"pageSize": 200})
-            assert response.status_code == 403
-            assert not any(item["table"] == "doc_cards" for item in observed["statements"])
+            validation = [item for item in observed["statements"] if item["table"] == "doc_cards"]
             samples.append(evidence(observed, response, scale=scale, profile=profile,
-                resource="documents", operation="service-denied", response_rows=0))
+                resource="documents", operation="service-denied", response_rows=0,
+                document_id_validation_statements=len(validation)))
+            assert response.status_code == 403
+            assert observed["hydrated"]["doc_cards"] == 0
+            # Stored unused SET profiles are still validated by the real
+            # verifier. Permit that scalar tenant/ID check, never a domain
+            # COUNT, entity projection or document list/detail query.
+            for item in validation:
+                assert not item["entity"]
+                assert item["sql"].split(" from ", 1)[0] == "select doc_cards.id"
+                assert "doc_cards.company_id = " in item["sql"] and "doc_cards.id in (" in item["sql"]
+                assert all(fragment not in item["sql"] for fragment in ("count(", " order by ", " limit "))
     # Session-scoped schema teardown belongs to the existing conftest. Each
     # scale has a separate synthetic company, never global DELETE/other DBs.
     record_property("product_query_scaling", json.dumps({"scale": scale,
