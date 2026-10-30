@@ -89,16 +89,27 @@ receipts, удаление только созданных exactIDs с retained 
 ## Ограничения и критерии результата
 
 До исполнения ROOT принимает private frozen proposal с exact SHA/argv/env/budgets.
-Диск принимается по отдельным последовательным admission stages при reserve≥16GiB
+Первый source freeze273ebe49/V3 отозван до исполнения: неиспользуемый host REPO
+вычислял SERVER.parents[1] при SERVER=/app. V4 удаляет только это присваивание
+из двух новых runners; старый commit и proposals сохранены. Source-only symbolic
+AST review проверил29+35+3 top-level assignments для image paths; никакой runner
+не импортировался и не исполнялся. HOME65534=/nonexistent сохраняется по passwd;
+записи идут только в ROOT-owned /acceptance, bytecode/cache отключены.
+Actual readonly-rootfs/user/mount proofs остаются за ROOT.
+Отдельным allocation decision msg_49b88fa5deb3 ROOT заменил собственный
+первоначальный плановый reserve16GiB на15GiB; upper bounds load/build не уменьшены.
+Это новое решение ROOT для данной локальной приёмки, не изменение прежних proofs.
+Диск принимается по последовательным fresh admission stages при reserve≥15GiB
 всегда: load upper2473280512B из прежнего accepted2expanded+compressed accounting,
 плюс1MiB bounded output; после доказанного освобождения load temporaries — fresh
 build admission с upper768MiB для новых context/images/cache/logs; затем fresh
 admission160MiB для двух retained test scratch/evidence directories. Это upperbound
 и watchdog, не hard quota Docker FS. При исходном ROOT preflight free19578298368B load stage
 не укладывается: headroom2398429184B меньше required2474329088B на75899904B.
-ROOT должен сначала разрешить дефицит собственных ephemeral ресурсов или остановить
-работу; observed прошлый load расход не подменяет upperbound. Старые proof/wheels/env,
-чужие ресурсы и reserve сохраняются. Retained archive не копируется повторно.
+После ROOT allocation decision free19127570432B даёт headroom3021443072B
+над reserve15GiB; fresh measurement перед каждой стадией остаётся обязательным.
+Observed прошлый load расход не подменяет upperbound. Старые proof/wheels/env,
+чужие ресурсы сохраняются; оба host env ROOT восстановил после отменённой временной архивации. Retained archive не копируется повторно.
 Context≤128MiB, PGDATA≤512MiB tmpfs,
 test scratch≤64MiB/4096 entries, stdout каждого child≤2MiB, file≤2MiB,
 JSON≤2MiB, traces≤16KiB each/1MiB total, DB≤256MiB. ROOT обязан доказать upper bound
