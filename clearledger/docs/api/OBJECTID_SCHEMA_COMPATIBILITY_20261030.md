@@ -3,6 +3,11 @@
 База кандидата: `0eb3319dffc30da8df40cdb83d0c280bb41be211`.
 Ветка: `agent/api-objectid-schema-compatibility-20261030`.
 
+Узкая приёмка ROOT завершена успешно на коммите
+`7622caf2f2d8508c6f8559e9d2aeac6d81d4ba18`: old 14 PASS и new 14 PASS,
+без FAIL/ERROR/SKIP. Прежняя проверка ссылки ObjectId прошла без изменения
+assertion. Общий прогон 376 после правки не выполнялся; статуса «376 PASS» нет.
+
 По переданным координатором доказательствам новый FastAPI 0.133.0 / Starlette
 1.3.1 публикует эквивалентные ограничения ObjectId непосредственно в schema
 path-параметра. На FastAPI 0.115.6 / Starlette 0.41.3 там уже находится ссылка
@@ -116,6 +121,45 @@ old/new pytest 1.66/1.70 с, outer 3.685/3.588 с. Blanket-запрет app.serv
 Доказательства сохранены в `.artifacts/root-objectid-schema-review-v3-20261030`.
 Для v4 применён описанный выше точный список 20 модулей с отдельным запретом
 исполнения сервисных функций. Продукт и тесты по-прежнему неизменны с de255800.
-Повторная матрица v4 ожидает запуска ROOT после заморозки;
-общие 375 успешных runtime/access/library проверок повторно не запускались.
+Матрица v4 выполнена ROOT и принята после завершения обоих процессов.
+Общие 375 успешных runtime/access/library проверок повторно не запускались.
 Никаких изменений общих папок, старых доказательств, merge или выпуска нет.
+
+## Фактические доказательства ROOT v4
+
+| Окружение | Результат | pytest console | JUnit suite | Весь процесс |
+|---|---|---:|---:|---:|
+| old: FastAPI 0.115.6 / Starlette 0.41.3 | 14 PASS, 0 FAIL/ERROR/SKIP | 3.57 с | 3.592 с | 6.492341409437358 с |
+| new: FastAPI 0.133.0 / Starlette 1.3.1 | 14 PASS, 0 FAIL/ERROR/SKIP | 4.54 с | 4.560 с | 6.979167857207358 с |
+
+В каждом boundary-proof ровно 42 успешные фазы setup/call/teardown,
+`ok=true`, ноль запрещённых попыток, ровно 20 разрешённых импортов приложения,
+`real_engines_created=0`, `connections_allowed=false`.
+SQLAlchemy и app.database действительно импортированы; инертная привязка нужна
+только для объявления моделей. Настоящие engine, сессии и SQL не выполнялись.
+Функции разрешённых service-модулей не вызывались, внешних отправок нет.
+
+Исходники app/tests/runner заморожены на `7622caf2`; правка продукта и тесты
+не менялись после `de255800`. Финальный коммит отчёта изменяет только этот документ.
+ROOT независимо подтвердил неизменность остального AST app.py и bytes старого
+теста в `source-review.json`; работник прочитал доказательства и сверил SHA,
+JUnit и boundary без выполнения приложения или тестов.
+
+Доказательства находятся в ROOT worktree, а не внутри ветки кандидата:
+`/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/root-objectid-schema-review-v4-20261030/`.
+Все относительные пути `.artifacts` в истории попыток выше тоже относятся к
+этому ROOT worktree. Основные файлы: `root-acceptance.json`, `source-review.json`,
+для old/new — `process.json`, `run.log`,
+`objectid-test-evidence/{junit.xml,boundary-proof.json,pytest.log}`.
+
+| Артефакт | SHA-256 |
+|---|---|
+| Замороженный runner | `72d9fe961c6b212ecf1483329d17a72c06d5eda03a02a755e82e39d5814ed7c9` |
+| old JUnit | `5dc0a12d2f6cad503fbf11ed5203c511fc08123bf0de4c9aec7d535331c39f03` |
+| old boundary | `a26aa10f994e3fc6eecd0eba1ecd430f0be9536b8fe188d238a41ec51a886307` |
+| new JUnit | `a9f090528a8c4526cff0e0f51d0410563a30f5535d59a9bc3377f473af0e1a03` |
+| new boundary | `abbc2eaacb67a43c3e5c91a4fdf121b26ff24e096e5f833773fb23e59644ee0b` |
+
+Исходный named-component drift закрыт в пределах этой задачи. Интеграция
+кандидата в общий состав остаётся за ROOT, программа модернизации продолжается;
+эта приёмка не подтверждает новый единый прогон 376, merge или выпуск.
