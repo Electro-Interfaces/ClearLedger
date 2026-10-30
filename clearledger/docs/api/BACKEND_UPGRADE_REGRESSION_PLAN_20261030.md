@@ -202,7 +202,7 @@ Runner сохраняет full nodeids/outcomes и точный inventory; эт�
 | schema_migrations | `c641925633181647d39f788fd29765322d3a2027f6fcaeaefe533e870d1f1f0e` |
 | tests | `faa034c1241dabd15aceb82f1ed6e90e47a0131b9af6ab0342cf00f7a898e722` |
 
-Runner SHA-256: `489636f3de7dbe325abf86658930945fa868f1146a4cdc490e6168ed54ae8ef1`.
+Runner SHA-256: `b13d20b54e8dbf5804ba9ba77f2d00b42092847914e81fb4d88d226e50ca744a`.
 
 ROOT получает отдельный private frozen proposal с commit, full file hashes,
 источниками16 tools без копирования retained40MB, принятыми installation receipts,
@@ -267,3 +267,48 @@ fixtures. Это подавляет import capability probe без выполн�
 strictzero в child/supervisor сохранён. Evidence записывает suppressed/restored,
 original capability boolean и bind_allowance=False. IPv6/реальный HTTP transport
 этот ASGI прогон не валидирует. Любая иная запрещённая попытка означает FAIL.
+
+
+## ROOT attempt2: interrupted partial run; next profile is diagnostic
+
+ROOT начал actual v3/full376 на неизменном runtime77. Supervisor прервал own child
+из-за FileNotFoundError между rglob/stat live scratch: temporary sample.bin
+был удалён тестом. Supervisor204.63358381204307s, ROOT205.65794378332794s,
+child killed/reaped. Run.log386bytes содержит dots и failures, но final JUnit и
+boundary отсутствуют; атомарного per-test checkpoint в v3 не было. **Точное число
+PASS/FAIL неизвестно и не принимается**, выводить его из progress symbols нельзя.
+Original attempt2 целиком сохранён. Worker не исполнял runner/SQL.
+
+V4 исправляет только observer/harness: точный owned root lstat anchor(dev/ino/uid),
+bounded os.walk(followlinks=False), lstat каждого child. Игнорируется **только**
+FileNotFoundError/ENOENT с exact filename исчезнувшего descendant внутри own root;
+missing/drifted root, permission/I/O и любые иные errors остаются failure.
+Symlinks/FIFOs negative file-policy fixtures учитываются в count, не обходятся и
+не читаются; regular bytes≤64MiB, all observed entries≤4096. Проверка anchor
+повторяется после обхода. Использован reviewed target-driver ENOENT-only pattern;
+anchor identity и error policy записываются supervisor receipt.
+
+После каждого pytest report phase пишется атомарный bounded checkpoint:
+exclusive no-follow sibling temp, flush/fsync и os.replace в evidence. Содержит
+nodeids/outcomes, last phase, counters/stub counts и safe failure trace при FAIL.
+Каждый trace≤16KiB UTF-8, суммарно≤1MiB; после budget записывается truncated marker.
+Pytest showlocals выключен, URL credentials/JWT/credential assignment values
+редактируются; реальные .env/credentials в child отсутствуют. JSON≤2MiB,
+private aggregate scratch≤64MiB и aggregate stdout log≤2MiB сохранены.
+Неполный checkpoint явно complete=False/full376_accepted=False; это не PASS suite.
+
+Следующий **отдельный diagnostic profile**:
+`--profile api-contracts-http-first-failure` выбирает только
+`tests/test_api_contracts_http.py`, ожидает **56 collected cases** по прежнему AST
+и добавляет `--maxfail=1`. При первой неудаче нормально сохраняются testcase trace,
+JUnit, boundary, atomic checkpoint и supervisor receipts. Это ожидаемый diagnostic
+FAIL для получения первой причины, **не приёмка376**. Даже если все56 пройдут,
+статус DIAGNOSTIC_PASS/full376_accepted=False не означает полный functional PASS.
+
+Профиль `--profile full376` сохраняет прежние 376 selectors/counts/assertions и
+не добавляет maxfail. ROOT не повторяет его до понимания первой ошибки. V4 имеет
+fresh attempt3 directory; original attempt1/2 и frozen proposals1–3 сохранены.
+ROOT отметил source lead: sync TestClient/lifespan и app.router.startup/shutdown
+в create_policy_app. Это пока гипотеза; actual trace следующим diagnostic прогоном
+получает ROOT. Application/API/dependencies/tests ожидания не меняются ради обхода
+startup; никаких application fixes в ownership этого пакета нет.
