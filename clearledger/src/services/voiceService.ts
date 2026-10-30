@@ -41,6 +41,31 @@ async function выпустить(companyId: string): Promise<VoiceAccessToken> 
 }
 
 const voiceAuth = createVoiceAuth({ issue: выпустить })
+let operationGeneration = 0
+const activeStreams = new Set<AbortController>()
+
+/** Lifetime операции отделён от кэша токенов: reset не разрешает старый dispatch/retry. */
+function captureVoiceContext() {
+  const generation = operationGeneration
+  const isCurrent = () => generation === operationGeneration
+  const assertCurrent = () => {
+    if (!isCurrent()) throw new DOMException('Контекст телефонии изменился', 'AbortError')
+  }
+  return {
+    isCurrent, assertCurrent,
+    async run<T>(work: () => Promise<T>): Promise<T> {
+      assertCurrent()
+      try {
+        const result = await work()
+        assertCurrent()
+        return result
+      } catch (error) {
+        assertCurrent()
+        throw error
+      }
+    },
+  }
+}
 
 /**
  * Забыть все пропуски узлов при выходе или смене компании.
@@ -49,11 +74,17 @@ const voiceAuth = createVoiceAuth({ issue: выпустить })
  * той же компании не должен дожить с ним пятиминутный токен прежнего.
  */
 export function resetVoiceAuth() {
+  operationGeneration++
   voiceAuth.invalidate()
+  const streams = [...activeStreams]
+  activeStreams.clear()
+  for (const stream of streams) stream.abort()
 }
 
 /** Токен для узла: из памяти, пока до конца срока больше минуты, иначе новый. */
-export const voiceToken = voiceAuth.get
+export function voiceToken(companyId: string): Promise<VoiceAccessToken> {
+  return captureVoiceContext().run(() => voiceAuth.get(companyId))
+}
 
 function забыть(companyId: string) {
   voiceAuth.invalidate(companyId)
@@ -144,34 +175,41 @@ function адрес(path: string, query?: Опции['query']) {
   return url.toString()
 }
 
-async function отправить(companyId: string, path: string, o: Опции, повтор = true): Promise<Response> {
-  const { token } = await voiceToken(companyId)
+async function отправить(
+  companyId: string, path: string, o: Опции, повтор = true, context = captureVoiceContext(),
+): Promise<Response> {
+  const { token } = await context.run(() => voiceToken(companyId))
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
   if (o.body !== undefined) headers['Content-Type'] = 'application/json'
   if (o.ifMatch) headers['If-Match'] = o.ifMatch
-  const res = await fetch(адрес(path, o.query), {
+  const res = await context.run(() => fetch(адрес(path, o.query), {
     method: o.method ?? 'GET', headers,
     body: o.form ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined),
-  })
+  }))
+  context.assertCurrent()
   if (res.status === 401) {
     // Даже второй отвергнутый токен не оставляем в кэше: следующий ручной запрос
     // начнёт с новой выдачи, но этот запрос всё равно повторяем только один раз.
     забыть(companyId)
-    if (повтор) return отправить(companyId, path, o, false)
+    if (повтор) return отправить(companyId, path, o, false, context)
   }
   if (!res.ok && !o.принять?.includes(res.status)) {
     let b: { error?: string; detail?: string; issues?: Issue[] } = {}
-    try { b = await res.json() } catch { /* тело не JSON — хватит статуса */ }
+    try { b = await context.run(() => res.json()) } catch { context.assertCurrent() /* не JSON — хватит статуса */ }
+    context.assertCurrent()
     throw new VoiceError(res.status, b.error ?? String(res.status), словами(res.status, b.error ?? '', b.detail), b.issues)
   }
   return res
 }
 
 async function запрос<T>(companyId: string, path: string, o: Опции = {}): Promise<Ответ<T>> {
-  const res = await отправить(companyId, path, o)
-  const etag = res.headers.get('etag')
-  if (res.status === 204) return { data: undefined as T, etag }
-  return { data: await res.json() as T, etag }
+  const context = captureVoiceContext()
+  return context.run(async () => {
+    const res = await отправить(companyId, path, o, true, context)
+    const etag = res.headers.get('etag')
+    if (res.status === 204) return { data: undefined as T, etag }
+    return { data: await res.json() as T, etag }
+  })
 }
 
 async function дай<T>(companyId: string, path: string, query?: Опции['query']) {
@@ -340,14 +378,20 @@ export type NowEvent =
  */
 export function nowStream(cid: string, on: (e: NowEvent) => void, onState: (s: 'live' | 'reconnecting' | 'failed', e?: unknown) => void) {
   const ctl = new AbortController()
+  const context = captureVoiceContext()
+  activeStreams.add(ctl)
+  const assertCurrent = () => { context.assertCurrent(); ctl.signal.throwIfAborted() }
   let пауза = 1000
 
   async function раз(повтор401 = true): Promise<void> {
+    assertCurrent()
     const { token } = await voiceToken(cid)
+    assertCurrent()
     const res = await fetch(адрес('/now/stream'), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
       signal: ctl.signal,
     })
+    assertCurrent()
     if (res.status === 401) {
       забыть(cid)
       // Токен мог истечь между выдачей и открытием потока: сразу берём новый один раз.
@@ -355,55 +399,70 @@ export function nowStream(cid: string, on: (e: NowEvent) => void, onState: (s: '
       if (повтор401) return раз(false)
       let b: { error?: string; detail?: string } = {}
       try { b = await res.json() } catch { /* без тела */ }
+      assertCurrent()
       throw new VoiceError(res.status, b.error ?? 'invalid_token', словами(res.status, b.error ?? 'invalid_token', b.detail))
     }
     if (!res.ok || !res.body) {
       let b: { error?: string; detail?: string } = {}
       try { b = await res.json() } catch { /* без тела */ }
+      assertCurrent()
       throw new VoiceError(res.status, b.error ?? String(res.status), словами(res.status, b.error ?? '', b.detail))
     }
     onState('live')
+    assertCurrent()
     пауза = 1000
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
     let буфер = ''
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) return
-      буфер += value
-      let i: number
-      while ((i = буфер.indexOf('\n\n')) >= 0) {
-        const кусок = буфер.slice(0, i)
-        буфер = буфер.slice(i + 2)
-        let type = 'message'
-        const data: string[] = []
-        for (const строка of кусок.split('\n')) {
-          if (строка.startsWith('event:')) type = строка.slice(6).trim()
-          else if (строка.startsWith('data:')) data.push(строка.slice(5).trimStart())
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        assertCurrent()
+        if (done) return
+        буфер += value
+        let i: number
+        while ((i = буфер.indexOf('\n\n')) >= 0) {
+          const кусок = буфер.slice(0, i)
+          буфер = буфер.slice(i + 2)
+          let type = 'message'
+          const data: string[] = []
+          for (const строка of кусок.split('\n')) {
+            if (строка.startsWith('event:')) type = строка.slice(6).trim()
+            else if (строка.startsWith('data:')) data.push(строка.slice(5).trimStart())
+          }
+          if (!data.length) continue // пинг — комментарий SSE
+          assertCurrent()
+          try { on({ type, data: JSON.parse(data.join('\n')) } as NowEvent) } catch { /* битое событие пропускаем */ }
         }
-        if (!data.length) continue // пинг — комментарий SSE
-        try { on({ type, data: JSON.parse(data.join('\n')) } as NowEvent) } catch { /* битое событие пропускаем */ }
       }
+    } finally {
+      if (ctl.signal.aborted || !context.isCurrent()) {
+        try { await reader.cancel() } catch { /* abort уже мог закрыть body */ }
+      }
+      reader.releaseLock()
     }
   }
 
   ;(async () => {
-    while (!ctl.signal.aborted) {
-      try {
-        await раз()
-      } catch (e) {
-        if (ctl.signal.aborted) return
-        // Отказ узла в правах не лечится переподключением — показываем и стоим.
-        if (e instanceof VoiceError && (e.status === 401 || e.status === 403 || e.status === 429)) { onState('failed', e); return }
-        onState('reconnecting', e)
-        await new Promise(r => setTimeout(r, пауза))
-        пауза = Math.min(пауза * 2, 30_000)
-        continue
+    try {
+      while (!ctl.signal.aborted) {
+        try {
+          await раз()
+        } catch (e) {
+          if (ctl.signal.aborted || !context.isCurrent()) return
+          // Отказ узла в правах не лечится переподключением — показываем и стоим.
+          if (e instanceof VoiceError && (e.status === 401 || e.status === 403 || e.status === 429)) { onState('failed', e); return }
+          onState('reconnecting', e)
+          if (ctl.signal.aborted || !context.isCurrent()) return
+          await new Promise(r => setTimeout(r, пауза))
+          пауза = Math.min(пауза * 2, 30_000)
+          continue
+        }
+        if (!ctl.signal.aborted && context.isCurrent()) onState('reconnecting')
       }
-      if (!ctl.signal.aborted) onState('reconnecting')
-    }
+    } finally { activeStreams.delete(ctl) }
   })()
 
-  return () => ctl.abort()
+  return () => { ctl.abort(); activeStreams.delete(ctl) }
 }
 
 // ——— Журнал звонков и карточка ———
@@ -769,9 +828,12 @@ export async function issueMonthly(cid: string, month: string, o: { comment?: st
  * Каждая выгрузка — строка `report.export` в журнале доступа.
  */
 export async function monthlyExport(cid: string, month: string, format: 'csv' | 'html', line?: string) {
-  const res = await отправить(cid, `/stats/monthly/${encodeURIComponent(month)}/export`, { query: { format, line } })
-  const имя = /filename="?([^";]+)"?/i.exec(res.headers.get('content-disposition') ?? '')?.[1]
-  return { blob: await res.blob(), имя: имя ?? `report_${line ?? 'line'}_${month}.${format}` }
+  const context = captureVoiceContext()
+  return context.run(async () => {
+    const res = await отправить(cid, `/stats/monthly/${encodeURIComponent(month)}/export`, { query: { format, line } }, true, context)
+    const имя = /filename="?([^";]+)"?/i.exec(res.headers.get('content-disposition') ?? '')?.[1]
+    return { blob: await res.blob(), имя: имя ?? `report_${line ?? 'line'}_${month}.${format}` }
+  })
 }
 
 // ——— Настройки с версиями ———
@@ -990,12 +1052,15 @@ export interface Health {
  * ошибка. 503 без тела `Health` — кромка стека или nginx, тогда это «узел недоступен».
  */
 export async function health(cid: string): Promise<Health> {
-  const res = await отправить(cid, '/health', { принять: [503] })
-  const b = await res.json().catch(() => null) as (Health & { error?: string; detail?: string }) | null
-  if (!b || typeof b.ok !== 'boolean') {
-    throw new VoiceError(res.status, b?.error ?? String(res.status), словами(res.status, b?.error ?? '', b?.detail))
-  }
-  return b
+  const context = captureVoiceContext()
+  return context.run(async () => {
+    const res = await отправить(cid, '/health', { принять: [503] }, true, context)
+    const b = await res.json().catch(() => null) as (Health & { error?: string; detail?: string }) | null
+    if (!b || typeof b.ok !== 'boolean') {
+      throw new VoiceError(res.status, b?.error ?? String(res.status), словами(res.status, b?.error ?? '', b?.detail))
+    }
+    return b
+  })
 }
 
 export interface HealthEvent {
@@ -1099,8 +1164,11 @@ export async function deleteSound(cid: string, name: string) {
  * Authorization, поэтому файл берём запросом и отдаём адрес blob; освобождает его вызывающий.
  */
 export async function soundAudio(cid: string, name: string) {
-  const res = await отправить(cid, `/sounds/${encodeURIComponent(name)}`, {})
-  return URL.createObjectURL(await res.blob())
+  const context = captureVoiceContext()
+  const res = await отправить(cid, `/sounds/${encodeURIComponent(name)}`, {}, true, context)
+  const blob = await context.run(() => res.blob())
+  context.assertCurrent()
+  return URL.createObjectURL(blob)
 }
 
 // ——— Хранение (волны 1 и 4) ———
