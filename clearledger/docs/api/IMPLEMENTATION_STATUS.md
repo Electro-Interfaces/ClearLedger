@@ -553,3 +553,48 @@ compiler60pins, cleanoffline61distributions сpip, оба pipcheck PASS.
 PostgreSQL сохранён. App/functionalSQL нового runtime ещё NOT RUN.
 Requirements.txt/Dockerfile/feature flags не переключены.
 [Артефакты кандидата](BACKEND_UPGRADE_ARTIFACTS_20261030.md).
+
+
+M04/P2 принят: source0053a9c2/0aa45f40/18827eef → integration891ae3b0/
+e9dcd082/260975ca. Пять bindings task ACL направлены к прежнему task_access,
+остальные guards/queries/hooks сохранены. Root full-module reverse-import AST
+и fullapp/tests/schema Git parity PASS; независимый AST oracle на323services
+подтвердил19sites/23bindings. Первый actual38:27PASS/11fixtureFAIL из-за
+некорректного уникального subject_ref новых тестовых документов. После
+исправления только новой fixture/runner —11PASS17,33с (outer30,026с),
+предыдущие27не повторялись. Обе БД штатно удалены, freshrelations0/conns0,
+existsafterDROP0,maxlocks64. Это два отдельных прогона baseline runtime.
+[Прямой владелец task ACL](TASK_ACL_IMPORT_BOUNDARY_20261030.md).
+
+Три новых candidate provisional locks и actualtarget report принятыc0962321:
+Root effective1/8/60requirement+hash lines побайтно равны actual compiler output,
+публичные файлы без sandbox paths/URL/options. Исторические baseline locks
+сохранены. [Целевой состав](BACKEND_UPGRADE_TARGET_20261030.md).
+Новый hostfunctional env3.13.7/glibc2.36 содержит точные61runtime+pip и16
+отдельных testtools: Root16wheel/16officialmetadata/29activeedges и77installed
+versions проверены, pipcheck PASS. Первый functionalattempt остановился до
+testcalls: две отсутствующие opt-in переменные selectedsuites и запрещённая
+urllib3IPv6importprobe. Failure сохранён, БД штатно удалена, оснастка исправляется.
+Прикладные376сценариев нового runtime ещё не приняты; requirements/Dockerfile
+не переключены, sourcefinding об уязвимости из этой ошибки оснастки не выводится.
+
+
+M18 actualmain пакет принят26ff474f/eddd4df4/9e960c17. Baseline7cases:
+5PASS2FAIL72,40с; подтверждён runtime-дефект requestIdbody/header, второй
+FAIL — неверный predicate новогоSwaggerтеста. Child теперь использует trusted
+внешний SecurityContext ID; standalone сохраняет новыйUUID, incomingheader
+не принимается. Независимый reverseAST proof всего runtimeмодуля PASS.
+Affected-only3PASS31,98с (outer46,073с): equality/forgedheader/8concurrent,
+standalone503с0SQL и полныйSwaggerflow доCSRFclose/revokedenial.
+Первоначальные5PASS не повторялись; единого8greenrun нет.
+Проверены настоящийCorelogin/CodePKCE/signatures/UserInfo/refresh/revoke,
+ordinaryemployee1site, отдельныйnegativeбезdocsrole/positiveсdocsrole,
+machinegrant и guardsчерезactualmain. Все наблюдавшиеся businessrows/filebytes
+неизменны, ожидаемые authstate transitions учитывались отдельно.
+Network/processattempts0,deliverycapture/lifecyclecounts точны; обе exactDB
+штатно удаленыс344syntheticrelations/connections0/exists0/maxlocks64.
+Одно нефатальное JUnitrecord_property warning сохранено.
+[Основная ASGI-композиция](PARTNER_MAIN_COMPOSITION_20261030.md).
+Productionseed/jobs изолированы; nginx/browserSSO/реальныйпартнёр/полныйM18
+остаются открыты. Sourceoverlay четырёхP2файлов совпал с ихfrozencommit;
+полный совмещённыйCI текущегоHEAD не заявляется.
