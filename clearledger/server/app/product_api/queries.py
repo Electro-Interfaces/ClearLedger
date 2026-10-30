@@ -194,6 +194,29 @@ class Query:
         result["next_cursor"] = self.encode_cursor(rows[-1], binding) if has_more else None
         return result
 
+    async def contract_documents(self, identifier, params):
+        """Visible explicit subject/graph links; each resource keeps its own ACL."""
+        from app.services.doc_subject_links import subject_documents_clause
+        parent = await self.detail("contracts", identifier)
+        binding = self.binding(f"contract-documents:{parent.id}", params)
+        cursor = self.decode_cursor(params.cursor, binding) if params.cursor else None
+        model = DocCard
+        conditions = [*await self.conditions("documents"),
+                      subject_documents_clause(self.facts.company_id, f"contract:{parent.id}")]
+        total = await self.db.scalar(select(func.count()).select_from(model).where(*conditions))
+        if cursor:
+            at, last_id = cursor
+            last_id = native_id(model.id, last_id)
+            if last_id is None:
+                raise HTTPException(400, "Invalid cursor")
+            conditions.append(or_(model.created_at > at, and_(model.created_at == at, model.id > last_id)))
+        rows = list((await self.db.execute(select(model.id, model.created_at).where(*conditions).order_by(
+            model.created_at, model.id).limit(params.page_size + 1))).all())
+        has_more = len(rows) > params.page_size
+        rows = rows[:params.page_size]
+        return {"contract_id": str(parent.id), "items": [{"document_id": str(row.id)} for row in rows],
+                "total": total, "next_cursor": self.encode_cursor(rows[-1], binding) if has_more else None}
+
     async def visible_links(self, resource, ids):
         ids = {value for value in ids if value is not None}
         if (not ids or READ_SCOPES[resource] not in self.context.scopes

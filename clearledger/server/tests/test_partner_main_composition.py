@@ -556,7 +556,7 @@ async def test_main_swagger_canonical_projection_assets_session_csrf_and_live_re
             schemas[path] = response.json()
     for schema in schemas.values():
         assert schema["servers"] == [{"url": ISSUER + "/api/v1"}]
-        assert sum("get" in methods for methods in schema["paths"].values()) == 13
+        assert sum("get" in methods for methods in schema["paths"].values()) == 14
         assert not any("/auth" in p or "/developer" in p for p in schema["paths"])
     canonical = schemas["/openapi.server.json"]["components"]["securitySchemes"]
     browser = schemas["/openapi.json"]["components"]["securitySchemes"]

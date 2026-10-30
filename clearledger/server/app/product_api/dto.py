@@ -80,6 +80,27 @@ class ContractObjects(DTO):
     next_cursor: str | None
 
 
+class ContractDocumentsQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pageSize: int = Field(default=50, ge=1, le=200)
+    cursor: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @property
+    def page_size(self):
+        return self.pageSize
+
+
+class ContractDocument(DTO):
+    document_id: Id
+
+
+class ContractDocuments(DTO):
+    contract_id: Id
+    items: list[ContractDocument]
+    total: int = Field(ge=0)
+    next_cursor: str | None
+
+
 class MonitoringQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
     days: int = Field(default=90, ge=1, le=366)

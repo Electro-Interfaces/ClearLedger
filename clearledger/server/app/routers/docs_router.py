@@ -1711,11 +1711,8 @@ async def list_docs(
         # предметом карточки и явной связью, — и обе одинаково законны, поэтому
         # ищем по обеим. Это обратный ход графа: из карточки договора в её
         # документы, а не наоборот.
-        related = select(DocRelation.doc_id).where(
-            DocRelation.company_id == cid,
-            DocRelation.doc_id == DocCard.id,
-            DocRelation.target_ref == ref).exists()
-        stmt = stmt.where(or_(DocCard.subject_ref == ref, related))
+        from app.services.doc_subject_links import subject_documents_clause
+        stmt = stmt.where(subject_documents_clause(cid, ref))
     if attention:
         # Просрочка — в московском времени: им живёт делопроизводство и им же
         # считает экран. UTC разошёлся бы с человеком на три часа в сутки.

@@ -1,5 +1,19 @@
 # Подключение внешнего приложения: кандидат API
 
+Текущий NEXT-R2 добавляет `GET /api/v1/contracts/{contractId}/documents`
+(`listContractDocuments`): явные subject/graph связи с независимо доступными
+документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,
+а также отдельные typed resource grants обоих ресурсов. Machine-профиля нет.
+Ответ: `contractId, items[].documentId, total, nextCursor`; query только
+`pageSize` (1..200, default 50) и `cursor`. Чтение связи не даёт права на файлы:
+для content по-прежнему нужны отдельный download scope, права документа и file policy.
+Схема кандидата содержит 14 GET: 10 user/service и четыре user-only.
+ROOT принял 60 новых сценариев и отдельный corrective1, regression84 с 142
+subtests, official generation/freshness, 6 generator controls и 3 typed consumers.
+Это отдельные локальные серии; выпуска и включения не было. Подробности: [NEXT-R2](api/CONTRACT_DOCUMENTS_READ_20261030.md).
+
+Следующие датированные сведения о NEXT-R1 и M12 сохранены как история срезов.
+
 NEXT-R1 добавляет кандидат GET `/api/v1/contracts/{contractId}/objects`
 (`listContractObjects`): явные текущие связи договора только с независимо
 доступными точками обслуживания. Одновременно нужны `contracts:read` и
@@ -156,5 +170,5 @@ docs session: `/api/developer/docs/openapi.server.json`. В нём отдель�
 пользовательский Code+PKCE и confidential client_credentials с обязательным
 прикладным `grant_id`. Файл `/api/developer/docs/openapi.json` служит Swagger
 в браузере и предлагает только пользовательский Code+PKCE; секрет серверного
-приложения в браузер не вводится. Оба представления относятся к одним 13
+приложения в браузер не вводится. Оба текущих представления относятся к одним 14
 операциям и тем же политикам доступа.

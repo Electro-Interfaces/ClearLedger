@@ -1,5 +1,19 @@
 # M12: wire types внешнего product API
 
+Текущий NEXT-R2 добавляет `GET /api/v1/contracts/{contractId}/documents`
+(`listContractDocuments`): явные subject/graph связи с независимо доступными
+документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,
+а также отдельные typed resource grants обоих ресурсов. Machine-профиля нет.
+Ответ: `contractId, items[].documentId, total, nextCursor`; query только
+`pageSize` (1..200, default 50) и `cursor`. Чтение связи не даёт права на файлы:
+для content по-прежнему нужны отдельный download scope, права документа и file policy.
+Схема кандидата содержит 14 GET: 10 user/service и четыре user-only.
+ROOT принял 60 новых сценариев и отдельный corrective1, regression84 с 142
+subtests, official generation/freshness, 6 generator controls и 3 typed consumers.
+Это отдельные локальные серии; выпуска и включения не было. Подробности: [NEXT-R2](api/CONTRACT_DOCUMENTS_READ_20261030.md).
+
+Следующие датированные сведения о NEXT-R1 и M12 сохранены как история срезов.
+
 Дополнение NEXT-R1: actual curated candidate расширен новым
 `listContractObjects` до 13 GET, из которых 10 допускают user/service и три
 документные требуют пользователя. Exporter и официальный генератор обновляют

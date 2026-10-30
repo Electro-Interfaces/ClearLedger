@@ -188,6 +188,19 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                 raise HTTPException(422, "Request body is not accepted")
         return await query.contract_objects(contractId, params)
 
+    @operation("/contracts/{contractId}/documents", "documents", "listContractDocuments", dto.ContractDocuments,
+               extra_scopes={access.READ_SCOPES["contracts"]}, summary="Read explicit contract document associations",
+               description="Current subject and explicit document graph links to an independently authorized contract. "
+                   "Requires delegated user consent, contracts:read AND documents:read and both resource grants. "
+                   "Document visibility is checked independently before count and pagination. No file access is granted. "
+                   "Live cursor pagination.")
+    async def contract_documents(contractId: dto.Id, params: Annotated[dto.ContractDocumentsQuery, QueryParams()],
+                                 request: Request, query: Query = Depends(query_dependency)):
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(422, "Request body is not accepted")
+        return await query.contract_documents(contractId, params)
+
     @operation("/documents", "documents", "listDocuments", dto.Page[dto.Document])
     async def documents(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("documents", params)
