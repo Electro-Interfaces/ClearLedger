@@ -483,8 +483,8 @@ writer, внешний write API и полное закрытие M06 остаю
 дала совпадения по пяти пакетам. 170package/advisory pairs включают алиасы
 разных источников и не являются числом уникальных уязвимостей. Это metadata
 intake, без проверки достижимости в приложении. Исторические provisional locks
-не подтверждают отсутствие уязвимостей; отдельная Task собирает первичные
-advisory details и совместимый план обновления, включая Starlette/FastAPI.
+не подтверждают отсутствие уязвимостей; первичные advisory details и совместимый план обновления, включая Starlette/FastAPI,
+приняты отдельным пакетом ниже.
 [Фактическая offline-приёмка](BACKEND_DEPENDENCY_TARGET_20261030.md).
 
 
@@ -511,7 +511,7 @@ packaging26.3; история unknown и три range-source расхожден�
 Starlette1.3.1+FastAPI0.133.0 и потенциальный annotated-doc0.0.2.
 Отдельный ROOT OSV batch шести candidate версий:0matches, без pagination.
 Это metadata/declaration plan, не проверка исполнения или exploitability.
-Major pypdf5→6 иStarlette0→1 требуют отдельных regressions. Новый Task готовит
+Major pypdf5→6 иStarlette0→1 требуют отдельных regressions. Подготовлены
 семь артефактов, candidate input/constraints и ROOT-only execution proposal;
 старые locks/requirements/Dockerfile и runtime settings не переключены.
 [План обновления](BACKEND_DEPENDENCY_UPGRADE_PLAN_20261030.md).
@@ -523,7 +523,30 @@ unknown,20import sites/29bindings/36call-spelling refs. Все29связей п�
 owner/решение; динамические loader/rebinding/runtime пути остаются ограничениями.
 Авторские12purefixtures и отдельный ast.walk oracle сохранены; app/SQL в этой
 задаче не выполнялись. Runtime не менялся, карта историческая наd70581b4.
-Новый отдельный P1 переносит запрос ведущих из conf router в существующий
-jitsi service, сохраняет wrapper и убирает один обратный импорт meeting_notice.
-Отправители в будущих проверках полностью синтетические.
+P1 перенёс запрос ведущих из conf router в существующий jitsi service,
+сохранил wrapper и убрал один обратный импорт meeting_notice. Приёмка ниже.
 [Карта границ](SERVICE_ROUTER_BOUNDARIES_20261030.md).
+
+
+M04/P1 принят: sourcec4b245e6→integration23a6babf, finalreport6cd7bd73→801128c5.
+Точные прежние query/fallback извлечены в jitsi.meeting_hosts; wrapper,
+остальной router и notice сохранены по независимому AST proof. Root actual
+8PASS16,46с (outer28,521с),0FAIL/ERROR/SKIP: семь новых cases и прежний тест
+ведущих/пяти минут. Перехвачены3письма/3чата, externaldelivery stubbed,
+запрещённых сетевых попыток0. БД штатно удалена: freshrelations0/connections0,
+existsafterDROP0,maxlocks64. Fullapp/tests/schema Git parity и пять Python
+file hashes совпали после переноса. Карта стала19sites/28bindings,
+остальные28edge records сохранены; весь M04 ещё открыт.
+[Общий запрос ведущих](MEETING_HOSTS_QUERY_20261030.md).
+
+DEP candidate input/60constraints/66wheel manifest принят в19fda5c6. Root
+независимо проверил66wheel inspections/66metadata hashes,53сохранённых runtime
+pins/6замен/1новый annotated-doc;22roots/3extras и67активных runtime edges.
+Отдельная подготовка source2feeb525→integrationcac784b2 заменила только
+setuptools80.9.0→84.1.0 иwheel0.45.1→0.46.2;64других manifest entries и все
+runtime/input/constraints сохранены побайтно. Root вновь проверил66SHA/metadata,
+60runtime closure и9tooling edges; новый OSV query66 дал0version matches.
+Исторический http-ece build provenance сохраняет прежние tools; пересборки нет.
+Фактическая target-проверка нового состава выполняется отдельно; её результат
+ещё не принят. Requirements.txt/Dockerfile/feature flags не переключены.
+[Артефакты кандидата](BACKEND_UPGRADE_ARTIFACTS_20261030.md).
