@@ -288,3 +288,10 @@
 происхождения каталога; исходные policy/протокольные выводы остаются bounded
 source review, не HTTP/WS/SQL acceptance каждого из75маршрутов. P-02 передан
 отдельному исполнителю для исправления и синтетической runtime проверки.
+
+
+P-02 follow-up координатора: в общем кандидате e6659c6e применены f873ac00
+и81882001: фильтр известных uvicorn.error handshake formats и очистка всего
+query exact /api/chat/ws, включая encoded key. Root25PASS/2wsprotoSKIP1.34с;
+[ограничения и evidence](WS_LOG_PRIVACY_20261030.md). Это последующее исправление
+за пределами закреплённого source pin паспортов, исходные хеши не переписаны.

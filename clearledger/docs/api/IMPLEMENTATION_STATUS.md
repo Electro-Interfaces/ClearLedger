@@ -1,7 +1,7 @@
 # Партнёрский API: интеграционный кандидат
 
 Состав исходников на 30.10.2026: ветка
-`MagLook/api-modernization-integration-20261029`, runtime pin `02e6e963`; инвентаризация Core на `7896039f`.
+`MagLook/api-modernization-integration-20261029`, runtime pin `e6659c6e`; инвентаризация Core на `7896039f`.
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
 
@@ -87,6 +87,12 @@ byte-identical actual Core экспортами. Он видит1703операц
 требуют ручного разбора. Паспорта44special+31integration операций привязаны
 к75registry keys и62source hashes; это source review, не общий ACL acceptance.
 
+WS handshake privacy исправлена отдельно: root25PASS/2wsprotoSKIP1.34с.
+Фильтр известных uvicorn.error formats скрывает query authority; exact chat WS
+скрывает query целиком, в том числе encoded token key. Отзыв уже accepted WS,
+произвольные debug/custom logs и все proxy/root_path compositions этим пакетом
+не закрыты.
+
 ## Что остаётся
 
 Write API, site/EVSE/connector и temporal retirement, shared-file GC, все
@@ -108,6 +114,7 @@ backup с фактическим восстановлением, состав р
 [пилоты](PARTNER_SYNTHETIC_PILOTS.md), [quota](product-budget-20261030.md),
 [контрагенты](counterparty-explicit-null-20261030.md),
 [UserInfo](userinfo-protocol-20261030.md),
-[binary transport](CORE_BINARY_TRANSPORT_20261030.md).
+[binary transport](CORE_BINARY_TRANSPORT_20261030.md),
+[WS logging](WS_LOG_PRIVACY_20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.

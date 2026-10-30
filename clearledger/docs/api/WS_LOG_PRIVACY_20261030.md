@@ -185,3 +185,10 @@ Uvicorn записывает в известных handshake-форматах. �
 Зависимости, окружение общего venv, ingress, ВМ и рабочие данные не изменялись.
 Follow-up сохраняется отдельным коммитом поверх `f873ac00` в той же ветке;
 для root integration нужны оба коммита, PR/merge/deploy не выполнялись.
+
+
+Независимый повтор координатора после переноса обоих commits в общий кандидат
+e6659c6e: **25PASS /2SKIP за1.34с**. Старые HTTP/Gunicorn проверки сохранены,
+actualwire baseline/candidate использует localhost и синтетические маркеры,
+wsproto actualwire остаётся SKIP без установки backend. Это не журнал рабочего
+пространства и не проверка Core JWT; dependencies/ACL не менялись.
