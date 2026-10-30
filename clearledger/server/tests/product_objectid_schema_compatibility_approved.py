@@ -19,6 +19,14 @@ FLAG = "RUN_PRODUCT_OBJECTID_SCHEMA_COMPATIBILITY"
 APPROVAL = "ROOT_APPROVED_PRODUCT_OBJECTID_SCHEMA_COMPATIBILITY"
 UNUSED_URL = "postgresql+asyncpg://synthetic:unused@127.0.0.1:1/objectid_schema_test_unused"
 SECRET = "objectid-schema-synthetic-secret-unused-20261030"
+APP_IMPORT_CLOSURE = {
+    "app", "app.api_contracts", "app.api_contracts.context", "app.api_contracts.routing",
+    "app.config", "app.database", "app.models", "app.models_product_budget", "app.security_context",
+    "app.product_api", "app.product_api.access", "app.product_api.app", "app.product_api.budget",
+    "app.product_api.dto", "app.product_api.files", "app.product_api.monitoring", "app.product_api.queries",
+    "app.services", "app.services.ops_monitor_context", "app.services.session_scope",
+}
+INERT_SERVICE_IMPORTS = {"app.services", "app.services.ops_monitor_context", "app.services.session_scope"}
 SELECTION = ["tests/test_product_object_ids.py::test_pure_schema_distinguishes_object_identity_from_other_ids",
              "tests/test_product_objectid_schema_compatibility.py"]
 TEST_NAMES = {
@@ -138,12 +146,21 @@ def install_boundary(attempts, evidence):
 
     class NoAssemblyOrDrivers(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
-            if (fullname == "app.main" or fullname == "app.services" or fullname.startswith("app.services.")
+            if ((fullname == "app" or fullname.startswith("app.")) and fullname not in APP_IMPORT_CLOSURE
                     or fullname.split(".")[0] in {"asyncpg", "psycopg", "psycopg2", "aiosqlite"}):
                 attempts.append("import:" + fullname)
                 raise ImportError("pure OpenAPI boundary forbids assembly/senders/database drivers")
 
     sys.meta_path.insert(0, NoAssemblyOrDrivers())
+
+    def no_service_execution(frame, event, arg):
+        if (event == "call" and frame.f_globals.get("__name__") in INERT_SERVICE_IMPORTS
+                and frame.f_code.co_name != "<module>"):
+            attempts.append("inert_service_function:" + frame.f_code.co_name)
+            raise RuntimeError("pure OpenAPI permits inert service imports, never service function execution")
+
+    require(sys.getprofile() is None, "no preexisting profiler before inert-service boundary")
+    sys.setprofile(no_service_execution)
 
     def audit(event, args):
         denied = event in {"socket.connect", "socket.connect_ex", "socket.getaddrinfo", "socket.getnameinfo",
@@ -271,8 +288,10 @@ def run(evidence, site, proof, attempts):
             self.results.append({"nodeid": report.nodeid, "phase": report.when, "outcome": report.outcome})
 
         def pytest_sessionfinish(self, session, exitstatus):
-            forbidden = [k for k in sys.modules if k == "app.main" or k == "app.services" or k.startswith("app.services.")]
-            clean = (not attempts and not forbidden and len(bindings) == len(settings_calls) == 1
+            app_imports = {k for k in sys.modules if k == "app" or k.startswith("app.")}
+            forbidden = sorted(app_imports - APP_IMPORT_CLOSURE)
+            clean = (not attempts and not forbidden and app_imports == APP_IMPORT_CLOSURE
+                     and len(bindings) == len(settings_calls) == 1
                      and len(self.results) == 3 * len(TEST_NAMES)
                      and all(r["outcome"] == "passed" for r in self.results)
                      and proof["import_capability"]["restored"])
@@ -283,6 +302,9 @@ def run(evidence, site, proof, attempts):
                 "inert_import_bindings": bindings, "settings_initialization": settings_calls,
                 "app_database_imported": "app.database" in sys.modules, "sqlalchemy_imported": "sqlalchemy" in sys.modules,
                 "real_engines_created": 0, "connections_allowed": False, "forbidden_modules": forbidden,
+                "actual_application_imports": sorted(app_imports),
+                "approved_inert_service_imports": sorted(INERT_SERVICE_IMPORTS),
+                "inert_service_function_execution_allowed": False,
                 "collected": self.collected, "results": self.results}, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
 
     code = pytest.main(["-c", str(SERVER / "pytest.ini"), "--noconftest", "-p", "pytest_asyncio.plugin",
@@ -311,6 +333,7 @@ def main():
         raise
     finally:
         signal.alarm(0)
+        sys.setprofile(None)
 
 
 if __name__ == "__main__":
