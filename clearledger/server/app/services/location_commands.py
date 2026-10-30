@@ -34,7 +34,7 @@ class Mutation:
 # Preserve import-owned snapshots and manually configured bindings on form edits.
 _SERVICE_META_KEYS = {
     "ext_id", "stationId", "ocppId", "ocppUrl", "source", "nameSource",
-    "nameHistory", "numberHistory", "zoi1", "buNumber", "connectorsSource",
+    "nameHistory", "numberHistory", "identifierHistory", "zoi1", "buNumber", "connectorsSource",
 }
 _EDITABLE_LINK_KEYS = {"hubexAssetId", "hubexName", "hubexNote", "linkStatus",
                        "zoi1", "buNumber", "ocppUrl"}
@@ -126,6 +126,29 @@ async def code_taken(db, company_id, code, *, except_id=None):
     return rows.first() is not None
 
 
+def _history_entries(metadata, key):
+    """Read history without repairing legacy dictionaries or inventing domains."""
+    history = metadata.get(key)
+    detail = ("История номеров повреждена: требуется сверка перед изменением номера"
+              if key == "numberHistory" else
+              "История идентификаторов повреждена: требуется сверка перед изменением")
+    if history is None:
+        return []
+    if not isinstance(history, list) or any(not isinstance(entry, dict) for entry in history):
+        raise LocationConflict(409, detail)
+    if key == "identifierHistory":
+        for entry in history:
+            domain = entry.get("domain")
+            if domain != "code" and domain != "station_number":
+                continue  # Unknown legacy dictionaries remain opaque and intact.
+            old, new = entry.get("old"), entry.get("new")
+            if (not isinstance(old, str) or not old.strip() or "new" not in entry or
+                    not (isinstance(new, str) and new.strip() or
+                         domain == "station_number" and new is None)):
+                raise LocationConflict(409, detail)
+    return history
+
+
 async def _assert_numbers_free(db, company_id, values, *, except_id=None):
     values = {v for v in values if v}
     if not values:
@@ -137,7 +160,15 @@ async def _assert_numbers_free(db, company_id, values, *, except_id=None):
         md = other.extra_metadata or {}
         # A retired alias remains reserved even for its original point. Current
         # values of that same point are exempt; this is not a new assignment.
-        numbers = {_number(h.get("было")) for h in (md.get("numberHistory") or []) if isinstance(h, dict)}
+        try:
+            number_history = _history_entries(md, "numberHistory")
+            identifier_history = _history_entries(md, "identifierHistory")
+        except LocationConflict as exc:
+            # A hidden malformed history cannot prove that a number is free.
+            raise LocationConflict(409, "Номер уже занят текущим или историческим объектом компании") from exc
+        numbers = {_number(h.get("было")) for h in number_history}
+        numbers.update(_number(h.get("old")) for h in identifier_history
+                       if h.get("domain") == "code" or h.get("domain") == "station_number")
         if other.id != except_id:
             numbers.update({_number(other.code), _number(other.station_number), _number(md.get("number"))})
         if values & numbers:
@@ -173,6 +204,8 @@ def _prepare(loc, data):
         incoming = changes.pop("metadata")
         if incoming is not None and not isinstance(incoming, dict):
             raise LocationConflict(422, "metadata должен быть объектом или null")
+        if loc is None and incoming is not None and "identifierHistory" in incoming:
+            raise LocationConflict(422, "История идентификаторов заполняется сервером")
         if isinstance((incoming or {}).get("number"), (dict, list, bool)):
             raise LocationConflict(422, "Номер точки должен быть скалярным значением")
         changes["extra_metadata"] = merge_metadata(loc.extra_metadata, incoming) if loc else incoming
@@ -184,8 +217,8 @@ def _prepare(loc, data):
     return changes
 
 
-def _with_number_history(loc, changes, *, actor_id=None, source=None):
-    """Record observed outgoing aliases, never infer validity dates or repair legacy JSON.
+def _with_identifier_history(loc, changes, *, actor_id=None, source=None):
+    """Record typed transitions and station-only aliases without inferring validity.
 
     Called only after the command acquired its barrier and reloaded the row.
     Construct a fresh metadata tree: neither the ORM snapshot nor an incoming
@@ -193,36 +226,40 @@ def _with_number_history(loc, changes, *, actor_id=None, source=None):
     """
     current_md = loc.extra_metadata or {}
     next_md = changes.get("extra_metadata", loc.extra_metadata) or {}
+    history = _history_entries(current_md, "numberHistory")
+    identifier_history = _history_entries(current_md, "identifierHistory")
     outgoing = []
-    for field, old, new in (
-        ("code", loc.code, changes.get("code", loc.code)),
-        ("station_number", loc.station_number, changes.get("station_number", loc.station_number)),
-        ("metadata.number", current_md.get("number"), next_md.get("number")),
+    seen_transitions = set()
+    for domain, field, old, new in (
+        ("code", "code", loc.code, changes.get("code", loc.code)),
+        ("station_number", "station_number", loc.station_number, changes.get("station_number", loc.station_number)),
+        ("station_number", "metadata.number", current_md.get("number"), next_md.get("number")),
     ):
         old, new = _number(old), _number(new)
-        if old and old != new:
-            outgoing.append((field, old))
+        transition = (domain, old, new or None)
+        if old and old != new and transition not in seen_transitions:
+            outgoing.append((domain, field, old, new or None))
+            seen_transitions.add(transition)
     if not outgoing:
         return changes
-    history = current_md.get("numberHistory")
-    if history is not None and (not isinstance(history, list) or
-                               any(not isinstance(entry, dict) for entry in history)):
-        raise LocationConflict(409, "История номеров повреждена: требуется сверка перед изменением номера")
     # SQL containment matches JSON strings exactly. Numeric/whitespace legacy
     # entries must stay untouched, but cannot replace a searchable new alias.
-    seen = {entry["было"] for entry in (history or []) if isinstance(entry.get("было"), str)}
+    seen = {entry["было"] for entry in history if isinstance(entry.get("было"), str)}
     additions = []
+    identifier_additions = []
     recorded_at = datetime.now(timezone.utc).isoformat()
-    for field, old in outgoing:
-        if old not in seen:
-            additions.append({"было": old, "field": field, "source": source or "unknown",
-                              "actor": str(actor_id) if actor_id is not None else None,
-                              "recordedAt": recorded_at})
+    for domain, field, old, new in outgoing:
+        provenance = {"field": field, "source": source or "unknown",
+                      "actor": str(actor_id) if actor_id is not None else None,
+                      "recordedAt": recorded_at}
+        identifier_additions.append({"domain": domain, "old": old, "new": new, **provenance})
+        if domain == "station_number" and old not in seen:
+            additions.append({"было": old, **provenance})
             seen.add(old)
-    if not additions:
-        return changes
     metadata = deepcopy(next_md)
-    metadata["numberHistory"] = deepcopy(history or []) + additions
+    metadata["identifierHistory"] = deepcopy(identifier_history) + identifier_additions
+    if additions:
+        metadata["numberHistory"] = deepcopy(history) + additions
     return {**changes, "extra_metadata": metadata}
 
 
@@ -237,7 +274,7 @@ async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None):
         reasons = await freeze_reasons(db, company_id, loc.id)
         if reasons:
             raise LocationConflict(409, "Номер объекта изменить нельзя: " + ", ".join(reasons))
-        changes = _with_number_history(loc, changes, actor_id=actor_id, source=source)
+        changes = _with_identifier_history(loc, changes, actor_id=actor_id, source=source)
         await _assert_numbers_free(db, company_id,
             [changes["code"] if code_changed else None,
              _number(changes.get("station_number")) if number_changed else None], except_id=loc.id)
