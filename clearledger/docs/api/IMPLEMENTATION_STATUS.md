@@ -407,3 +407,27 @@ Baseline сервиса14PASS/41FAIL, caller2PASS/3FAIL; прежние ошиб
 typecheck сохранены отдельно. UI proof использует настоящие React providers и
 синтетические HTTP/media; server jobs, полный App/production ACL и универсальный
 same-token reset UI не проверялись. [Отчёт](AUDITOR_SSE_CONTEXT_20261030.md).
+
+M06: root независимо воспроизвёл карту записей Contract наeb5cdc51 за22,367с:
+489app files/479AST,28семейств,127refs,27caller spelling edges,15countercases
+и13pure controls. Все5private artifacts совпали побайтово. Отдельно проверены
+5ORM constructors и9literal SQL sinks; динамические receivers и внешние restore
+остаются unknown, source inventory не подтверждает runtime/ACL. Source59477daa
+перенесён в1c9ea350. Выбран следующий срез: общая CREATE-команда legacy reestr,
+L2Cache иcorporate без изменения matcher, raw, scope, locks и transaction owners.
+Подготовка реализации и изолированных тестов идёт отдельно; SQL пока не запускался.
+[Карта записей](CONTRACT_WRITER_INVENTORY_20261030.md).
+
+Vite закреплён ровно на7.3.7: package.json меняет только dev pin, lock — только
+корневую декларацию и запись Vite. Source6ff8fbb7→integrationc78da6b2; root
+проверил10source pins,604artifact hashes, registry integrity и неизменность
+остального dependency graph. В отдельном свежем npm ci без hooks прошли189SSR
+leaf cases,5React/Chromium сценариев, nodeTypeScript, main/public builds
+(62,369/9,435с) и проверка итоговых assets. Повторного root runtime прогона нет:
+приняты замороженные исходники и артефакты автора.
+
+Пять Vite version matches исходного набора уведомлений устранены выбранной
+версией; семь остальных совпадений обрабатываются отдельным пакетом. Это не
+подтверждение эксплуатируемости или безопасности рабочего окружения. Исходные
+public PWA placeholders сохранены и описаны; app version1.2.857 не менялась,
+CI/выпуск не запускались. [Отчёт](VITE_PATCH_20261030.md).
