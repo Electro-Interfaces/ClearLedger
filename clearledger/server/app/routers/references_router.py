@@ -928,7 +928,27 @@ async def update_contract(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
+    # До общего с импортом барьера даже проверка членства не должна вызвать
+    # autoflush pending-договора и взять row/FK locks в обратном порядке.
+    with db.no_autoflush:
+        c = await get_owned(Contract, uid, current_user, db)
+        cid = c.company_id
+        await lock_manual_creation(db, cid, "contract")
+    await db.flush()
+    c = (await db.execute(select(Contract).where(
+        Contract.id == uid, Contract.company_id == cid,
+    ).execution_options(populate_existing=True))).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    # Во время ожидания могли изменить роль/скоуп или удалить членство.
+    # Держим свежий объект: повторный get_owned сам не обновляет identity map.
+    if not current_user.is_superadmin:
+        membership = (await db.execute(select(UserCompany).where(
+            UserCompany.user_id == current_user.id, UserCompany.company_id == cid,
+        ).execution_options(populate_existing=True))).scalar_one_or_none()
+        if membership is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    c = await get_owned(Contract, uid, current_user, db)
     before = snapshot_reference_fields(c)
 
     cp_id, org_id = await _validate_contract_parties(
