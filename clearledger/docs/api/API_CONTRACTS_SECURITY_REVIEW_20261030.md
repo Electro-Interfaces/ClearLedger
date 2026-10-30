@@ -42,3 +42,9 @@ Contracts принимает факты от доверенного resolver. П
 - Инструмент сообщил usage `1 371 483` tokens, включая `1 292 288` cached input tokens; источник `codex_rollout`, coverage `complete`, один thread.
 
 Daybreak advisory вернул `not_granted`: отображение защищённых результатов может требовать отдельного доступа. Другие credential-каналы не использовались.
+
+## Приёмка canonical readback, 30.10.2026
+
+**PASS.** Штатный `get_codex_security_completed_scan` с существующим continuation claim успешно прочитал тот же scan. Подтверждены `status=completed`, `sealedAt=completedAt=2026-10-30T04:22:45.011295Z`, исходная ревизия `310b31afb263d0ece311094f32e13a8b0cf0383e`, точный scope и три перечисленных reviewed paths при `coverage.completeness=complete`, `findings=0`, `deferred=0`.
+
+В sealed limitations явно сохранено отсутствие независимого baseline из-за запрета вложенной делегации. Новый scan не создавался, `complete` повторно не вызывался; canonical JSON не переносился в shell или репозиторий. Приёмка подтверждает сохранённый результат в прежних границах scope.
