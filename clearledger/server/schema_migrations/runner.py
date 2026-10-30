@@ -1,0 +1,173 @@
+"""Explicit, not startup-enabled PG16 migration foundation. Offline plan has no DB imports."""
+# Direct file execution under python -I; importing the package never edits sys.path.
+if __name__ == "__main__" and not __package__:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import argparse
+import asyncio
+from dataclasses import dataclass, field
+import json
+import re
+from urllib.parse import unquote, urlsplit
+
+from schema_migrations import catalog, journal
+from schema_migrations.errors import MigrationError
+from schema_migrations.manifest import load
+
+LOCK = (434532, 1)
+
+
+@dataclass(frozen=True)
+class Config:
+    dsn: str = field(repr=False)
+    database: str
+    user: str
+    namespace: str
+    lock_seconds: float = 2.0
+    total_seconds: float = 20.0
+
+    def validate(self):
+        try:
+            uri = urlsplit(self.dsn)
+            if (uri.scheme != "postgresql" or uri.query or uri.fragment or not uri.hostname
+                    or uri.port is None or not 1 <= uri.port <= 65535 or not uri.password
+                    or unquote(uri.username or "") != self.user or unquote(uri.path) != "/" + self.database
+                    or not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.database)
+                    or not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.user)
+                    or not 0.05 <= self.lock_seconds <= 10 or not 1 <= self.total_seconds <= 120):
+                raise MigrationError(3, "target")
+        except (ValueError, TypeError):
+            raise MigrationError(3, "target") from None
+        if self.namespace != "core":
+            raise MigrationError(3, "namespace")
+
+
+async def identity(conn, config):
+    row = await conn.fetchrow("""SELECT pg_catalog.current_database() AS db,
+        current_user AS usr, pg_catalog.current_schema() AS ns,
+        pg_catalog.current_setting('server_version_num')::int AS version,
+        pg_catalog.current_setting('session_replication_role') AS replication_role,
+        pg_catalog.pg_get_userbyid(n.nspowner) AS owner,
+        pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE') AS usage,
+        pg_catalog.has_schema_privilege(current_user,n.oid,'CREATE') AS can_create
+        FROM pg_catalog.pg_namespace n WHERE n.nspname='core'""")
+    if (row is None or row["db"] != config.database or row["usr"] != config.user
+            or row["ns"] != "core" or row["owner"] != config.user or not row["usage"]
+            or not row["can_create"] or row["replication_role"] != "origin" or not 160000 <= row["version"] < 170000):
+        raise MigrationError(3, "identity")
+
+
+async def state(conn, config, package):
+    await identity(conn, config)
+    parent = await catalog.inspect_prerequisites(conn, package.contract, config.user)
+    budget = await catalog.verify_budget(conn, package.contract, config.user, parent)
+    ledger = await catalog.verify_journal(conn, package.contract, config.user)
+    await catalog.verify_unoccupied_names(conn, budget, ledger)
+    complete = await journal.read_verified_history(conn, package, config.user, ledger is not None)
+    if complete and budget is None:
+        raise MigrationError(4, "missing_applied_table")
+    return parent, budget, ledger, complete
+
+
+async def execute(config, mode):
+    """Return a safe receipt; never retries. check takes no advisory lock or write transaction."""
+    package = load()
+    if mode not in {"check", "apply"}:
+        raise MigrationError(2, "mode")
+    config.validate()
+    # Import only after explicit invocation, offline integrity and target checks.
+    import asyncpg
+    connection = None
+    try:
+        async with asyncio.timeout(config.total_seconds):
+            connection = await asyncpg.connect(config.dsn, timeout=5, command_timeout=10,
+                server_settings={"search_path": "core", "statement_timeout": "10000",
+                    "lock_timeout": "2000", "idle_in_transaction_session_timeout": "5000",
+                    "application_name": "schema-migration-foundation"})
+            async with connection.transaction(isolation="repeatable_read", readonly=True):
+                *_, complete = await state(connection, config, package)
+                if mode == "check":
+                    if not complete:
+                        raise MigrationError(4, "unapplied")
+                    return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+            # One connection owns this session lock, all DDL and journal writes.
+            try:
+                async with asyncio.timeout(config.lock_seconds):
+                    await connection.fetchval("SELECT pg_catalog.pg_advisory_lock($1::int,$2::int)", *LOCK)
+            except Exception:
+                raise MigrationError(5, "owner_lock") from None
+            async with connection.transaction():
+                parent, budget, ledger, complete = await state(connection, config, package)
+                if complete:
+                    return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+                # Invalid prerequisites/catalog/history have already refused before first DDL.
+                if ledger is None:
+                    await connection.execute(package.journal_sql)
+                action = "adopted" if budget else "created"
+                if budget is None:
+                    await connection.execute(package.sql)
+                if await catalog.verify_budget(connection, package.contract, config.user, parent) is None:
+                    raise MigrationError(6, "postcondition")
+                if await catalog.verify_journal(connection, package.contract, config.user) is None:
+                    raise MigrationError(6, "postcondition")
+                await journal.append_applied(connection, package, config.user, action)
+                await journal.read_verified_history(connection, package, config.user, True)
+            return {"ok": True, "action": action, "revision": package.entry["id"]}
+    except MigrationError:
+        raise
+    except TimeoutError:
+        raise MigrationError(5, "deadline") from None
+    except Exception:
+        raise MigrationError(6, "database") from None
+    finally:
+        if connection is not None:
+            # Closing the dedicated connection releases its advisory lock even after rollback/cancel.
+            await asyncio.shield(connection.close(timeout=2))
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse's normal diagnostic echoes unknown arguments, potentially a pasted DSN.
+        raise MigrationError(2, "arguments")
+
+
+def main(argv=None, environ=None):
+    try:
+        parser = Parser(description=__doc__)
+        parser.add_argument("mode", choices=("plan", "check", "apply"))
+        parser.add_argument("--dsn-env")
+        parser.add_argument("--database")
+        parser.add_argument("--user")
+        parser.add_argument("--namespace")
+        args = parser.parse_args(argv)
+        package = load()
+        if args.mode == "plan":
+            if any((args.dsn_env, args.database, args.user, args.namespace)):
+                raise MigrationError(2, "arguments")
+            print(json.dumps({"ok": True, "foundation_only": True, "namespace": "core",
+                "revision": package.entry["id"], "artifact_sha256": package.entry["artifact_sha256"]}, sort_keys=True))
+            return 0
+        if (not args.dsn_env or not re.fullmatch(r"SCHEMA_MIGRATION_[A-Z0-9_]+", args.dsn_env)
+                or not args.database or not args.user or not args.namespace):
+            raise MigrationError(2, "arguments")
+        if environ is None:
+            import os
+            environ = os.environ
+        dsn = environ.get(args.dsn_env)
+        if not dsn:
+            raise MigrationError(2, "credential_input")
+        receipt = asyncio.run(execute(Config(dsn, args.database, args.user, args.namespace), args.mode))
+        print(json.dumps(receipt, sort_keys=True))
+        return 0
+    except MigrationError as error:
+        print(json.dumps({"ok": False, "code": error.code, "phase": error.phase}, sort_keys=True))
+        return error.code
+    except Exception:
+        print(json.dumps({"ok": False, "code": 6, "phase": "internal"}, sort_keys=True))
+        return 6
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

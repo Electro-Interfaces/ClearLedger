@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "revisions": [
+    {
+      "artifact_sha256": "301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1",
+      "files": {
+        "revisions/0001_contract.json": "19450cd978b88df859aa6f4d33ad745f48fb4f0b55a17850aa875e75b66a0194",
+        "revisions/0001_product_api_budgets.sql": "98da0597f9e4d6a3d21326a310496b790753a5d9e766cfec8005d84641dd2ac9",
+        "revisions/catalog_v1.py": "ae3c42d51a7e7e37ee293b2c64f73addd421cf792b63af6bed6c36b1ed5f24f5",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0001_product_api_budgets",
+      "namespace": "core",
+      "ordinal": 1,
+      "parent": null,
+      "runner_format": 1,
+      "source_commit": "b55d99597ae0dbd3986e8cde0469f7e117d18177"
+    }
+  ]
+}
