@@ -1,99 +1,102 @@
 # Партнёрский API: интеграционный кандидат
 
-Версионированный child API подключён к `/api/v1`. Он использует отдельный
-партнёрский verifier; Core session, SSO handoff и ID Token не заменяют access
-token API. Реестр child проверяется явно при сборке приложения: parent mount
-сам по себе не запускает его lifespan. Ключ cursor стабилен между workers и
-рестартами и выведен из серверного секрета с отдельным назначением HMAC.
+Состав исходников на 30.10.2026: ветка
+`MagLook/api-modernization-integration-20261029`, runtime pin `7b204fee`.
+Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
+программа M00–M19 продолжается.
 
-По умолчанию `PARTNER_OAUTH_ENABLED`, `PARTNER_API_ENABLED` и
-`PARTNER_DOCS_ENABLED` выключены. Для Swagger зарезервированы настройки
-`PARTNER_DOCS_CLIENT_ID`, `PARTNER_DOCS_ENVIRONMENT=unconfigured`,
-`PARTNER_DOCS_SANDBOX_API_URL`. Портал подключён к Core; его UI, raw OpenAPI
-и локальные Swagger assets требуют отдельной короткой docs-сессии.
-Business scopes выдаются отдельным Code+PKCE, Try it out — только на песочнице.
-`SOURCE_REVISION` используется как идентификатор состава при экспорте;
-значение `unverified` не подтверждает готовность публикации.
+## Что реализовано
 
-Независимая интеграционная проверка: 52 identity и 57 product тестов PASS;
-19 тестов настоящей цепочки Core login → consent → code/PKCE → mounted API
-PASS. Без подмены verifier проверены SQL scope/total/detail/pagination,
-редакция полей, token confusion, живой отзыв client/installation/account,
-изменение object scope и привязки cursor, отдельные default-off gates.
-Typecheck и 296 frontend unit тестов PASS. Экспортированный curated OpenAPI
-прошёл общий offline design gate, runtime readiness остаётся candidate.
+Child API `/api/v1` содержит 12 GET-операций: объекты ЭЗС, оборудование,
+контрагенты, договоры, документы/разрешённые файлы и мониторинг объекта.
+SQL-права применяются до count/limit/агрегации; cursor связан с текущими
+разрешениями и отбором. Существующие ObjectId с кириллицей и пробелами сохраняются.
+Девять операций допускают user/service, три документные требуют пользователя.
 
-При независимом review исходного OAuth-патча обнаружено, что сохранённый
-development callback не классифицировался повторно после смены конфигурации.
-Canonical exact-match теперь также проверяет действующую URI policy перед
-authorize/consent, а token endpoint закрывает непогашенный code с запрещённым
-теперь redirect. Regression проверяет dev → prod и выключение loopback flag;
-раньше согласованная конфигурация не остаётся бессрочным исключением.
+OAuth/OIDC на Authlib разделяет Core session, partner access, ID token и machine
+grant. Есть Code+PKCE с явным согласием, rotating refresh, installations/resource
+grants и живой отзыв. Изменение callback policy перепроверяется до выдачи code
+и при обмене; непригодный issuer закрывает регистрацию/discovery/export.
+UserInfo использует Bearer challenge для отрицательных ответов. Core login,
+SSO handoff и ID token не заменяют access token продуктового API.
 
-Также issuer проверяется до записей в реестр: порт обязан быть допустимым,
-а исходная строка не может содержать control/whitespace/backslash, которые
-URL parser способен нормализовать или проверить позднее. Проверено отсутствие
-новой регистрации при отказе 503; discovery и curated OpenAPI также закрыты
-при непригодном origin. Повторены восемь изменённых issuer/exporter случаев.
+Защищённый Swagger выдаёт отдельную короткую docs session; UI/raw JSON/assets
+закрыты одним guard. Canonical `/api/developer/docs/openapi.server.json`
+описывает оба OAuth-профиля; `/openapi.json` в том же каталоге представляет
+browser execution projection Code+PKCE. Шесть предметных групп и мобильные
+описания проверены на закреплённом Swagger. Wire types генерируются официальным
+openapi-typescript из настоящего curated exporter, без `.env`, сети и HTTP app.
 
-Удалённый workflow `.github/workflows/checks.yml` имеет состояние
-`disabled_manually`; его не включали. Отсутствие GitHub checks не означает
-прохождение CI: приведённые выше результаты относятся к локальным прогонам.
+Общие механизмы: document policy, file writer с rollback cleanup, counterparty
+matcher и три импортные команды, ServiceLocation commands, отдельная closing
+materialization и чистый основной GET, batch live resource loader, attempt HMAC
+Events, schema namespace guard. Новые контрагенты без ИНН используют NULL при
+неизменном raw. Импорт 1С обновляет stale manual markers под существующей
+блокировкой и сохраняет ручное очищение полей. Исправлены late response/401/login
+гонки Core session и выбранные company-context consumers.
 
-Identity/product тесты переведены на явный opt-in с общим pure safety guard,
-без жёсткой привязки к машине/порту/имени БД. На одном интеграционном составе
-128 identity/product/полных-chain тестов PASS. Schema suite запускается
-отдельным процессом/job: у исполнителя 25 fresh/upgrade/repeat/guard проверок
-PASS с настоящими предыдущими исходниками. Автор подтвердил 31 Core/public case и 2 финальные проверки индексов
-с неизменными public sentinels. Манифест новой таблицы уточнён по фактическому
-immutable M11 `partner_docs_sessions`; финальный portal gate и schema прогон координатора завершены: 31 PASS на immutable ef5f6ee2, 295.47 с.
+Общая PostgreSQL-квота считает company/installation/client между workers,
+возвращает безопасные429/503 и ограничивает очистку. OAuth/API/docs/quota
+выключены по умолчанию. `SOURCE_REVISION=unverified` не подтверждает готовность
+публикации; docs environment по умолчанию `unconfigured`.
 
-Это часть программы модернизации. Write API, все уровни объектов, общий
-идентификатор предметных команд, события, оптимизация и перевод всех старых
-потребителей ещё не завершены. Локальные тесты не подтверждают независимую
-приёмку всей программы, совместимость всех клиентов или рабочий выпуск.
+## Независимые локальные проверки координатора
 
+Полные и последующие целевые прогоны относятся к своим указанным составам.
+Их совокупность не объявляется единым полным CI финального HEAD.
 
-Дополнительная приёмка координатора: M05 команды и прежние объектные сценарии
-**84 + 39 = 123 PASS**, отдельный monitoring policy mapping **12 PASS**.
-M11 HTTP/SQL **21 PASS**; первая browser-проверка остановилась на гонке теста:
-удаление nginx gate до загрузки private consent chunk давало ожидаемый 403.
-Тест исправлен (`ef5f6ee2`): gate удаляется после отрисовки согласия перед
-отправкой, чтобы проверить именно public callback. Повтор browser на том же executable/test составе завершён: PASS за111.44с, реальные main/public build, HTTPS, native Swagger Authorize/Try SQL/logout/revoke.
-Эта запись не переносит авторские 22 PASS на непроверенный общий состав.
+| Состав | Результат |
+|---|---|
+| Identity/product/resources/ObjectId/monitoring/portal на28f6b7e2 | 296 PASS,268.31с, без SKIP/DESELECTED |
+| Объектные команды и прежние сценарии | 123 PASS |
+| Документы/файлы | 222policy;119writer/archive checks и2HTTP photo cases |
+| Closing/payment | 121domain и16browser scenarios |
+| Namespace guard на28f6b7e2 | 12real PostgreSQL PASS,229.213с |
+| Core/public fresh/upgrade/repeat/old-source с portal+quota model | 31PASS,301.22с |
+| Общая quota | 41offline и12SQL/process PASS,7.677с |
+| Auth session lifecycle | 15actualReact и17transport/redirect PASS |
+| Canonical/browser OpenAPI | 56offline,6pinned Swagger/interceptor,22HTTP/PostgreSQL PASS |
+| HTTPS Swagger после auth/service/mobile fixes | PASS110.21с: actual main/public builds, PKCE/Try SQL/logout/revoke/expiredCore recovery |
+| Responsive pinned Swagger | 7checks PASS на390/1200px |
+| Types generation/parity/drift/negative | 6PASS; freshness/consumer/typecheck PASS |
+| Оба исправления контрагентов наe1cb1a53 | 52SQL/HTTP PASS,22.55с, прежний explicit-null test сохранён |
+| UserInfo на9c33d932 | 70offline PASS,8.140с;FULL89identity/docs SQL/HTTP PASS,117.79с, без SKIP/DESELECTED |
+| Events attempt signatures | 61mock-transport PASS; DNS/SSRF не проверены этим набором |
 
+Внешние synthetic clients на официальном openid-client и публичных types прошли
+8machine+6documents cases,89HTTPS requests; пять evidence digests проверены.
+Проверены scoped pagination, foreign/ungranted denials, scope escalation,
+живой token/grant/membership revoke, Code/PKCE/nonce/signature/UserInfo,
+точные bytes/SHA файла и native file denials. Это два отдельных evidence этапа.
+Делегированный пользователь — company owner/admin; ordinary employee UI case
+SKIP. Server business-row immutability без baseline fingerprint не подтверждена.
+Purpose-built local HTTPS fixture не заменяет full production main/nginx/SSO
+или реального партнёра. Собственные тестовые процессы остановлены.
 
-Продолжение 30.10.2026, кандидат28f6b7e2. Общий PostgreSQL/HTTP набор identity,
-product, resource budgets SQL-count, ObjectId, monitoring и docs portal: **296 PASS
-за268.31с**, без SKIP/DESELECTED. Старый identity table recreation manifest теперь
-включает partner_docs_sessions; ошибка DROP не скрыта исключением теста.
-Пакетная загрузка live resource profiles/items уменьшает число statements на4–8
-при pageSize1/50/200, права продолжают перечитываться. Кириллица/пробелы
-ServiceLocation IDs сохраняются во внешнем контракте, ACL и cursor.
+GitHub workflow `.github/workflows/checks.yml` имеет состояние
+`disabled_manually`; его не включали. Отсутствие checks не означает PASS CI.
+Все SQL-проверки используют отдельную синтетическую PostgreSQL, не рабочую БД.
 
-M09 центральный Problem formatter сохраняет status-specific protocol headers;
-curated OpenAPI описывает actual 12operations/errors/header examples. Root:
-20PASS+36subtests,28schemaPASS+132subtests. Это ASGI с synthetic verifier/domain
-seams, не повтор настоящей OAuth/SQL цепочки на этом patch. Официальный
-openapi-typescript7.10.1 с изолированным lock генерирует wiretypes реального
-curated exporter:6generation/parity/drift/negative PASS, consumer/check/typecheck
-PASS. Прямая сеть/.env в exporter запрещены; transport/refresh в types не входят.
+## Что остаётся
 
-M14 root61mock-transportPASS: подпись каждой попытки свежая, ID/time факта
-сохранены; невозможность расшифровать signing secret запрещает URL-доставку
-до сети. DNS/SSRF и полныйchangefeed ещё не закрыты.
+Write API, site/EVSE/connector и temporal retirement, shared-file GC, все
+reference/contract/lifecycle commands, полный consumer ownership/usage,
+SSRF/DNS/change feed/replay, distributed OAuth pre-auth, load/SLO/export/job
+budgets, versioned migration runner и реальный dump/restore не завершены.
+Физический DELETE ServiceLocation временно возвращает409; прежний
+GET closing с expand_all остаётся deprecated write-guarded путём.
+Другие reference sync пути и расширенный null-intent требуют отдельной работы.
 
-M16 root independently **12 real PostgreSQL PASS за229.213с** на28f6b7e2:
-guard выполняется до DDL/functions, не позволяет принять public tables за Core,
-сохраняет public/Core/explicitEdge/oldORM compatibility и не блокирует чужие
-INDEX/SEQUENCE, которые SQLAlchemyhas_table не считает таблицами. Foreign
-TABLE/partitionedTABLE/VIEW/MATVIEW отклоняются раньше изменений. Read-only
-preflight фактического rushydro по333modelnames: currentSchema core,
-transactionReadOnly on, visibleForeignRelations=[]; это не backup/restore
-или release validation. Старый initialRuntime snapshot требует fresh сверки
-перед будущим выпуском.
+Read-only runtime baseline РусГидро сверялся до кандидата. Catalog preflight по
+333model names подтвердил current_schema=core и отсутствие чужих видимых
+relations, но был до quota model. Перед выпуском нужны свежий полный preflight,
+backup с фактическим восстановлением, состав релиза и rollback. Локальные PASS
+не подтверждают готовность всей программы или рабочего пространства.
 
-M18 standalone synthetic HTTPS sandbox и официальныеopenid-client клиенты
-подготовлены отдельно, actualHTTPpilots ещё не приняты. M15distributedquota
-implementation идёт отдельно, ни ratebudget/SLO, ни productionreadiness этим
-отчётом не заявлены. Все изменения остаются draft без merge/выкатки.
+Подробности: [quickstart](../PARTNER_QUICKSTART.md),
+[types](../PARTNER_SDK_TYPES.md), [OpenAPI profiles](service-openapi-20261030.md),
+[пилоты](PARTNER_SYNTHETIC_PILOTS.md), [quota](product-budget-20261030.md),
+[контрагенты](counterparty-explicit-null-20261030.md),
+[UserInfo](userinfo-protocol-20261030.md).
+Общий план и статус M00–M19 находятся в ecosystem-deploy;
+Support create/retry — отдельные draft PR23/24 TSupport.
