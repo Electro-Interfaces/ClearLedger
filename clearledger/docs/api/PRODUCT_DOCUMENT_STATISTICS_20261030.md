@@ -1,9 +1,9 @@
 # M15: document statistics control, 30.10.2026
 
-Статус: **source-only; SQL/collect/opt-out/ANALYZE/EXPLAIN NOT RUN**.
-Standalone ANALYZE требует отдельного literal root GO. Свободный synthetic PG
-и предыдущие grants разрешением не являются. M00–M19 открыта, PR draft;
-runtime/query rewrite/index/schema/config/merge/deploy в этот slice не входят.
+Статус: **author statistics control PASS: 1 case /16HTTP /4EXPLAIN /2ANALYZE**.
+Measured source `3c090cdc`, test SHA ниже. Выполнен один отдельно разрешённый
+run; grant завершён, повторов нет. M00–M19 открыта, PR draft;
+runtime/query rewrite/index/schema/config/merge/deploy не выполнялись.
 
 Own branch `agent/api-document-statistics-control-20261030`, база
 `f76174c3dcab196bbf381a6e8d955e2b2af00aa0`, тот же worktree
@@ -159,6 +159,153 @@ Parent helpers pins и guards не ослабляются. Разрешение 
 ожидается1SKIP/EXIT5 без DB fixtures.
 
 До grant выполнены только source/AST/compile своего test, без module import;
-AST/compile и diff-check PASS. Плановые metadata/HTTP/ANALYZE/EXPLAIN и cleanup
-этого Dispatch пока NOT RUN. После approved run сюда добавляется фактический
-результат и source SHA; source/runtime speedup не объявляется.
+AST/compile и diff-check PASS. Root отдельно прочитал точный source/MD и выдал
+literal GO на fresh canonical own DB, один case и ровно2 targeted ANALYZE.
+Opt-out `--noconftest`: **1 module SKIP /EXIT5**, без DB fixtures. После этого
+один actual run, без FAIL/retry и без изменения measured test source.
+
+## Фактический result и golden equivalence
+
+**Child EXIT0/reaped, 1 PASS /0FAIL /0ERROR /0SKIP, JUnit45,420s**.
+Выполнены16 HTTP (6×200/8×404/2×403),4 actual EXPLAIN и2 literal ANALYZE.
+Все metadata/ownership/read-only controls прошли. `safe-summary.json` совпадает
+с JUnit property; все8 deterministic HTTP records before/after равны без
+walltime. Совпали целиком page payloads, разрешённые IDs, link redaction/cursor
+и actual driver SQL+original typed binds. Исходники Query/ACL/verifier/listeners,
+индексы и конфигурация не изменялись.
+
+API total2000, page200 возвращает200 cards/гидратирует201/50843bytes; cursor
+также201 hydrated cards/50945bytes. Positive detail1card/308bytes, negatives
+0cards/159bytes, service403 без domain SELECT/0cards/157bytes. SQL counts
+до/после:31 для list/cursor/detail,28 для каждого negative detail,15 для
+service403; всего440 statements внутри16 HTTP, включая verifier/SET LOCAL.
+Maintenance, metadata и EXPLAIN считаются отдельно от этих HTTP statements.
+
+Preflight: PG160015, maxlocks64, otherclients0, fresh own DB7 765 015bytes.
+После dataset36 011 031bytes, после queries36 330 519bytes (34,65MiB), ниже
+256MiB. Один и тот же owned connection подтвердил перед maintenance:
+current DB=`api_product_query_scaling_test`, schema public, owner clearledger,
+relation kind r, ровно doc_cards/doc_access_grants. После commit RO проверки
+в отдельной writable transaction выполнены только две ANALYZE и local limits.
+
+## Metadata: статистика действительно изменилась
+
+В BEFORE start/end и ownership snapshot обе таблицы имели reltuples=-1,
+relpages0, analyze_count0/autoanalyze_count0, last_analyze/last_autoanalyze NULL.
+Это неизвестные catalog estimates, а не нулевое фактическое число строк.
+pg_stat live-tuple counters уже показывали5004/2000; их нельзя смешивать с
+planner catalog estimates или считать точным API-visible count.
+
+| Таблица | pg_class reltuples before→after | relpages before→after | n_live_tup before/after | n_mod_since_analyze before→after | analyze_count before→after |
+|---|---|---|---:|---|---|
+| doc_cards | -1→5004 | 0→167 | 5004 | 5005→0 | 0→1 |
+| doc_access_grants | -1→2000 | 0→35 | 2000 | 2000→0 | 0→1 |
+
+AFTER start/end counters/timestamps совпадают: обе last_analyze заполнены,
+autoanalyze_count0 и last_autoanalyze NULL. Observed counter change внутри
+каждой plan phase=false. Snapshots читались в новых RO transactions, поэтому
+старый transaction pg_stat snapshot не использовался. Publication lag остаётся
+общим ограничением counters, но здесь изменение подтверждено и pg_class,
+и analyze_count/last_analyze. OIDs/pg_statistic/MCV/histograms не читались.
+
+ANALYZE command walltime: doc_cards65,86ms, doc_access_grants24,88ms.
+Это durations двух разрешённых maintenance commands на данном dataset,
+не производственная стоимость обслуживания и не SQL SELECT execution time.
+
+## Два unchanged statements, четыре actual plans
+
+| Фаза | Statement | Planning ms | Execution ms | Root actual rows | Узлов | Root shared hits | Shared reads/temp |
+|---|---|---:|---:|---:|---:|---:|---|
+| BEFORE | COUNT | 0,803 | 2294,662 | 1 | 13 | 166921 | 0/0 |
+| BEFORE | page LIMIT201 | 1,468 | 2365,177 | 201 | 14 | 166921 | 0/0 |
+| AFTER | COUNT | 6,499 | 652,845 | 1 | 13 | 27171 | 0/0 |
+| AFTER | page LIMIT201 | 2,338 | 43,119 | 201 | 14 | 27179 | 0/0 |
+
+Actual visible intermediate result Anti join2000 rows не изменился. COUNT и
+page сохраняют **Nested Loop Anti и3000 loops**; исчез не сам loop, а broad
+deny probe внутри него. В private plan структурные условия подтверждают:
+раньше deny index branches использовали company_id/scope_type, после ANALYZE
+они также используют scope_id для doc/kind correlations. SQL и существующий
+индекс при этом те же; здесь не публикуются Filter/Index Cond или их значения.
+
+| Наблюдение | BEFORE | AFTER |
+|---|---|---|
+| Anti join estimate /actual | 1 /2000 | 3703 /2000 |
+| doc_cards scan estimate /actual | 1 /3000 | 4628 /3000 |
+| Deny bitmap index branch avg rows /loops | 2000 /3000 | 1 /3000 |
+| Deny heap avg rows returned/removed | 834 /834 | 0 /0 (округлено) |
+| Deny heap shared hits | 153745 | 14000 |
+| Deny heap avg time COUNT/page | 0,649 /0,664ms | 0,006 /0,004ms |
+
+Rows/times повторяемых узлов — округлённые averages per loop. AFTER0 не значит,
+что не было deny matches: final actual2000 и golden explicit-deny404 сохранены.
+Parent/child buffers/times не суммировались. Allow subplan тоже сохраняет3000
+loops и13000 shared hits; это отдельная работа, не broad deny scan.
+
+COUNT AFTER сканирует doc_cards через Seq Scan, page AFTER — Index Scan с
+Incremental Sort; эти формы выбраны PostgreSQL без planner switches. Меньшее
+число root hits и selective deny index conditions согласуются с улучшением
+catalog estimates. Это не утверждение об идеальности новых estimates:4628/3703
+по-прежнему отличаются от actual3000/2000.
+
+Raw COUNT AFTER содержит automatic JIT:52 functions, reported timing total
+226,377ms; BEFORE COUNT и оба page plans JIT section не имеют. JIT settings
+не менялись. Root Actual Total Time COUNT AFTER259,787ms и Execution Time
+652,845ms — разные measurements; не складываем root/child/JIT и не приписываем
+разность одному компоненту. Без отдельного контроля нельзя делать вывод о
+полезности JIT или предлагать его отключение по этим числам.
+
+HTTP walltime отдельно: page2004572,38→344,33ms, cursor4254,01→346,01ms.
+Наблюдение single-run общей VM с разным порядком/cache/plan/JIT, без repeat
+распределений и p95. **Statistics-only fixture effect, не source speedup и не
+production SLO/QPS.** EXPLAIN execution не заменяет HTTP latency.
+
+SQL hashes одинаковы BEFORE/AFTER и соответствуют actual captured statements:
+
+| Statement | SQL SHA256 |
+|---|---|
+| COUNT | `f69e3a5950d17390c1921deeb728a3a58a9b1356607cc3725bcb474696178f29` |
+| Page | `4d28a1084a39f7ec1cda9bd81b50a95a69f23a2e8da96d51d6aeb9d5e9c13172` |
+
+| Фаза/statement | Raw-plan SHA256 |
+|---|---|
+| BEFORE COUNT | `d643ade12275c545b4f2cd9f59c3043a5ec8b1bd9f0cbaea807eccbbd5826455` |
+| BEFORE page | `6eba83dd700c2889870cad6b364fc346ea036f7446d8478ad27ca74d45fbd992` |
+| AFTER COUNT | `da6b1802946b0b9199d3ef7928b082aefed48842a32140f8681017111094defe` |
+| AFTER page | `6f897102c570412681597d93b6098780001e3a0dbb66b80c9becfecbdf7658f6` |
+
+## Вывод для следующего решения root
+
+Статистика fresh synthetic DB оказалась существенным confounder исходных
+медленных plans: broad deny scan исчез при неизменённом SQL/ACL и уже имеющемся
+scope index. Поэтому немедленный deny-EXISTS rewrite на основании unanalyzed
+plan теперь не обоснован. Следующие performance comparisons должны явно
+фиксировать сопоставимое statistics state и actual plan; оригинальный fresh
+bootstrap case сохраняется отдельно. Это рекомендация к подготовке будущих
+согласованных synthetic experiments, а не поручение менять реальные базы.
+
+Если root всё же выберет source A/B, сравнивать его с analyzed unchanged SQL,
+а не с неинициализированными estimates; сначала нужна отдельная ACL-equivalence
+матрица и новый scoped grant. Current16 golden controls подтверждают этот
+statistics experiment, но не полную матрицу будущего rewrite. Не предлагается
+новый индекс, отключение JIT, изменение autovacuum или runtime fix. Работа
+другого characterization worker остаётся независимым source-only направлением.
+
+## Cleanup и private artifacts
+
+Child EXIT0/reap/shared teardown завершены без ошибок, connections процесса
+закрыты, SQL_SLOT_RELEASED передан root. Root отдельно подтвердил fresh
+public/edge tables0/conns0, normal DROP canonical own DB, затем
+DBexists0/otherclients0/maxlocks64/adminclosed. Worker admin/CREATE/DROP не
+использовал. После PASS новых SQL/ANALYZE/EXPLAIN/повторов нет, старый grant завершён.
+
+Current artifacts только в отдельной
+`/srv/projects/api-modernization-test-env-20261029/private-product-document-statistics-20261030/`:
+optout/preflight/run/JUnit, `http-samples.jsonl`, count/page raw statements,
+`before-count-plan.json`, `before-page-plan.json`, `after-count-plan.json`,
+`after-page-plan.json`, before/after phase safe summaries, `analyze.json`,
+`safe-summary.json`. Ownership metadata включена в final summary. Raw SQL,
+binds/plans/conditions не копируются в public; в Git только2 согласованных
+source/report файла. Прежние4files и old evidence/archives не менялись.
+Measured testSHA после run неизменен; final commit добавляет только этот отчёт.
+Root artifact acceptance отдельно; M00–M19/fullCI/production performance не закрыты.
