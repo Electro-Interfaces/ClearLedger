@@ -102,6 +102,12 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                     raise state["failure"]
                 return dict(contract_id=identifier, scope_type="locations", items=[], total=0, next_cursor=None)
 
+            async def contract_documents(inner, identifier, params):
+                state["domain"].append(("contract-documents", identifier))
+                if state["failure"]:
+                    raise state["failure"]
+                return dict(contract_id=identifier, items=[], total=0, next_cursor=None)
+
             async def detail(inner, resource, identifier):
                 state["domain"].append(("detail", resource))
                 if state["failure"]:
@@ -227,8 +233,8 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         OpenAPIV31SpecValidator(schema).validate()
         entries = policy_registry(self.app)
         registry = export_runtime_registry(self.app)
-        self.assertEqual(len(entries), 13)
-        self.assertEqual(len({v["operationId"] for v in registry["operations"]}), 13)
+        self.assertEqual(len(entries), 14)
+        self.assertEqual(len({v["operationId"] for v in registry["operations"]}), 14)
         for entry in entries:
             with self.subTest(path=entry["path"]):
                 operation = schema["paths"][entry["path"]]["get"]
@@ -280,7 +286,7 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(set(schema["paths"][entry["path"]]["get"]["responses"]["200"]["content"]),
                                      {"application/json"})
                     checked.append(entry["operationId"])
-        self.assertEqual(len(checked), 12)
+        self.assertEqual(len(checked), 13)
 
     async def test_binary_representation_and_range_ignore_are_explicit(self):
         version = SimpleNamespace(file_id=FILE, file_name="../Скан 1.pdf")
