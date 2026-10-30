@@ -226,7 +226,8 @@ async def create_location(
         # Omission is not an explicit request to erase the object number.
         data.pop("metadata")
     try:
-        loc = await location_commands.upsert(db, cid, new_id, data)
+        loc = await location_commands.upsert(db, cid, new_id, data,
+                                             actor_id=current_user.id, source="native.locations")
     except location_commands.LocationConflict as exc:
         raise HTTPException(exc.status, exc.detail) from exc
     await db.flush()
@@ -255,7 +256,8 @@ async def update_location(
     cid = await assert_company_member(str(loc.company_id), current_user, db)
     data = payload.model_dump(exclude_unset=True)
     try:
-        mutation = await location_commands.update(db, cid, location_id, data)
+        mutation = await location_commands.update(db, cid, location_id, data,
+                                                 actor_id=current_user.id, source="native.locations")
     except location_commands.LocationConflict as exc:
         raise HTTPException(exc.status, exc.detail) from exc
     if mutation is None:
