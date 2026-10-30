@@ -22,6 +22,9 @@ CEILING = 256 * 1024 * 1024
 # BEFORE pytest/application imports; the __main__ runner repeats these checks
 # before its first connection and before importing pytest/conftest.
 error = partner_test_safety_error(os.environ, flag=FLAG)
+if os.environ.get(FLAG) != "1" and __name__ != "__main__":
+    import pytest
+    pytest.skip("Opt in with RUN_PRODUCT_QUERY_SCALING_TESTS=1", allow_module_level=True)
 if error:
     raise RuntimeError("Refusing product scaling run: " + error)
 if any(os.environ.get(key) != TARGET for key in ("TEST_DATABASE_URL", "DATABASE_URL")):
@@ -177,6 +180,11 @@ async def dataset(b, n):
 
 async def policy(b, d, restricted, machine):
     await database_size(b.db)
+    # Only synthetic persisted/token claims change. Keep real verifier expiry
+    # checks and the actual clock; cover the entire 20-minute outer bound.
+    expires = identity.now() + timedelta(minutes=25)
+    b.family.expires_at = b.token.expires_at = expires
+    b.payload.update(iat=int(time.time()), exp=int(expires.timestamp()))
     await profiles(b)  # Real stored ALL profiles; no verifier override.
     selections = {"counterparties": [b.data["counterparties"][0].id]}
     if restricted:
@@ -199,7 +207,6 @@ async def policy(b, d, restricted, machine):
         scopes = sorted(set(scopes) - {"openid", "documents:read"})
         b.grant.kind, b.grant.user_id = "machine", None
         b.family.token_version = b.family.auth_time = None
-        b.family.expires_at = identity.now() + timedelta(minutes=5)
         b.payload["sub"] = "client:" + b.client.id
     b.grant.scopes = scopes
     b.payload["scope"] = " ".join(scopes)

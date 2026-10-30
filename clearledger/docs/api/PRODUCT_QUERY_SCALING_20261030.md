@@ -8,8 +8,8 @@ runtime optimization, индексы и EXPLAIN не входят в разре�
 Ветка: `agent/api-product-query-scaling-20261030` в собственном чистом worktree
 `/home/mag/orca/workspaces/ledger-app/api-contract-manual-serialization-20261030`.
 Ownership: только этот документ и `server/tests/test_product_query_scaling.py`.
-SHA-256 теста для первого согласования:
-`e16b198b74938e1a4477d09f3be622c26608230248c1139b77a0485b60d14797`.
+SHA-256 теста после source review root (opt-out/expiry):
+`692f3f825d8ef1cb0c4f4791c06c555b860c77a127091ec912365da7dce2d208`.
 
 ## Что именно измеряется
 
@@ -23,9 +23,13 @@ SHA-256 теста для первого согласования:
 
 Действуют `CompanyRole`, `UserCompany`, stored resource profiles/items,
 `ContractLocation`, `DocAccessGrant` и штатная `_readable_doc_clause`.
+Перед каждым profile только synthetic token/family/payload expiry обновляется
+до now+25 минут, JWT подписывается реальным fixture RSA-ключом. Это покрывает
+20-минутный outer bound; действующий verifier и настоящие часы не подменяются.
 ORM listeners из `auth.py`, `scope.py`, `task_assignments.py`, `file_store.py`
 сохраняются. Дополнительные event handlers только наблюдают запросы/гидратацию
-и выставляют согласованные `SET LOCAL` timeouts. Не используется fake verifier,
+и выставляют согласованные `SET LOCAL` timeouts в отдельном runner process;
+это не глобальная настройка приложения/остальных тестов. Не используется fake verifier,
 выключение ACL/listeners, подмена `Query` или ручная копия SQL приложения.
 
 Existing resource-budget tests уже доказали снижение SQL при batch loading
@@ -130,6 +134,9 @@ root получает failed/unknown cleanup; запрещено удалять 
 `api_test_only`, own database `api_product_query_scaling_test`. Базу подготавливает
 root отдельным grant. Runner не создаёт БД, не использует admin connection,
 не меняет maxlocks/config и не обращается к реальным URL/env/данным.
+Без opt-in обычный pytest import заканчивается module SKIP до app/DB imports;
+в режиме `__main__` отсутствие opt-in остаётся строгим отказом. Module opt-out
+пока не выполнялся: он также ожидает отдельного GO.
 
 Runner — сам owned test file в режиме `__main__`; лог/evidence приватны, не Git.
 Команда ниже только спецификация до root GO. Она не меняет HOME, передаёт
@@ -145,7 +152,7 @@ import hashlib, os
 from pathlib import Path
 root = Path('/home/mag/orca/workspaces/ledger-app/api-contract-manual-serialization-20261030')
 test = root / 'clearledger/server/tests/test_product_query_scaling.py'
-assert hashlib.sha256(test.read_bytes()).hexdigest() == 'e16b198b74938e1a4477d09f3be622c26608230248c1139b77a0485b60d14797'
+assert hashlib.sha256(test.read_bytes()).hexdigest() == '692f3f825d8ef1cb0c4f4791c06c555b860c77a127091ec912365da7dce2d208'
 runtime = Path('/srv/projects/api-modernization-test-env-20261029')
 cwd = runtime / 'product-query-scaling-empty-test'
 upload = runtime / 'product-query-scaling-test-uploads'
