@@ -147,6 +147,66 @@ class PreparationTests(unittest.TestCase):
         self.assertFalse(dep.satisfies('3.13.18', '<3.13'))
         self.assertTrue(dep.satisfies('1.7.4', '~=1.7,!=1.8.*'))
 
+    def test_numeric_release_zero_padding_reproducer_and_both_operand_lengths(self):
+        releases = ['1', '1.0', '1.0.0.0.0', '1.0.0.0.0.0', '1' + '.0' * 63]
+        for left in releases:
+            for right in releases:
+                for operator, expected in [('==', True), ('!=', False), ('<=', True),
+                                           ('>=', True), ('<', False), ('>', False)]:
+                    with self.subTest(left=left, right=right, operator=operator):
+                        self.assertEqual(dep.satisfies(left, operator + right), expected)
+
+    def test_numeric_release_nonzero_tail_and_ordering_beyond_fifth_component(self):
+        for lower, upper in [('1', '1.0.0.0.0.1'), ('1.0.0.0.0.1', '1.0.0.0.0.2'),
+                             ('1.0.0.0.9', '1.0.0.0.10'), ('9.999999', '10')]:
+            for candidate, bound, order in [(lower, upper, -1), (upper, lower, 1)]:
+                expected = {'==': False, '!=': True, '<': order < 0, '<=': order < 0,
+                            '>': order > 0, '>=': order > 0}
+                for operator, result in expected.items():
+                    with self.subTest(candidate=candidate, bound=bound, operator=operator):
+                        self.assertEqual(dep.satisfies(candidate, operator + bound), result)
+
+    def test_numeric_wildcard_prefix_zero_padding_preserves_prefix_precision(self):
+        for version, prefix, expected in [('1', '1.0.0.0.0.0', True),
+                                          ('1.0.0.0.0.0.1', '1', True),
+                                          ('1.0.0.0.0.1', '1.0.0.0.0.0', False),
+                                          ('1.0.0.0.1', '1.0.0.0.1.0', True),
+                                          ('1.1', '1.0.0.0.0.0', False)]:
+            with self.subTest(version=version, prefix=prefix):
+                self.assertEqual(dep.satisfies(version, '==' + prefix + '.*'), expected)
+                self.assertEqual(dep.satisfies(version, '!=' + prefix + '.*'), not expected)
+
+    def test_numeric_compatible_release_uses_original_bound_precision(self):
+        for version, bound, expected in [('1', '1.0.0.0.0.0', True),
+                                         ('1.0.0.0.0.9', '1.0.0.0.0.0', True),
+                                         ('1.0.0.0.1', '1.0.0.0.0.0', False),
+                                         ('1.9.0.0.0.1', '1.0', True),
+                                         ('2.0.0.0.0.0', '1.0', False),
+                                         ('1.1', '1.0.0', False),
+                                         ('1.0.0.0.0.0', '1.0.0.0.0.1', False)]:
+            with self.subTest(version=version, bound=bound):
+                self.assertEqual(dep.satisfies(version, '~=' + bound), expected)
+
+    def test_numeric_markers_use_shared_padding_for_reversed_operands_and_operators(self):
+        env = dict(dep.MARKER_ENV, python_full_version='1.0.0.0.0.0')
+        for operator, expected in [('==', True), ('!=', False), ('>=', True),
+                                   ('<=', True), ('>', False), ('<', False), ('~=', True)]:
+            for expression in (f'python_full_version {operator} "1.0"',
+                               f'"1.0" {operator} python_full_version'):
+                with self.subTest(expression=expression):
+                    self.assertEqual(dep.Marker(expression).evaluate(env), expected)
+        self.assertTrue(dep.Marker('python_full_version == "1.0.0.0.0.0.*"').evaluate(env))
+        self.assertTrue(dep.Marker('python_full_version < "1.0.0.0.0.1"').evaluate(env))
+
+    def test_numeric_supported_subset_rejects_bounds_and_hidden_unsupported_clause(self):
+        self.assertTrue(dep.satisfies('1' + '.0' * 127, '==1'))
+        for version in ('1' + '.0' * 128, '1' * 33, '１.0', '1rc1', '1!1.0', '1.0+local'):
+            with self.subTest(version=version), self.assertRaises(dep.Rejected):
+                dep.satisfies(version, '>=0')
+        for spec in ('~=1', '>=1.*', '<0,>=1rc1', '!=1,==1!1.0', '==1.0.*.0'):
+            with self.subTest(spec=spec), self.assertRaises(dep.Rejected):
+                dep.satisfies('1', spec)
+
     def test_unsupported_marker_url_and_version_semantics_fail_closed(self):
         for raw in ('dep; unknown_variable == "x"', 'dep; extra === "dev"',
                     'dep @ https://example.invalid/a.whl', 'dep; __import__("os")',
