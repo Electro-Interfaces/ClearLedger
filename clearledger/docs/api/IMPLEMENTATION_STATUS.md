@@ -261,3 +261,12 @@ protocol, stale indexes и concurrent/global no-reuse остаются откр�
 blobs,43AST expression hashes,117immutable snippet refs и MD/JSON agreement.
 Это статическая карта, не подтверждение production traffic или server ACL.
 [Разбор](NATIVE_CONSUMER_TRIAGE_20261030.md).
+
+
+Native PATCH договора использует общий с импортом company barrier до autoflush,
+после ожидания перечитывает текущий договор и членство перед правкой. Actual
+baseline2FAIL/2controlsPASS; root117PASS35.04с без SKIP. Сохранены13прежних
+модулей тестов; concurrent manual NULL, stale payload/pending ORM state и
+revoke/scope/demotion/move/delete проверены. Все writers модели и live
+organization/global/superadmin semantics не объявляются покрытыми.
+[Отчёт](contract-manual-serialization-20261030.md).

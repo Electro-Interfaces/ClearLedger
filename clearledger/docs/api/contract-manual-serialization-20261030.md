@@ -194,3 +194,20 @@ OData; независимый прогон координатора на мом�
 магазинных документов и документных сценариев. Реальные данные/договоры,
 коннекторы/1С, внешние API, браузер, SSH, CI, merge и deploy не используются.
 Программа M00–M19 остаётся незавершённой.
+
+
+## Независимая приёмка общего состава
+
+Координатор перенёс source919b9c8d в интеграцию коммитомf5f2de3b и повторил
+те же14модулей на свежей собственной synthetic БД
+`api_root_contract_manual_serialization_test`: **117 PASS за35,04с**,
+0FAIL/ERROR/SKIP/DESELECTED, child EXIT0/reaped. Проверены runtime/test SHA256
+выше, AST изменения только update_contract и побайтовая неизменность13прежних
+модулей тестов относительноb46eb062. Отдельно сверены SHA исходного baseline
+файла1cfb106e и неизменность AST исходных четырёх параметризованных сценариев.
+Private evidence: `.artifacts/root-contract-manual-serialization-repeat.py`,
+`.artifacts/root-contract-manual-serialization-counterparty-final.log`,
+`.artifacts/root-contract-serialization-boundaries.py`. Артефакты не публикуются. После child fresh public/edge tables0 и
+ownconns0, ordinary DROP, fresh DBexists0/maxlocks64, admin/probes закрыты.
+Это приёмка ограниченного native PATCH/import взаимодействия, не полного CI
+и не всех writers Contract. Рабочие данные и сервисы не менялись.
