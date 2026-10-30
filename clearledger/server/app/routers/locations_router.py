@@ -227,7 +227,8 @@ async def create_location(
         data.pop("metadata")
     try:
         loc = await location_commands.upsert(db, cid, new_id, data,
-                                             actor_id=current_user.id, source="native.locations")
+                                             actor_id=current_user.id, source="native.locations",
+                                             name_intent="manual" if "name" in payload.model_fields_set else None)
     except location_commands.LocationConflict as exc:
         raise HTTPException(exc.status, exc.detail) from exc
     await db.flush()
@@ -257,7 +258,8 @@ async def update_location(
     data = payload.model_dump(exclude_unset=True)
     try:
         mutation = await location_commands.update(db, cid, location_id, data,
-                                                 actor_id=current_user.id, source="native.locations")
+                                                 actor_id=current_user.id, source="native.locations",
+                                                 name_intent="manual" if "name" in payload.model_fields_set else None)
     except location_commands.LocationConflict as exc:
         raise HTTPException(exc.status, exc.detail) from exc
     if mutation is None:

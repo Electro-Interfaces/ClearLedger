@@ -1086,7 +1086,7 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
 
 async def refresh_location_names(db: AsyncSession, company_id) -> int:
     """Имя объекта-станции = свежайшее имя из сессий — но ТОЛЬКО если подпись не
-    подтверждена справочником CPO.
+    подтверждена справочником CPO или явной ручной правкой.
 
     Правило приоритета: реестр оператора > выгрузка сессий. Реестр ведёт сам CPO,
     а `station_name` в сессиях отстаёт и бывает мусорным — так карточка ID 3114
@@ -1096,7 +1096,9 @@ async def refresh_location_names(db: AsyncSession, company_id) -> int:
 
     Для станций, которых в реестре нет (заведены из сессий), поведение прежнее:
     имя берётся из последней сессии, старое уходит в extra_metadata.nameHistory
-    (поиск по нему остаётся). Идемпотентно; возвращает число переименованных."""
+    (поиск по нему остаётся). Ручной marker проверяется по текущей строке UPDATE,
+    включая повторную проверку после ожидания row lock. Идемпотентно; возвращает
+    число переименованных. Это не защита от остальных CPO/import writers."""
     from sqlalchemy import text
     res = await db.execute(text(
         "WITH fresh AS ("
@@ -1113,5 +1115,6 @@ async def refresh_location_names(db: AsyncSession, company_id) -> int:
         "WHERE f.location_id = sl.id AND sl.company_id = :cid "
         "  AND btrim(sl.name) IS DISTINCT FROM f.nm"
         "  AND coalesce(sl.extra_metadata->>'nameSource', '') <> 'cpo_registry'"
+        "  AND coalesce(sl.extra_metadata#>>'{fieldProvenance,name,authority}', '') <> 'manual'"
     ), {"cid": str(company_id)})
     return int(res.rowcount or 0)
