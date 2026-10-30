@@ -29,9 +29,14 @@ from urllib.parse import urlsplit
 SERVER = Path(__file__).resolve().parents[1]
 REPO = SERVER.parents[1]
 SELF = Path(__file__).resolve()
+OTHER_RUNNER = SERVER / 'tests/backend_upgrade_main_approved.py'
+APPROVED_OTHER_SHA = None
+CURRENT_APPROVED_SHA = None
+SOURCE_BASE = '330883aaf8e387e106e93d790806a182acbe526d'
+FROZEN_COUNTS = {'app': 492, 'tests': 345, 'schema_migrations': 16}
 CANDIDATE = Path('/srv/projects/api-modernization-upgrade-test-env-20261030/.venv')
 SITE = CANDIDATE / 'lib/python3.13/site-packages'
-RUN = REPO / '.artifacts/backend-upgrade-functional-execution-20261030-attempt3'
+RUN = REPO / '.artifacts/backend-upgrade-functional-execution-20261030-attempt4'
 EMPTY, UPLOAD, EVIDENCE = (RUN / n for n in ('empty-test', 'upgrade-test-uploads', 'evidence'))
 DSN = 'postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/api_backend_upgrade_test_20261030'
 RAW_DSN = DSN.replace('postgresql+asyncpg:', 'postgresql:', 1)
@@ -40,8 +45,8 @@ LIMIT_LOG = 2 * 1024 * 1024
 LIMIT_SCRATCH = 64 * 1024 * 1024
 DEADLINE = 900
 # Filled from source bytes and accepted ROOT receipts, not imports/collection.
-FROZEN_TREES = {'app': '6eff5b153368ec492b91664a76825bd4ae360bfe4af55e902651f95d0d679981', 'schema_migrations': 'c641925633181647d39f788fd29765322d3a2027f6fcaeaefe533e870d1f1f0e', 'tests': 'faa034c1241dabd15aceb82f1ed6e90e47a0131b9af6ab0342cf00f7a898e722'}
-FROZEN_FILES = {'.dockerignore': '219f4861afde083e955dccd850e20ac3f86a4d3b51164c484e7fca1620490d6a', 'Dockerfile': 'aaa894b69a30d8e9253bf3759ea627cb2d6a8709ed2046b7e7abf20e4e25d09d', 'locks/dependency-artifacts-upgrade-py313-linux-amd64-20261030.json': '8711de6afb6bc461718851a537c2456ea9b1f68b2f4236f3de599df561493b7f', 'locks/runtime-upgrade-20261030-py313-linux-amd64.provisional.txt': 'a9b060f941cda22fab721522eb68f717711c55f17dbbdc83fae169a8e0fbf2bc', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601', 'requirements-upgrade-20261030.in': '90e92d607c5f3c966f5dca129461d92fdfc2a094e5b3a77e5e211ad5dc4d8caf', 'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0'}
+FROZEN_TREES = {'app': '748c5eda4d956dc73771aa84462c6bc789d80cbdcddc0b86825e141f04a8c3c0', 'tests': '08ae0ee2ed47661fe8d6d5dc89fab61641fbeccb49fa3cbf76e82a7b4dd5f0a9', 'schema_migrations': 'c641925633181647d39f788fd29765322d3a2027f6fcaeaefe533e870d1f1f0e'}
+FROZEN_FILES = {'.dockerignore': '219f4861afde083e955dccd850e20ac3f86a4d3b51164c484e7fca1620490d6a', 'Dockerfile': 'aaa894b69a30d8e9253bf3759ea627cb2d6a8709ed2046b7e7abf20e4e25d09d', 'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0', 'requirements-upgrade-20261030.in': '90e92d607c5f3c966f5dca129461d92fdfc2a094e5b3a77e5e211ad5dc4d8caf', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601', 'locks/bootstrap-py313-linux-amd64.provisional.txt': '551e3fb88d8fda035c0d8a2f38c7b08e29b4798d9bad0bfc8d42f5a3c3a8200f', 'locks/bootstrap-upgrade-20261030-py313-linux-amd64.provisional.txt': 'b41fd964893071eb489e01e85256f471764997721fe151eaf08684bfb12a87b8', 'locks/dependency-artifacts-py313-linux-amd64.json': '3390cbfaa680b9bb970ce43e8d3e32014230908c46fd9e7b1d4464c7cf7365ee', 'locks/dependency-artifacts-upgrade-py313-linux-amd64-20261030.json': '8711de6afb6bc461718851a537c2456ea9b1f68b2f4236f3de599df561493b7f', 'locks/derived-http-ece-py313-linux-amd64.provisional.json': '84596a3ebfce149db956cc750006eeb55871c80b41d40207cfe29fb0d8961d83', 'locks/runtime-baseline.constraints.txt': '0ffe95bf719106fc03b76fc8ec2627173e574ee32b974660b7aadc7561e4f6f8', 'locks/runtime-py313-linux-amd64.provisional.txt': '3b17a7566f0519b7f056697975ed2216e01de5d99972cc882b678be2696cd3d1', 'locks/runtime-upgrade-20261030-py313-linux-amd64.provisional.txt': 'a9b060f941cda22fab721522eb68f717711c55f17dbbdc83fae169a8e0fbf2bc', 'locks/runtime-upgrade-20261030.constraints.txt': '0df586ccfd455936da34929fd32ded0c241b0bf3befad06e83b0be61c94ebfce', 'locks/tooling-py313-linux-amd64.provisional.txt': '9e9d2d3d92273c607c2acba679d1d08b3cefa3102583718eade5f665a1c99d80', 'locks/tooling-upgrade-20261030-py313-linux-amd64.provisional.txt': '554fc211ee0ed4e88a2136029781308ac4d820b33ec60fcc242b88a556c33162'}
 RUNTIME_WITH_PIP = {'aiofiles': '24.1.0', 'aiohappyeyeballs': '2.7.1', 'aiohttp': '3.14.5', 'aiosignal': '1.4.0', 'aiosmtplib': '5.1.3', 'annotated-doc': '0.0.2', 'annotated-types': '0.8.0', 'anyio': '4.15.1', 'asyncpg': '0.30.0', 'attrs': '26.1.0', 'authlib': '1.9.1', 'bcrypt': '4.2.1', 'certifi': '2026.10.23', 'cffi': '2.1.1', 'charset-normalizer': '3.5.2', 'click': '8.5.0', 'cryptography': '50.0.2', 'dnspython': '2.9.1', 'email-validator': '2.3.0', 'et-xmlfile': '2.0.0', 'fastapi': '0.133.0', 'frozenlist': '1.8.0', 'greenlet': '3.5.6', 'gunicorn': '23.0.0', 'h11': '0.16.0', 'http-ece': '1.2.1', 'httpcore': '1.0.9', 'httptools': '0.9.0', 'httpx': '0.28.1', 'idna': '3.20', 'joserfc': '1.7.7', 'lxml': '6.1.3', 'multidict': '7.2.1', 'openpyxl': '3.1.5', 'packaging': '26.3', 'passlib': '1.7.4', 'pip': '26.2.2', 'propcache': '0.5.4', 'py-vapid': '1.9.6', 'pycparser': '3.12', 'pydantic': '2.14.2', 'pydantic-core': '2.50.2', 'pydantic-settings': '2.7.1', 'pyjwt': '2.15.0', 'pypdf': '6.21.2', 'python-docx': '1.1.2', 'python-dotenv': '1.2.2', 'python-multipart': '0.0.31', 'pywebpush': '2.5.0', 'pyyaml': '6.0.3', 'requests': '2.34.2', 'sqlalchemy': '2.0.36', 'starlette': '1.3.1', 'typing-extensions': '4.16.0', 'typing-inspection': '0.4.4', 'urllib3': '2.8.0', 'uvicorn': '0.34.0', 'uvloop': '0.23.0', 'watchfiles': '1.3.0', 'websockets': '17.3', 'yarl': '1.25.1'}
 TEST_TOOLS = {'iniconfig': '2.3.1', 'jsonschema': '4.26.0', 'jsonschema-path': '0.5.0', 'jsonschema-specifications': '2025.9.1', 'lazy-object-proxy': '1.13.0', 'openapi-schema-validator': '0.9.0', 'openapi-spec-validator': '0.9.0', 'pathable': '0.6.0', 'pluggy': '1.7.0', 'pygments': '2.21.0', 'pytest': '9.2.0', 'pytest-asyncio': '1.4.1', 'referencing': '0.37.0', 'rfc3339-validator': '0.1.4', 'rpds-py': '2026.9.1', 'six': '1.17.0'}
 EXPECTED_CASES = {'backend_upgrade_approved.py': 6, 'test_api_contracts_context.py': 34, 'test_api_contracts_http.py': 56, 'test_auth.py': 13, 'test_contract_liability.py': 1, 'test_doc_text.py': 9, 'test_docs_portal.py': 22, 'test_docs_register.py': 23, 'test_partner_identity.py': 67, 'test_partner_product_integration.py': 20, 'test_partner_userinfo_wire.py': 14, 'test_product_api.py': 57, 'test_product_http_profile.py': 12, 'test_product_object_ids.py': 27, 'test_product_openapi_http_contract.py': 8, 'test_product_service_openapi.py': 7}
@@ -60,7 +65,9 @@ def sha(path):
 
 def tree_digest(root):
     paths = [p for p in sorted(root.rglob('*'))
-             if p.is_file() and '__pycache__' not in p.parts and p != SELF]
+             if p.is_file() and '__pycache__' not in p.parts and p not in {SELF, OTHER_RUNNER}]
+    if root.name in FROZEN_COUNTS and len(paths) != FROZEN_COUNTS[root.name]:
+        raise RuntimeError('Frozen exact source file count mismatch')
     if len(paths) > 1024 or sum(p.stat().st_size for p in paths) > 32 * 1024 * 1024:
         raise RuntimeError('Source tree exceeds approved bounds')
     if any(p.is_symlink() for p in paths):
@@ -72,6 +79,10 @@ def tree_digest(root):
 def source_guard(approved_sha):
     if not re.fullmatch('[0-9a-f]{64}', approved_sha) or sha(SELF) != approved_sha:
         raise RuntimeError('Runner SHA does not match independent ROOT approval')
+    if (not isinstance(APPROVED_OTHER_SHA, str) or
+            not re.fullmatch('[0-9a-f]{64}', APPROVED_OTHER_SHA) or
+            OTHER_RUNNER.is_symlink() or sha(OTHER_RUNNER) != APPROVED_OTHER_SHA):
+        raise RuntimeError('Other owned entrypoint SHA lacks independent ROOT approval')
     for name, expected in FROZEN_TREES.items():
         if tree_digest(SERVER / name) != expected:
             raise RuntimeError('Frozen complete source tree mismatch: ' + name)
@@ -387,7 +398,8 @@ def child(approved_sha, profile):
         raise RuntimeError('Exact scrubbed environment required')
     packages = inventory()
     write_json(EVIDENCE / 'pre-import-boundary.json', {
-        'runner_sha256': approved_sha, 'source_trees': FROZEN_TREES,
+        'runner_sha256': approved_sha, 'source_trees': FROZEN_TREES, 'source_counts': FROZEN_COUNTS,
+        'source_base': SOURCE_BASE, 'other_runner_sha256': APPROVED_OTHER_SHA,
         'runtime61': RUNTIME_WITH_PIP, 'test_tools16': TEST_TOOLS,
         'python': '3.13.7', 'glibc': '2.36', 'flags': ['-I', '-S', '-B'],
         'environment_keys': sorted(os.environ), 'home_preserved': True,
@@ -403,7 +415,8 @@ def child(approved_sha, profile):
     record = {'profile': profile, 'full376_accepted': False, 'status': 'starting', 'python': '3.13.7', 'glibc': '2.36', 'runner_sha256': approved_sha,
               'inventory': packages, 'runtime_count': 61, 'test_tool_count': 16,
               'home_preserved': True, 'no_site_before_guards': True, 'no_env_files': True,
-              'source_trees': FROZEN_TREES, 'sql_target': DATABASE}
+              'source_trees': FROZEN_TREES, 'source_counts': FROZEN_COUNTS,
+              'source_base': SOURCE_BASE, 'other_runner_sha256': APPROVED_OTHER_SHA, 'sql_target': DATABASE}
     code = 2
     try:
         with install_boundaries():
@@ -508,7 +521,7 @@ def supervise(approved_sha, profile):
     anchor_identity = (anchor.st_dev, anchor.st_ino, anchor.st_uid)
     cases = EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}
     argv = [str(CANDIDATE / 'bin/python'), '-I', '-S', '-B', str(SELF),
-            '--approved-sha256', approved_sha, '--profile', profile, '--root-reviewed-child']
+            '--approved-sha256', approved_sha, '--approved-other-sha256', APPROVED_OTHER_SHA, '--profile', profile, '--root-reviewed-child']
     started = time.monotonic()
     proc = subprocess.Popen(argv, cwd=EMPTY, env=clean_environment(), start_new_session=True,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -689,11 +702,14 @@ async def test_upgrade_multipart_validation_and_limits():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--approved-sha256', required=True)
+    parser.add_argument('--approved-other-sha256', required=True)
     parser.add_argument('--profile', required=True, choices=['full376', 'api-contracts-http-first-failure'])
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--execute-root-reviewed', action='store_true')
     group.add_argument('--root-reviewed-child', action='store_true')
     args = parser.parse_args()
+    global APPROVED_OTHER_SHA, CURRENT_APPROVED_SHA
+    APPROVED_OTHER_SHA, CURRENT_APPROVED_SHA = args.approved_other_sha256, args.approved_sha256
     return child(args.approved_sha256, args.profile) if args.root_reviewed_child else supervise(args.approved_sha256, args.profile)
 
 
