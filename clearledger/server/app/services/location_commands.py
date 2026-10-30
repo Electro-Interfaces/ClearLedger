@@ -8,11 +8,11 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 
 from app.models import AuditEvent, Contract, ContractLocation, ObjectLink, ServiceLocation
 from app.scope import current_object_scope, current_organization
@@ -66,13 +66,126 @@ def validate_identifier(identifier: str) -> str:
     return identifier
 
 
+@dataclass(frozen=True, eq=False)
+class LockedLocationSet:
+    """Preheld identities, not admission; only the issuing root transaction may use it."""
+
+    identifiers: frozenset[str]
+    _db: Any = field(repr=False)
+    _root: Any = field(repr=False)
+    _company: str = field(repr=False)
+
+
+@dataclass
+class _LocationEntrance:
+    root: Any
+    mode: str
+    capability: LockedLocationSet | None = None
+
+
+_ENTRANCE_KEY = "location-command:v1:entrance"
+_SET_CONFLICT = "Набор блокировок объекта недействителен: требуется новая транзакция"
+
+
+def _entrance(db, root):
+    state = db.info.get(_ENTRANCE_KEY)
+    return state if isinstance(state, _LocationEntrance) and state.root is root else None
+
+
+async def _root_transaction(db):
+    # Retain the sync root object's identity, not an AsyncSessionTransaction proxy
+    # or the current SAVEPOINT. begin() does not flush or commit caller state.
+    root = db.sync_session.get_transaction()
+    if root is None:
+        await db.begin()
+        root = db.sync_session.get_transaction()
+    return root
+
+
+def _require_location_set(db, company_id, identifier, capability):
+    root = db.sync_session.get_transaction()
+    state = _entrance(db, root)
+    if (not isinstance(capability, LockedLocationSet) or capability._db is not db
+            or root is None or not root.is_active or capability._root is not root
+            or state is None or state.mode != "prepared" or state.capability is not capability
+            or capability._company != str(company_id) or identifier not in capability.identifiers):
+        raise LocationConflict(409, _SET_CONFLICT)
+
+
+async def _advisory_lock(db, namespace, value):
+    # Preserve the exact v1 namespace, bytes, digest and signed bigint encoding.
+    key = int.from_bytes(hashlib.blake2b(
+        f"location-command:v1:{namespace}:{value}".encode(), digest_size=8).digest(), "big", signed=True)
+    await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
+async def acquire_location_set(db, company_id, identifiers):
+    """Acquire the FULL opaque-ID set before the existing company barrier.
+
+    Caller must enter before incompatible row/FK writes, and revalidate targets
+    after waiting. This API cannot discover arbitrary prior SQL locks. It does
+    not load rows, admit a principal, flush, mutate domain state or commit.
+    A fresh acquisition in a SAVEPOINT is unsafe: rollback would release its
+    locks while leaving the root alive. A preheld root set may be used there.
+    """
+    try:
+        if isinstance(identifiers, (str, bytes)):
+            raise TypeError
+        ordered = sorted({validate_identifier(value) for value in identifiers})
+    except ValueError as exc:
+        raise LocationConflict(422, str(exc)) from exc
+    except TypeError as exc:
+        raise LocationConflict(422, "Недопустимый набор ключей объектов") from exc
+
+    root = await _root_transaction(db)
+    state = _entrance(db, root)
+    if state is not None:
+        cap = state.capability
+        if (root.is_active and state.mode == "prepared" and cap is not None
+                and cap._db is db and cap._company == str(company_id)
+                and frozenset(ordered) <= cap.identifiers):
+            return cap
+        # Includes a single-path entrance, an incomplete acquisition, an
+        # extension, or another company. Never acquire another ID after C.
+        raise LocationConflict(409, _SET_CONFLICT)
+    if not root.is_active or db.in_nested_transaction():
+        raise LocationConflict(409, _SET_CONFLICT)
+
+    state = _LocationEntrance(root, "preparing")
+    db.info[_ENTRANCE_KEY] = state
+    try:
+        for identifier in ordered:
+            await _advisory_lock(db, "id", identifier)
+        await _advisory_lock(db, "company", company_id)
+    except BaseException:
+        # Some IDs may already be held. No retry/extension until outer rollback.
+        state.mode = "failed"
+        raise
+    cap = LockedLocationSet(frozenset(ordered), db, root, str(company_id))
+    state.mode, state.capability = "prepared", cap
+    return cap
+
+
 async def _barrier(db, company_id, identifier):
-    # Stable, transaction-scoped across processes and both HTTP entry points.
-    # ID before company also serializes concurrent cross-tenant ID claims.
+    root = await _root_transaction(db)
+    state = _entrance(db, root)
+    if state is not None and state.mode != "single":
+        # Protect old _locked/update/upsert/create callers in a prepared root T,
+        # not just the new explicit-token reader. Known IDs require no new lock.
+        _require_location_set(db, company_id, identifier, state.capability)
+        return
+    if state is None:
+        db.info[_ENTRANCE_KEY] = _LocationEntrance(root, "single")
+    # Existing single-path outcomes/order remain unchanged outside prepared T.
     for namespace, value in (("id", identifier), ("company", company_id)):
-        key = int.from_bytes(hashlib.blake2b(
-            f"location-command:v1:{namespace}:{value}".encode(), digest_size=8).digest(), "big", signed=True)
-        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+        await _advisory_lock(db, namespace, value)
+
+
+async def _reload_location(db, company_id, identifier):
+    # Tenant predicate precedes row lock; never load/lock another tenant's row.
+    return (await db.execute(select(ServiceLocation).where(
+                            ServiceLocation.id == identifier, ServiceLocation.company_id == company_id)
+                            .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
 
 
 async def _locked(db, company_id, identifier):
@@ -83,9 +196,7 @@ async def _locked(db, company_id, identifier):
     await _barrier(db, company_id, identifier)
     # FOR UPDATE conflicts with FK key-share checks in contract/session writers.
     # Reload even when admission already loaded this row into the identity map.
-    return (await db.execute(select(ServiceLocation).where(
-                            ServiceLocation.id == identifier, ServiceLocation.company_id == company_id)
-                            .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+    return await _reload_location(db, company_id, identifier)
 
 
 async def _assert_visible(db, company_id, loc):
@@ -113,6 +224,31 @@ async def locked_visible(db, company_id, identifier):
     if loc is None:
         raise LocationConflict(404, "Объект не найден")
     await _assert_visible(db, company_id, loc)
+    return loc
+
+
+async def locked_visible_in_set(db, company_id, identifier, locked_set):
+    """Reload an existing admitted point under a preheld root set; no commit.
+
+    Admission is the CURRENT O/G context at lookup, never cached by the token.
+    Company membership remains the caller's responsibility, as in locked_visible.
+    Apply the target's patch AFTER reload: populate_existing must not silently
+    discard its unflushed changes. Unrelated pending entities are not flushed.
+    """
+    try:
+        validate_identifier(identifier)
+    except ValueError as exc:
+        raise LocationConflict(422, str(exc)) from exc
+    _require_location_set(db, company_id, identifier, locked_set)
+    for entity in db.dirty:
+        if (isinstance(entity, ServiceLocation) and inspect(entity).identity == (identifier,)
+                and db.is_modified(entity, include_collections=True)):
+            raise LocationConflict(409, "Объект содержит несохранённые изменения")
+    with db.no_autoflush:
+        loc = await _reload_location(db, company_id, identifier)
+        if loc is None:
+            raise LocationConflict(404, "Объект не найден")
+        await _assert_visible(db, company_id, loc)
     return loc
 
 
