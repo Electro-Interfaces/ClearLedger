@@ -38,7 +38,7 @@ class ProjectsContext:
             team_ids.add(site.owner_user_id)
         people = (await db.scalars(select(User).join(UserCompany, UserCompany.user_id == User.id)
             .where(User.id.in_(team_ids), UserCompany.company_id == cid))).all() if team_ids else []
-        from app.routers.chat_router import _is_insider
+        from app.services.chat_access import is_insider as _is_insider
         suggestions = []
         for person in people:
             if not person.mail_only and await _is_insider(person, cid):

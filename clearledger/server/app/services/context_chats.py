@@ -6,7 +6,7 @@ from app.services import work_contexts
 
 
 async def ensure_room(db, cid, user, ref, *, purpose="main", audience="internal", participant_ids=()):
-    from app.routers.chat_router import _is_insider, _assert_participant
+    from app.services.chat_access import is_insider as _is_insider, assert_participant as _assert_participant
     context = await work_contexts.resolve(db, cid, user, ref)
     if not user.is_superadmin and not await _is_insider(user, cid):
         raise HTTPException(403, "Группу приложения создаёт сотрудник пространства")

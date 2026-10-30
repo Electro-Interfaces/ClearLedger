@@ -82,7 +82,7 @@ async def origin(db, cid, user, kind, entity_id):
         msg = await db.get(ChatMessage, mid)
         if msg and not msg.deleted_at and await db.scalar(select(ChatParticipant.id).where(
                 ChatParticipant.room_id == msg.room_id, ChatParticipant.user_id == user.id)):
-            from app.routers.chat_router import _history_from
+            from app.services.chat_access import history_from as _history_from
             since = await _history_from(msg.room_id, user, db)
             if since is None or msg.created_at >= since:
                 return {"room_id": str(msg.room_id), "message_id": str(mid)}
