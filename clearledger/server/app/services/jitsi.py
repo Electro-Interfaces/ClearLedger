@@ -59,6 +59,17 @@ def event_room(ev) -> str:
     return room_for(f"event:{ev.series_id or ev.id}")
 
 
+async def meeting_hosts(db, ev) -> set:
+    """Ведущие встречи: отмеченные участники, а не отмечен никто — организатор."""
+    from sqlalchemy import select
+
+    from app.models import CalendarAttendee
+
+    отмечены = set((await db.execute(select(CalendarAttendee.user_id).where(
+        CalendarAttendee.event_id == ev.id, CalendarAttendee.is_host.is_(True)))).scalars())
+    return отмечены or {ev.organizer_id}
+
+
 async def share_series_url(db, ev) -> None:
     """Раздать ссылку комнаты повторениям серии, у которых ссылки ещё нет.
 

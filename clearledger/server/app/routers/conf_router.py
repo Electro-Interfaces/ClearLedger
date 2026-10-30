@@ -610,9 +610,7 @@ async def meeting_create(
 
 async def ведущие_встречи(db: AsyncSession, ev: CalendarEvent) -> set:
     """Ведущие встречи: отмеченные участники, а не отмечен никто — организатор."""
-    отмечены = set((await db.execute(select(CalendarAttendee.user_id).where(
-        CalendarAttendee.event_id == ev.id, CalendarAttendee.is_host.is_(True)))).scalars())
-    return отмечены or {ev.organizer_id}
+    return await jitsi.meeting_hosts(db, ev)
 
 
 async def войти_во_встречу(db: AsyncSession, cid, ev: CalendarEvent, user: User) -> dict:

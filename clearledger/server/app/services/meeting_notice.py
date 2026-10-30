@@ -128,9 +128,8 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         if ev.conference_url:
             # Кого ждут в комнате — видно сразу: ведущий впускает гостей, без
             # него первые пять минут никто не откроет конференцию.
-            from app.routers.conf_router import ведущие_встречи
             имена = list((await db.execute(select(User.name).where(
-                User.id.in_(await ведущие_встречи(db, ev))))).scalars())
+                User.id.in_(await jitsi.meeting_hosts(db, ev))))).scalars())
             if имена:
                 строка += "\nВедущие: " + ", ".join(sorted(имена))
     elif отмена:
