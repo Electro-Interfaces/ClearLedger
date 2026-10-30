@@ -27,7 +27,8 @@ async def read_local(db: AsyncSession, user: User, cid: uuid.UUID, kind: Kind, *
         return await _chats(db, user, cid, query, limit)
 
     # Тот же гейт продукта, что у исходных /tasks и /work/calendar.
-    from app.routers.tasks_router import _assert_work, _names, _not_personal
+    from app.services.task_access import assert_work as _assert_work
+    from app.services.task_queries import names as _names, not_personal as _not_personal
     from app.services.task_access import is_admin as _is_admin, visible_to as _visible_to
     await _assert_work(str(cid), user, db)
     if kind == "tasks":
