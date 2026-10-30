@@ -22,10 +22,13 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getIntegration } from '@/services/projectIntegrationService'
 import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
+import { ProjectDismantleStations } from './ProjectDismantleStations'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { openAuthAttachment } from '@/lib/authFiles'
+import { captureApiContextGuard } from '@/services/apiClient'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -1352,7 +1355,7 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
 
 /* ── Вкладка «Паспорт» ──────────────────────────────────────────────────── */
 
-const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool'; options?: string[];
+const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool' | 'stations'; options?: string[];
   /** Графа-уточнение: видна, пока другая графа блока даёт для неё повод. */
   when?: (val: (k: string) => string) => boolean }[] }[] = [
   {
@@ -1401,11 +1404,13 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
     title: 'СМР',
     fields: [
       { k: 'plannedEzsCount', label: 'ЭЗС к установке, шт', type: 'number' },
+      { k: 'dismantleLocationIds', label: 'ЭЗС к демонтажу', type: 'stations' },
       { k: 'plannedPowerKwt', label: 'Мощность к установке, кВт', type: 'number' },
       { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
       { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
       { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
       { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
+      { k: 'decommissionedOn', label: 'Дата вывода ЭЗС из эксплуатации', type: 'date' },
       { k: 'supplier', label: 'Поставщик' },
       { k: 'contractor', label: 'Подрядчик' },
       { k: 'tuStatus', label: 'Статус согласования / ТУ', type: 'area' },
@@ -1472,6 +1477,7 @@ const API_FIELD: Record<string, string> = {
   archiveReason: 'archive_reason',
   // графы чек-листа согласования
   inputPriceKwth: 'input_price_kwth', smrCost: 'smr_cost', longTermContract: 'long_term_contract',
+  dismantleLocationIds: 'dismantle_location_ids', decommissionedOn: 'decommissioned_on',
   hasVideo: 'has_video', hasMobile: 'has_mobile', hasInternet: 'has_internet',
   hasLighting: 'has_lighting', access24x7: 'access_24x7', parkingSpots: 'parking_spots',
   subsidyPlanned: 'subsidy_planned', subsidyAmount: 'subsidy_amount',
@@ -1492,27 +1498,70 @@ const BOOL_LABEL = (v: unknown) => (v === true ? 'да' : v === false ? 'нет'
 const emailIn = (text: string): string | null =>
   text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0] ?? null
 
-export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
+type PassportProps = { site: SiteDetail; companyId: string; onDone: () => Promise<void> }
+
+export function PassportTab(props: PassportProps) {
+  return <ScopedPassportTab key={`${props.companyId}:${props.site.id}`} {...props} />
+}
+
+function ScopedPassportTab({ site, companyId, onDone }: PassportProps) {
   const specialized = ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
   const groups = specialized ? PASSPORT_GROUPS.filter((g) => ['Объект', 'СМР'].includes(g.title)).map((g) => ({ ...g,
     // У склада, закупки и корпоративного клиента строительства нет — блок зовётся по-старому.
     title: g.title === 'СМР' ? 'План и участники' : g.title,
     fields: g.fields.filter((f) => ['region', 'city', 'address', 'placeKind', 'installPlace', 'supplier', 'contractor', 'comment'].includes(f.k)) })) : PASSPORT_GROUPS
   const [draft, setDraft] = useState<Record<string, string>>({})
+  const [dismantleDraft, setDismantleDraft] = useState<string[] | null>(null)
+  const [guard] = useState(() => captureApiContextGuard())
+  const [stale, setStale] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const alive = useRef(false)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const [showRaw, setShowRaw] = useState(false)
-  useEffect(() => setDraft({}), [site])
+  useEffect(() => { setDraft({}); setDismantleDraft(null); setSaveError(null) }, [site])
 
-  const dirty = Object.keys(draft).length > 0
+  function current() {
+    try { guard(); return alive.current } catch { return false }
+  }
+  function editField(key: string, value: string) {
+    if (!current()) { setStale(true); return }
+    setSaveError(null)
+    setDraft((fields) => ({ ...fields, [key]: value }))
+  }
+
+  const dirtyCount = Object.keys(draft).length + (dismantleDraft === null ? 0 : 1)
+  const dirty = dirtyCount > 0
   const m = useMutation({
-    mutationFn: () => patchSite(companyId, site.id, Object.fromEntries(
-      Object.entries(draft).map(([k, v]) => [API_FIELD[k] ?? k, v === '' ? null : v]))),
+    mutationFn: async (payload: Record<string, unknown>) => {
+      guard()
+      const result = await patchSite(companyId, site.id, payload)
+      guard()
+      return result
+    },
     onSuccess: async (r) => {
+      if (!current()) return
       setDraft({})
+      setDismantleDraft(null)
+      setSaveError(null)
       toast.success(r.changed.length ? `Сохранено полей: ${r.changed.length}` : 'Изменений нет')
       await onDone()
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
+    onError: (e) => {
+      if (!current()) return
+      const message = e instanceof Error ? e.message : 'Не удалось сохранить'
+      setSaveError(message)
+      toast.error(message)
+    },
   })
+
+  function save() {
+    if (!current()) { setStale(true); return }
+    setSaveError(null)
+    m.mutate({
+      ...Object.fromEntries(Object.entries(draft).map(([k, v]) => [API_FIELD[k] ?? k, v === '' ? null : v])),
+      ...(dismantleDraft === null ? {} : { dismantle_location_ids: dismantleDraft }),
+    })
+  }
 
   // Написать собственнику: комната проекта заводится один раз, дальше переписка
   // живёт в ней. Внешний участник отвечает письмом — ответ приходит сюда же.
@@ -1566,6 +1615,10 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
   // Из «Сейчас» сюда приходят заполнять конкретную графу — показываем её сразу.
   useEffect(() => { document.querySelector('[data-wanted]')?.scrollIntoView({ block: 'center' }) }, [])
 
+  let contextCurrent = !stale
+  try { guard() } catch { contextCurrent = false }
+  if (!contextCurrent) return <Alert><AlertDescription>Сеанс изменился. Откройте карточку заново.</AlertDescription></Alert>
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -1576,12 +1629,15 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
               {plural(wantedCount, 'графа', 'графы', 'граф')}.</>
           )}
         </p>
-        <Button size="sm" className="h-8 text-sm" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
+        <Button size="sm" className="h-8 text-sm" disabled={!dirty || m.isPending} onClick={save}>
           {m.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
-          Сохранить{dirty ? ` (${Object.keys(draft).length})` : ''}
+          Сохранить{dirty ? ` (${dirtyCount})` : ''}
         </Button>
       </div>
 
+      {saveError && <Alert variant="destructive"><AlertDescription>{saveError}</AlertDescription></Alert>}
+
+      <fieldset disabled={m.isPending} className="flex min-w-0 flex-col gap-3" aria-label="Паспорт проекта">
       {groups.map((g) => (
         <section key={g.title} className="rounded-lg border border-border">
           <div className="px-3 py-1.5 text-sm font-semibold border-b bg-muted/40">{g.title}</div>
@@ -1593,9 +1649,9 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
               const needFor = needs(key)
               if (f.when && !f.when(val)) return null
               return (
-                <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
+                <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' || f.type === 'stations' ? 'md:col-span-3' : ''} ${
                   needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
-                  <Label>
+                  <Label htmlFor={`passport-${key}`}>
                     {f.label}
                     {isManual && <span className="ml-1 text-xs text-primary" title="Ведётся вручную, импорт не перезапишет">✎</span>}
                     {needFor && (
@@ -1605,10 +1661,14 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                       </span>
                     )}
                   </Label>
-                  {f.type === 'area' ? (
+                  {f.type === 'stations' ? (
+                    <ProjectDismantleStations companyId={companyId} disabled={m.isPending}
+                      value={dismantleDraft ?? site.dismantleLocationIds ?? []}
+                      onChange={(ids) => { if (current()) { setSaveError(null); setDismantleDraft(ids) } else setStale(true) }} />
+                  ) : f.type === 'area' ? (
                     <>
-                      <Textarea rows={2} className="text-sm min-h-[46px]" value={val(key)}
-                        onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
+                      <Textarea id={`passport-${key}`} rows={2} className="text-sm min-h-[46px]" value={val(key)}
+                        onChange={(e) => editField(key, e.target.value)} />
                       {/* Переписка с контрагентом идёт из карточки, а не из почтового
                           клиента: в контакте собственника обычно записан адрес, и по
                           нему заводится чат проекта с внешним участником — он отвечает
@@ -1626,8 +1686,8 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                     </>
                   ) : f.type === 'select' || f.type === 'bool' ? (
                     <Select value={val(key) || '__none__'}
-                      onValueChange={(v) => setDraft((d) => ({ ...d, [key]: v === '__none__' ? '' : v }))}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      onValueChange={(v) => editField(key, v === '__none__' ? '' : v)}>
+                      <SelectTrigger id={`passport-${key}`} className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {(f.type === 'bool' ? ['да', 'нет'] : f.options ?? []).map((o) => (
@@ -1636,9 +1696,9 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Input className="h-8 text-sm" type={f.type === 'date' ? 'date' : 'text'}
+                    <Input id={`passport-${key}`} className="h-8 text-sm" type={f.type === 'date' ? 'date' : 'text'}
                       inputMode={f.type === 'number' ? 'decimal' : undefined}
-                      value={val(key)} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
+                      value={val(key)} onChange={(e) => editField(key, e.target.value)} />
                   )}
                 </div>
               )
@@ -1646,6 +1706,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
           </div>
         </section>
       ))}
+      </fieldset>
 
       {(site.lat != null || site.mapUrl) && (
         <div className="flex items-center gap-3 text-sm">
@@ -3183,8 +3244,9 @@ export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: s
  * подняли до 12 px: ниже начинается «мелкий шрифт», о который спотыкается любой,
  * кто сидит с этим экраном полдня.
  */
-export function Label({ children }: { children: ReactNode }) {
-  return <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{children}</div>
+export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+  const className = 'block text-xs uppercase tracking-wide text-muted-foreground mb-1'
+  return htmlFor ? <label htmlFor={htmlFor} className={className}>{children}</label> : <div className={className}>{children}</div>
 }
 
 export function fmtDate(iso: string | null | undefined): string {
