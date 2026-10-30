@@ -18,6 +18,9 @@ def safe_target(target):
     if not isinstance(target, str):
         return target
     path, separator, query = target.partition("?")
+    # Chat requires a query credential; its key can also be percent-encoded.
+    if path == "/api/chat/ws":
+        return path
     return path if separator and (path.startswith(_PRIVATE) or _AUTH_QUERY.search(query)) else target
 
 
