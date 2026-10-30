@@ -261,6 +261,10 @@ async def _send(db: AsyncSession, sub: EventSubscription,
         if sub.target_kind == "url":
             raise RuntimeError("URL webhook: невозможно сформировать подпись") from None
         raise
+    if sub.target_kind == "url":
+        from app.services import webhook_delivery
+        return await webhook_delivery.send(url, body=body.encode("utf-8"), headers=headers,
+                                           timeout=DELIVERY_TIMEOUT)
     async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
         resp = await client.post(url, content=body.encode("utf-8"),
                                  headers=headers)
