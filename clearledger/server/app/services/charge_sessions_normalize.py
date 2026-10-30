@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from app.services.reference_identity import lock_manual_creation
+from app.services.contract_commands import create_imported_contract
 from app.services.reference_overrides import apply_import_values
 from app.services.reference_identity import (
     ContractIndex, CounterpartyIndex, organization_for_import, require_organization,
@@ -668,8 +669,8 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         # сортируется и не видна в поле даты формы.
         if len(start) == 10 and start[2] == "." and start[5] == ".":
             start = f"{start[6:]}-{start[3:5]}-{start[:2]}"
-        contract = Contract(
-            company_id=company_id, number="б/н", date=start,
+        contract = await create_imported_contract(
+            db, company_id, contracts, number="б/н", date=start,
             counterparty_id=str(cp.id), organization_id=require_organization(org_id),
             type=CORP_CONTRACT_TYPE, kind="СПокупателем", basis="договор",
             # Зарядка идёт по всей сети, а не по набору станций.
@@ -677,9 +678,6 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": CORP_CONTRACT_TYPE,
                                        "number": "б/н", "date": start}},
         )
-        db.add(contract)
-        await db.flush()
-        contracts.add(contract)
 
     # Ссылка клиента на карточку контрагента: реестр клиентов пересоздаётся при каждой
     # загрузке справочника, поэтому связь ставится здесь, а не разовым сопоставлением —

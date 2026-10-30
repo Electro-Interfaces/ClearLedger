@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.reference_identity import lock_manual_creation
+from app.services.contract_commands import create_imported_contract
 from app.services.counterparty_commands import (
     add_imported_counterparty_alias, create_imported_counterparty,
 )
@@ -275,16 +276,13 @@ async def ingest_reestr(
             basis = _detect_basis(row.get(contr_k), cp_cell)
             contract = contract_index.resolve(cp, ctype, number, cdate)
             if contract is None and number:
-                contract = Contract(
-                    company_id=company_id, number=str(number)[:100], date=cdate or "",
+                contract = await create_imported_contract(
+                    db, company_id, contract_index, number=str(number)[:100], date=cdate or "",
                     counterparty_id=str(cp.id), organization_id=require_organization(org_id),
                     type=ctype, kind=ckind, basis=basis, scope_type="locations",
                     raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": ctype,
                                                "number": str(number), "date": cdate or ""}},
                 )
-                db.add(contract)
-                await db.flush()
-                contract_index.add(contract)
                 res["contracts"] += 1
             # Повтор в другом объекте использует тот же договор и добавляет охват.
             link_key = (id_key(contract.id), id_key(loc.id)) if contract else None
