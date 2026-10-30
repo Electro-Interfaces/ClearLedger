@@ -107,3 +107,10 @@ public/edge, pools закрыты; отдельное проверочное с�
 Остаются независимая root приёмка общего кандидата, отдельные M06 producer/CRUD
 срезы и дизайн расширенного null-intent. Другие reference sync пути на stale
 identity-map здесь не проверялись. Полнота M06/программы и выпуск не заявляются.
+
+
+Независимый повтор координатора в общем кандидате e1cb1a53:
+52actual SQL/HTTP checks PASS за22.55с. Включены оба исправления контрагентов,
+прежний clear-fields case без изменения, immutable поведения omitted/null→null,
+1С identity/branch/company guards, native API и rollback канала.
+Предыдущий общий проход до refresh fix дал28PASS/1FAIL; это сохранено отдельно.
