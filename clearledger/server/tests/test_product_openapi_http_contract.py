@@ -223,7 +223,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(registry["kind"], "policy-runtime-registry")
         self.assertEqual(registry["sourceRevision"], "offline-http-profile")
         self.assertEqual(self.schema["x-elsy-runtime-registry"], registry)
-        self.assertEqual(len(registry["operations"]), 12)
+        self.assertEqual(len(registry["operations"]), 13)
         for entry in policy_registry(self.app):
             operation = self.schema["paths"][entry["path"]]["get"]
             self.assertEqual(operation["operationId"], entry["operationId"])

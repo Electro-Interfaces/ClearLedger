@@ -1,5 +1,14 @@
 # M12: wire types внешнего product API
 
+Дополнение NEXT-R1: actual curated candidate расширен новым
+`listContractObjects` до 13 GET, из которых 10 допускают user/service и три
+документные требуют пользователя. Exporter и официальный генератор обновляют
+точный manifest, сохраняя проверки чужих/лишних/повторных операций. Исходный
+срез из 12 операций ниже остаётся историей M12; текущая генерация, проверка
+freshness/consumer и её точные результаты фиксируются отдельно в
+[отчёте NEXT-R1](api/CONTRACT_OBJECTS_READ_20261030.md). До этой проверки старый
+generated файл не подтверждает новый контракт; ручной правки `.d.ts` нет.
+
 30.10.2026. База этого slice — `e94427bf6af8bbb84206dfc7f982bd7718ff0c52`,
 ветка `agent/api-wire-types-20261030`. Генерируемый файл:
 `src/generated/partner-api.d.ts`. Он экспортирует `paths`, `components`,

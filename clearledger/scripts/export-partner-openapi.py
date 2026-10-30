@@ -83,8 +83,8 @@ def export_schema(*, runtime_database=False):
     methods = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
     operations = [operation for path in schema["paths"].values()
                   for method, operation in path.items() if method in methods]
-    if len(operations) != 12 or any(operation.get("x-elsy-readiness") != "candidate" for operation in operations):
-        raise RuntimeError("Expected exactly 12 curated candidate product operations")
+    if len(operations) != 13 or any(operation.get("x-elsy-readiness") != "candidate" for operation in operations):
+        raise RuntimeError("Expected exactly 13 curated candidate product operations")
     unexpected = {"app.main", "app.auth", "app.services.partner_identity"}
     if not runtime_database:
         unexpected.add("app.config")
