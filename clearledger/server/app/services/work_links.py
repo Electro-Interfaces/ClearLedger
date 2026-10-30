@@ -10,14 +10,13 @@ from app.services import work_state
 def subject_clause(model, cid, ref):
     if model is Task:
         return Task.subject_ref == ref
-    return or_(DocCard.subject_ref == ref, select(DocRelation.id).where(
-        DocRelation.company_id == cid, DocRelation.doc_id == DocCard.id,
-        DocRelation.target_ref == ref).correlate(DocCard).exists())
+    from app.services.doc_subject_links import subject_documents_clause
+    return subject_documents_clause(cid, ref, correlate_doc=True)
 
 
 async def visible_work(db, cid, user, *, ref=None, object_id=None, unlinked_prefix=None):
     from app.services.doc_access import _readable_doc_clause
-    from app.routers.tasks_router import _not_personal
+    from app.services.task_queries import not_personal as _not_personal
     from app.services.task_access import is_admin as _is_admin, visible_to as _visible_to
 
     doc_acl = await _readable_doc_clause(db, cid, user)
@@ -50,7 +49,7 @@ async def visible_work(db, cid, user, *, ref=None, object_id=None, unlinked_pref
 
 async def readable_entity(db, cid, user, kind, entity_id, *, edit=False):
     from app.services.doc_access import _assert_doc_permission
-    from app.routers.tasks_router import _assert_actor
+    from app.services.task_access import assert_actor as _assert_actor
     from app.services.task_access import can_view_task as _can_view_task
 
     model = DocCard if kind == "doc" else Task

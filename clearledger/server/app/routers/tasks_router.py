@@ -543,21 +543,15 @@ async def _task_or_404(db: AsyncSession, cid: uuid.UUID, task_id: str) -> Task:
 
 
 async def _can_edit_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> bool:
-    """То же полномочие для API и интерфейса, включая охват руководителя."""
-    if not await _can_view_task(db, cid, user, t):
-        return False
-    if t.visibility == "personal":
-        return t.author_id == user.id
-    if user.id in (t.assignee_id, t.author_id) or await _is_admin(db, cid, user):
-        return True
-    from app.services import oversight
-    return (await oversight.охват(db, cid, user)).входит(t.assignee_id)
+    """Native adapter с текущими view/admin hooks."""
+    return await task_access.can_edit_task(
+        db, cid, user, t, can_view=_can_view_task, admin_check=_is_admin)
 
 
 async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> None:
-    await _assert_view_task(db, cid, user, t)
-    if not await _can_edit_task(db, cid, user, t):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
+    """Native adapter: view остаётся первым, hooks разрешаются при вызове."""
+    await task_access.assert_actor(
+        db, cid, user, t, view_guard=_assert_view_task, edit_check=_can_edit_task)
 
 
 # Обратная сторона связи называется иначе: если А — родитель Б, то у Б это
