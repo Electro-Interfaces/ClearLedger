@@ -177,3 +177,18 @@ override. Private helper не входит в Git. Runtime-правка и те�
 Реальные договоры, финансы и коннекторы не затрагивались; PR, merge и deploy
 не выполнялись. В логах bootstrap есть известное предупреждение совместимости
 passlib/bcrypt; оно не помешало setup и не изменяет результат тестов.
+
+
+## Независимый повтор координатора
+
+Общий кандидатefd06570: те же10test-модулей дали **57PASS за35.35с**,
+без SKIP/DESELECTED. Запуск из отдельного пустого cwd, абсолютные пути,
+явные TEST_DATABASE_URL/DATABASE_URL и test UPLOAD_DIR; HOME сохранён
+без override, глобальные auth/config files не менялись. Это новый повтор,
+отдельный от исторического runner, описанного выше.
+После pytest EXIT0/reap fresh проверка из postgres control DB подтвердила
+0соединений назначенных mapping/contract DB; publictables0 в обеих, max_locks64.
+Своя contracttestDB удалена обычным DROP безFORCE/terminate; fresh контроль
+подтвердил отсутствиеБД и0соединений. MappingDB оставлена пустой.
+Это локальные actualSQL/nativeHTTPdependencyfixtures и fakeOData, не реальная
+1С, OAuth E2E или полныйCI; рабочие финансовые данные не использовались.

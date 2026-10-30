@@ -1,7 +1,8 @@
 # Партнёрский API: интеграционный кандидат
 
 Состав исходников на 30.10.2026: ветка
-`MagLook/api-modernization-integration-20261029`, runtime pin `e6659c6e`; Core export consumers `bc24daca`;
+`MagLook/api-modernization-integration-20261029`, runtime пакеты: WS `e6659c6e`, mapping `45a03b51`, Contract refresh `efd06570`;
+Core export consumers `bc24daca`;
 инвентаризация Core на `7896039f`.
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
@@ -97,6 +98,13 @@ WS handshake privacy исправлена отдельно: root25PASS/2wsprotoS
 произвольные debug/custom logs и все proxy/root_path compositions этим пакетом
 не закрыты.
 
+Native external mapping теперь проверяет общий target admission и bind link
+к company/path/type/relation. Root147PASS28.32с. Для договоров1С исправлен
+подтверждённый persisted overwrite ручных NULL из stale ORM: company-scoped
+Contract SELECT перечитывается после прежнегоflush/lock. Root57PASS35.35с.
+Даты mapping/повторное закрытие/собственные commits и остальные writer bypass
+этими пакетами не исправлялись.
+
 ## Что остаётся
 
 Write API, site/EVSE/connector и temporal retirement, shared-file GC, все
@@ -120,6 +128,8 @@ backup с фактическим восстановлением, состав р
 [UserInfo](userinfo-protocol-20261030.md),
 [binary transport](CORE_BINARY_TRANSPORT_20261030.md),
 [WS logging](WS_LOG_PRIVACY_20261030.md),
-[export consumers](CORE_EXPORT_CONSUMERS_20261030.md).
+[export consumers](CORE_EXPORT_CONSUMERS_20261030.md),
+[mapping admission](station-mapping-admission-20261030.md),
+[Contract manual fields](contract-manual-freshness-20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.
