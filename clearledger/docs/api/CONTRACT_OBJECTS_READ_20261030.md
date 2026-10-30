@@ -1,6 +1,7 @@
 # NEXT-R1: явные связи договора с доступными ЭЗС
 
-**Статус: реализация и source preparation; фактическая приёмка ROOT ещё не выполнена.**
+**Статус: реализация и локальная приёмка ROOT завершены отдельными сериями;
+выпуска и включения внешнего доступа не было.**
 Добавлен один candidate GET `/api/v1/contracts/{contractId}/objects`,
 `operationId=listContractObjects`. Он возвращает только текущие явные
 `ContractLocation` связи доступного договора с независимо доступными
@@ -78,10 +79,11 @@ Canonical OpenAPI содержит оба OAuth-профиля новой опе
 path-схемы не менялись. Ни native handler, ни `contract_usage`, ни service→router
 вызов не добавлены.
 
-## Подготовленные проверки и границы исполнения
+## Проверки и границы исполнения
 
 Автор выполнял только чтение исходников, AST, compile в памяти и Git/hash checks;
-app/tests/runner не импортировались, pytest/collect/SQL/codegen не запускались.
+сам не импортировал app/tests/runner и не запускал pytest/collect/SQL/codegen.
+Фактическое исполнение и генерацию выполнил ROOT отдельно.
 Сохранены private `.artifacts/contract-objects-read/`:
 `existing-test-allowlist.json`, полный `existing-tests.diff`, `source-proof.json`,
 `ast-case-counts.json` и frozen proposal. Прежние test expectations изменены
@@ -96,8 +98,8 @@ Source proof подтверждает полный AST прежнего app.py �
 DDL/migrations, старые runners/gates, requirements/locks/Dockerfile/CI, версии,
 два readiness reports не менялись.
 
-Подготовлено **69 новых** actual HTTP/PG сценариев с литеральными synthetic
-goldens. Они используют настоящие Core login, admin client/installation,
+Все **69 новых** actual HTTP/PG сценариев с литеральными synthetic goldens
+прошли в первом запуске ROOT. Они используют настоящие Core login, admin client/installation,
 Code+PKCE consent/token или machine credentials/grant, verifier и SQL.
 Verifier/Query bodies не подменяются; counters оборачивают настоящий вызов.
 Каждая fixture получает отдельный synthetic ASGI peer; security counters не
@@ -128,11 +130,14 @@ Verifier/Query bodies не подменяются; counters оборачиваю
 | Прежний native GET: literal response и отказ partner bearer | 1 |
 | Canonical/browser profiles и прежние ObjectId refs | 1 |
 
-Выборка runner — новые 69, прежние `test_product_api` 57,
+Первоначальная выборка V2 — новые 69, прежние `test_product_api` 57,
 `test_product_http_profile` 12, `test_product_openapi_http_contract` 8,
 `test_product_service_openapi` 7, ObjectId compatibility 13 и один прежний
-pure ObjectId schema control: **167 предложенных случаев**, не фактический
-результат collect или PASS. Полный 376/main/monitoring CI не повторяется.
+pure ObjectId schema control: **167 случаев**. В этом запуске 110 прошли,
+а 57 получили setup errors; отдельный V3 повторил только эти 57, все прошли.
+Текущий frozen runner выбирает исключительно `test_product_api.py` 57,
+используя новый модуль только как fixture plugin, без его повторной collection.
+Это две серии, не один зелёный прогон 167. Полный 376/main/monitoring CI не повторялся.
 Изменение числа маршрутов в historical main test проверено по source;
 его старый frozen main runner не выдаётся за действующий gate новой функции.
 
@@ -183,18 +188,30 @@ reap child. Pytest capture=sys, без общего conftest, tb и captured std
 печатаются; bounded redacted failures сохраняются отдельно. Selection counts
 точные, skip/xfail не принимаются; JUnit и boundary.json отражают реальные
 outcomes, forbidden attempts, delivery counts и source/inventory после прогона.
-Эти ограничения — оснастка будущего запуска, не доказательство его выполнения.
+В V3 проверены setup/ready/finalized counters: схема один раз, db и api по 57,
+env и password_hash ноль; уведомлений ноль. Sessionfinish выполняет проверку
+после штатного teardown. Правила допуска, приложение и тела fixtures не менялись.
 
 ## SDK и пример
 
 ROOT отдельно разрешил минимально изменить два tooling файла: exporter ожидает
 13 candidate operations, официальный generator manifest добавляет только
 `listContractObjects`, сохраняя strict validation и negative controls.
-Сгенерированный `.d.ts` автор **не редактировал**. После source review ROOT
-выполняет существующие `partner:types`, `partner:types:check`,
-`partner:types:consumer`, `partner:types:test` и нужный TypeScript check в
-утверждённой среде без установки новых зависимостей. До receipt генерации
-наличие старого SDK не считается поддержкой нового operation.
+Сгенерированный `.d.ts` автор **не редактировал**: после source review ROOT
+выполнил официальную generation/freshness, прежний consumer TypeScript check
+и неизменённые `generation.test.mjs` **6/6 PASS**, 23,8797 секунды. Пройдены
+real-module schema parity без подключения к БД, детерминизм, drift и отрицательные
+schema/ref/export controls. Tool node_modules ROOT материализовал из прежней
+точной pinned среды; npm install и сеть не использовались.
+
+ROOT отдельно добавил `contract-objects-consumer.ts` в существующий tsconfig:
+совместный TypeScript check прежнего и нового consumers — PASS. Новый пример
+использует operation/path/query/response из generated types, Unicode ObjectId
+и пять отрицательных compile checks: company override, выдуманный POST, body,
+отсутствующий contractId и отсутствующий nextCursor. Прежний consumer.ts
+сохранён. Canonical schema SHA-256 из generated header:
+`b1cb847e1e3327ceaadcc78b0b1f52be6f701840f78474c881271dbd2e26427e`.
+Это проверки SDK-контракта, не HTTP-пилот и не полный app TypeScript/build.
 
 Вымышленный вызов в отдельно разрешённой sandbox после выдачи user/machine
 access token с обоими scopes/grants; здесь не исполнялся:
@@ -214,12 +231,106 @@ curl --fail-with-body -sS \
 непрозрачный nextCursor. Чужой parent даёт 404, отсутствующий objects grant
 403, неизвестный company selector 422.
 
-## Результат и что остаётся
+## Фактические ROOT результаты и сохранённая история
 
-На момент подготовки подтверждены только source/AST/compile/hash/diff checks.
-**Actual HTTP/SQL/167-case execution и официальный SDK codegen: NOT RUN.**
-ROOT review, независимый запуск и receipts ожидаются; после них этот раздел
-дополняется точными результатами, source pins и историей отказов без переписывания
-неудачных evidence. Реальный партнёр, nginx/SSO browser, release/activation,
-производительность, legal site/temporal coverage, contract→DocCard и любые
-writes остаются вне NEXT-R1. Завершение этого пакета не закрывает M00–M19.
+| Состав | Наблюдавшийся результат |
+|---|---|
+| V1, source `b863e1064184bb3077b48627758ac116e826d692` | Только source review: до исполнения ROOT обнаружил, что pytest FileHandler мог открыть `/dev/null`, запрещённый write guard. Добавлен явный owned `pytest.log`, без допуска `/dev/null` |
+| V2, source `991127b02318b900e0382ee5484f2215b4a1f249` | **110 PASS** (69 новых + 41 прежний), **57 setup errors**, 132 успешных subtests; pytest 158,22 с, outer 163,3464 с, exit 1, child reaped |
+| V3, source `bb09029eb73b55280dec81e03ab13c065637fbe8` | Только прежние 57, затронутые setup: **57 PASS / 0 FAIL / 0 ERROR / 0 SKIP**, pytest 23,20 с, outer 28,4079055181 с, exit 0, child reaped |
+| SDK, отдельная ROOT фаза | Официальные generation/freshness, два consumer checks PASS, 5 negative compile checks и 6/6 неизменённых generator cases PASS |
+
+V2 одновременно загрузил `test_product_contract_objects` как глобальный fixture
+plugin и собрал его как test module. В pytest 9.2 это два набора FixtureDef с
+разными cache/visibility. Новые 69 успешно использовали локальный session setup;
+затем старые product API cases запросили глобальный plugin setup, чей preflight
+снова ожидал пустую БД и получил **334 существующие relations**. Это ошибка
+оснастки, не дефект business query. V3 не собирает модуль plugin как тестовый,
+поэтому exact fresh-schema setup происходит один раз. Никакой DROP внутри
+fixtures, очистки assertion или изменения app/test bodies не добавлено.
+
+Первые 110 PASS не повторялись. Успешные наблюдения покрывают 167 различных
+cases **по двум сериям**, не один непрерывный full167 и не CI всего API.
+JUnit V2 имеет tests=299 с учётом 132 subtests; отдельных testcase элементов
+167, из них 110 PASS и 57 setup errors. Сохранено одно нефатальное предупреждение
+`record_property` при xunit2; ради его удаления frozen tests не менялись.
+ROOT также исправил свой внешний scratch monitor: intentional symlink/FIFO
+прежних negative fixtures учитываются через bounded no-follow inode traversal.
+
+В обеих сериях forbidden attempts пусты, source/inventory после исполнения
+PASS. V2 зарегистрировал 207 перехваченных login notifications, две PG socket
+connections и один строго допущенный PG sendmsg. V3: deliveries 0, одна PG
+connection, sendmsg 0; lifecycle counters совпали с точными ожиданиями.
+Ни main/lifespan/seed/jobs, ни внешние отправки не выполнялись. Runtime и
+test bytes между V2/V3 не менялись; изменён только runner selection/lifecycle.
+
+По независимому контролю ROOT после завершения процессов:
+V2 — 339 synthetic relations, connections 0; V3 — **338 relations**, connections 0.
+После каждого выполнен обычный DROP DATABASE, existsAfter 0,
+`max_locks_per_transaction=64` сохранён. Внешний process receipt V3 первоначально
+ошибочно записал имя fixture-файла в поле database из-за переиспользованной
+переменной monitor loop. Исходный receipt сохранён, отдельный
+`receipt-database-label-correction.json` связывает create/env/runner/drop с точной
+`api_contract_objects_test_20261030`; фактическая SQL-цель была правильной.
+Автор эти SQL-контроли не выполнял.
+
+## Frozen source и проверяемые receipts
+
+Общие app/tests/schema pins обоих исполнений, формат digest: SHA-256 compact
+JSON отсортированных `[relative-to-server path, fileSHA256]`, без `__pycache__`;
+в tests self-referencing runner исключён и закреплён отдельно.
+
+| Состав | Count | SHA-256 |
+|---|---:|---|
+| app | 492 | `4d290f519709a185c633f0f59c0145a4898cff0cb9ea9cdad1efbe35896d5d7e` |
+| tests без runner | 350 | `c300ad882f7292f3a93d59ac0629d674638c4f39d90666a2696b6de55bc8d97b` |
+| schema_migrations | 16 | `51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d` |
+| runner V2 | 1 | `a6b4fd5aa5344c6be3992cebfdb9c75662bef04336b0f4c603b83faa8fb5b259` |
+| runner V3 | 1 | `4f48de90e1a5b69bb03a98c4a6b7d5dfe7d35670d8740e22fb810a4e81bc1a82` |
+
+Source owners относительно `server/app/product_api`:
+`app.py:create_product_api.contract_objects`, `access.py:resolve`,
+`queries.py:Query.contract_objects`, `dto.py:ContractObjectsQuery/ContractObject/ContractObjects`.
+Их точные blobs доступны в обоих frozen Git commits; SHA-256 файлов:
+
+| Файл | SHA-256 |
+|---|---|
+| app.py | `e8eb031a2d587b53e59a2d43413ecf86ec6e9c03867a0c83564ec2fb3ee3c0ba` |
+| access.py | `f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2` |
+| dto.py | `c40f473afdc13b06cddd74234fa09138a3dffa8fc10563d16ea6e04fb0de496c` |
+| queries.py | `49ea5445b69ce01eb2d572e9d14dde6e4211eee54c63beb6f9967a9e9a4fdd47` |
+
+Private ROOT evidence — `.artifacts/root-contract-objects-review-20261030/`
+в integration worktree. Автор прочитал уже существующие JUnit/boundary/process,
+SDK receipt и исправление label, проверил outcomes и хеши трёх ROOT SDK файлов;
+это чтение evidence, не новый runtime прогон.
+
+| ROOT artifact относительно evidence root | SHA-256 |
+|---|---|
+| `process.json` | `162a05f6bbd1bd14d540afd0848df600d0f836773f92f22a2441a0637cb61098` |
+| `r1-evidence-test/boundary.json` | `cf4d45057888ec3bc9f7f1007e7f379fcaf8a6565c768d106a4ddf4ca681b3e3` |
+| `r1-evidence-test/contract-objects.xml` | `ea0b3c7855fa93da9f1685a594d92f08478c4bea5314418a6d2481eefd78d387` |
+| `r1-evidence-test/failures.json` | `b88337bca2fc9c49f1e74cc5b6d338caddaf868833c121db45258156f667825f` |
+| `affected57/process.json` | `c6e7fbe4b6e27c325f90ea15cf018f2091a9d1d0ed6e56e54825b49ccbd06959` |
+| `affected57/receipt-database-label-correction.json` | `b9740caafffdb5018e2c6013c82160a7833bf2bb28444ba78fcef94cae7bd961` |
+| `affected57/r1-evidence-test/boundary.json` | `afd72be9572b652a5affe09f7c639b9fe176e4b5756d8011b3282473ea3de4aa` |
+| `affected57/r1-evidence-test/contract-objects.xml` | `de72de77a42e760263a18fb4bc3fd896e5edfa993af042c727d05bebf2b81a13` |
+| `sdk-result.json` | `9c9ab95c2e3f76a0403ba15814a56bb6c9f1e96e6da03fe4e47379c14d2c5990` |
+
+| ROOT SDK-файл относительно clearledger | SHA-256 |
+|---|---|
+| `src/generated/partner-api.d.ts` | `b76760f044eecea4a42f23829bff3b51f8c5ac86fe90724b01c0458e09477714` |
+| `tools/partner-api-types/contract-objects-consumer.ts` | `c17746e21cc13a996eca173f6adbe3be7ebc96ad5cddff6511eec1215bfb0ba0` |
+| `tools/partner-api-types/tsconfig.json` | `349613fe76bae30f92c37bed2adb6567820926efe5a2a83124ec61ee24e28126` |
+
+## Результат и границы
+
+NEXT-R1 реализован, локальные scoped HTTP/PG и SDK проверки приняты указанными
+сериями. Финализация меняет только документацию и включает три точных
+ROOT-generated/consumer файла; app/tests/runner/tooling после PASS не меняются.
+Оба readiness reports и чужой Docker baseline 07f остаются frozen.
+
+**NOT RUN:** реальный партнёр, nginx/SSO browser, full main, полный 376/CI,
+полный app TypeScript/build, нагрузка/SLO, deploy/activation. Legal site/temporal
+coverage, contract→DocCard и любые writes вне NEXT-R1. Завершение пакета не
+закрывает M00–M19 и не означает готовность рабочего релиза.
