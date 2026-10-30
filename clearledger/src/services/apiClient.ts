@@ -49,9 +49,11 @@ export const isApiEnabled = (): boolean => isDemoMode() || !!BASE_URL
 // показывали дефолтную; теперь следуют выбору. Устанавливается из CompanyContext.
 let activeCompanyId: string | null = null
 // Поколение проверяют binary transport и явно захваченные guards отложенных
-// действий. Оно замечает A→B→A и новый вход с тем же токеном;
-// общий JSON transport сохраняет прежний жизненный цикл.
+// действий. Оно замечает A→B→A и новый вход с тем же токеном.
 let binaryContextGeneration = 0
+// Для session-effects JSON важен вход/выход, а не выбор company/org.
+// Строка Bearer не отличает новый вход с тем же токеном от старого запроса.
+let sessionGeneration = 0
 
 /** Прокинуть активную компанию в HTTP-клиент (заголовок X-Company-Id). */
 export function setApiCompany(id: string | null): void {
@@ -87,6 +89,7 @@ export function getToken(): string | null {
 /** Сохранить токен */
 export function setToken(token: string): void {
   binaryContextGeneration++
+  sessionGeneration++
   cancelSessionRedirect()
   localStorage.setItem(TOKEN_KEY, token)
 }
@@ -94,6 +97,7 @@ export function setToken(token: string): void {
 /** Удалить токен */
 export function clearToken(): void {
   binaryContextGeneration++
+  sessionGeneration++
   localStorage.removeItem(TOKEN_KEY)
 }
 
@@ -196,6 +200,7 @@ export function isPublicPage(pathname: string): boolean {
 
 async function handleResponseError(
   res: Response, sentAuthorization: string | undefined, signal?: AbortSignal, guard?: () => void,
+  sentSessionGeneration?: number,
 ): Promise<void> {
   if (!res.ok) {
     let detail = res.statusText
@@ -211,10 +216,11 @@ async function handleResponseError(
     // особенно 401: прежний ответ не должен завершить новую сессию.
     guard?.()
 
-    // Parsing the body is asynchronous too: compare the exact Bearer sent by
-    // this request with the session that is current now, after that await.
+    // Проверяем после body await: новый вход может вернуть прежнюю строку Bearer.
+    // Binary использует более строгий guard выше; обычный JSON сохраняет ApiError.
     const currentToken = getToken()
     if (res.status === 401 && !isRedirecting && !signal?.aborted && currentToken
+        && (sentSessionGeneration === undefined || sentSessionGeneration === sessionGeneration)
         && sentAuthorization === `Bearer ${currentToken}`) {
       // На публичных страницах 401 от фоновых запросов — не «истёкшая сессия»: не шумим
       // и не редиректим (иначе фоновый 401 сбивает свежий вход). Приглашение и сброс
@@ -256,9 +262,10 @@ async function handleResponseError(
 }
 
 async function handleResponse<T>(
-  res: Response, sentAuthorization: string | undefined, signal?: AbortSignal, contextGuard?: () => void,
+  res: Response, sentAuthorization: string | undefined, sentSessionGeneration: number,
+  signal?: AbortSignal, contextGuard?: () => void,
 ): Promise<T> {
-  if (!res.ok) await handleResponseError(res, sentAuthorization, signal, contextGuard)
+  if (!res.ok) await handleResponseError(res, sentAuthorization, signal, contextGuard, sentSessionGeneration)
 
   if (res.status === 204) return undefined as T
   const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
@@ -316,8 +323,9 @@ export async function get<T>(
     }
   }
   const requestHeaders = headers()
+  const generation = sessionGeneration
   const res = await fetch(url.toString(), { headers: requestHeaders, signal: options?.signal })
-  return handleResponse<T>(res, requestHeaders.Authorization, options?.signal)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation, options?.signal)
 }
 
 /** POST запрос (JSON) */
@@ -326,6 +334,7 @@ export async function post<T>(path: string, body?: unknown, options?: { contextG
   contextGuard?.()
   if (isDemoMode()) return demoPost<T>(path)
   const requestHeaders = headers({ 'Content-Type': 'application/json' })
+  const generation = sessionGeneration
   let res: Response
   try {
     res = await fetch(`${BASE_URL}${path}`, {
@@ -338,42 +347,45 @@ export async function post<T>(path: string, body?: unknown, options?: { contextG
     throw error
   }
   contextGuard?.()
-  return handleResponse<T>(res, requestHeaders.Authorization, undefined, contextGuard)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation, undefined, contextGuard)
 }
 
 /** PATCH запрос */
 export async function patch<T>(path: string, body: unknown): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
   const requestHeaders = headers({ 'Content-Type': 'application/json' })
+  const generation = sessionGeneration
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
     headers: requestHeaders,
     body: JSON.stringify(body),
   })
-  return handleResponse<T>(res, requestHeaders.Authorization)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation)
 }
 
 /** PUT запрос */
 export async function put<T>(path: string, body: unknown): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
   const requestHeaders = headers({ 'Content-Type': 'application/json' })
+  const generation = sessionGeneration
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PUT',
     headers: requestHeaders,
     body: JSON.stringify(body),
   })
-  return handleResponse<T>(res, requestHeaders.Authorization)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation)
 }
 
 /** DELETE запрос */
 export async function del<T = void>(path: string): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
   const requestHeaders = headers()
+  const generation = sessionGeneration
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
     headers: requestHeaders,
   })
-  return handleResponse<T>(res, requestHeaders.Authorization)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation)
 }
 
 /** POST multipart (файлы) */
@@ -392,6 +404,7 @@ export async function upload<T>(
 ): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
   const requestHeaders = headers()
+  const generation = sessionGeneration
   if (!onProgress) {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
@@ -399,7 +412,7 @@ export async function upload<T>(
       body: formData,
       credentials: options?.credentials,
     })
-    return handleResponse<T>(res, requestHeaders.Authorization)
+    return handleResponse<T>(res, requestHeaders.Authorization, generation)
   }
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -417,7 +430,7 @@ export async function upload<T>(
         statusText: xhr.statusText,
         headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
       })
-      handleResponse<T>(тело, requestHeaders.Authorization).then(resolve, reject)
+      handleResponse<T>(тело, requestHeaders.Authorization, generation).then(resolve, reject)
     }
     xhr.onerror = () => reject(new ApiError(0, 'Не удалось связаться с сервером'))
     xhr.ontimeout = () => reject(new ApiError(0, 'Загрузка не уложилась во время ожидания'))
