@@ -330,3 +330,28 @@ Source test после measured run не менялся; final report commit с�
 задаче после PASS не выполнялось. Следующее root решение должно выбрать одну
 адресную диагностику; оптимизация потребует отдельного разрешения и golden
 equivalence с текущим baseline, включая отрицательные controls.
+
+
+## Независимый повтор координатора
+
+Source chain d179295f/b6a955f9/bdeae257/095d36c5 перенесён без runtime delta;
+интеграционный HEAD перед проверкойb2a287d7. Тест сохранён с тем же SHA054f2c99.
+Координатор создал свежую собственную canonical `api_product_query_scaling_test`
+и выполнил тот же guarded runner: **3 PASS, 237 HTTP samples, 230,677с**,
+0FAIL/ERROR/SKIP, child EXIT0/reaped. После fresh public/edge tables0/conns0
+выполнен ordinary DROP; fresh DBexists0/otherclients0/maxlocks64, admin закрыт.
+
+Все237sample records сверены с сохранённым авторским запуском: SQL shapes/counts,
+cursor rowcounts, hydration, HTTP statuses, response cardinalities/bytes и остальные
+deterministic fields совпали. Walltime/peak Python allocations измеряются заново
+и не требуются побайтово равными. Это не новый A/B-тест runtime оптимизации.
+
+Перед повтором11авторских artifact files скопированы с побайтовой SHA-проверкой
+в private `.artifacts/private/product-query-scaling-author-095d36c5/`. Manifest:
+`.artifacts/private/product-query-scaling-author-manifest.json`. Текущий fixed
+private-product-query-scaling-20261030 содержит root-run; attempt-1 сохранён
+отдельно и в архиве. Root runner/proof: `.artifacts/root-product-query-scaling-repeat.py`
+и `.artifacts/root-product-query-scaling-proof.json`. Raw evidence не публикуется.
+
+Адресная диагностика двух document SQL plans готовится отдельно; EXPLAIN,
+runtime/index changes и production performance этим baseline не выполнены.

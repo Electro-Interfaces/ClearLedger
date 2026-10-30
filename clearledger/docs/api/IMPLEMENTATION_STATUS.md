@@ -287,3 +287,11 @@ Bearer, имя архива и Auditor error semantics сохранены. Root5
 app/nodeTypeScript и targeted ESLint PASS;11прежних runtime/test modules
 сохранены. Browser download manager/server ACL/SSE/PTY не проверялись.
 [Отчёт](AUDITOR_EXPORT_CONTEXT_20261030.md).
+
+
+Измерен synthetic scaling объектов/договоров/документов на100/1000/5000: root
+3PASS/237HTTPsamples230.677с. SQL shapes/counts, ACL/total/page/detail/cursor,
+link redaction, hydration и response bytes всех237records совпали сauthor run.
+Page size ограничивает гидратацию карточек; total и проверка больших SET
+требуют отдельного анализа. Walltime/peak относятся к traced single run,
+не production SLO. [Отчёт](PRODUCT_QUERY_SCALING_20261030.md).
