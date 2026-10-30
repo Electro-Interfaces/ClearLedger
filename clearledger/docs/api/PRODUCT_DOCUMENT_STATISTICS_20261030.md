@@ -309,3 +309,20 @@ binds/plans/conditions не копируются в public; в Git только2
 source/report файла. Прежние4files и old evidence/archives не менялись.
 Measured testSHA после run неизменен; final commit добавляет только этот отчёт.
 Root artifact acceptance отдельно; M00–M19/fullCI/production performance не закрыты.
+
+
+## Приёмка координатора
+
+Source3c090cdc/d6c3806f перенесён без runtime delta коммитамиa5be62be/4eab37da.
+Root сверил immutable testSHAf2e6745d, JUnit1PASS45.420с и safe-summary property,
+16HTTP/8before-after deterministic pairs, четыре raw-plan SHA/тайминга/root rows,
+оба verified analyze targets и readonly metadata. SQL shapes всех четырёх plans
+совпадают с независимо выполненным root scaling baseline. Повторные SQL/ANALYZE
+для этой приёмки не запускались. Proof:
+`.artifacts/root-product-document-statistics-artifact-proof.json`.
+
+Фиксация process EXIT0/reap и root fresh tables0/conns0→normalDROP→DBexists0/
+otherclients0/maxlocks64 завершает отдельное synthetic окно. Эффект статистики
+не превращается в разрешение обслуживать рабочую БД или переписывать ACL.
+Отдельная ACL characterization готовится и проверяется до будущего выбора
+source A/B; немедленная правка deny clause по fresh unanalyzed plan не выбрана.

@@ -304,3 +304,12 @@ page2012531.699ms, explicit deny Anti join повторяет ACL scan3000раз
 EXPLAIN не было. Индекс scope уже существует; statistics control и ACL matrix
 готовятся отдельно, runtime/index changes отсутствуют.
 [Планы](PRODUCT_DOCUMENT_QUERY_PLANS_20261030.md).
+
+
+Statistics control документов:1authorPASS/16HTTP/4plans/2ANALYZE толькоown
+synthetic tables, unchangedSQL/goldens. После статистики broad deny probe
+стал selective при прежнем scope index; COUNT2294.662→652.845ms,
+page2365.177→43.119ms в single fixture run. Root проверил source/artifacts,
+SQL-shape parity с независимым baseline и cleanup; повторного root SQL не было.
+Это не source/prodSLO speedup, runtime/JIT/autovacuum/index не менялись.
+[Контроль](PRODUCT_DOCUMENT_STATISTICS_20261030.md).
