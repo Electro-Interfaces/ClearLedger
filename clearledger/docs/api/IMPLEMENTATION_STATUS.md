@@ -51,10 +51,32 @@ mobile390, light/dark,6PNG, отсутствие переполнения/оши
 живой app workflow. Прежние ошибки оснастки и ROOT watcher сохранены отдельно;
 TypeScript не повторялся. [Отчёт по фронту](http://10.10.70.56:8000/api-platform-20261029/live-frontend-preservation.html).
 
-Следующие потоки: M14-P1 webhook network boundary; M04-P6 доступ/связи работы;
-M01/M09 реестр Core/Support/Auditor. Полного CI совместного HEAD и рабочего
-выпуска нет. Read-only frontend snapshot409files/15.7MB подтвердил public1.2.858,
-но source maps/revision labels отсутствуют: полное source correspondence не доказано.
+M14-P1 принят и интегрирован: **172/172 PASS** (111 новых и61 прежний),4.46с.
+Внешняя доставка использует проверенный полный набор публичных DNS-адресов;
+соединение привязано к этому набору, Host/TLS сохраняют исходное имя. Proxy из
+окружения, redirects и URL credentials исключены; общий deadline10с и ответ64KiB.
+Семь controlled HTTP/TLS receivers завершены, SQL и рабочий трафик не использовались.
+Совместимость HTTP сохранена как открытое ограничение внешнего пилота; outbox,
+change feed, retry/replay и вся M14 пока не закрыты.
+[Отчёт M14](http://10.10.70.56:8000/api-platform-20261029/webhook-delivery-boundary.html).
+
+P6 также принят: владельцы edit/actor ACL и документного графа общие для native
+adapters и WorkLinks. В первой серии47 сохранённых PASS, затем38/38 корректирующих
+PASS; это85 разных primary cases двумя сериями. Отдельно3/3 прежних R2 scenarios
+PASS, включая действующие права документов. Исправлялись fixture canonical subject
+и prerequisite старого теста, прежние assertions сохранены. Выделенные БД штатно
+удалены; весь M04/M07 и общий CI не объявляются завершёнными.
+[Отчёт P6](http://10.10.70.56:8000/api-platform-20261029/work-link-owners.html).
+
+Текущие потоки: M16-C1 повторные ORM declarations; M04-P7 команды проекта ЭЗС;
+M01/M09 реестр Core/Support/Auditor. Реестр пока проверяется на датированном
+срезе264ad50b до M14/P6; обнаружена нестабильность автоматически сгенерированных
+ID multi-method маршрутов, она учитывается отдельно от реального дрейфа состава.
+Полного CI совместного HEAD и рабочего выпуска нет. Read-only frontend
+snapshot409files/15.7MB подтвердил public1.2.858, но source maps/revision labels
+отсутствуют: полное source correspondence не доказано. Support выбранные455paths
+проверены read-only:448JS совпали с baseline09c221c4, два package manifest отличаются;
+это ограниченный source proof, а не whole-app actual. Рабочие данные не менялись.
 
 ## Предыдущая принятая волна: внешние приложения и контейнер
 
