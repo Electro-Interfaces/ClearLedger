@@ -639,6 +639,10 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         Organization.company_id == company_id))).scalars().all()
     org_id = organization_for_import(organizations, existing)
 
+    from app.services.counterparty_commands import (
+        add_imported_counterparty_alias, create_imported_counterparty,
+    )
+
     cp_by_phone: dict[str, Counterparty] = {}
     for o in orgs:
         name = str(o.get("name") or "").strip()
@@ -647,20 +651,15 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             continue
         cp = cp_index.resolve(_clean_cp_name(name), o.get("inn"), o.get("kpp"))
         if cp is None:
-            cp = Counterparty(
-                company_id=company_id, inn=str(o.get("inn") or "")[:20], kpp=o.get("kpp") or None,
-                name=_clean_cp_name(name)[:500], type=_cp_type(name),
-                aliases=["corporate"], kind="external",
-                raw={"referenceIdentity": {"name": _clean_cp_name(name), "inn": str(o.get("inn") or ""), "kpp": o.get("kpp")}},
+            cp = await create_imported_counterparty(
+                db, company_id, cp_index, name=_clean_cp_name(name),
+                inn=str(o.get("inn") or ""), kpp=o.get("kpp"),
+                cp_type=_cp_type(name), alias="corporate",
             )
-            db.add(cp)
-            await db.flush()
-            cp_index.add(cp)
         else:
             # Одно юрлицо может быть и покупателем, и поставщиком — роль в реестре
             # прикладная, поэтому она копится в aliases, а не заводит вторую карточку.
-            if "corporate" not in (cp.aliases or []):
-                apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + ["corporate"]))})
+            add_imported_counterparty_alias(cp, "corporate")
         cp_by_phone[str(o.get("phone") or "")] = cp
         if contracts.resolve(cp, CORP_CONTRACT_TYPE) is not None:
             continue

@@ -11,19 +11,28 @@ from app.services.reference_identity import CounterpartyIndex
 from app.services.reference_overrides import apply_import_values
 
 
+_KPP_OMITTED = object()
+
+
 async def create_imported_counterparty(
     db: AsyncSession, company_id, index: CounterpartyIndex, *,
-    name: str, inn: str, cp_type: str, alias: str | None,
+    name: str, inn: str, cp_type: str, alias: str | None, kpp=_KPP_OMITTED,
 ) -> Counterparty:
     """Создать импортную карточку и опубликовать её в индексе текущего прогона.
 
     Исходные строки в snapshot сохраняются целиком, реквизиты имеют прежние
     ограничения длины. После неуспешного flush индекс не получает карточку.
+    КПП попадает в snapshot только при явной передаче, включая None;
+    в колонке сохраняется прежнее для corporate правило kpp or None.
     """
+    identity = {"name": name, "inn": inn}
+    if kpp is not _KPP_OMITTED:
+        identity["kpp"] = kpp
     cp = Counterparty(
         company_id=company_id, inn=None if inn == "" else inn[:20], name=name[:500],
+        kpp=None if kpp is _KPP_OMITTED else kpp or None,
         type=cp_type, aliases=[alias] if alias else [], kind="external",
-        raw={"referenceIdentity": {"name": name, "inn": inn}},
+        raw={"referenceIdentity": identity},
     )
     db.add(cp)
     await db.flush()
