@@ -253,3 +253,11 @@ intentional AC/DC split сохранены. Actual baseline24FAIL/13PASS; root60
 78.99с без SKIP,20 прежних функций и16модулей тестов неизменны. Полный import
 protocol, stale indexes и concurrent/global no-reuse остаются открытыми.
 [Отчёт](station-import-ambiguity-20261030.md).
+
+
+На source pin62bd4a46 разобраны все43native AST records:28keep/13extract/2defer.
+Прямые вызовы разделены по Core/Voice/Auditor/vendor/static boundaries,9из43
+относятся к реализации apiClient. Root повторил inventory и проверил1147Git
+blobs,43AST expression hashes,117immutable snippet refs и MD/JSON agreement.
+Это статическая карта, не подтверждение production traffic или server ACL.
+[Разбор](NATIVE_CONSUMER_TRIAGE_20261030.md).
