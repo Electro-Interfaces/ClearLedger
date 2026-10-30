@@ -1258,8 +1258,12 @@ class OneCSyncService:
             Counterparty, connection.company_id, by="id")
         local_org = await self._build_local_index(
             Organization, connection.company_id, by="id")
+        # PATCH другой сессии мог изменить реквизиты и manual_overrides после
+        # прежнего commit. Свои правки уже сохранены flush выше; перечитываем
+        # свежие значения перед matcher и применением импортных полей.
         rows = (await self.session.execute(select(Contract).where(
-            Contract.company_id == connection.company_id))).scalars().all()
+            Contract.company_id == connection.company_id)
+            .execution_options(populate_existing=True))).scalars().all()
         contract_index = ContractIndex(rows)
         by_ref = {}
         for contract in rows:
