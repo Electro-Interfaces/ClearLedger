@@ -25,7 +25,7 @@ def access():
     return AccessContext(Principal(PrincipalKind.PARTNER, "subject", "client", "install", "grant"),
                          "tenant-a", "policy-1", {"documents.read"},
                          (ResourcePermission("document", "read", ResourceScope.selected(["a"]),
-                                             ResourceScope.selected(["title"])),))
+                                             ResourceScope.selected(["title"])),), valid=True)
 
 
 def contract():
@@ -36,7 +36,7 @@ def contract():
 
 def app_with_hooks(events):
     app = create_policy_app(context_resolver=lambda request: access())
-    app.add_event_handler("startup", lambda: events.append("root.start.sync"))
+    app.router.add_event_handler("startup", lambda: events.append("root.start.sync"))
 
     async def start():
         events.append("root.start.async")
@@ -44,9 +44,9 @@ def app_with_hooks(events):
     async def stop():
         events.append("root.stop.async")
 
-    app.add_event_handler("startup", start)
-    app.add_event_handler("shutdown", lambda: events.append("root.stop.sync"))
-    app.add_event_handler("shutdown", stop)
+    app.router.add_event_handler("startup", start)
+    app.router.add_event_handler("shutdown", lambda: events.append("root.stop.sync"))
+    app.router.add_event_handler("shutdown", stop)
     return app
 
 
@@ -81,8 +81,8 @@ def test_include_default_hooks_run_once_and_mount_does_not_start_child(with_moun
     source.add_event_handler("shutdown", lambda: events.append("source.stop"))
     if with_mount:
         child = create_policy_app(context_resolver=lambda request: access())
-        child.add_event_handler("startup", lambda: events.append("mounted.start"))
-        child.add_event_handler("shutdown", lambda: events.append("mounted.stop"))
+        child.router.add_event_handler("startup", lambda: events.append("mounted.start"))
+        child.router.add_event_handler("shutdown", lambda: events.append("mounted.stop"))
         child.router.operation("/ok", policy=contract(), methods=["GET"])(lambda: {"ok": True})
         source.mount("/child", child)
     else:
@@ -170,8 +170,8 @@ def test_startup_failure_keeps_framework_no_shutdown_semantics():
         events.append("startup.fail")
         raise RuntimeError("startup failed")
 
-    app.add_event_handler("startup", fail)
-    app.add_event_handler("startup", lambda: events.append("unreached"))
+    app.router.add_event_handler("startup", fail)
+    app.router.add_event_handler("startup", lambda: events.append("unreached"))
     with pytest.raises(RuntimeError, match="^startup failed$"):
         with TestClient(app):
             pytest.fail("startup failure swallowed")
@@ -212,8 +212,8 @@ def test_shutdown_failure_propagates_and_does_not_repeat_handlers():
         events.append("shutdown.fail")
         raise RuntimeError("shutdown failed")
 
-    app.add_event_handler("shutdown", fail)
-    app.add_event_handler("shutdown", lambda: events.append("unreached"))
+    app.router.add_event_handler("shutdown", fail)
+    app.router.add_event_handler("shutdown", lambda: events.append("unreached"))
     with pytest.raises(RuntimeError, match="^shutdown failed$"):
         with TestClient(app):
             pass

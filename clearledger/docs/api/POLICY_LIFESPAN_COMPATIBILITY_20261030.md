@@ -111,7 +111,7 @@ AST всего `routing.py` вне `create_policy_app` идентичен exact 
 После actual evidence допустимо только обновление отчёта; любые изменения source
 после freeze требуют нового review и результатов. Merge/deploy не поручены.
 
-## Frozen source proposal для ROOT
+## Первый frozen source proposal b3b456f1 для ROOT
 
 | Состав | Количество файлов | SHA256 |
 | --- | ---: | --- |
@@ -137,4 +137,43 @@ Opt-in: `RUN_POLICY_LIFESPAN_COMPATIBILITY=1`,
 Без opt-in новый тестовый модуль пропускается до FastAPI/app imports, как другие
 ROOT-only suites; при approved runner любой SKIP/неполный набор означает FAIL.
 
-Фактические результаты focused old/new: **PENDING ROOT**, PASS не заявлен.
+## Первый actual focused прогон ROOT и поправка фикстур
+
+ROOT выполнил оба exact runtime на `b3b456f1516ea84dae5f1cdfe957b2c4c8006a11`:
+
+| Runtime | PASS | FAIL | Время pytest | Время внешнего supervisor |
+| --- | ---: | ---: | ---: | ---: |
+| old | 8 | 4 | 0.68 сек | 1.5017810696735978 сек |
+| new | 0 | 12 | 0.68 сек | 1.5020289598032832 сек |
+
+Оба процесса завершены/reaped. Обе `boundary.json` подтверждают exact source/runner,
+12 collected, `database_allowed=false`, `app_main_imported=false`, пустой список
+`network_sql_sender_attempts`. Первый прогон не был зелёным и остаётся в истории.
+Evidence не менялся:
+`/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/root-policy-lifespan-review-20261030/`;
+там `old.log`, `new.log`, `old-process.json`, `new-process.json` и отдельные
+`old-lifespan-test-evidence`/`new-lifespan-test-evidence` с JUnit/boundary.
+
+Причины FAIL находятся в новых фикстурах: `access()` не задавал `valid=True`
+(защищённое значение по умолчанию false), а `app.add_event_handler` отсутствует
+в новом FastAPI до входа в lifecycle. По явному поручению ROOT `msg_6598a766a6a5`
+фикстура теперь создаёт явно валидный синтетический контекст; новые root/child
+hooks регистрируются публичным `app.router.add_event_handler`, который есть
+в обоих installed APIRouter. Тестовые ожидания, auth/ACL, runtime-код и старый
+HTTP-файл не менялись. Это исправление оснастки, а не ослабление политики.
+
+Повтор ROOT нужен для всех 12 случаев old/new: общий helper затрагивает весь
+набор. Worker выполнил только AST/compile в памяти и сравнение frozen source.
+
+Текущий corrected freeze, app/schema/inventories прежние:
+
+| Состав | SHA256 |
+| --- | --- |
+| tests, 344 файла без runner | `ebedfa5f889842d1c09c7d29a18fd58338b7ebd9b04539c951efe43ce9f77ec9` |
+| runner | `4952f4f8cd05de5793120b1d591f874505bae06be5e811275311d410022b4c87` |
+| новый test module | `813d80d31aa44eba805f46742b622b2f778a05a206558822b865f566a23039cb` |
+| неизменный routing.py | `131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0` |
+
+Для следующего запуска использовать corrected runner SHA и новый reviewed
+source commit, сохранять исходные evidence, выбирать свежие private directories.
+Повтор focused old/new: **PENDING ROOT**, PASS не заявлен.
