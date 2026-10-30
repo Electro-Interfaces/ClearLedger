@@ -133,9 +133,23 @@ def release_url(name, version):
 
 
 def numeric_version(value):
-    need(re.fullmatch(r'\d+(?:\.\d+)*', value) is not None, 'unsupported version semantics')
-    values = tuple(int(x) for x in value.split('.'))
-    return values + (0,) * max(0, 5 - len(values))
+    """Числовой release subset: ASCII, до 128 компонентов по 32 цифры."""
+    need(isinstance(value, str) and len(value) <= 4096 and
+         re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', value) is not None,
+         'unsupported version semantics')
+    parts = value.split('.')
+    need(len(parts) <= 128 and all(len(x) <= 32 for x in parts),
+         'numeric release exceeds supported bounds')
+    # Длину сохраняем: она задаёт точность ~= и wildcard prefix.
+    return tuple(int(x) for x in parts)
+
+
+def compare_numeric_components(left, right):
+    """PEP 440: дополняем более короткий release до длины второго."""
+    width = max(len(left), len(right))
+    left = left + (0,) * (width - len(left))
+    right = right + (0,) * (width - len(right))
+    return (left > right) - (left < right)
 
 
 def spec_parts(spec):
@@ -152,27 +166,32 @@ def spec_parts(spec):
 def satisfies(version, spec):
     """Только numeric release subset; неизвестная семантика отклоняется."""
     current = numeric_version(version)
+    clauses = []
+    # Валидируем все clauses заранее: ранний False не скрывает unsupported input.
     for op, other in spec_parts(spec):
-        if other.endswith('.*'):
+        wildcard = other.endswith('.*')
+        candidate = numeric_version(other[:-2] if wildcard else other)
+        if wildcard:
             need(op in ('==', '!='), 'unsupported wildcard operator')
-            prefix = tuple(int(x) for x in other[:-2].split('.'))
-            equal = current[:len(prefix)] == prefix
+        if op == '~=':
+            need(not wildcard and len(candidate) >= 2, 'invalid compatible release')
+        clauses.append((op, candidate, wildcard))
+    results = []
+    for op, candidate, wildcard in clauses:
+        if wildcard:
+            equal = compare_numeric_components(current[:len(candidate)], candidate) == 0
             ok = equal if op == '==' else not equal
+        elif op == '~=':
+            upper = candidate[:-2] + (candidate[-2] + 1,)
+            ok = (compare_numeric_components(current, candidate) >= 0 and
+                  compare_numeric_components(current, upper) < 0)
         else:
-            candidate = numeric_version(other)
-            if op == '~=':
-                pieces = [int(x) for x in other.split('.')]
-                need(len(pieces) >= 2, 'invalid compatible release')
-                upper = pieces[:-1]
-                upper[-1] += 1
-                ok = current >= candidate and current < numeric_version('.'.join(map(str, upper)))
-            else:
-                ok = {'==': current == candidate, '!=': current != candidate,
-                      '>=': current >= candidate, '<=': current <= candidate,
-                      '>': current > candidate, '<': current < candidate}[op]
-        if not ok:
-            return False
-    return True
+            comparison = compare_numeric_components(current, candidate)
+            ok = {'==': comparison == 0, '!=': comparison != 0,
+                  '>=': comparison >= 0, '<=': comparison <= 0,
+                  '>': comparison > 0, '<': comparison < 0}[op]
+        results.append(ok)
+    return all(results)
 
 
 class Marker:
@@ -249,7 +268,7 @@ class Marker:
             if op == 'not in':
                 return x not in y
             if variable in ('python_version', 'python_full_version', 'implementation_version'):
-                x, y = numeric_version(x), numeric_version(y)
+                return satisfies(x, op + y)
             need(op != '~=', 'unsupported marker compatible-release evaluation')
             return {'==': x == y, '!=': x != y, '<=': x <= y,
                     '>=': x >= y, '<': x < y, '>': x > y}[op]
