@@ -880,7 +880,8 @@
     "tests/test_works_roles.py": "7481c0532e8d73796904385c27cf811c24fd0c272076498f1d7e513bd8451ab5",
     "tools/backend_image_acceptance_20261030/Dockerfile.acceptance": "1f37658abc2242fa004d94e530a63b436314b493e8eb907a81c0a042fff908f2",
     "tools/backend_image_acceptance_20261030/Dockerfile.candidate": "a8b7717043dfd49d0f86cbe58c9fb3252a1b2936f450017de9aa03a9a5d32319",
-    "tools/backend_image_acceptance_20261030/full376.py": "0eb56d6caebaf811d07e89dc9d0453147e0b988906db4fdb64d613009421c305",
+    "tools/backend_image_acceptance_20261030/Dockerfile.harness-overlay": "57268baaadd14e1aa758f5b40dbaa5010a32d7401b3beb4c9e296fbe2106a5a6",
+    "tools/backend_image_acceptance_20261030/full376.py": "1ae40b34a2611d1f859f426b7d3f747ad55d7128532c29297c13869469bc09a1",
     "tools/backend_image_acceptance_20261030/image_probe.py": "283fac64a55ae3a75e0b6df0e69bee5d0284a48bb6376dfc295ae6d03f75f898",
     "tools/backend_image_acceptance_20261030/main8.py": "56feec258f4794c27cec18e3522d91880495d8d4b3b1f923e55b4d0e4f58c540"
   },

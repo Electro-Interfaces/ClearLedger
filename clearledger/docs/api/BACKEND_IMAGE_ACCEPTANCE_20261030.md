@@ -1,6 +1,6 @@
 # Локальная контейнерная приёмка backend, 30.10.2026
 
-**SOURCE-ONLY, AWAITING ROOT EXECUTION. Ни376GREEN, ни8GREEN пока не заявлены.**
+**ROOT: main8 —8PASS; full376 —370PASS/6harnessFAIL. Corrective affected6 pending; единого376GREEN нет.**
 Основа `07f12c6575cbb397e9945c7f9efda724445615c2`; собственная ветка
 `agent/api-container-acceptance-20261030`. Прежние ignored artifacts и Git-история
 сохранены. ROOT integration worktree не переключался; app/tests/DTO, прежние gates,
@@ -46,7 +46,7 @@ startup prepare/seed seam и8 parked jobs; final cancellation всех8 обяз
 has_ipv6=False; исходное значение восстанавливается до app/fixtures, bind allowance
 отсутствует. External network/process/env attempts должны остаться0.
 
-## Два образа и два новых контейнера
+## Candidate, acceptance и собственные контейнеры
 
 `Dockerfile.candidate` получает через обязательный ARG BASE_IMAGE verified local name:tag@digest для retained image
 sha256:812e423c722ae3cbac7780e4d8bd1ac54387b27c013c33f89c9c1fdefb7cae51.
@@ -142,3 +142,57 @@ business/files/auth oracle fingerprints, forbidden0 и independent parent receip
 Никаких skip/xfail/ослабления assertions. Первый провал сохраняется; retry без
 нового review/fresh attempt не предусмотрен. После ROOT receipts здесь разрешена
 только report-only finalization. Это не production readiness, выпуск или закрытие M00–M19.
+
+
+## Фактические ROOT результаты V5 и corrective V6
+
+Candidate61 build PASS45.037790793s, acceptance77 build PASS8.513850699s.
+Actual candidate probe: Python3.13.18/glibc2.41, app492/schema16, exact61,
+пять default flags OFF, no attempts, source guard before/after, app from image.
+Candidate ID0d58065c8b3ed50db553c12e9bd47aee7f16566e8353e99f636084d24714c38e;
+acceptance IDffe96074307ea9e98f97252b3e7831510560b0096127aaabad72e08ddb64cf25.
+Его RootFS наследует полный candidate prefix; app/schema/runtime pins сохранены.
+
+Full376 завершился370PASS/6FAIL/149passed subtests, pytest200.22s,
+ROOT outer226.2434s. Это сохранённый FAIL; network/env0, blocked_subprocess6.
+Все failures — шесть unchanged tests/test_docs_register.py: общий subprocess deny
+перехватил попытку pdftotext до native FileNotFoundError. Исправленные ROOT facts
+показывают отсутствие pdftotext/pdftoppm/tesseract в image. Первое сообщение ROOT
+об установленных extractors было premature и явно отозвано.
+
+Причина отличия от прежнего host375/1 — новая оснастка перенесла MAIN boundary,
+потеряв FULL seam doc_text._command. Старый принятый full gate возвращал в этом
+единственном optional externalOCR seam captured bempty; native Popen не достигался.
+ROOT разрешил V6 восстановить **точный** прежний seam, сохранив запрет subprocess.
+Нет новой exec/absence allowlist, installer или permissions. Шесть library probes
+с actual pypdf/JWT/PDF/multipart/dotenv, их helpers и assertions прежние.
+Source-only AST proof подтверждает exact oldfull patch и captured helper;
+остальная V5 boundary AST-эквивалентна. Это register lifecycle scope,
+не проверка внешнего OCR и не source/app fix.
+
+V6 profile docs-register-affected6 выбирает только шесть actual failing nodeids,
+проверяет exact6 collected/passed/JUnit, no errors/skips/xfail, source before/after,
+forbidden0 и положительный captured count. Он сохраняет full376_accepted=False
+и отдельный affected6_accepted. Fresh RUN/output и новая dedicated DB того же
+разрешённого имени готовятся только ROOT после normal DROP.
+Dockerfile.harness-overlay наследует exact acceptance77 tag@digest и копирует
+только owned tools/manifest; app/tests/schema/runtime/pins/support не меняются.
+Старые fullFAIL artifacts не переписываются. ROOT поручил affected-only retest,
+main8 повторять не требуется. После6PASS допустим scoped aggregate370retained+6corrective,
+который не переименовывается в новый single376GREEN.
+
+Main8 отдельно завершился8/8PASS, ROOT outer93.0779s, child reaped.
+Prepare1/chat start1+stop1, scheduler8 parked/cancelled, notify8,
+transport0/forbidden0; HOME/source guard/inventory target сохранены.
+ROOT независимо проверил65 retained artifacts и44 numbered business/files/auth
+transition phases для7 baseline-final fixtures: exact SHA/bytes и разрешённые/
+обязательные auth deltas совпали. Прежние affected5 58items/42phases сюда не перенесены.
+Normal DROP main DB:344 relations, connections0; обе test DB после первых прогонов отсутствуют.
+
+PG init attempt1 завершился EACCES tmpfs0700root до SQL/app; failure сохранён,
+удалён только exact exited own container. ROOT проверил UID70, исправил tmpfs
+uid/gid70 и создал fresh own PGf5b2ec249cd684e6ea2aa588fc73061d088995e1bb104f00060ad75f857e4a3c;
+test c5b26a77bd2c67adbc7063ec929e58d2222617283a64b2c4e1bb1a8020ccacef.
+Isolation inspect PASS. Коррекция UID относится только к новому synthetic PG.
+Все runtime/SQL/Docker действия выполнял ROOT; автор читал только завершённые receipts.
+Final affected6/cleanup receipts ещё ожидаются; M00–M19, CI и выпуск не закрыты.
