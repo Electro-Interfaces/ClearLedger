@@ -179,3 +179,26 @@ release SQL не выполнялся. Private runner/logs/JUnit/manifest нах
 | Private cleanup.log | `ae9bb72bdfe309eea60f8ac7c24bf1e8eecddb1a26ae7b64a2b789882141badb` |
 | Private source-boundaries.json | `6b84e9e14f7cecd3456058343e859afb657844c370254fa1595ba904c6556eb5` |
 | Private runner.py | `059dafd4d378ae13f23fbc5a1835c3241937590691371703c33d012c46e25d66` |
+
+
+## Независимая проверка общего кандидата
+
+Исходный8e18fe76a977a42814383793ec0893776e827230 перенесён как65816963.
+Координатор повторил60новых+313прежних в одном процессе с шестью явными flags:
+**373 PASS за53,00с**, без FAIL/ERROR/SKIP/DESELECTED. Runtime f981511f и
+новый тест7abf32d4 сохранились; все11прежних файлов тестов побайтно совпали с
+базойa9be3e63. AST прежних функций/классов, кроме согласованных _barrier и
+_locked, отдельно сверены с той же immutable базой. Новые helpers проверены
+на actual PG/ASGI; это не проверка всех существующих import producers.
+
+Процесс70406 EXIT0, pytest child reaped. Private runner использовал собственную
+synthetic DB, empty cwd, абсолютные пути, test UPLOAD_DIR, без подмены HOME.
+Свежие own connections0/public+edge tables0 подтверждены после закрытия engine;
+обычный DROP без FORCE/terminate и новый контроль дали dbexists0/maxlocks64.
+Probes закрыты до следующего SQL grant. Локальные evidence:
+`.artifacts/root-location-lock-sets-final.log` и
+`.artifacts/root-location-lock-sets-boundaries.log`.
+
+Activation B, SourcePatch/manual authority, крупные sets/lock budget и общий
+row/FK/unit/document protocol остаются отдельными gates. Foundation не является
+готовностью рабочих импортов к выпуску.

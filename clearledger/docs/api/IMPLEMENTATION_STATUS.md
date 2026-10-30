@@ -186,3 +186,11 @@ M17: два consumer фоновой загрузки показывают partia
 success. Root TypeScript app/node PASS; ESLint baseline и candidate совпадают
 (7прежнихerrors/3warnings,0новых), полный lint остаётся FAIL. Browser/HTTP
 E2E не выполнялся. [Отчёт](channel-partial-notifications-20261030.md).
+
+
+Foundation M05-B принят: acquire_location_set/LockedLocationSet и admitted lookup
+предварительно берут полный sorted-ID set перед company barrier. Root373PASS53с,
+включая60новых и313неизменённых; контекст набора связан с root T и не расширяет O/G.
+Late extension и потеря dirty target блокируются до SQL. Крупные sets и
+подключение import/unit/FK writers остаются gated.
+[Отчёт](location-lock-sets-20261030.md).
