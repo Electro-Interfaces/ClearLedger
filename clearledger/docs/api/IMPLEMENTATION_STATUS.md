@@ -8,7 +8,33 @@ company-wide occupancy `461c9ed4`, typed history `1f0cf49a`, route triage `18fd9
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
 
-## Последняя принятая волна: внешние приложения и контейнер
+## Принятая интеграция 31.10: документы договора, chat ACL и live backend
+
+Кандидат содержит **14 GET: 10 user/service и 4 user-only**. Добавлен
+`/api/v1/contracts/{contractId}/documents`: общий native predicate объединяет
+DocCard.subject_ref и tenant-safe DocRelation.target_ref. Нужны contracts:read,
+documents:read и независимые typed grants; связь не выдаёт право на байты файла.
+SQL ACL применяется до count/limit, cursor связан с текущими правами и родителем.
+
+ROOT: новые61 дали 60 PASS и один отказ нового fixture; после точечного
+исправления fixture затронутый сценарий прошёл отдельно. Прежние84 PASS и
+142 subtests PASS в отдельной серии. Это не один зелёный145-прогон. SDK14
+перегенерирован официально; freshness, шесть проверок генератора и три
+TypeScript-примера потребителя PASS.
+
+Chat ACL получил общего владельца с сохранением native adapters и двух
+management runtime hooks: 90/90 PASS. Семь исправлений действующего backend
+перенесены без потери принятой модернизации: 55 сохранённых PASS и отдельный
+корректирующий прогон восьми новых календарных goldens PASS. Исправлялся только
+ошибочный expected UID фикстуры; старые MIME/hosts assertions сохранены.
+Все процессы завершены, выделенные БД удалены обычным DROP.
+
+Следующие потоки: M06-R3 типы/сроки договоров и scoped metadata; M04-P4 общий
+calendar selector (97/97 PASS на ветке исполнителя, интеграция ожидается);
+M00/M17 сохранение трёх frontend consumers. Новый контракт15 операций ещё
+не принят. Полного CI текущего совместного HEAD и рабочего выпуска нет.
+
+## Предыдущая принятая волна: внешние приложения и контейнер
 
 Добавлен GET `/api/v1/contracts/{contractId}/objects`: только явные текущие
 связи договора с доступными объектами ЭЗС. Нужны оба права `contracts:read`
@@ -61,11 +87,11 @@ Requirements/production Dockerfile не переключены, OAuth/API/docs/�
 
 ## Что реализовано
 
-Child API `/api/v1` содержит 13 GET-операций: объекты ЭЗС, оборудование,
+Child API `/api/v1` содержит 14 GET-операций: объекты ЭЗС, оборудование,
 контрагенты, договоры, документы/разрешённые файлы и мониторинг объекта.
 SQL-права применяются до count/limit/агрегации; cursor связан с текущими
 разрешениями и отбором. Существующие ObjectId с кириллицей и пробелами сохраняются.
-Десять операций допускают user/service, три документные требуют пользователя.
+Десять операций допускают user/service, четыре документные требуют пользователя.
 
 OAuth/OIDC на Authlib разделяет Core session, partner access, ID token и machine
 grant. Есть Code+PKCE с явным согласием, rotating refresh, installations/resource
