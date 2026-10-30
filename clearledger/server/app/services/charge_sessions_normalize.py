@@ -22,7 +22,7 @@ from typing import Any
 
 import re
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import case, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
@@ -785,7 +785,35 @@ async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id,
             ).values(client_tariff=rate, client_amount=S.energy_kwh * rate))).rowcount or 0)
             if region is None:
                 priced += n_priced
+    await classify_corporate_sessions(db, company_id, channel_id)
     return named, priced, matched
+
+
+async def classify_corporate_sessions(db: AsyncSession, company_id, channel_id=None) -> int:
+    """Восстановить отсутствующий тип по подтверждённому обогащению организации.
+
+    API сессий может не передавать тип пользователя. Имя и телефон должны вместе
+    совпасть с реестром той же компании; нулевое списание само по себе не доказывает
+    ЮЛ. Существующий явный тип, тарифы и учтённые суммы остаются прежними.
+    """
+    S, C = ChargeSession, CorporateClient
+    conditions = [
+        S.company_id == company_id,
+        or_(S.user_type.is_(None), func.trim(S.user_type) == ""),
+        select(C.id).where(
+            C.company_id == S.company_id, C.name == S.client_name,
+            C.phone == S.user_id,
+        ).exists(),
+    ]
+    if channel_id is not None:
+        conditions.append(S.channel_id == channel_id)
+    result = await db.execute(update(S).where(*conditions).values(
+        user_type="ЮЛ",
+        # Служебный запуск остаётся вне выручки даже при известной организации.
+        cut_key=case((func.upper(func.trim(S.charge_type)) == "ADMIN", "ezs_admin"),
+                     else_="ezs_corp"),
+    ))
+    return int(result.rowcount or 0)
 
 
 async def _enrichment_result(db, company_id, orgs_count, named, priced, matched) -> dict[str, Any]:
