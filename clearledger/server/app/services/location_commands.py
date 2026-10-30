@@ -101,6 +101,19 @@ async def _assert_visible(db, company_id, loc):
             raise LocationConflict(404, "Объект не найден")
 
 
+async def locked_visible(db, company_id, identifier):
+    """Admit an existing service point without mutation or implicit commit.
+
+    Reuse the tenant-first reload and the current object/organization context;
+    the caller still owns company membership and the transaction lifetime.
+    """
+    loc = await _locked(db, company_id, identifier)
+    if loc is None:
+        raise LocationConflict(404, "Объект не найден")
+    await _assert_visible(db, company_id, loc)
+    return loc
+
+
 async def code_taken(db, company_id, code, *, except_id=None):
     rows = await db.execute(select(ServiceLocation.id).where(
         ServiceLocation.company_id == company_id, ServiceLocation.code == _number(code),

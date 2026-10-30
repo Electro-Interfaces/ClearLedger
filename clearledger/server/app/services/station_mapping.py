@@ -36,6 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ObjectLink, ServiceLocation
+from app.services import location_commands
 
 # Как называются внешние системы, встречающиеся в снимке и в реестре.
 СИСТЕМЫ: dict[str, str] = {
@@ -212,6 +213,7 @@ async def add_external_id(
     в базе это держит EXCLUDE-ограничение, здесь только понятная проверка, чтобы
     человек получил объяснение, а не ошибку драйвера.
     """
+    await location_commands.locked_visible(db, company_id, location_id)
     занято = (await db.execute(select(ObjectLink).where(
         ObjectLink.company_id == company_id,
         ObjectLink.relation == "external_id",
@@ -221,8 +223,7 @@ async def add_external_id(
     ))).scalars().first()
     if занято is not None and занято.parent_id != str(location_id):
         raise ValueError(
-            f"Значение «{value}» уже закреплено за другим объектом "
-            f"({занято.parent_id}) и не закрыто датой")
+            f"Значение «{value}» уже закреплено за другим объектом и не закрыто датой")
 
     link = ObjectLink(
         company_id=company_id,
@@ -239,12 +240,15 @@ async def add_external_id(
 
 
 async def close_external_id(
-    db: AsyncSession, company_id: uuid.UUID, link_id: uuid.UUID, *,
+    db: AsyncSession, company_id: uuid.UUID, location_id: str, link_id: uuid.UUID, *,
     valid_to: date | None = None, reason: str | None = None,
 ) -> dict[str, Any]:
     """Закрыть соответствие датой. Удалять нельзя: история связи — часть учёта."""
+    await location_commands.locked_visible(db, company_id, location_id)
     link = (await db.execute(select(ObjectLink).where(
-        ObjectLink.company_id == company_id, ObjectLink.id == link_id))).scalar_one_or_none()
+        ObjectLink.company_id == company_id, ObjectLink.id == link_id,
+        ObjectLink.parent_type == "station", ObjectLink.parent_id == location_id,
+        ObjectLink.relation == "external_id"))).scalar_one_or_none()
     if link is None:
         raise ValueError("Запись соответствия не найдена")
     link.valid_to = valid_to or date.today()

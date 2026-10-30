@@ -24,6 +24,7 @@ from app.services.network_vendors import network_vendors
 from app.services.station_history import station_history
 from app.services.station_obligations import station_obligations
 from app.services import station_mapping as sm
+from app.services.location_commands import LocationConflict
 from app.services import contract_liability, intake_watch, ops_tickets
 from app.services.station_visits import station_visits
 from app.services import station_check as sc
@@ -250,6 +251,8 @@ async def add_station_external_id(
             valid_from=body.valid_from, note=body.note,
             author_name=current_user.name or current_user.email,
             author_id=str(current_user.id))
+    except LocationConflict as e:
+        raise HTTPException(e.status, e.detail) from e
     except ValueError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
 
@@ -266,7 +269,9 @@ async def close_station_external_id(
     """Закрыть соответствие датой. Удаления нет: история связи — часть учёта."""
     cid = await assert_company_member(company_id, current_user, db)
     try:
-        return await sm.close_external_id(db, cid, uuid.UUID(link_id), reason=reason)
+        return await sm.close_external_id(db, cid, location_id, uuid.UUID(link_id), reason=reason)
+    except LocationConflict as e:
+        raise HTTPException(e.status, e.detail) from e
     except ValueError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
 
