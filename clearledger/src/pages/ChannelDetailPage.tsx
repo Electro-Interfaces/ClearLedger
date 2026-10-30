@@ -449,6 +449,7 @@ function ManualTableCard({ channel }: { channel: Channel }) {
       if (final) {
         const msg = final.message || `Загружено ${final.loaded ?? 0}`
         if (final.status === 'error') toast.error(msg)
+        else if (final.status === 'partial') toast.warning('Обработано частично: ' + msg)
         else toast.success('Обработано: ' + msg)
       } else {
         toast.message('Обработка продолжается в фоне', { description: 'Обновите страницу позже' })
@@ -2250,6 +2251,7 @@ export function ChannelDetailPage() {
             qc.invalidateQueries({ queryKey: ['fuel-count', channel.id] })
             qc.invalidateQueries({ queryKey: ['channel-runs', channel.id] })
             if (st.status === 'error') toast.error(st.message || 'Ошибка прогона')
+            else if (st.status === 'partial') toast.warning('Загрузка завершена частично: ' + (st.message || `Загружено ${st.loaded ?? 0}`))
             else toast.success(st.message || `Загрузка завершена · ${st.loaded}`)
             return
           }
