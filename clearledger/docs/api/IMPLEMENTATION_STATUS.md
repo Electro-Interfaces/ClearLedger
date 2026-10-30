@@ -415,7 +415,10 @@ M06: root независимо воспроизвёл карту записей 
 остаются unknown, source inventory не подтверждает runtime/ACL. Source59477daa
 перенесён в1c9ea350. Выбран следующий срез: общая CREATE-команда legacy reestr,
 L2Cache иcorporate без изменения matcher, raw, scope, locks и transaction owners.
-Подготовка реализации и изолированных тестов идёт отдельно; SQL пока не запускался.
+Реализация подготовлена отдельно. Первый ROOT прогон69SQL cases дал68PASS/1FAIL
+из-за snapshot oracle: колонка DataEntry.metadata прочитана как Base.metadata
+вместо mapped DataEntry.meta. Синтетическая БД штатно удалена, журнал сохранён;
+исправляется только test oracle, runtime приёмка пока не завершена.
 [Карта записей](CONTRACT_WRITER_INVENTORY_20261030.md).
 
 Vite закреплён ровно на7.3.7: package.json меняет только dev pin, lock — только
@@ -427,7 +430,32 @@ leaf cases,5React/Chromium сценариев, nodeTypeScript, main/public build
 приняты замороженные исходники и артефакты автора.
 
 Пять Vite version matches исходного набора уведомлений устранены выбранной
-версией; семь остальных совпадений обрабатываются отдельным пакетом. Это не
-подтверждение эксплуатируемости или безопасности рабочего окружения. Исходные
+версией; оставшиеся семь записей обработаны следующим отдельным пакетом ниже.
+Это не подтверждение эксплуатируемости или безопасности рабочего окружения. Исходные
 public PWA placeholders сохранены и описаны; app version1.2.857 не менялась,
 CI/выпуск не запускались. [Отчёт](VITE_PATCH_20261030.md).
+
+
+Транзитивные npm-зависимости приняты: source4e2186a7→integrationfabc9e04.
+Изменены13записей lock (8целевых позиций и5необходимых зависимостей),
+package.json и прикладной код не менялись; постоянных overrides нет. Root
+проверил2695artifact hashes/10source pins,13точных JSON diff и фактические
+установленные версии. В свежем окружении автора прошли189SSR и5React/Chromium
+сценариев, nodeTypeScript, предметный lint, main/public builds62,861/9,203с.
+После интеграции root заново сопоставил97сохранённых advisory с текущим lock:
+54компонента отсутствуют,43версии вне указанного диапазона,0version matches.
+Это фильтр версий сохранённого набора, не новая security scan и не заключение
+об эксплуатируемости. Для humanfs остаётся расхождение reviewed metadata с
+upstream PatchedNone; подтверждение устранения уязвимости не заявляется.
+[Отчёт](NPM_TRANSITIVE_PATCHES_20261030.md).
+
+DEP-1: подготовка артефактов и исправление числового сравнения версий включены
+в e2a213c3/2a296442. Root25pure controls PASS, offline verifier65артефактов
+PASS,130metadata/file hashes совпали; загрузка новых зависимостей не повторялась.
+Текущие requirements/Dockerfile и startup flags сохранены. В первом actual
+Python3.13.18 sandbox прошли tooling9,175с, изготовление wheel http-ece4,067с
+и compiler2,027с. Проверка clean offline install прервана FileNotFoundError
+проверочного сценария, общий процесс29,115с/EXIT1/OOMFalse. Промежуточный lock
+не активирован и не считается принятым. Журнал неудачи сохранён, собственные
+контейнер и image удалены; отдельная проверка установки готовится после
+исправления live scratch monitor. [Подготовка](BACKEND_DEPENDENCY_ARTIFACTS_20261030.md).
