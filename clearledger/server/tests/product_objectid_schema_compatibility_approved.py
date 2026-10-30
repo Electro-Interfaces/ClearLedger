@@ -12,7 +12,7 @@ SERVER = Path(__file__).resolve().parents[1]
 WORKTREE = Path("/home/mag/orca/workspaces/ledger-app/api-intake-upload-client-20261030")
 BASE = "0eb3319dffc30da8df40cdb83d0c280bb41be211"
 BRANCH = "agent/api-objectid-schema-compatibility-20261030"
-FROZEN = {'app': {'count': 492, 'sha256': '2c65aa4a192cd8f7b8f22985de86eefcc86977ab2550bded5af7ede97dbf2329'}, 'tests': {'count': 347, 'sha256': '3509851123facc067ce4d6bedb33886843a866cb5ed89737ce3621cf1612b41e'}, 'schema_migrations': {'count': 16, 'sha256': '51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d'}}
+FROZEN = {'app': {'count': 492, 'sha256': '98c57c0f1d3919df459a4037d709e7011b8def7f345fd3fc6b3351fcc4a49f52'}, 'tests': {'count': 347, 'sha256': '25adc062a92bd57aaef7e3df3d90c5d43ca1d9f5e0b2d3067b5d946d84c2df3c'}, 'schema_migrations': {'count': 16, 'sha256': '51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d'}}
 SUPPORT = {'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601'}
 INVENTORIES = {'old': {'prefix': '/srv/projects/api-modernization-test-env-20261029/.venv', 'count': 79, 'sha256': '2850615e939b64d93a5c3bf1d2b2f148795f9e11eb528d7d2de3227c42fb7262'}, 'new': {'prefix': '/srv/projects/api-modernization-upgrade-test-env-20261030/.venv', 'count': 77, 'sha256': '1716af920666a4b5e19d2fb74ec0061b2e354220825b623bd54a71b33bb5a58b'}}
 FLAG = "RUN_PRODUCT_OBJECTID_SCHEMA_COMPATIBILITY"
@@ -166,6 +166,8 @@ def install_boundary(attempts, evidence):
 
 def run(evidence, site, proof, attempts):
     sys.path.insert(0, str(site))  # Verified exact site only; never site.main()/addsitedir()/.pth execution.
+    import tempfile
+    tempfile.tempdir = str(evidence)  # Any library scratch stays within the approved write boundary.
     import socket
     import smtplib
 
@@ -284,7 +286,7 @@ def run(evidence, site, proof, attempts):
                 "collected": self.collected, "results": self.results}, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
 
     code = pytest.main(["-c", str(SERVER / "pytest.ini"), "--noconftest", "-p", "pytest_asyncio.plugin",
-        "-p", "no:cacheprovider", "-vv", "--tb=long", "--show-capture=no",
+        "-p", "no:cacheprovider", "--capture=no", "-vv", "--tb=long", "--show-capture=no",
         "--junitxml=" + str(evidence / "junit.xml"), *[str(SERVER / s) for s in SELECTION]], plugins=[Boundary()])
     return int(code)
 

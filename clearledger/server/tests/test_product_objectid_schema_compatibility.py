@@ -70,7 +70,8 @@ def test_inline_without_display_title_and_component_annotations():
 
 
 def test_constraint_drift_is_rejected_atomically():
-    for field, value in (("minLength", 0), ("maxLength", 41), ("pattern", ".*"),
+    for field, value in (("minLength", 0), ("minLength", True), ("maxLength", 41),
+                         ("maxLength", 40.0), ("pattern", ".*"),
                          ("type", "integer"), ("nullable", True), ("format", "uuid"),
                          ("enum", ["one"]), ("description", "unreviewed"),
                          ("anyOf", [OBJECT_ID, {"type": "null"}])):
@@ -146,6 +147,11 @@ def test_authoritative_component_future_keyword_must_match():
         parameter(schema, path)["schema"]["not"] = {"const": "reserved"}
     _canonical_object_id_paths(schema)
     assert schema["components"]["schemas"]["ObjectId"]["not"] == {"const": "reserved"}
+    schema = sample()
+    schema["components"]["schemas"]["ObjectId"]["not"] = {"const": 1}
+    for path in PATHS:
+        parameter(schema, path)["schema"]["not"] = {"const": True}
+    rejected_without_mutation(schema)
 
 
 def test_real_canonical_contract_and_codegen_identity_controls():
