@@ -295,3 +295,12 @@ link redaction, hydration и response bytes всех237records совпали с
 Page size ограничивает гидратацию карточек; total и проверка больших SET
 требуют отдельного анализа. Walltime/peak относятся к traced single run,
 не production SLO. [Отчёт](PRODUCT_QUERY_SCALING_20261030.md).
+
+
+Получены два actual read-only document plans наN5000: COUNT2404.896ms и
+page2012531.699ms, explicit deny Anti join повторяет ACL scan3000раз.
+1authorPASS/16goldenHTTP/2EXPLAIN; root проверил source/hashes/rawplan/JUnit,
+равенство before/after и SQL shapes с независимым baseline. Повторного root
+EXPLAIN не было. Индекс scope уже существует; statistics control и ACL matrix
+готовятся отдельно, runtime/index changes отсутствуют.
+[Планы](PRODUCT_DOCUMENT_QUERY_PLANS_20261030.md).

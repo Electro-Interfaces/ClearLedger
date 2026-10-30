@@ -313,3 +313,22 @@ DBexists0/otherclients0/maxlocks64/adminclosed. Worker admin/CREATE/DROP не и
 raw artifacts не копируются в public. Baseline files/current EVIDENCE/immutable
 author archive не менялись этим run. Root independent acceptance plans остаётся
 отдельным этапом; M00–M19/full CI/production performance этим PASS не закрыты.
+
+
+## Приёмка координатора
+
+Source7a663599/f76174c3 перенесён без runtime delta; интеграционные коммиты
+0be1edd7/b5aa8d1d. Проверены SHA тестаeeae2aed и helper054f, actual JUnit
+1PASS/0FAIL/ERROR/SKIP53.657с и равенство safe-summary с JUnit property. Все
+8deterministic HTTP records до/после совпали; всего16. Raw-plan hashes и
+planning/execution/root rows сверены с исходными private plans. SQL hashes
+COUNT и page найдены в **независимом root baseline N5000/page200** из предыдущего
+этапа: планы относятся к тем же измеренным формам запросов.
+
+Повторный SQL/EXPLAIN для этой приёмки не запускался: это независимая сверка
+source/evidence и связи с уже повторённым baseline. Proof:
+`.artifacts/root-product-document-plans-artifact-proof.json`. Это не
+самостоятельный root plan benchmark и не доказательство эффекта оптимизации.
+
+Следующие два потока готовят отдельно statistics control без изменения кода
+и недостающую actual SQL/HTTP матрицу ACL. Runtime/index rewrite пока не разрешён.
