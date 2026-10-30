@@ -1,0 +1,25 @@
+# ROOT-only local candidate, offline context assembled from the frozen manifest.
+# No production Dockerfile/requirements/lock activation. No mutable FROM tags.
+FROM sha256:812e423c722ae3cbac7780e4d8bd1ac54387b27c013c33f89c9c1fdefb7cae51
+USER root
+WORKDIR /app
+COPY runtime-wheels/ /candidate-input/wheels/
+COPY locks/bootstrap-upgrade-20261030-py313-linux-amd64.provisional.txt /candidate-input/bootstrap.lock
+COPY locks/runtime-upgrade-20261030-py313-linux-amd64.provisional.txt /candidate-input/runtime.lock
+# Use retained pip only to populate a clean image-local environment; never copy host envs.
+RUN python -I -B -m venv --without-pip /opt/candidate \
+ && python -I -B -m pip --python /opt/candidate/bin/python install --no-index --no-cache-dir --no-compile --no-deps --require-hashes --only-binary=:all: --find-links=/candidate-input/wheels -r /candidate-input/bootstrap.lock -r /candidate-input/runtime.lock \
+ && /opt/candidate/bin/python -I -B -m pip check \
+ && rm -rf /candidate-input /usr/local/lib/python3.13/site-packages /app/app /app/schema_migrations /app/.env \
+ && mkdir /usr/local/lib/python3.13/site-packages
+COPY app/ /app/app/
+COPY schema_migrations/ /app/schema_migrations/
+COPY tools/backend_image_acceptance_20261030/ /app/tools/backend_image_acceptance_20261030/
+ENV PATH=/opt/candidate/bin:/usr/local/bin:/usr/bin:/bin
+LABEL api-modernization.source="07f12c6575cbb397e9945c7f9efda724445615c2" api-modernization.scope="local-candidate-only" api-modernization.owner="ctx_b4e579b3aef1"
+CMD ["/opt/candidate/bin/gunicorn","app.main:app","-w","2","-k","uvicorn.workers.UvicornWorker","--bind","0.0.0.0:8000","--timeout","300","--access-logfile","-"]
+# Immutable build args are supplied by ROOT from the source-only proposal.
+ARG PROBE_SHA256
+ARG MANIFEST_SHA256
+RUN env -i HOME=/root PATH=/opt/candidate/bin:/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 APP_ENV=test DATABASE_URL=postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/api_backend_upgrade_test_20261030 SECRET_KEY=backend-image-synthetic-key-at-least-32-bytes UPLOAD_DIR=/tmp/backend-image-test-uploads \
+    /opt/candidate/bin/python -I -S -B /app/tools/backend_image_acceptance_20261030/image_probe.py --approved-sha256 ${PROBE_SHA256} --approved-manifest-sha256 ${MANIFEST_SHA256} --profile runtime61
