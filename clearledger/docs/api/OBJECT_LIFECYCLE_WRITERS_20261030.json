@@ -1,0 +1,433 @@
+{
+  "format": "object-lifecycle-source-manifest-v1",
+  "date": "2026-10-30",
+  "method": "Read-only source text and DOCX XML review; no AST scan, app import, SQL or network API.",
+  "ledger": {
+    "revision": "13d1b6b3d544325ce0234677d2f7536e09e4c116",
+    "files": [
+      {
+        "path": "clearledger/server/app/models.py",
+        "sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+        "bytes": 965563,
+        "lines": 14434
+      },
+      {
+        "path": "clearledger/server/app/database.py",
+        "sha256": "be856862b369d89da8c7993fd974b70481260f37f07b7ca5a6d20db6ac077c3c",
+        "bytes": 385027,
+        "lines": 5551
+      },
+      {
+        "path": "clearledger/server/app/main.py",
+        "sha256": "6311430edbdc2f642f18698e5e841e2807d53ec95f5cc25e7b7990962b8e1a17",
+        "bytes": 46126,
+        "lines": 863
+      },
+      {
+        "path": "clearledger/server/app/auth.py",
+        "sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+        "bytes": 37575,
+        "lines": 707
+      },
+      {
+        "path": "clearledger/server/app/deps.py",
+        "sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c",
+        "bytes": 7194,
+        "lines": 129
+      },
+      {
+        "path": "clearledger/server/app/scope.py",
+        "sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b",
+        "bytes": 12361,
+        "lines": 212
+      },
+      {
+        "path": "clearledger/server/app/seed.py",
+        "sha256": "e0de032c1a7da5c81bd52698234952c00ff345cc2a8733a7ede9d9d390780be6",
+        "bytes": 34261,
+        "lines": 691
+      },
+      {
+        "path": "clearledger/server/app/services/location_commands.py",
+        "sha256": "a1182683d4e556482a9328cf840a14c1e0a335c32a6f1d86c202d9f9707641a1",
+        "bytes": 12394,
+        "lines": 238
+      },
+      {
+        "path": "clearledger/server/app/services/object_freeze.py",
+        "sha256": "72aa8f516631b661f33b0c28efeaa91ee4ec9d53749e407387cdb2fcb8987118",
+        "bytes": 6936,
+        "lines": 123
+      },
+      {
+        "path": "clearledger/server/app/services/object_control.py",
+        "sha256": "eb8c2139966098c2260a870dcad9c29ed21a800d422a6f59813fc8a6fc6b2de7",
+        "bytes": 5298,
+        "lines": 99
+      },
+      {
+        "path": "clearledger/server/app/services/station_passport.py",
+        "sha256": "d00dd17269736074a234f76a88ce0269702317ff023c5af7a5640ef30070c80e",
+        "bytes": 8314,
+        "lines": 150
+      },
+      {
+        "path": "clearledger/server/app/services/stations_normalize.py",
+        "sha256": "468869d96705e6a3627f24c909c46ef240c615c950c053874e417ffbda3fa2e9",
+        "bytes": 72063,
+        "lines": 1117
+      },
+      {
+        "path": "clearledger/server/app/services/asuim_normalize.py",
+        "sha256": "0a5b8ba629468ccaf11abe662265ff4de63b456171d13e09670f91db162e3fae",
+        "bytes": 77247,
+        "lines": 1242
+      },
+      {
+        "path": "clearledger/server/app/services/reestr_rushydro.py",
+        "sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+        "bytes": 60993,
+        "lines": 1253
+      },
+      {
+        "path": "clearledger/server/app/services/channel_orchestrator.py",
+        "sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+        "bytes": 43191,
+        "lines": 743
+      },
+      {
+        "path": "clearledger/server/app/services/channel_scheduler.py",
+        "sha256": "a587ce5031856054878e2b2b2cb32d998e8e9027512b8be544e8428ccb35ab6e",
+        "bytes": 8218,
+        "lines": 177
+      },
+      {
+        "path": "clearledger/server/app/services/charge_sessions_normalize.py",
+        "sha256": "afa815f8e0dd52213182d1d63dd424e596736ffaf077f9554ac377965e33c146",
+        "bytes": 53871,
+        "lines": 873
+      },
+      {
+        "path": "clearledger/server/app/services/ezs_equipment.py",
+        "sha256": "8cfa7902dbed0ced07e6c50c04e27ed2e6ae64fc2f64127f9d7fb4e03c9ef5be",
+        "bytes": 66103,
+        "lines": 1179
+      },
+      {
+        "path": "clearledger/server/app/services/ezs_equipment_docs.py",
+        "sha256": "413c4109fa3b52ce81011acf593d3059c5721b814254083b2d2478f98978ddc5",
+        "bytes": 56725,
+        "lines": 835
+      },
+      {
+        "path": "clearledger/server/app/services/ezs_supply.py",
+        "sha256": "3113a0f1321603df0be0c58e9cac67f526cc4498ca13e974dff327597865a337",
+        "bytes": 36448,
+        "lines": 682
+      },
+      {
+        "path": "clearledger/server/app/services/ezs_project.py",
+        "sha256": "6572971632e9f9506b85102d6f29d2bbcb1eca8c78ca9f2c9b9aafddf4d224b4",
+        "bytes": 129224,
+        "lines": 2197
+      },
+      {
+        "path": "clearledger/server/app/services/ezs_lifecycle.py",
+        "sha256": "f9f9cec7efb709866e295c517ba684c0cf21b77b3d9d9f7513e23ace62693ce3",
+        "bytes": 25786,
+        "lines": 416
+      },
+      {
+        "path": "clearledger/server/app/services/projects_process.py",
+        "sha256": "aa38aa92b15a12291710bab8eb52f4e61bfc35062530c18b5d6ccaa8fd1fe216",
+        "bytes": 40968,
+        "lines": 647
+      },
+      {
+        "path": "clearledger/server/app/services/station_mapping.py",
+        "sha256": "00872175f99912acf3b3da1a6d2b43cd23ad9743d68d61302e4924cad8188ef7",
+        "bytes": 13799,
+        "lines": 253
+      },
+      {
+        "path": "clearledger/server/app/services/space_registry.py",
+        "sha256": "8f8b47901479b048ac3d08e64ba07802cb5f7e1f184dd9ae95f78d291119bb0a",
+        "bytes": 16615,
+        "lines": 315
+      },
+      {
+        "path": "clearledger/server/app/services/space_projection.py",
+        "sha256": "75565ae26fe2ad186f3f6f9d9bbca83278b277286b166abd48d60de627d20508",
+        "bytes": 31618,
+        "lines": 565
+      },
+      {
+        "path": "clearledger/server/app/services/space_data_model.py",
+        "sha256": "9629a86faf77d1b66832798751981ab3c3b08d06f2adcbc6e9086143fed67a70",
+        "bytes": 28176,
+        "lines": 353
+      },
+      {
+        "path": "clearledger/server/app/services/session_scope.py",
+        "sha256": "87df5f6a422680208faaaea051cf134cc3c4d141b1262a6bfc4bbb96227c2a04",
+        "bytes": 6386,
+        "lines": 99
+      },
+      {
+        "path": "clearledger/server/app/services/station_scope.py",
+        "sha256": "451fa4a98142d94364d5aba3deaef18491ae0bbd8b5efefcef9c064b662f0824",
+        "bytes": 6384,
+        "lines": 109
+      },
+      {
+        "path": "clearledger/server/app/services/network_state.py",
+        "sha256": "bd0483f97cadded4f7e5781691d2f94fc4f5978b8cab190db3e5ea0b9effc9ce",
+        "bytes": 21103,
+        "lines": 330
+      },
+      {
+        "path": "clearledger/server/app/services/network_reliability.py",
+        "sha256": "1cf5f09e6bd0197bfc5996d4cb35046c46122e27429e962bed911dbf7516833d",
+        "bytes": 16959,
+        "lines": 255
+      },
+      {
+        "path": "clearledger/server/app/services/station_history.py",
+        "sha256": "462e417f0c46bc102d7fd873746a2532720b00f9fafb804af5d9f712870b5b5d",
+        "bytes": 11570,
+        "lines": 209
+      },
+      {
+        "path": "clearledger/server/app/services/station_status_days.py",
+        "sha256": "d6100b167a01bda7af3467ebe8c55419c08cac6e707ea895fcd2ca6c54ff7eff",
+        "bytes": 12517,
+        "lines": 230
+      },
+      {
+        "path": "clearledger/server/app/services/ops_dashboard.py",
+        "sha256": "0868900afefe004dc2ce4fad24bede621bccb0a0e1e29b06d51d9c618893b181",
+        "bytes": 45183,
+        "lines": 808
+      },
+      {
+        "path": "clearledger/server/app/services/hubex_sync.py",
+        "sha256": "751ae8c34a4079cfc52257eb40c351196f45e51bd2742b49f70d449fb2418efe",
+        "bytes": 14052,
+        "lines": 320
+      },
+      {
+        "path": "clearledger/server/app/services/hubex_service.py",
+        "sha256": "42bc83112281e3d57dc366bab3325dd756f6e9a75b1f31acc4bd149ce2512aa6",
+        "bytes": 4100,
+        "lines": 106
+      },
+      {
+        "path": "clearledger/server/app/routers/locations_router.py",
+        "sha256": "5ead43964483628c7a4c0104e9cbbf7c3e9a201cd203da1c849ab66b4b120f81",
+        "bytes": 20570,
+        "lines": 385
+      },
+      {
+        "path": "clearledger/server/app/routers/space_registry_router.py",
+        "sha256": "2b06a57f45b73a70ca736eb0b2782ec88f65736615b90f3e68b65c8c244707d7",
+        "bytes": 36175,
+        "lines": 665
+      },
+      {
+        "path": "clearledger/server/app/routers/ops_router.py",
+        "sha256": "2fd8f3d104cff7ecb39ede69ac84859a24d09ba85e39d359ed84c2fb4cd7290b",
+        "bytes": 55404,
+        "lines": 1134
+      },
+      {
+        "path": "clearledger/server/app/routers/equipment_router.py",
+        "sha256": "5992759b387be39603a3effc0bca474b09ae279dfe39ce3ce31417469b996aab",
+        "bytes": 88429,
+        "lines": 1780
+      },
+      {
+        "path": "clearledger/server/app/routers/sites_router.py",
+        "sha256": "806fa73096f7e83ceb0f59e52b54c7a0e60d5845baec0d2e0a3aa9ebaf728fc7",
+        "bytes": 93104,
+        "lines": 1781
+      },
+      {
+        "path": "clearledger/server/app/routers/channels_router.py",
+        "sha256": "027df4a863a9f730b45e05ed8d283acf298b6835fa6cf42786222b3b8daf91a4",
+        "bytes": 29858,
+        "lines": 621
+      },
+      {
+        "path": "clearledger/server/app/product_api/queries.py",
+        "sha256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+        "bytes": 11122,
+        "lines": 211
+      },
+      {
+        "path": "clearledger/server/app/product_api/access.py",
+        "sha256": "9edd931485539ffd23e696c4a37efad2e1060d1f69f434ce6b592ea1b1f85ebc",
+        "bytes": 7776,
+        "lines": 150
+      },
+      {
+        "path": "clearledger/server/app/product_api/monitoring.py",
+        "sha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb",
+        "bytes": 2234,
+        "lines": 40
+      },
+      {
+        "path": "clearledger/server/app/product_api/app.py",
+        "sha256": "f6c4e3950d6365b087cf92addc82e9c039d3b0425b389283ff7596e02862f526",
+        "bytes": 29108,
+        "lines": 431
+      },
+      {
+        "path": "clearledger/server/scripts/backfill_stations.py",
+        "sha256": "3883bc340638e4cf7bac732780951657790e62a84f7f117e2db195b6f4f4a9c7",
+        "bytes": 22216,
+        "lines": 400
+      },
+      {
+        "path": "clearledger/server/scripts/backfill_evse.py",
+        "sha256": "5456b70b2394a2a58c5f4834f279bb16f47c2780ea50a32f6b687b2b4a6cdf12",
+        "bytes": 8144,
+        "lines": 174
+      },
+      {
+        "path": "clearledger/server/scripts/backfill_external_ids.py",
+        "sha256": "1b4032d4f49100d1376884c2e2a4ad716a27f7f64e84734c33800db8c1c106fb",
+        "bytes": 8542,
+        "lines": 165
+      },
+      {
+        "path": "clearledger/server/scripts/prune_stale_stations.py",
+        "sha256": "990196fadbc70d83dc982208a717066d761bce956882669534b4dbc193ca2374",
+        "bytes": 3895,
+        "lines": 84
+      },
+      {
+        "path": "clearledger/server/scripts/postdeploy_ezs_nakat.py",
+        "sha256": "9d7b5133058488878811dafaf1b065c71d42bff8c4067aa502f5f27441ca96ff",
+        "bytes": 3678,
+        "lines": 67
+      },
+      {
+        "path": "clearledger/server/scripts/check_object_ticket_autoprojection.py",
+        "sha256": "dec7117723bace7b6039f93aa9a7f1a58e2901acad107c3b7be52d2a183a6884",
+        "bytes": 2679,
+        "lines": 50
+      },
+      {
+        "path": "clearledger/docs/LOCATION_COMMANDS.md",
+        "sha256": "28c32d944a922c8fdce6c0f2d8053332c7aef3d1b2d7f5992b04c5c364bdb743",
+        "bytes": 16996,
+        "lines": 189
+      },
+      {
+        "path": "clearledger/docs/api/IMPLEMENTATION_STATUS.md",
+        "sha256": "57b3a904775ee805163b006cd6aca6065736284d258690d99e9e58abad002954",
+        "bytes": 9759,
+        "lines": 120
+      },
+      {
+        "path": "clearledger/docs/api/PRODUCT_OBJECT_IDS.md",
+        "sha256": "5ed7bcddff08ac3a1ef1d51563f77b625cc993ec890a9a17e1c41a3d7a7e6c4d",
+        "bytes": 6439,
+        "lines": 81
+      },
+      {
+        "path": "clearledger/docs/api/object-monitoring-20261030.md",
+        "sha256": "4ec6f8a9cf6bf32310be23d755853e784017524e528cde04241953647142c494",
+        "bytes": 11611,
+        "lines": 149
+      },
+      {
+        "path": "clearledger/docs/СТО. Идентификация объектов зарядной инфраструктуры (проект).docx",
+        "sha256": "5af3ffb1b02b9f447f03646b2eaa794924e030a3f6bcc9a0d7909d5461c51750",
+        "bytes": 24654
+      },
+      {
+        "path": "clearledger/docs/Учётная политика. Идентификация объектов ЭЗС (проект).docx",
+        "sha256": "129dd9eaa1da5e4f829995df948a3b6194247096e5b42ca0bc46e7e415cf50cc",
+        "bytes": 14303
+      },
+      {
+        "path": "clearledger/docs/Учётная политика. Идентификация объектов ЭЗС (проект, ред. 2).docx",
+        "sha256": "b51ed11613c412cf149868d20b83d211cd853e5cd5c853f33ada3d8b2f75e439",
+        "bytes": 15814
+      }
+    ]
+  },
+  "deployCanon": {
+    "revision": "72b224f653c8d6721c9509b92aa80e9e09227f2e",
+    "worktree": "partner-api-design-20261029",
+    "files": [
+      {
+        "path": "docs/OBJECTS.md",
+        "sha256": "7f8a820c7b931a7f1c804593ffce792f0a97f46d31bc0affbb4b21e4a00b2422",
+        "bytes": 79950,
+        "lines": 847
+      },
+      {
+        "path": "docs/SPACE.md",
+        "sha256": "08f3a0ca0586482de69994cce3ee91a6f898b661ada3b2e29ea2231b796a99dc",
+        "bytes": 107856,
+        "lines": 1035
+      },
+      {
+        "path": "docs/CORE.md",
+        "sha256": "bbcbde3195cd683cd99253d76e72ee6e1c10daf42f8d6d95b7ee93f3b7af3d83",
+        "bytes": 54718,
+        "lines": 579
+      },
+      {
+        "path": "docs/API-MODERNIZATION-PLAN.md",
+        "sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+        "bytes": 29956,
+        "lines": 238
+      },
+      {
+        "path": "docs/api/execution-20261029/STATUS.md",
+        "sha256": "365c32e1c6b6a052ef163efe6894cb0809d3623e4cc5b606dab714619d485f4b",
+        "bytes": 18984,
+        "lines": 188
+      }
+    ]
+  },
+  "evidenceLimits": {
+    "runtimeVerified": false,
+    "databaseVerified": false,
+    "completeProductionWriterAudit": false,
+    "currentWorkingDataInspected": false,
+    "testsExecuted": false
+  },
+  "draftProvenance": {
+    "sto": "clearledger/docs/СТО. Идентификация объектов зарядной инфраструктуры (проект).docx",
+    "approvalStatus": "Draft with approval/date placeholders; not an approved normative policy",
+    "clauses": [
+      "4.4",
+      "7.1",
+      "7.5",
+      "7.6",
+      "7.8",
+      "8.1",
+      "8.2",
+      "8.3",
+      "8.4",
+      "8.5",
+      "9.1",
+      "9.2",
+      "9.3",
+      "9.5",
+      "9.6",
+      "11.5"
+    ]
+  },
+  "unknowns": [
+    "Out-of-repository SQL and scripts",
+    "Actual deployed constraints, schedules and channel configuration",
+    "Former IDs with no retained evidence",
+    "Object import entrypoints outside discovered source paths",
+    "Complete financial and soft-reference usage graph"
+  ]
+}
