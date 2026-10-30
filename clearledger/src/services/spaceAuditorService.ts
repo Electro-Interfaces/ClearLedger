@@ -9,7 +9,7 @@
  * Запрос идёт токеном пользователя: аудитор своих прав не имеет и не покажет того,
  * чего человек не видит сам.
  */
-import { get, getToken, post, put } from './apiClient'
+import { captureApiContextGuard, get, getToken, post, put } from './apiClient'
 
 /** Где человек находился, когда позвал. Отсюда агент понимает, куда смотреть. */
 export interface AuditorContext {
@@ -224,16 +224,39 @@ export async function getKnowledge(companyId: string): Promise<AuditorKnowledge[
  * поставку, принимает человек, посмотрев дифф.
  */
 export async function exportWork() {
-  const res = await fetch(`${BASE}/export-work`, {
-    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
-  })
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Не выгрузилось (${res.status})`)
-  const url = URL.createObjectURL(await res.blob())
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'auditor-work.tar.gz'
-  a.click()
-  URL.revokeObjectURL(url)
+  const guard = captureApiContextGuard()
+  guard()
+  try {
+    const res = await fetch(`${BASE}/export-work`, {
+      headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+    })
+    guard()
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      guard()
+      throw new Error(detail?.error || `Не выгрузилось (${res.status})`)
+    }
+    const blob = await res.blob()
+    guard()
+    const url = URL.createObjectURL(blob)
+    let anchor: HTMLAnchorElement | undefined
+    try {
+      guard()
+      anchor = document.createElement('a')
+      guard()
+      anchor.href = url
+      anchor.download = 'auditor-work.tar.gz'
+      guard()
+      anchor.click()
+      guard()
+    } finally {
+      try { anchor?.remove() } finally { URL.revokeObjectURL(url) }
+    }
+    guard()
+  } catch (error) {
+    guard()
+    throw error
+  }
 }
 
 /**
