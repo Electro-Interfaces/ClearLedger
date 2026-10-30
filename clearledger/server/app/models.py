@@ -7023,6 +7023,9 @@ class EzsSite(Base):
     # без них «Итого затраты на подключение» нечем разложить.
     input_price_kwth: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)  # R
     smr_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)          # T
+    # Реквизиты СМР проекта; сами по себе не меняют состояние объекта/оборудования.
+    dismantle_location_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    decommissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # Условия площадки, которые проверяет отдел развития глазами (этап 2/3).
     long_term_contract: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # Y
     has_video: Mapped[bool | None] = mapped_column(Boolean, nullable=True)           # Z

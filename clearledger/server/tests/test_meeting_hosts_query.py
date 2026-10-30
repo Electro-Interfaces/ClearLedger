@@ -191,8 +191,9 @@ async def test_asgi_invitation_uses_sorted_hosts_and_captured_delivery(world, me
     )
     mails = meeting_delivery_capture["meeting_email"]
     chats = meeting_delivery_capture["chat"]
-    assert len(mails) == len(chats) == 3
-    assert {m["to"] for m in mails} == {w.people[k].email for k in ["alpha", "bravo", "listener"]}
+    # Live e44ea4d6 also updates the actor's external calendar (old 3, now 4).
+    assert len(mails) == 4 and len(chats) == 3
+    assert {m["to"] for m in mails} == {w.people[k].email for k in ["organizer", "alpha", "bravo", "listener"]}
     assert {c["person_id"] for c in chats} == {w.ids[k] for k in ["alpha", "bravo", "listener"]}
     for mail in mails:
         assert mail["text"] == golden
