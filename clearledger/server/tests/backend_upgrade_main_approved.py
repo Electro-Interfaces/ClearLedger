@@ -583,6 +583,8 @@ def child(approved_sha, profile):
         record['failure_type'] = type(exc).__name__
     finally:
         signal.alarm(0)
+        if any(value != 0 for value in SENDER_COUNTS.values()):
+            code = code or 7
         if any(BOUNDARY[name] != 0 for name in FORBIDDEN_COUNTERS):
             code = code or 4
         if os.environ.get('HOME') != pwd.getpwuid(os.getuid()).pw_dir:
@@ -675,6 +677,9 @@ def supervise(approved_sha, profile):
                         boundary.get('import_capability_proof', {}).get('suppressed') is True and
                         boundary.get('import_capability_proof', {}).get('restored') is True and
                         boundary.get('import_capability_proof', {}).get('bind_allowance') is False and
+                        isinstance(boundary.get('transport_stub_counts'), dict) and
+                        bool(boundary['transport_stub_counts']) and
+                        all(value == 0 for value in boundary['transport_stub_counts'].values()) and
                         boundary.get('m18_lifecycle_accepted') is True and
                         boundary.get('m18_jobs_cancelled') is True and
                         boundary.get('main8_accepted') is True and
