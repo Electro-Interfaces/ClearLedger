@@ -486,3 +486,18 @@ intake, без проверки достижимости в приложении
 не подтверждают отсутствие уязвимостей; отдельная Task собирает первичные
 advisory details и совместимый план обновления, включая Starlette/FastAPI.
 [Фактическая offline-приёмка](BACKEND_DEPENDENCY_TARGET_20261030.md).
+
+
+M04/M06: обычный native POST создания договора теперь тонкий адаптер к
+create_native_contract. Пять прежних helpers имеют одного владельца
+reference_validation; private aliases сохраняют PATCH и остальные handlers.
+Source1cd272c6→integration8e784fb3, finalreport16227d60→60d419b3. Root
+независимо сверил exact AST/helpers/CREATE/остальной router, lexical globals
+и489старых app blobs; полный app492/tests336+runner/schema16 совпал перед
+исполнением и после переноса. Один actualPG/HTTP run:59PASS (55new+4old),
+0FAIL/ERROR/SKIP,24,31с (outer36,528с). Проверены реквизиты/точный request hash,
+права, стороны, типы, replay/conflicts, два конкурентных POST и caller rollback.
+БД штатно удалена после freshrelations0/connections0, maxlocks64 прежний.
+Повторов SQL после PASS нет. Native User и прежний admission до lock сохранены;
+нового partner write API и закрытия всего M06 нет.
+[Native CREATE](NATIVE_CONTRACT_CREATE_20261030.md).
