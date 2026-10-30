@@ -22,6 +22,8 @@ if (urlsplit(os.environ["TEST_DATABASE_URL"]).path != "/api_contract_create_test
 
 import asyncio
 from copy import deepcopy
+from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 import uuid
 
@@ -81,8 +83,25 @@ async def world(db):
 
 def record(row):
     # Corporate phone-link UPDATE legitimately advances its onupdate timestamp.
-    return {c.key: deepcopy(getattr(row, c.key)) for c in row.__table__.columns
-            if not (isinstance(row, CorporateClient) and c.key == "updated_at")}
+    # Mapper keys preserve aliased columns: DataEntry.meta maps SQL metadata;
+    # row.metadata is Base.metadata and is not a persisted column value.
+    result = {attr.key: deepcopy(getattr(row, attr.key)) for attr in row.__mapper__.column_attrs
+              if not (isinstance(row, CorporateClient) and attr.key == "updated_at")}
+
+    def column_value(value):
+        if value is None or isinstance(value, (str, bool, int, float, Decimal, date, datetime, uuid.UUID, bytes)):
+            return True
+        if isinstance(value, dict):
+            return all(isinstance(k, str) and column_value(v) for k, v in value.items())
+        if isinstance(value, list):
+            return all(column_value(v) for v in value)
+        return False
+
+    assert all(column_value(value) for value in result.values()), "Snapshot must contain persisted column values"
+    if isinstance(row, DataEntry):
+        assert "meta" in result and "metadata" not in result
+        assert result["meta"] is None or isinstance(result["meta"], dict)
+    return result
 
 
 async def saved(w):

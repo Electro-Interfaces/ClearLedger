@@ -16,18 +16,9 @@ SERVER = Path(__file__).resolve().parents[1]
 BASE_COMMIT = "1c9ea350fff4502c5e0abdcb4b8b0eef65cc0e38"
 APP_DIGEST = 'beb45c71788be8c6d9b016fed04abab60079a7598b8a634c0c464886abb60184'
 SCHEMA_DIGEST = '51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d'
-FILES = {'tests/test_contract_import_create.py': '93690b8bca0a3870a53bd9262140602fdef868d684e1bfb7dad19ed68d9aa20c', 'tests/test_corporate_counterparty_commands.py': '73f25eccb83e6cae327283fef8e11f2f9c36ac6e005a7a373361b74bdeece05f', 'tests/test_counterparty_commands.py': '11dcd10fdfdb420a59775b54882150b6645b1f1f9326ab9b3e48482c3241ea5e', 'tests/test_reference_identity_api.py': 'f3ba7173f4fb885fff9c469989518ee2beca0bee4c2e009fecb8b0ef1248827b', 'tests/partner_test_safety.py': '43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1', 'tests/conftest.py': '32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b', 'tests/helpers.py': 'edaf0741b6c562dfa46d04b79789abf34ff2cb560fa13f42f184b970903d5a31', 'tests/__init__.py': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601'}
+FILES = {'tests/test_contract_import_create.py': 'cdc8feee5789e28cbe416e7094ec211e0477401558cfb96d865a1da901a2788f', 'tests/test_corporate_counterparty_commands.py': '73f25eccb83e6cae327283fef8e11f2f9c36ac6e005a7a373361b74bdeece05f', 'tests/test_counterparty_commands.py': '11dcd10fdfdb420a59775b54882150b6645b1f1f9326ab9b3e48482c3241ea5e', 'tests/test_reference_identity_api.py': 'f3ba7173f4fb885fff9c469989518ee2beca0bee4c2e009fecb8b0ef1248827b', 'tests/partner_test_safety.py': '43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1', 'tests/conftest.py': '32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b', 'tests/helpers.py': 'edaf0741b6c562dfa46d04b79789abf34ff2cb560fa13f42f184b970903d5a31', 'tests/__init__.py': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601'}
 SELECTION = [
     "tests/test_contract_import_create.py",
-    "tests/test_corporate_counterparty_commands.py",
-    "tests/test_counterparty_commands.py::test_import_replay_keeps_manual_fields_and_source",
-    "tests/test_counterparty_commands.py::test_import_accumulates_roles_and_caller_can_roll_back",
-    "tests/test_counterparty_commands.py::test_ambiguous_import_rolls_back_without_choosing_a_party",
-    "tests/test_counterparty_commands.py::test_l2_known_inn_company_scope_and_incomplete_identity",
-    "tests/test_reference_identity_api.py::test_registry_and_l2_reuse_real_orm_uuid",
-    "tests/test_reference_identity_api.py::test_legacy_reestr_same_run_and_repeat_reuse_contract",
-    "tests/test_reference_identity_api.py::test_corporate_missing_organization_is_explicit",
-    "tests/test_reference_identity_api.py::test_corporate_reimport_orm_uuid_and_pinned_source_identity",
 ]
 
 

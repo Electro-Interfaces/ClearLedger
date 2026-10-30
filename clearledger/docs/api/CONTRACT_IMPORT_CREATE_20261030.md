@@ -2,9 +2,12 @@
 
 Дата: 30.10.2026. База: `1c9ea350fff4502c5e0abdcb4b8b0eef65cc0e38`.
 Ветка: `agent/api-contract-import-create-20261030`.
-Статус подготовки: **реализовано, SQL/pytest/collection НЕ ЗАПУСКАЛИСЬ**.
-Actual PostgreSQL-проверка выполняется только ROOT после технического разрешения
-на конкретный frozen состав и синтетическую базу, описанные ниже.
+Статус: runtime реализован; первый actual run ROOT на `d80b14cc` дал
+**68 PASS / 1 FAIL**. Исправлен только snapshot oracle нового теста;
+повтор **35 новых случаев ещё НЕ ЗАПУСКАЛСЯ**. Worker ни на одной стадии
+не импортировал приложение/драйвер и не выполнял SQL/pytest/collection.
+Actual PostgreSQL-проверка остаётся только у ROOT на frozen составе и точной
+синтетической базе, описанных ниже.
 
 ## Реализованный срез
 
@@ -70,8 +73,8 @@ SHA256 файлов относительно `clearledger/server/`:
 | `app/services/reestr_normalize.py` | `6020b20cfd13f1c8a21d5f0d3f60dc11a490daa0802d28595e93f84ff6ea12ed` |
 | `app/services/reestr_rushydro.py` | `bcd5f19389047d57ed5dc8ecf7d4b066879443f180e8bb1f24895e42ae8883cf` |
 | `app/services/charge_sessions_normalize.py` | `51b4ba21ecb956bd13084dbd5f536d49ded18c2ba54cd2def68a3519a40dcac8` |
-| `tests/test_contract_import_create.py` | `93690b8bca0a3870a53bd9262140602fdef868d684e1bfb7dad19ed68d9aa20c` |
-| `tests/contract_import_create_approved.py` | `6e1d998a36e5aa9653ffdfe1ceddb809fdd971ab5d9a71a81ef4429a9c0d46b7` |
+| `tests/test_contract_import_create.py` | `cdc8feee5789e28cbe416e7094ec211e0477401558cfb96d865a1da901a2788f` |
+| `tests/contract_import_create_approved.py` | `49e20180b9b78090f0b478feb021e956c84c5eeddd8db48a8dbde750100b614b` |
 
 Runner закрепляет весь app (490 файлов) digest
 `beb45c71788be8c6d9b016fed04abab60079a7598b8a634c0c464886abb60184`
@@ -84,7 +87,8 @@ Digest: SHA256 compact JSON списка `[relative-to-server path, sha256]`,
 Также закреплены неизменные conftest, common safety guard, helpers,
 test package initializer, pytest.ini, requirements и три выбранных старых
 тестовых модуля. Полный bounded proposal с этими хешами и source-only счётчиками:
-`.artifacts/contract-create/proposal.json`. Сырые данные, credentials и среда
+`.artifacts/contract-create/proposal-oracle-v2.json`; первоначальное предложение
+сохранено отдельно как `proposal.json`. Сырые данные, credentials и среда
 процесса в публичный отчёт не включаются.
 
 ## Подготовленные meaningful actual checks
@@ -134,16 +138,47 @@ legacy ввода учитывает именно этот parser. Само вы
 Corporate UPDATE phone-link может менять updated_at клиента; сравнение сохраняет
 все его бизнес-поля, исключая только этот ожидаемо обновляемый timestamp.
 
-## Единственный предлагаемый bounded run
+## Первый actual run ROOT и исправление oracle
 
-Runner выбирает **69 ожидаемых случаев**, без worker execution:
+На неизменном `d80b14cc1242df60a992bebd43c16fa52adc2251` ROOT выполнил
+69 случаев: **68 passed / 1 failed**, pytest 69.62 с, процесс EXIT 1;
+outer duration 82.5631846329 с. Единственный отказ — foreign-company/legacy
+при сравнении DataEntry snapshot. Contract, Counterparty и relations в этом
+сценарии совпадали; новый snapshot ошибочно обходил SQL table column keys,
+поэтому для SQL-колонки `metadata` читал `Base.metadata`, а не `DataEntry.meta`.
+Deepcopy объекта MetaData давал ложное различие и не проверял фактический JSON.
+Это дефект тестового oracle, не обнаруженный дефект runtime.
+
+По точному указанию ROOT oracle теперь использует `__mapper__.column_attrs`
+и mapped attribute keys. DataEntry.meta сравнивается как настоящий JSON,
+вложенные значения проверяются как scalar/list/dict; MetaData/ORM-объекты
+не допускаются. Все mapped поля остальных моделей остаются в сравнении;
+единственное прежнее исключение — CorporateClient.updated_at. Source AST-review
+всех семи snapshot-моделей нашёл ровно один alias: DataEntry.meta → metadata.
+Helper и все три runtime producer побайтово остались прежними.
+
+Первоначальные hashes теста/runner были соответственно
+`93690b8bca0a3870a53bd9262140602fdef868d684e1bfb7dad19ed68d9aa20c` и
+`6e1d998a36e5aa9653ffdfe1ceddb809fdd971ab5d9a71a81ef4429a9c0d46b7`;
+новые frozen hashes приведены выше. Старое evidence ROOT сохраняет приватно:
+`.artifacts/root-contract-create-review-20261030/test.log`, JUnit и
+`test-process.json`. ROOT подтвердил свежие relations=0/connections=0
+для `api_contract_create_test_20261030`, обычный DROP DATABASE и прежний
+max_locks_per_transaction=64. Worker этих подключений не выполнял.
+
+## Предлагаемый повтор только affected 35
+
+Первоначальный runner в d80b14cc выбирал **69 случаев**:
 
 - новый модуль: 35;
 - весь неизменённый `test_corporate_counterparty_commands.py`: 23;
 - четыре выбранных producer-теста `test_counterparty_commands.py`: 7 с параметрами;
 - четыре selected registry/L2/corporate-теста `test_reference_identity_api.py`: 4.
 
-Точные selectors перечислены в frozen `SELECTION` runner. Полный прежний 117
+После исправления oracle ROOT запросил повтор только всех **35 новых случаев**.
+Текущий frozen `SELECTION` содержит единственный новый test module; 34 unchanged
+existing cases уже прошли в первом actual run и повторно не включены.
+Полный прежний 117
 набор native PATCH/1С не включён: его paths не менялись. Новые тесты helper
 не предлагаются как baseline failure на базе, где helper ещё отсутствует.
 
@@ -185,9 +220,9 @@ DROP DATABASE и освобождение SQL-окна выполняет ROOT �
 
 ## Что ещё требуется
 
-Нужны техническая приёмка предложения ROOT и его actual SQL evidence на точном
-составе. До получения этих результатов статус SQL остаётся NOT RUN; worker не
-завершает Dispatch как будто runtime уже принят. При новом finding или изменении
+Нужны actual evidence ROOT для исправленного oracle и окончательная приёмка
+этого среза. Статус повторного 35-case run остаётся NOT RUN; worker не завершает
+Dispatch как будто runtime уже принят. При новом finding или изменении
 frozen source требуется отдельное решение ROOT; baseline bugs в этот diff не правятся.
 
 Остальные Contract writer families, native/1С/store commands, delete/scope/link
