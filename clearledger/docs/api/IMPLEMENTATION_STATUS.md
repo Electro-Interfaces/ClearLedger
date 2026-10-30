@@ -415,10 +415,13 @@ M06: root независимо воспроизвёл карту записей 
 остаются unknown, source inventory не подтверждает runtime/ACL. Source59477daa
 перенесён в1c9ea350. Выбран следующий срез: общая CREATE-команда legacy reestr,
 L2Cache иcorporate без изменения matcher, raw, scope, locks и transaction owners.
-Реализация подготовлена отдельно. Первый ROOT прогон69SQL cases дал68PASS/1FAIL
-из-за snapshot oracle: колонка DataEntry.metadata прочитана как Base.metadata
-вместо mapped DataEntry.meta. Синтетическая БД штатно удалена, журнал сохранён;
-исправляется только test oracle, runtime приёмка пока не завершена.
+Общая CREATE-команда трёх импортёров принята:7226bbfa/509346b5. Root независимо
+подтвердил полный AST трёх прежних модулей за пределами извлечения и равенство
+адаптированных полей. Первый прогон69cases:68PASS/1FAIL из-за snapshot oracle
+(DataEntry.metadata/meta), затем исправленные35новых cases PASS18,27с
+(внешний процесс29,533с);34старых выбранных regressions прошли в первой попытке.
+Это два отдельных прогона. После каждого синтетическая БД штатно удалена
+при fresh relations0/connections0; runtime/test/schema pins совпали после переноса.
 [Карта записей](CONTRACT_WRITER_INVENTORY_20261030.md).
 
 Vite закреплён ровно на7.3.7: package.json меняет только dev pin, lock — только
@@ -459,3 +462,12 @@ Python3.13.18 sandbox прошли tooling9,175с, изготовление whee
 не активирован и не считается принятым. Журнал неудачи сохранён, собственные
 контейнер и image удалены; отдельная проверка установки готовится после
 исправления live scratch monitor. [Подготовка](BACKEND_DEPENDENCY_ARTIFACTS_20261030.md).
+
+
+M06 CREATE: общая команда публикует Contract в индексе только после успешного
+flush; callers сохраняют matcher, company/organization, raw, scope, связи,
+статистику, locks и владение транзакцией. Фактические источники реестра, L2
+и corporate проверены на replay, ручных NULL, неоднозначности, чужой компании,
+ошибке второго договора и конкурирующих транзакциях. Остальные семейства
+writer, внешний write API и полное закрытие M06 остаются открыты.
+[Отчёт](CONTRACT_IMPORT_CREATE_20261030.md).
