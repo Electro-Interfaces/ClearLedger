@@ -38,11 +38,23 @@ R3 принят: Contract.typeCode и validUntil обязательны в от�
 84 прежних PASS с152subtests; officialSDK15/freshness/6generatorchecks и4consumers
 PASS. Подробности: CONTRACT_CLASSIFICATION_READ_20261031.md.
 
-Следующие потоки: M14-P1 webhook network boundary; M04-P5 владельцы task helpers;
-M00/M17 сохранение трёх frontend consumers. Полного CI совместного HEAD и
-рабочего выпуска нет. Read-only frontend snapshot409files/15.7MB подтвердил
-public1.2.858, но source maps/revision labels отсутствуют: полное source
-correspondence не доказано.
+P4 calendar selector и P5 task helpers приняты и интегрированы: 97/97 и69/69
+PASS соответственно. Native adapters сохраняют прежние hooks/defaults/ошибки;
+management использует прямых владельцев. В source snapshot остаются15 service→router
+bindings, часть из них осознанно сохранена; весь M04 не закрыт.
+
+Три frontend consumers паспорта СМР сохранены с общим transport и защитой от
+устаревших draft/catalog/save. TypeScript всего фронта и typed consumer PASS;
+браузерное подтверждение15/15 PASS (14сценариев+parent),45.36с. Проверены desktop1440,
+mobile390, light/dark,6PNG, отсутствие переполнения/ошибок консоли/неожиданных запросов.
+Это synthetic component integration с настоящими PassportTab/apiClient, не полный
+живой app workflow. Прежние ошибки оснастки и ROOT watcher сохранены отдельно;
+TypeScript не повторялся. [Отчёт по фронту](http://10.10.70.56:8000/api-platform-20261029/live-frontend-preservation.html).
+
+Следующие потоки: M14-P1 webhook network boundary; M04-P6 доступ/связи работы;
+M01/M09 реестр Core/Support/Auditor. Полного CI совместного HEAD и рабочего
+выпуска нет. Read-only frontend snapshot409files/15.7MB подтвердил public1.2.858,
+но source maps/revision labels отсутствуют: полное source correspondence не доказано.
 
 ## Предыдущая принятая волна: внешние приложения и контейнер
 
