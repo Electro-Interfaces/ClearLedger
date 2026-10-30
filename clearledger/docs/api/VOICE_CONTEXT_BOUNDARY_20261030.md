@@ -161,3 +161,20 @@ fence блокирует её продолжение/retry после reset, а 
 Это synthetic transport proof, не production exploit/leak claim и не server
 acceptance. Реальные voice/Core/API, SQL, `.env`, SSH, браузер и CI не использовались;
 выкатка не выполнялась. Узловой протокол и backend ACL вне этого изменения.
+
+
+## Независимая приёмка координатора
+
+Source `f4a5ac622f9abe6fced60f237ec21cbc816d573b` принят в интеграцию
+коммитом `386e6551`. Координатор повторил все шесть Node-наборов одним запуском:
+**415 PASS**, 0 FAIL/SKIP/cancelled, 14,489 с по node:test (14,601 с runner),
+child EXIT0/reaped. Это 18 новых reported tests с parent и 397 прежних,
+которые уже включают intake; повторного прибавления этих шести тестов нет.
+
+App и node TypeScript с собственными incremental caches и targeted ESLint
+прошли на том же составе. Два SHA финального source/test совпали с отчётом;
+TypeScript AST сравнение ограничило изменения согласованными функциями и двумя
+новыми state variables. Семь прежних source/test modules побайтно совпали с f422.
+Private evidence: `.artifacts/root-voice-context-transport.log` и
+`.artifacts/root-voice-source-boundaries.mjs`. Границы reset-only, server acceptance
+и уже отправленных мутаций остаются в силе.

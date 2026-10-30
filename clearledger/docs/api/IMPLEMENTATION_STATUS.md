@@ -225,3 +225,12 @@ accept остаются разными действиями. Root: 392 transport
 9 pure tests и полный scan, сверил все source blobs и побайтовый результат.
 Динамические вызовы и внешние партнёры не считаются установленным runtime
 ownership. [Отчёт](API_CONSUMER_INVENTORY_20261030.md).
+
+
+Voice-клиент сохраняет исходный контекст операции через выдачу токена, HTTP,
+разовый retry и чтение тела; явный reset прекращает старый SSE. На исходном
+сервисе воспроизведены две гонки смены пользователя той же компании. Отдельные
+остаточные await-hop случаи первого candidate устранены после review. Root:
+415 Node PASS, app/node TypeScript и targeted ESLint PASS. Это synthetic
+reset-only proof с сохранением отдельного aud=voice протокола.
+[Отчёт](VOICE_CONTEXT_BOUNDARY_20261030.md).
