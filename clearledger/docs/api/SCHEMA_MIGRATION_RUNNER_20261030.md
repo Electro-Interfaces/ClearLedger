@@ -283,3 +283,20 @@ Foundation не включён в startup, не меняет Compose/managed mod
 единственным владельцем schema. Отдельные ownership cutover/full bootstrap/real
 old binary compatibility, dump/restore, production activation, CI и вся M00–M19
 остаются открыты; M16 не объявляется целиком завершённой.
+
+
+## Интеграционная приёмка координатора
+
+Source commit `f6cc347fc4305e4de5dc69f9ef37dfbf4f0ddc8c` перенесён в
+integration как `0f847b6f9bd94e1faff1476913ace2219749ced4`. Root подтвердил
+точный состав: 16 новых package files и один отчёт, без правок существующих
+app/config/models/tests. Все 16 integration files совпадают по SHA256 с
+пакетом, прошедшим единственный независимый SQL-прогон. Повторный SQL после
+cherry-pick не выполнялся; тесты не повторялись после PASS.
+
+Root14 pure PASS, root13 actual PostgreSQL PASS/0FAIL/0ERROR/0SKIP и завершённая
+очистка подтверждены приватными `root-schema-runner-source-checkpoint.json`,
+`root-schema-runner-pure.log`, `root-schema-runner-sql-proof.json` в `.artifacts/`.
+Это Foundation, а не включённый managed startup, полная миграция схемы, restore
+или рабочий выпуск. Дальнейший ownership cutover требует отдельного состава
+и проверок реального bootstrap и marker/readiness путей.
