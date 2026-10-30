@@ -202,3 +202,12 @@ readback PASS у владельца continuation claim. Проверка пос�
 независимого baseline-агента; supporting auth/product/identity trace-only.
 Это не полный аудит API/production/OAuth и не разрешение выпуска.
 [Сводка](API_CONTRACTS_SECURITY_REVIEW_20261030.md).
+
+
+Ручные name edits native PATCH, existing-ID POST/upsert и registry теперь
+ставят server-owned provenance, а W10 проверяет manual marker по текущей строке.
+Исходный baseline3actualFAIL+2controlPASS, root441PASS61.82с. Это68новых плюс
+372прежних expectations и1согласованный strengthened golden; initial create
+и W07/W08 не защищены. [Отчёт](location-manual-names-20261030.md).
+Existing-only SourcePatch с независимыми column/metadata numbers готовится
+отдельно; импорты ещё не активированы.

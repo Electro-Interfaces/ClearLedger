@@ -184,3 +184,20 @@ create и полный multi-row/import protocol остаются отдельн
 | Private cleanup.log | `ae9bb72bdfe309eea60f8ac7c24bf1e8eecddb1a26ae7b64a2b789882141badb` |
 | Private source-boundaries.json | `421f432f8f585fdf6cbd2a18a785cf10188be773ae4339bcbb8133b7f44c60f7` |
 | Private runner.py | `475748c7c9c661a1400241de08ec7fc391005888ce5ae81f93af16efd018836c` |
+
+
+## Независимая приёмка координатора
+
+Source `bdcdfab7157045f78eb1a3a640c5fe01b2b6bef7` принят в интеграцию
+коммитом `d43ad8c9`. На этом составе независимо выполнен тот же полный набор:
+**441 PASS за61.82с**,0FAIL/ERROR/SKIP/DESELECTED, child EXIT0/reaped.
+Пять измеренных SHA совпали с финальным source; пять AST-сравнений подтвердили
+ограничение правок согласованными функциями/metadata key и одним strengthened
+golden. Одиннадцать других старых test modules побайтно совпали с8e18fe76.
+
+Root использовал отдельную `api_root_location_manual_names_test` на synthetic
+loopback PG16, exact target guard и все7opt-in flags. После прогона fresh
+public/edge tables0 и own connections0, затем normal DROP без FORCE/terminate;
+fresh dbexists0 и maxlocks64. Private evidence: root-location-manual-names-final.log
+и root-manual-name-boundaries.py в .artifacts. Границы initial create/W07/W08,
+production/полного CI и code rollback остаются в силе.
