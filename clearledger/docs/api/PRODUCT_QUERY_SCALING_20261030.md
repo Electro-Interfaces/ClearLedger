@@ -1,7 +1,8 @@
 # M02/M15: synthetic baseline продуктовых read queries, 30.10.2026
 
-Статус: **первый approved run FAIL на ошибочном ожидании теста; source correction
-готова, повторный SQL GO ещё не получен**. Полный scaling baseline не завершён.
+Статус: **author baseline PASS: 3 cases / 237 HTTP samples**, точный source
+`bdeae257`, test SHA ниже. Первый FAIL сохранён отдельно. Root independent
+repeat ещё не выполнен; это отдельный этап, не часть author PASS.
 Общая модернизация M00–M19 не завершена; PR остаётся draft. Merge/deploy,
 runtime optimization, индексы и EXPLAIN не входят в разрешённый состав.
 
@@ -217,10 +218,115 @@ SQL_SLOT_RELEASED root отдельно проверил `public/edge tables0`, 
 использовал admin/CREATE/DROP. Первый private evidence:
 `/srv/projects/api-modernization-test-env-20261029/private-product-query-scaling-20261030/attempt-1/`
 (`run.log`, `results.xml`, `preflight.json`, `optout.log`).
-После поправки root требуется свежий CREATE и отдельный literal GO на новый SHA;
-SQL/collect/optout повторно не запускались. Full CI и M00–M19 не закрыты.
+Root отдельно выдал retry GO на `bdeae257` / test
+`054f2c99deba32c25459f68688e5f29cfa4b83f8b3ec0bda2635c844620165c2`
+и заново созданную own DB. Guard/состав/наборы/timeouts/ceiling не менялись.
+Opt-out повторно не запускался по решению root: guard после проверки не менялся.
 
-После approved run сюда добавляются фактический SHA, PASS/FAIL/SKIP, размеры,
-sample aggregates, ограничения и private evidence paths. Только после реальных
-данных формулируется минимальное evidence-backed optimization proposal для
-отдельного root решения; пока оснований менять runtime/индексы нет.
+## Фактический approved baseline
+
+**EXIT 0/reaped, 3 PASS / 0 FAIL / 0 ERROR / 0 SKIP, 227,392 s** по JUnit.
+На каждом масштабе записано ровно 79 samples, всего 237: 90 listing,
+30 cursor, 30 detail, 81 negative-detail, 6 service-denied. HTTP statuses:
+150×200, 81×404, 6×403. Все запланированные масштабы и page sizes выполнены.
+Private JSONL и JUnit совпадают по числу samples; после PASS SQL/тесты не повторялись.
+
+Точные visible totals и фактическое число statements для listing. Число включает
+verifier, живые permissions, projection и transaction-local guards, не только
+Query. Каждый указанный SQL count наблюдался на всех трёх page sizes/scales;
+таблица фиксирует этот run, не новое A/B-доказательство старого batch loader.
+
+| Профиль | Ресурс | N100 | N1000 | N5000 | SQL/request |
+|---|---|---:|---:|---:|---:|
+| user-all | objects | 100 | 1000 | 5000 | 26 |
+| user-all | contracts | 100 | 1000 | 5000 | 27 |
+| user-all | documents | 40 | 400 | 2000 | 31 |
+| user-intersection | objects | 28 | 285 | 1428 | 30 |
+| user-intersection | contracts | 17 | 167 | 833 | 31 |
+| user-intersection | documents | 6 | 66 | 333 | 35 |
+| service-all | objects | 100 | 1000 | 5000 | 19 |
+| service-all | contracts | 100 | 1000 | 5000 | 20 |
+| service-intersection | objects | 85 | 857 | 4285 | 22 |
+| service-intersection | contracts | 75 | 750 | 3750 | 23 |
+
+User-all, pageSize200: фактические возвращённые/гидратированные карточки,
+wire bytes, single traced request walltime и Python peak. Time не SQL latency.
+
+| N | Ресурс | Response rows | Hydrated cards | Response bytes | Wall ms | Python peak KiB |
+|---:|---|---:|---:|---:|---:|---:|
+| 100 | objects | 100 | 100 | 19341 | 193,45 | 597,1 |
+| 100 | contracts | 100 | 100 | 19441 | 191,67 | 682,3 |
+| 100 | documents | 40 | 40 | 10120 | 219,22 | 662,8 |
+| 1000 | objects | 200 | 201 | 38902 | 255,31 | 1081,7 |
+| 1000 | contracts | 200 | 201 | 39209 | 217,78 | 970,9 |
+| 1000 | documents | 200 | 201 | 50570 | 736,36 | 1322,9 |
+| 5000 | objects | 200 | 201 | 38902 | 225,59 | 1081,2 |
+| 5000 | contracts | 200 | 201 | 38971 | 262,16 | 969,4 |
+| 5000 | documents | 200 | 201 | 50843 | 5375,24 | 1335,2 |
+
+Во всех 90 lists hydration равна `min(visible_total,pageSize+1)`; ни одна
+отрицательная detail-проверка не гидратировала карточку скрытого ресурса.
+Tenant/resource/member/organization и document allow/deny фильтруют count и
+limited SELECT; link redaction и cursor tie-break прошли. Обязательная scalar
+validation unused document SET наблюдалась по одному statement на каждом
+service-intersection 403; service-all 403 — без неё. В обоих случаях нет
+document domain COUNT/page/entity/hydration/выдачи карточек.
+
+У 936 cursor observations rowcount неизвестен (null), в том числе у control
+statements; unknown не подменялся нулём. Hydrated/response cardinalities выше
+измерены отдельно. Во всех samples SQL-count диапазон 15–35, в lists 19–35.
+
+| Scale | DB bytes после dataset | DB bytes после queries |
+|---:|---:|---:|
+| 100 | 28318743 | 28458007 |
+| 1000 | 29981719 | 30663183 |
+| 5000 | 38937103 | 42359831 |
+
+Максимум own DB 42 359 831 bytes (40,40 MiB), ниже 256 MiB. Это размер текущей
+собственной DB до teardown, не shared PGDATA/WAL. Shared-conftest teardown
+завершён без ошибки; EXIT0/reap закрыл connections процесса. После нового
+SQL_SLOT_RELEASED root отдельно подтвердил fresh `public/edge tables0/conns0`,
+normal DROP и `DBexists0/otherclients0/maxlocks64`. Admin/CREATE/DROP worker
+не использовал. Старый grant завершён, дальнейшего SQL разрешения нет.
+
+Текущие private artifacts в
+`/srv/projects/api-modernization-test-env-20261029/private-product-query-scaling-20261030/`:
+`preflight.json`, `run.log`, `results.xml`, `samples-scale-100.jsonl`,
+`samples-scale-1000.jsonl`, `samples-scale-5000.jsonl`, `summary.json`.
+`attempt-1/` содержит исходный FAIL и opt-out. Raw artifacts в Git не входят.
+Source test после measured run не менялся; final report commit содержит только
+сводку. Full CI, M00–M19, production QPS/SLO и root independent repeat не закрыты.
+
+## Адресное предложение root, без runtime/index правок
+
+1. **Document COUNT/ACL.** При N5000 user-all documents page1/50/200 заняли
+   5236,79/5263,51/5375,24 ms, сохранив 31 statement и bounded hydration.
+   При N1000 — 627,42/730,74/736,36 ms. Source `Query.listing` выполняет exact
+   COUNT до limited SELECT; `_readable_doc_clause` содержит correlated EXISTS
+   для allow/deny/назначений. Это кандидат для диагностики, не доказанный
+   PostgreSQL bottleneck или отсутствующий индекс. Минимальный следующий
+   experiment по отдельному root grant: новая own synthetic DB, тот же N5000
+   user-all document dataset; реальные ORM count/page statements с неизменными
+   predicates, по одному `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` для count и
+   pageSize200. Сохранить plan rows/loops/buffers отдельно от HTTP latency,
+   предварительно/после сверить golden totals/IDs/deny/link redaction/cursor.
+   Только после плана обсуждать точечный способ ускорить ACL-доступ/count.
+2. **Grant-set validation/binding.** На N5000 intersection page200 walltime
+   1902,83–3268,22 ms и Python peak примерно 5,6–6,9 MiB; user/service ALL
+   objects/contracts — 198,56–262,16 ms с peak около 1 MiB. Source verifier
+   проверяет live SET IDs всех профилей, а `Query.binding` сортирует/кодирует
+   scope IDs. Эти операции и ACL остаются обязательными. Предложение отдельной
+   стадии: измерить их CPU/allocation contribution с тем же golden output,
+   без caching/reuse authority между запросами и без ослабления unused-profile
+   validation. Текущие данные не разделяют их стоимость с остальным request.
+3. **Instrumentation overhead.** SQL hooks вызывают `get_final_froms`, считают
+   hydration; tracemalloc активен на каждом запросе. Single run на общей VM
+   с параллельной root Node/TypeScript работой не позволяет вычесть этот overhead.
+   Контроль без tracing требует нового согласованного bounded experiment и
+   не заменяет текущую SQL/ACL evidence. Ни число statements, ни walltime сами
+   по себе не доказывают конкретный plan/index/CPU cause.
+
+Никаких EXPLAIN, индексов, runtime changes или новых benchmark repeats в этой
+задаче после PASS не выполнялось. Следующее root решение должно выбрать одну
+адресную диагностику; оптимизация потребует отдельного разрешения и golden
+equivalence с текущим baseline, включая отрицательные controls.
