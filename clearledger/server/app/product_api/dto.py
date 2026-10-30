@@ -58,6 +58,28 @@ class EmptyQuery(DTO):
     pass
 
 
+class ContractObjectsQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pageSize: int = Field(default=50, ge=1, le=200)
+    cursor: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @property
+    def page_size(self):
+        return self.pageSize
+
+
+class ContractObject(DTO):
+    object_id: ObjectId
+
+
+class ContractObjects(DTO):
+    contract_id: Id
+    scope_type: str
+    items: list[ContractObject]
+    total: int = Field(ge=0)
+    next_cursor: str | None
+
+
 class MonitoringQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
     days: int = Field(default=90, ge=1, le=366)

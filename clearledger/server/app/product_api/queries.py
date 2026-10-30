@@ -167,6 +167,33 @@ class Query:
             raise HTTPException(404, "Not found")
         return row
 
+    async def contract_objects(self, identifier, params):
+        """Visible explicit current associations; company scope never implies ALL."""
+        parent = await self.detail("contracts", identifier)
+        binding = self.binding(f"contract-objects:{parent.id}", params)
+        cursor = self.decode_cursor(params.cursor, binding) if params.cursor else None
+        result = {"contract_id": str(parent.id), "scope_type": parent.scope_type,
+                  "items": [], "total": 0, "next_cursor": None}
+        if parent.scope_type != "locations":
+            return result
+        model = ServiceLocation
+        conditions = [*await self.conditions("objects"), select(ContractLocation.id).where(
+            ContractLocation.company_id == self.facts.company_id,
+            ContractLocation.contract_id == parent.id,
+            ContractLocation.location_id == model.id,
+        ).correlate(model).exists()]
+        result["total"] = await self.db.scalar(select(func.count()).select_from(model).where(*conditions))
+        if cursor:
+            at, last_id = cursor
+            conditions.append(or_(model.created_at > at, and_(model.created_at == at, model.id > last_id)))
+        rows = list((await self.db.execute(select(model.id, model.created_at).where(*conditions).order_by(
+            model.created_at, model.id).limit(params.page_size + 1))).all())
+        has_more = len(rows) > params.page_size
+        rows = rows[:params.page_size]
+        result["items"] = [{"object_id": row.id} for row in rows]
+        result["next_cursor"] = self.encode_cursor(rows[-1], binding) if has_more else None
+        return result
+
     async def visible_links(self, resource, ids):
         ids = {value for value in ids if value is not None}
         if (not ids or READ_SCOPES[resource] not in self.context.scopes

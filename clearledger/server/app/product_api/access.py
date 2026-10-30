@@ -100,7 +100,9 @@ async def resolve(request: Request) -> AccessContext:
             raise HTTPException(403, "Required scope is not granted")
         if kind not in policy.accepted_kinds:
             raise HTTPException(403, "Principal kind is not accepted")
-        if not grants[policy.resource_type].contains([]):
+        required_resources = {policy.resource_type} | {
+            resource for resource in RESOURCES if READ_SCOPES[resource] in policy.required_scopes}
+        if any(not grants[resource].contains([]) for resource in required_resources):
             raise HTTPException(403, "Resource access is not granted")
         user = None
         objects = ResourceScope.all()

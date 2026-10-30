@@ -176,6 +176,18 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
     async def contract_detail(contractId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("contracts", [await query.detail("contracts", contractId)]))[0]
 
+    @operation("/contracts/{contractId}/objects", "contracts", "listContractObjects", dto.ContractObjects,
+               extra_scopes={access.READ_SCOPES["objects"]}, summary="Read explicit contract object associations",
+               description="Only current explicit links to independently authorized service points. Requires both "
+                   "contracts and objects resource grants. Company/unassigned scope returns no explicit links; "
+                   "no implied legal coverage or historical interpretation. Live cursor pagination.")
+    async def contract_objects(contractId: dto.Id, params: Annotated[dto.ContractObjectsQuery, QueryParams()],
+                               request: Request, query: Query = Depends(query_dependency)):
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(422, "Request body is not accepted")
+        return await query.contract_objects(contractId, params)
+
     @operation("/documents", "documents", "listDocuments", dto.Page[dto.Document])
     async def documents(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("documents", params)

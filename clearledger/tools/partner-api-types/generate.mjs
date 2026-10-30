@@ -14,7 +14,7 @@ import openapiTS, { astToString, COMMENT_HEADER } from "openapi-typescript";
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 const version = "7.10.1";
 const operationIds = new Set(["listObjects", "getObject", "getObjectMonitoring", "listEquipment", "getEquipment",
-  "listCounterparties", "getCounterparty", "listContracts", "getContract", "listDocuments", "getDocument", "downloadDocumentVersion"]);
+  "listCounterparties", "getCounterparty", "listContracts", "getContract", "listContractObjects", "listDocuments", "getDocument", "downloadDocumentVersion"]);
 
 // Schema generation is local. A future accidental remote resolver fails closed.
 const noNetwork = () => { throw new Error("Network is forbidden during offline wire type generation"); };
@@ -38,7 +38,7 @@ export function validateSchema(schema) {
       }
     }
   }
-  if (operations.length !== 12 || new Set(operations).size !== 12 || operations.some(id => !operationIds.has(id))) {
+  if (operations.length !== 13 || new Set(operations).size !== 13 || operations.some(id => !operationIds.has(id))) {
     throw new Error("Unexpected curated product operation manifest");
   }
   function refs(value) {
@@ -104,7 +104,7 @@ export async function main(args = process.argv.slice(2)) {
         await writeFile(staging, bytes);
         await rename(staging, output);
       } finally { await rm(staging, { force: true }); }
-      process.stdout.write("Generated partner wire types from 12 curated candidate operations\n");
+      process.stdout.write("Generated partner wire types from 13 curated candidate operations\n");
     }
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
