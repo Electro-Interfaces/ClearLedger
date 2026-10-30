@@ -240,3 +240,20 @@ existing typed/legacy history и сохранённых metadata siblings сов
 применялся только к локальному ASGI приложению в synthetic PG cases. Source
 review и перечисленные SQL regression/concurrency cases не заменяют отдельную
 приёмку будущей producer activation.
+
+
+## Независимая приёмка координатора
+
+Source b70c3b3c82f6f11e922948f5542057430132f5e9 принят в интеграцию коммитом
+64716e5e. На этом составе координатор повторил полный набор: **564 PASS за
+72,93 с**, 0 FAIL/ERROR/SKIP/DESELECTED, child EXIT0/reaped.
+Два финальных SHA совпали с отчётом; AST-сравнение ограничило изменения двумя
+прежними guards, двумя новыми функциями и imports math/Decimal. Все 13 прежних
+test modules побайтно совпали с базой bdcdfab7.
+
+Root использовал отдельную api_root_source_number_patch_test на synthetic PG16,
+exact target/common guard до pytest и все восемь opt-in flags. Fresh public/edge
+tables0 и connections0 подтвердились перед normal DROP; затем fresh dbexists0
+и maxlocks64. Private evidence: .artifacts/root-source-number-patch-final.log
+и root-source-number-boundaries.py. Producer activation, membership вызывающего
+кода, полная import concurrency и production acceptance остаются открытыми.

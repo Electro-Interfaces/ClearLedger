@@ -234,3 +234,13 @@ Voice-клиент сохраняет исходный контекст опер
 415 Node PASS, app/node TypeScript и targeted ESLint PASS. Это synthetic
 reset-only proof с сохранением отдельного aud=voice протокола.
 [Отчёт](VOICE_CONTEXT_BOUNDARY_20261030.md).
+
+
+
+Принята внутренняя команда независимого изменения station_number и metadata.number
+существующей точки. Она требует заранее полученный набор блокировок и отсутствие
+pending ORM changes; uses current admission/reload и общие freeze/history/no-reuse
+guards. Root564PASS72.93с, 13 прежних модулей тестов неизменны. JSONB numeric
+round-trip проверен, нормализация ограничена новым source validator. Импорты
+ещё не подключены; следующий пакет исследует ambiguous identity.
+[Отчёт](location-source-number-patch-20261030.md).
