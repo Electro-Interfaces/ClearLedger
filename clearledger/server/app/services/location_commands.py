@@ -34,7 +34,7 @@ class Mutation:
 # Preserve import-owned snapshots and manually configured bindings on form edits.
 _SERVICE_META_KEYS = {
     "ext_id", "stationId", "ocppId", "ocppUrl", "source", "nameSource",
-    "nameHistory", "numberHistory", "identifierHistory", "zoi1", "buNumber", "connectorsSource",
+    "nameHistory", "numberHistory", "identifierHistory", "fieldProvenance", "zoi1", "buNumber", "connectorsSource",
 }
 _EDITABLE_LINK_KEYS = {"hubexAssetId", "hubexName", "hubexNote", "linkStatus",
                        "zoi1", "buNumber", "ocppUrl"}
@@ -342,6 +342,8 @@ def _prepare(loc, data):
             raise LocationConflict(422, "metadata должен быть объектом или null")
         if loc is None and incoming is not None and "identifierHistory" in incoming:
             raise LocationConflict(422, "История идентификаторов заполняется сервером")
+        if loc is None and incoming is not None and "fieldProvenance" in incoming:
+            raise LocationConflict(422, "Происхождение полей заполняется сервером")
         if isinstance((incoming or {}).get("number"), (dict, list, bool)):
             raise LocationConflict(422, "Номер точки должен быть скалярным значением")
         changes["extra_metadata"] = merge_metadata(loc.extra_metadata, incoming) if loc else incoming
@@ -399,7 +401,47 @@ def _with_identifier_history(loc, changes, *, actor_id=None, source=None):
     return {**changes, "extra_metadata": metadata}
 
 
-async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None):
+def _with_manual_name_provenance(loc, changes, *, name_intent=None, actor_id=None, source=None):
+    """Record an explicit admitted wrapper intent, never infer it from source/text.
+
+    Only existing points and actual name changes participate. Unknown stored
+    provenance stays opaque: a new manual edit cannot silently repair it.
+    """
+    if name_intent not in (None, "manual"):
+        raise LocationConflict(422, "Недопустимое намерение изменения названия")
+    if name_intent is None or "name" not in changes or changes["name"] == loc.name:
+        return changes
+    if actor_id is None or not isinstance(source, str) or not source:
+        raise LocationConflict(422, "Для ручного названия требуется автор и источник")
+    current_md = loc.extra_metadata or {}
+    provenance = current_md.get("fieldProvenance", {})
+    detail = "Происхождение названия повреждено или неизвестно: требуется сверка"
+    if not isinstance(provenance, dict):
+        raise LocationConflict(409, detail)
+    if "name" in provenance:
+        old = provenance["name"]
+        if (not isinstance(old, dict) or old.get("authority") not in ("manual", "cpo_registry", "sessions")
+                or "actor" not in old or not (old["actor"] is None or isinstance(old["actor"], str) and old["actor"].strip())
+                or old["authority"] == "manual" and old["actor"] is None
+                or not isinstance(old.get("source"), str) or not old["source"].strip()
+                or not isinstance(old.get("recordedAt"), str)):
+            raise LocationConflict(409, detail)
+        try:
+            recorded = datetime.fromisoformat(old["recordedAt"])
+        except ValueError as exc:
+            raise LocationConflict(409, detail) from exc
+        if recorded.utcoffset() is None:
+            raise LocationConflict(409, detail)
+    metadata = deepcopy(changes.get("extra_metadata", loc.extra_metadata) or {})
+    provenance = deepcopy(provenance)
+    provenance["name"] = {**provenance.get("name", {}), "authority": "manual",
+                          "actor": str(actor_id), "source": source,
+                          "recordedAt": datetime.now(timezone.utc).isoformat()}
+    metadata["fieldProvenance"] = provenance
+    return {**changes, "extra_metadata": metadata}
+
+
+async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None, name_intent=None):
     code_changed = "code" in changes and changes["code"] != loc.code
     number_changed = "station_number" in changes and _number(changes["station_number"]) != _number(loc.station_number)
     # Include the snapshot number as well as its materialized column, including
@@ -414,6 +456,8 @@ async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None):
         await _assert_numbers_free(db, company_id,
             [changes["code"] if code_changed else None,
              _number(changes.get("station_number")) if number_changed else None], except_id=loc.id)
+    changes = _with_manual_name_provenance(loc, changes, name_intent=name_intent,
+                                          actor_id=actor_id, source=source)
     applied = {key: {"from": getattr(loc, key), "to": value} for key, value in changes.items()
                if getattr(loc, key) != value}
     for key, value in changes.items():
@@ -457,7 +501,7 @@ async def create(db, company_id, identifier, data):
     return loc
 
 
-async def upsert(db, company_id, identifier, data, *, actor_id=None, source=None):
+async def upsert(db, company_id, identifier, data, *, actor_id=None, source=None, name_intent=None):
     """An existing ID denotes the same service point, never a tenant transfer."""
     loc = await _locked(db, company_id, identifier)
     if loc is None:
@@ -470,12 +514,14 @@ async def upsert(db, company_id, identifier, data, *, actor_id=None, source=None
             raise LocationConflict(404, "Объект не найден")
         return await create(db, company_id, identifier, data)
     await _assert_visible(db, company_id, loc)
-    return (await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source)).location
+    return (await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source,
+                         name_intent=name_intent)).location
 
 
-async def update(db, company_id, identifier, data, *, actor_id=None, source=None):
+async def update(db, company_id, identifier, data, *, actor_id=None, source=None, name_intent=None):
     loc = await _locked(db, company_id, identifier)
     if loc is None:
         return None
     await _assert_visible(db, company_id, loc)
-    return await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source)
+    return await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source,
+                        name_intent=name_intent)

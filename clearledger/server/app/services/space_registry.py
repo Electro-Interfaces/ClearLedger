@@ -143,7 +143,8 @@ async def update_object(
 ) -> dict[str, Any] | None:
     try:
         mutation = await location_commands.update(db, company_id, object_id, data,
-            actor_id=getattr(actor, "id", None), source="registry.objects")
+            actor_id=getattr(actor, "id", None), source="registry.objects",
+            name_intent="manual" if actor is not None and "name" in data else None)
     except location_commands.LocationConflict as exc:
         raise HTTPException(exc.status, exc.detail) from exc
     if mutation is None:

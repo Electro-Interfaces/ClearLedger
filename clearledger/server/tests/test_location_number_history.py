@@ -317,14 +317,27 @@ async def test_initial_create_does_not_invent_history_and_existing_ids_stay_opaq
 
 
 async def test_preexisting_double_station_number_is_not_reconciled_or_renumbered(world):
+    from datetime import datetime, timedelta, timezone
+
     w = world
     async with w.factory() as session:
         loc = await session.get(ServiceLocation, w.locations[1].id)
         loc.station_number = "number-0"
         await session.commit()
+    started = datetime.now(timezone.utc)
     response = await mutate(w, "native", {"name": "Display name"})
+    finished = datetime.now(timezone.utc)
     assert response.status_code == 200, response.text
     async with w.factory() as session:
         rows = (await session.scalars(select(ServiceLocation).where(ServiceLocation.company_id == w.cid))).all()
     assert {r.id for r in rows if r.station_number == "number-0"} == {r.id for r in w.locations}
-    assert (await persisted(w)).extra_metadata == w.locations[0].extra_metadata
+    metadata = (await persisted(w)).extra_metadata
+    assert {k: v for k, v in metadata.items() if k != "fieldProvenance"} == w.locations[0].extra_metadata
+    provenance = metadata["fieldProvenance"]
+    assert set(provenance) == {"name"}
+    marker = provenance["name"]
+    assert set(marker) == {"authority", "actor", "source", "recordedAt"}
+    assert marker["authority"] == "manual"
+    assert marker["actor"] == str(w.user.id) and marker["source"] == "native.locations"
+    recorded = datetime.fromisoformat(marker["recordedAt"])
+    assert recorded.utcoffset() == timedelta(0) and started <= recorded <= finished
