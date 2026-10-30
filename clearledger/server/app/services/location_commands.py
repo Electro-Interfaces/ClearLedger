@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select, text
@@ -177,7 +179,49 @@ def _prepare(loc, data):
     return changes
 
 
-async def _apply(db, company_id, loc, changes):
+def _with_number_history(loc, changes, *, actor_id=None, source=None):
+    """Record observed outgoing aliases, never infer validity dates or repair legacy JSON.
+
+    Called only after the command acquired its barrier and reloaded the row.
+    Construct a fresh metadata tree: neither the ORM snapshot nor an incoming
+    list may be mutated before all guards have succeeded.
+    """
+    current_md = loc.extra_metadata or {}
+    next_md = changes.get("extra_metadata", loc.extra_metadata) or {}
+    outgoing = []
+    for field, old, new in (
+        ("code", loc.code, changes.get("code", loc.code)),
+        ("station_number", loc.station_number, changes.get("station_number", loc.station_number)),
+        ("metadata.number", current_md.get("number"), next_md.get("number")),
+    ):
+        old, new = _number(old), _number(new)
+        if old and old != new:
+            outgoing.append((field, old))
+    if not outgoing:
+        return changes
+    history = current_md.get("numberHistory")
+    if history is not None and (not isinstance(history, list) or
+                               any(not isinstance(entry, dict) for entry in history)):
+        raise LocationConflict(409, "История номеров повреждена: требуется сверка перед изменением номера")
+    # SQL containment matches JSON strings exactly. Numeric/whitespace legacy
+    # entries must stay untouched, but cannot replace a searchable new alias.
+    seen = {entry["было"] for entry in (history or []) if isinstance(entry.get("было"), str)}
+    additions = []
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    for field, old in outgoing:
+        if old not in seen:
+            additions.append({"было": old, "field": field, "source": source or "unknown",
+                              "actor": str(actor_id) if actor_id is not None else None,
+                              "recordedAt": recorded_at})
+            seen.add(old)
+    if not additions:
+        return changes
+    metadata = deepcopy(next_md)
+    metadata["numberHistory"] = deepcopy(history or []) + additions
+    return {**changes, "extra_metadata": metadata}
+
+
+async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None):
     code_changed = "code" in changes and changes["code"] != loc.code
     number_changed = "station_number" in changes and _number(changes["station_number"]) != _number(loc.station_number)
     # Include the snapshot number as well as its materialized column, including
@@ -188,6 +232,7 @@ async def _apply(db, company_id, loc, changes):
         reasons = await freeze_reasons(db, company_id, loc.id)
         if reasons:
             raise LocationConflict(409, "Номер объекта изменить нельзя: " + ", ".join(reasons))
+        changes = _with_number_history(loc, changes, actor_id=actor_id, source=source)
         await _assert_numbers_free(db, company_id,
             [changes["code"] if code_changed else None,
              _number(changes.get("station_number")) if number_changed else None], except_id=loc.id)
@@ -234,18 +279,18 @@ async def create(db, company_id, identifier, data):
     return loc
 
 
-async def upsert(db, company_id, identifier, data):
+async def upsert(db, company_id, identifier, data, *, actor_id=None, source=None):
     """An existing ID denotes the same service point, never a tenant transfer."""
     loc = await _locked(db, company_id, identifier)
     if loc is None:
         return await create(db, company_id, identifier, data)
     await _assert_visible(db, company_id, loc)
-    return (await _apply(db, company_id, loc, _prepare(loc, data))).location
+    return (await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source)).location
 
 
-async def update(db, company_id, identifier, data):
+async def update(db, company_id, identifier, data, *, actor_id=None, source=None):
     loc = await _locked(db, company_id, identifier)
     if loc is None:
         return None
     await _assert_visible(db, company_id, loc)
-    return await _apply(db, company_id, loc, _prepare(loc, data))
+    return await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source)
