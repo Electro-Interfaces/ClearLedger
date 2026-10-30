@@ -117,9 +117,12 @@ async def locked_visible(db, company_id, identifier):
 
 
 async def code_taken(db, company_id, code, *, except_id=None):
-    rows = await db.execute(select(ServiceLocation.id).where(
-        ServiceLocation.company_id == company_id, ServiceLocation.code == _number(code),
-        ServiceLocation.id != except_id if except_id is not None else True).limit(1))
+    # Internal occupancy is company-wide even when the actor sees one point.
+    # Core columns avoid actor ORM criteria without loading hidden entities.
+    columns = ServiceLocation.__table__.c
+    rows = await db.execute(select(columns.id).where(
+        columns.company_id == company_id, columns.code == _number(code),
+        columns.id != except_id if except_id is not None else True).limit(1))
     return rows.first() is not None
 
 
@@ -127,7 +130,9 @@ async def _assert_numbers_free(db, company_id, values, *, except_id=None):
     values = {v for v in values if v}
     if not values:
         return
-    rows = (await db.execute(select(ServiceLocation).where(ServiceLocation.company_id == company_id))).scalars().all()
+    columns = ServiceLocation.__table__.c
+    rows = (await db.execute(select(columns.id, columns.code, columns.station_number,
+        columns.extra_metadata).where(columns.company_id == company_id))).all()
     for other in rows:
         md = other.extra_metadata or {}
         # A retired alias remains reserved even for its original point. Current
@@ -283,6 +288,13 @@ async def upsert(db, company_id, identifier, data, *, actor_id=None, source=None
     """An existing ID denotes the same service point, never a tenant transfer."""
     loc = await _locked(db, company_id, identifier)
     if loc is None:
+        # A scoped ORM miss may still be an existing point in this company.
+        # Keep hidden-existing 404 distinct from restricted new-create 403,
+        # using only a scalar existence read after the same advisory barrier.
+        columns = ServiceLocation.__table__.c
+        if await db.scalar(select(columns.id).where(
+                columns.company_id == company_id, columns.id == identifier)) is not None:
+            raise LocationConflict(404, "Объект не найден")
         return await create(db, company_id, identifier, data)
     await _assert_visible(db, company_id, loc)
     return (await _apply(db, company_id, loc, _prepare(loc, data), actor_id=actor_id, source=source)).location
