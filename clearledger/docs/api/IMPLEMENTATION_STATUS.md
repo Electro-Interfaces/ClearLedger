@@ -211,3 +211,10 @@ readback PASS у владельца continuation claim. Проверка пос�
 и W07/W08 не защищены. [Отчёт](location-manual-names-20261030.md).
 Existing-only SourcePatch с независимыми column/metadata numbers готовится
 отдельно; импорты ещё не активированы.
+
+
+Загрузка первичных документов использует общий multipart-клиент с сохранением
+credentials include; отдельные fetch/auth/error удалены. Разбор файла и ручной
+accept остаются разными действиями. Root: 392 transport/session/export PASS
+за 4,749 с, app/node TypeScript и targeted ESLint PASS. Реальный CORS/cookie
+обмен не проверялся. [Отчёт](INTAKE_UPLOAD_TRANSPORT_20261030.md).

@@ -103,3 +103,18 @@ worktree. Фильтр нужен только для этого направл�
 Реальные `.env`, API, SQL, SSH, стендовый браузер и данные не использовались;
 проверка браузерного CORS/cookie обмена с сервером и выпуск в стек не выполнялись.
 Общий binary transport и финансовая логика не изменялись.
+
+
+## Независимая приёмка координатора
+
+Source `06e02207c29651682530309bea1a4157f48b3168` принят в общую ветку
+коммитом `2d73edcb`. Координатор повторил новый набор вместе с неизменёнными
+apiBinaryTransport, apiSessionRedirect и coreExportTransport: **392 PASS**,
+0 FAIL/SKIP/cancelled, 4,749 с по node:test (4,874 с runner), child EXIT0/reaped.
+Счётчик включает родительские тесты; новых предметных сценариев пять.
+
+TypeScript app и node прошли отдельно на этом составе с собственными
+incremental caches; targeted ESLint двух сервисов и нового теста также PASS.
+Private log: `.artifacts/root-intake-upload-transport.log`. Это независимый
+повтор synthetic transport checks, без проверки server CORS/cookies, production
+или защиты successful response после смены компании.
