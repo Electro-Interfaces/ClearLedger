@@ -610,3 +610,19 @@ TestClient lifespan → routing.py280 → AttributeError PolicyRouter.startup.
 compatibilityfix готовится через public router.lifespan_context с сохранением
 registry-before-startup, callbacks/state/cleanup; проверка нужна на обоихruntime.
 Runtime77/requirements/Dockerfile пока не переключаются.
+
+
+Lifecycle compatibility принят: sourceb3b456f1/335b0eec/d81654f8 →
+integrationdfa78032/330883aa/e964a649. Фабрика capture-ит bound
+lifespan_context нового PolicyRouter; framework исполняет callbacks. Registry
+проверяется до startup, state и cleanup передаются контекстом. Остальной
+полныйroutingAST и прежниеHTTPexpectations не менялись.
+Первый focusedmatrix выявил ошибки новыхfixtures (old8PASS4FAIL/new12FAIL);
+после их исправления ROOT old12/12PASS иnew12/12PASS по0,64с, forbidden0,
+SQLallowedfalse/appmainfalse,36passedreports наruntime. Ошибки/предупреждения
+сохранены, tests/runtime/gate frozen послеPASS. Полныйsourceoverlay содержит
+только принятыйcandidate376runner, sourcebytes вне его совпали.
+[Совместимость lifecycle](POLICY_LIFESPAN_COMPATIBILITY_20261030.md).
+[История candidate diagnostics](BACKEND_UPGRADE_REGRESSION_PLAN_20261030.md).
+Готовится новый совмещённыйsourceguard для376 и отдельногоfullmain8 наexact77;
+они ещё не выполнены. Это не release/fullapplication acceptance.
