@@ -39,6 +39,12 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger"
     )
 
+    # Opt-in ownership gate only for the already versioned Core budget table.
+    # Legacy standalone public/Core bootstrap remains the default.
+    managed_core_budget_enabled: bool = False
+    managed_core_budget_expected_database: str = ""
+    managed_core_budget_expected_user: str = ""
+
     # Безопасность. Секрет читается из SECRET_KEY ИЛИ JWT_SECRET — историческое
     # расхождение имён (прод-compose отдавал JWT_SECRET, а приложение ждало
     # SECRET_KEY → втихую брался дефолт). AliasChoices принимает оба.

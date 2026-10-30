@@ -20,4 +20,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends     build-essen
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY app ./app
+COPY schema_migrations ./schema_migrations
 CMD ["gunicorn","app.main:app","-w","2","-k","uvicorn.workers.UvicornWorker","--bind","0.0.0.0:8000","--timeout","300","--access-logfile","-"]
