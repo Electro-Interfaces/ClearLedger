@@ -23,9 +23,14 @@ company-wide occupancy `461c9ed4`, typed history `1f0cf49a`, route triage `18fd9
 Отдельный прогон настоящего main собрал 8 сценариев: 3 PASS, 5 FAIL. Пять
 сценариев остановлены тестовой границей `socket.sendmsg` при разрешённой
 пакетной записи asyncpg в выделенную PostgreSQL. Это пока ошибка оснастки,
-прикладной дефект из неё не установлен. Готовится узкое исправление и повтор
-только пяти затронутых сценариев. Тестовые БД после завершения процессов
-удалены штатно, без изменения параметров PostgreSQL.
+прикладной дефект из неё не установлен. После узкого исправления оснастки
+повторены только пять затронутых сценариев: **5 PASS за 69,72 с**, без ошибок
+и пропусков. Прежние три успешных сценария не повторялись. Проверены точные
+lifecycle counts, остановка восьми изолированных фоновых jobs, отсутствие
+внешних отправок и неизменность наблюдавшихся business rows/файлов.
+Запрещённых network/process/env попыток нет. Это два отдельных прогона,
+единого зелёного main8 нет. Тестовые БД после завершения процессов удалены
+штатно, без изменения параметров PostgreSQL.
 
 Requirements/Dockerfile не переключены. Merge, выпуск, включение внешнего
 доступа и готовность всей программы M00–M19 этим не подтверждены.
@@ -646,5 +651,10 @@ SQLallowedfalse/appmainfalse,36passedreports наruntime. Ошибки/пред�
 только принятыйcandidate376runner, sourcebytes вне его совпали.
 [Совместимость lifecycle](POLICY_LIFESPAN_COMPATIBILITY_20261030.md).
 [История candidate diagnostics](BACKEND_UPGRADE_REGRESSION_PLAN_20261030.md).
-Готовится новый совмещённыйsourceguard для376 и отдельногоfullmain8 наexact77;
-они ещё не выполнены. Это не release/fullapplication acceptance.
+Совмещённые профили на exact77 выполнены: 375 PASS/1 schema FAIL и затем
+целевой ObjectId old14/new14 PASS; main3 PASS и последующий affected5 PASS.
+Результаты относятся к разным замороженным составам. Независимый перенос
+подтвердил ровно наложение двух runner-файлов и трёх файлов ObjectId, без
+остальных изменений app/schema/tests. Это не единый CI и не release acceptance.
+[Совмещённая проверка](BACKEND_UPGRADE_COMPOSED_VERIFICATION_20261030.md),
+[стабильный ObjectId](OBJECTID_SCHEMA_COMPATIBILITY_20261030.md).
