@@ -2,7 +2,7 @@
 
 Состояние: **bounded candidate принят author-проверками: 37 PASS, combined 485 PASS**.
 Actual synthetic baseline: 24 FAIL / 13 PASS на тех же test bytes. Own DB
-очищена и удалена, SQL_SLOT_RELEASED. Root merged repeat остаётся отдельным gate.
+очищена и удалена, SQL_SLOT_RELEASED. Root merged independent repeat: **608 PASS за 78,99с**, без SKIP/ERROR/DESELECTED.
 Это bounded часть B, не приёмка всей модернизации импортов.
 
 База отдельного worktree `api-station-import-ambiguity-20261030`, ветка
@@ -203,7 +203,7 @@ AST и `git diff --check` PASS. Source search по
 | Candidate combined: new37 + previous441 + canon4 + region3 | **485 PASS**, 66,05с; EXIT0/reaped, 0 FAIL/ERROR/SKIP/DESELECTED. |
 | Opt-out, `--noconftest`, own flag отсутствует | 1 module SKIP, collected0, 0,36с; штатный EXIT5/reaped, fixtures не запрошены. |
 | Final cleanup после combined/opt-out | Fresh public/edge tables0, ownconns0; normal own DROP; DBexists0/ownconns0/otherclients0/maxlocks64, probes closed. |
-| Root merged independent | Pending: ожидается608 с source-number123; не author PASS. |
+| Root merged independent | **608 PASS**, 78,99с; EXIT0/reaped, 0 FAIL/ERROR/SKIP/DESELECTED. Это37new+564прежних+canon4+region3, source cherry62bd4a46 поверхb46eb062. |
 
 Каждый из24regression cases теперь PASS: ambiguous rows не меняют ни point,
 ни unit/link/region/audit, не создают дубль и возвращают partial/errors+1.
@@ -236,3 +236,20 @@ prerequisites не объявляются решёнными. Клиентски
 security scan, стенд и production не проверялись этим worker-ом. Откат: revert
 трёх файлов без переписывания данных; он возвращает воспроизведённую прежнюю
 небезопасную обработку неоднозначных строк.
+
+
+## Независимая приёмка интеграционного состава
+
+Координатор повторил объединённый состав в свежей собственной synthetic БД
+`api_station_import_ambiguity_test`: то же имя требуется защитой нового модуля,
+но БД создана заново после author normal DROP. **608 PASS, 78,99с**,
+child EXIT0/reaped. Проверены обе SHA256 выше, неизменность20прежних функций
+(включая W10) и побайтовое совпадение16прежних модулей тестов сb46eb062.
+Private evidence: `.artifacts/root-station-import-ambiguity-repeat.py`,
+`.artifacts/root-station-import-ambiguity-final.log`,
+`.artifacts/root-station-import-boundaries.py`. Exact target/общий guard,
+APP_ENV=test,9opt-ins, явный async plugin и пустой cwd; HOME не подменялся.
+После EXIT fresh public/edge tables0/conns0, normal DROP, fresh DBexists0 и
+maxlocks64; admin/probe connections закрыты. SQL передан следующему тесту
+только после очистки. Это приёмка ограниченного guard, не всей частиB,
+не полного CI и не рабочего выпуска.

@@ -242,5 +242,14 @@ reset-only proof с сохранением отдельного aud=voice про
 pending ORM changes; uses current admission/reload и общие freeze/history/no-reuse
 guards. Root564PASS72.93с, 13 прежних модулей тестов неизменны. JSONB numeric
 round-trip проверен, нормализация ограничена новым source validator. Импорты
-ещё не подключены; следующий пакет исследует ambiguous identity.
+ещё не подключены; ограниченный guard ambiguous identity принят отдельно ниже.
 [Отчёт](location-source-number-patch-20261030.md).
+
+
+Импорт W07/W08 различает новую и неоднозначную идентичность. При конфликте
+кандидатов строка не меняет point/unit/region/audit, не создаёт дубль и возвращает
+partial с ограниченным списком reconciliation. Unique strong matches и прежний
+intentional AC/DC split сохранены. Actual baseline24FAIL/13PASS; root608PASS
+78.99с без SKIP,20 прежних функций и16модулей тестов неизменны. Полный import
+protocol, stale indexes и concurrent/global no-reuse остаются открытыми.
+[Отчёт](station-import-ambiguity-20261030.md).
