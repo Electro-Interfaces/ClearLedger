@@ -458,10 +458,16 @@ PASS,130metadata/file hashes совпали; загрузка новых зав�
 Текущие requirements/Dockerfile и startup flags сохранены. В первом actual
 Python3.13.18 sandbox прошли tooling9,175с, изготовление wheel http-ece4,067с
 и compiler2,027с. Проверка clean offline install прервана FileNotFoundError
-проверочного сценария, общий процесс29,115с/EXIT1/OOMFalse. Промежуточный lock
-не активирован и не считается принятым. Журнал неудачи сохранён, собственные
-контейнер и image удалены; отдельная проверка установки готовится после
-исправления live scratch monitor. [Подготовка](BACKEND_DEPENDENCY_ARTIFACTS_20261030.md).
+проверочного сценария, общий процесс29,115с/EXIT1/OOMFalse. Журнал неудачи
+сохранён. Исправленный v3 повторил только offline-install, используя14проверенных
+артефактов первой попытки:21,097с/EXIT0/OOMFalse,59runtime+pip26.2.2 дают
+точные60distributions, pip check PASS. Tooling/build/compiler повторно не
+выполнялись. Собственные контейнеры/image удалены после каждого запуска,
+прежний PostgreSQL сохранён. App/driver/lifespan/SQL не запускались. Безопасные
+provisional locks и provenance приняты в66848e8b: три отдельных lock-файла и
+проверенное происхождение http-ece wheel. Убраны только комментарии с путями
+sandbox; эффективные requirement/hash lines сохранены. Dockerfile не
+переключается, независимая воспроизводимость сборки не заявляется. [Подготовка](BACKEND_DEPENDENCY_ARTIFACTS_20261030.md).
 
 
 M06 CREATE: общая команда публикует Contract в индексе только после успешного
@@ -471,3 +477,12 @@ flush; callers сохраняют matcher, company/organization, raw, scope, с�
 ошибке второго договора и конкурирующих транзакциях. Остальные семейства
 writer, внешний write API и полное закрытие M06 остаются открыты.
 [Отчёт](CONTRACT_IMPORT_CREATE_20261030.md).
+
+
+Проверка OSV metadata от30.10.2026 для точных60установленных distributions
+дала совпадения по пяти пакетам. 170package/advisory pairs включают алиасы
+разных источников и не являются числом уникальных уязвимостей. Это metadata
+intake, без проверки достижимости в приложении. Исторические provisional locks
+не подтверждают отсутствие уязвимостей; отдельная Task собирает первичные
+advisory details и совместимый план обновления, включая Starlette/FastAPI.
+[Фактическая offline-приёмка](BACKEND_DEPENDENCY_TARGET_20261030.md).
