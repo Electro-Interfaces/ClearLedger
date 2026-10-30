@@ -13,15 +13,20 @@ import sys
 from urllib.parse import urlsplit
 
 SERVER = Path(__file__).resolve().parents[1]
-BASE_COMMIT = "46c6ea484476569f17e8957335bf010acbd66bb4"
-APP_DIGEST = '716fa867894646a1977ea89c970503d319c9205c0b0459e73682a7722534a5fe'
-TESTS_DIGEST = '76b527332b6bc3af52f2edad271f5bfd646e486329eab9e0e46b67f5263f950e'
+BASE_COMMIT = "d2d014d873b6eb763f3cd03cc529dc3491d45cfb"
+APP_DIGEST = 'fc73c090cd736b7e4a8f43df42025d78dee7114572989936a5ac27e99236e62a'
+TESTS_DIGEST = 'bd352e7f2c77947355ea5377a9eb0c1ad251037885798ef55e6cf83c74dce320'
 SCHEMA_DIGEST = '51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d'
 APP_COUNT = 492
 TESTS_COUNT_WITHOUT_SELF = 340
 SCHEMA_COUNT = 16
 SUPPORT_FILES = {'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601'}
-EXPECTED_CASES = 7
+SELECTION = (
+    "test_main_problem_request_id_matches_outer_security_context",
+    "test_main_swagger_canonical_projection_assets_session_csrf_and_live_revoke",
+    "test_standalone_child_unavailable_problem_request_id_without_sql",
+)
+EXPECTED_CASES = 3
 FLAG = "RUN_PARTNER_MAIN_COMPOSITION_TESTS"
 ISSUER = "https://m18-space.example.invalid"
 SECRET = "m18-synthetic-core-secret-never-production-20261030"
@@ -218,8 +223,9 @@ def main():
             config._m18_boundary = self
 
         def pytest_collection_modifyitems(self, session, config, items):
-            if len(items) != EXPECTED_CASES or any(Path(i.path).name != "test_partner_main_composition.py" for i in items):
-                raise pytest.UsageError("exact seven M18 cases required (request-ID baseline assertion retained)")
+            if (len(items) != EXPECTED_CASES or {i.name for i in items} != set(SELECTION)
+                    or any(Path(i.path).name != "test_partner_main_composition.py" for i in items)):
+                raise pytest.UsageError("exact three affected M18 cases required; previous five PASS must not repeat")
 
         def pytest_runtest_logreport(self, report):
             if report.when == "call" or report.failed or report.skipped:
@@ -230,18 +236,18 @@ def main():
                           {"startup.prepare", "chat_ws.start", "chat_ws.stop", "notify.dispatch_async",
                            *["scheduler." + n for n in SCHEDULERS]}}
             expected_lifecycle = {"startup.prepare": 1, "chat_ws.start": 1, "chat_ws.stop": 1,
-                                  "notify.dispatch_async": 8,
+                                  "notify.dispatch_async": 1,
                                   **{"scheduler." + n: 1 for n in SCHEDULERS}}
             outcomes = [(r["when"], r["outcome"]) for r in self.results]
             exact_outcomes = sum(when == "call" and outcome in {"passed", "failed"}
-                                 for when, outcome in outcomes) == 7 and len(outcomes) == 7
+                                 for when, outcome in outcomes) == EXPECTED_CASES and len(outcomes) == EXPECTED_CASES
             if attempts or unexpected or self.counts != expected_lifecycle or not exact_outcomes:
                 session.exitstatus = 1
             (evidence / "boundary.json").write_text(json.dumps({
                 "network_process_attempts": attempts, "capture_counts": self.counts,
                 "unexpected_delivery_counts": unexpected, "expected_lifecycle_counts": expected_lifecycle,
                 "results": self.results, "full_main_asgi": True, "nginx_browser_sso": False,
-                "source_finding": "M18-RID-01: requestId body/header; ROOT baseline reproduction, no xfail/skip",
+                "source_finding": "M18-RID-01: original equality retained; corrective affected-only retest, no xfail/skip",
             }, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
 
         def pytest_unconfigure(self, config):
@@ -251,7 +257,8 @@ def main():
     result = pytest.main(["-c", str(SERVER / "pytest.ini"), "--noconftest", "-p", "pytest_asyncio.plugin",
                          "-p", "no:cacheprovider", "-vv", "--tb=short", "--show-capture=no",
                          "--junitxml=" + str(evidence / "main-composition.xml"),
-                         str(SERVER / "tests/test_partner_main_composition.py")], plugins=[boundary])
+                         *(str(SERVER / "tests/test_partner_main_composition.py") + "::" + name
+                           for name in SELECTION)], plugins=[boundary])
     signal.alarm(0)
     return result
 

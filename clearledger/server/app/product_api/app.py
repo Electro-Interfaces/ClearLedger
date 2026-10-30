@@ -18,6 +18,7 @@ from starlette.exceptions import HTTPException
 
 from app.api_contracts import (AccessContext, PolicyRouter, PrincipalKind, RoutePolicy,
                                create_policy_app, get_access_context, policy_registry)
+from app.security_context import current as current_security_context
 from . import access, budget, dto, files, monitoring
 from .queries import Query
 
@@ -103,7 +104,8 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
 
     @app.middleware("http")
     async def request_id(request, call_next):
-        request.state.request_id = str(uuid.uuid4())
+        context = current_security_context.get()
+        request.state.request_id = context.request_id if context is not None else str(uuid.uuid4())
         response = await call_next(request)
         response.headers["X-Request-Id"] = request.state.request_id
         response.headers["Cache-Control"] = "no-store"

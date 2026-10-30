@@ -1,12 +1,15 @@
 # M18: подготовка actual app.main composition, 30.10.2026
 
-Статус: **SOURCE PREPARED, ROOT EXECUTION PENDING**. Это предложение проверки,
-не протокол успешного HTTP/SQL-прогона и не закрытие M18. База исходников:
+Статус: **ROOT BASELINE 5 PASS / 2 FAIL; CORRECTIVE RETEST PENDING**.
+Исходный frozen baseline выполнен ROOT, дефект request ID подтверждён.
+Подготовлен ограниченный фикс и повтор трёх затронутых cases; M18 не закрыт.
+База исходников:
 `46c6ea484476569f17e8957335bf010acbd66bb4`, ветка
-`agent/api-partner-main-composition-20261030`. Production-код, auth/ACL,
-requirements/locks, Compose, CI, версии и значения feature flags не изменены.
+`agent/api-partner-main-composition-20261030`. Auth/ACL, requirements/locks, Compose, CI, версии и значения feature flags
+не изменены. После baseline ROOT отдельно разрешил единственную runtime-правку
+`app/product_api/app.py`: использование trusted outer request ID в child.
 
-Добавлены только этот документ, `server/tests/test_partner_main_composition.py`
+В исходном baseline добавлены только этот документ, `server/tests/test_partner_main_composition.py`
 и `server/tests/partner_main_composition_approved.py`. Старые тесты и sandbox
 остались исходными. Существующие `.tmp`, `node_modules` и evidence сохранены.
 
@@ -70,7 +73,7 @@ Runner импортирует **исходный `app.main`**, а тесты и�
    реальный owner grant настроенного public docs client; Bearer сам по себе
    не открывает bytes. Same-Origin/CSRF bootstrap, Secure/HttpOnly/Strict cookie,
    UI/raw canonical/browser projection/все assets, запрет query override,
-   двенадцать GET в schema, canonical `clientCredentials` и его отсутствие в
+   двенадцать GET в schema, `ProductServiceOAuth.clientCredentials` в canonical и его отсутствие в
    browser projection, реальная пагинация object/equipment/party/contract,
    scoped monitoring GET и tenant404. DELETE session с CSRF отзывает family;
    оригинальная cookie повторно посылается и тоже получает401.
@@ -122,7 +125,7 @@ session — docs session; close — docs session/family. Company registry мож
 
 До первого pytest/app/ORM/driver import runner требует собственный SHA из
 ROOT approval, точный CLI argument, `-I`, Python3.13 без `-O`, обе ROOT/test flags,
-полное byte-совпадение app/tests/schema и requirements/pytest.ini. Hash списков:
+полное byte-совпадение app/tests/schema и requirements/pytest.ini. Hash списков **исходного baseline d2d014d8** (не corrective runner):
 
 | Набор | Count | SHA256 |
 |---|---:|---|
@@ -157,13 +160,15 @@ ROOT обязан ограничить процесс, дождаться вых
 
 Evidence: JUnit `main-composition.xml`, `boundary.json` со всеми outcomes,
 точными capture counts и network/process attempts, per-case baseline/phase/final
-fingerprints. Ожидание baseline: **6 PASS + 1 FAIL request-ID**, не зелёный
-run и не заранее измеренный результат. При дополнительном дефекте сохраняются
+fingerprints. Первоначальное ожидание baseline **6 PASS + 1 FAIL request-ID** оказалось
+неполным: ROOT измерил **5 PASS + 2 FAIL**. Второй FAIL — ошибочный predicate
+нового Swagger testcase, исправляемый по существующему контракту, без изменения
+OpenAPI или OAuth runtime. При дополнительном дефекте сохраняются
 фактические ошибки; независимые cases продолжаются без `--maxfail=1`.
 После review ROOT закрывает свои соединения и делает обычный DROP только этой
 БД, сохраняя proof отсутствия DB/clients/resources. Worker этого не выполняет.
 
-## M18-RID-01: source finding, baseline ещё не измерен
+## M18-RID-01: дефект подтверждён ROOT baseline
 
 `app/security_context.py:30–43` создаёт внешний uuid4.hex, удаляет любой
 вложенный `X-Request-Id` и ставит свой. Он добавлен внешним слоем в
@@ -175,16 +180,18 @@ run и не заранее измеренный результат. При до�
 
 ROOT подтвердил порядок: отдельный неизменённый assertion и frozen baseline
 без skip/xfail/подмены middleware, затем отдельное решение об исправлении.
-Этот patch не меняет runtime и не чинит/не обходит finding. Остальные error
+Baseline patch не менял runtime. После его исполнения ROOT разрешил
+точечный corrective patch, описанный ниже; middleware и assertion не подменяются. Остальные error
 checks проверяют статус, Problem media type, no-store и валидность каждого ID;
 единственное требование равенства явно принадлежит отдельному testcase.
 
 ## Выполненная проверка и ограничения
 
-Worker сделал только source review, stdlib AST parse двух новых Python файлов,
+Worker сделал source review, stdlib AST parse двух новых Python файлов и единственного runtime-файла,
 source manifests и Git checks. **Не выполнялись** compile gate, pytest/collect,
 runner, imports app/ORM, SQL, HTTP server/browser, Docker, npm install/build,
-venv или настоящая доставка. Actual HTTP/PG verdict ожидается от ROOT.
+venv или настоящая доставка **со стороны worker**. ROOT actual baseline
+выполнен отдельно; corrective HTTP/PG verdict ещё ожидается.
 
 Даже будущий successful ASGI main run с перечисленными seams не проверяет
 nginx/Traefik/CORS deployment trust chain, native SSO browser handoff,
@@ -193,3 +200,78 @@ real scheduling/seed, multiworker quotas, TLS/browser cookies на реальн�
 gate cookie в ASGI не равны проверке полного browser SSO. Старый purpose-built
 HTTPS sandbox остаётся отдельным доказательством и не переименовывается в
 full composition. **M18 и программа M00–M19 остаются открытыми.**
+
+
+## ROOT baseline evidence и corrective patch
+
+ROOT исполнил immutable `d2d014d873b6eb763f3cd03cc529dc3491d45cfb`:
+**5 PASS, 2 FAIL, 0 SKIP**, pytest72.40s, outer87.22030024975538s,
+exit1, child reaped. Сообщение ROOT `msg_3619c332886f` расширило ownership только
+на `app/product_api/app.py`, сохранив запрет worker на app/SQL/pytest execution.
+
+PASS: anonymous/mount guards; обычный employee objects/equipment + native
+login/PKCE/refresh/revoke; отдельный employee document eligibility denial;
+обычный docs-role employee allowed bytes/private/foreign404; confidential
+admin machine grant/read/live revoke. Они **не повторяются** без причины.
+
+FAIL1: отдельное неизменённое equality assertion body/header request ID.
+FAIL2: новый Swagger testcase искал `clientCredentials` внутри `ProductOAuth`,
+хотя существующий контракт хранит его в **отдельном** `ProductServiceOAuth`.
+Это ошибка нашей проверки, не OAuth/spec defect. Ранее существующий
+`test_product_service_openapi.py:55–58,158–159` и исходный schema builder
+подтверждают две canonical security schemes и одну browser scheme. Исправлены
+только predicates нового теста. Хвост Swagger testcase (pagination/monitoring/
+close/replayed cookie) после первоначального неверного assertion не считался
+проверенным; его завершает целевой повтор.
+
+ROOT evidence находится в integration worktree:
+`.artifacts/root-main-composition-review-20261030/`:
+
+| Artifact | SHA256 |
+|---|---|
+| `test-process.json` | `68cd52f493cba6dbc76549e849eea26ae1321154a7f017cd77ebb4e635ef0cd3` |
+| `evidence-test/boundary.json` | `bb46f4d2f0254d79746a54feaf8416f964b83b9472d53861710e91eab6829ccb` |
+| `evidence-test/main-composition.xml` | `1b7175a1cc91e7b83bbd79686958079f3c8a003660c6f62a12dc5978e8ea7aea` |
+
+Worker независимо прочитал эти **уже существующие** artifacts: семь pairs
+baseline/final business/files совпадают; сохранённые промежуточные phases тоже
+не меняют business/files. Это чтение evidence, не новый SQL-прогон. Boundary:
+8 schedulers, start/stop/prepare по1, notify8, network/process attempts0,
+unexpected delivery0. ROOT сообщил обычный DROP exact DB, retained relations344,
+fresh clients0, exists0, maxlocks64; database/listeners не остаются у worker.
+
+Runtime fix: child request-ID middleware читает существующий
+`app.security_context.current` ContextVar. При наличии внешнего контекста
+использует его ID; standalone child генерирует свой uuid4. Входящий HTTP
+`X-Request-Id` не читается, глобальный mutable ID не добавлен. Остальная AST
+runtime-файла вне одного нового import и одной вложенной функции byte-структурно
+совпадает с baseline; auth/ACL/schema generator не менялись.
+
+Корректирующий runner выбирает **только три node IDs**:
+
+- прежний request-ID testcase с сохранённым equality и новыми forged-header/
+  восьмью concurrent-request controls;
+- прежний Swagger testcase с исправленными scheme predicates;
+- новый `test_standalone_child_unavailable_problem_request_id_without_sql`:
+  настоящий standalone child, disabled product feature → actual ASGI503,
+  два разных UUID, body/header equality, forged input игнорируется, отсутствует
+  outer ContextVar. SQL listener отвергает любую попытку до исполнения и пишет
+  нулевой счётчик в JUnit/private evidence.
+
+Для трёх cases ожидаются notify1 от единственного owner login; восемь parked
+jobs и один lifecycle сохраняются. Все остальные gates/границы прежние,
+но frozen hash обновлён на corrective source. Новые proposal/source manifest
+имеют суффикс `-v2`; исходные artifacts и baseline не перезаписываются.
+
+| Corrective source | Count | SHA256 |
+|---|---:|---|
+| app | 492 | `fc73c090cd736b7e4a8f43df42025d78dee7114572989936a5ac27e99236e62a` |
+| tests excluding runner | 340 | `bd352e7f2c77947355ea5377a9eb0c1ad251037885798ef55e6cf83c74dce320` |
+| schema_migrations | 16 | `51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d` |
+| runner | 1 | `23fa037557b16ab2ffcf672a7759fa89ff1adf2e11d4afbb5644fc534fea5bd8` |
+| test module | 1 | `acf6332c769baf232ca4e8f18ce70695942f92c22cd5d76e306e5887eee5e74c` |
+| runtime app.py | 1 | `91c2c8165e9d1b25d04c2f930167a7f5aeb34ef4b6882b4fe5f0c4275ced82e5` |
+
+ROOT отдельно reviewed/re-reserves fresh target/directories и исполняет этот
+повтор после своего dependency-candidate окна. Worker corrective code не запускал.
+До новых actual evidence фикс остаётся подготовленным, не принятым по runtime.

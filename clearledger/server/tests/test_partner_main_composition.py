@@ -362,10 +362,52 @@ def problem(response, status):
 
 
 async def test_main_problem_request_id_matches_outer_security_context(fixture):
-    # Source finding M18-RID-01; ROOT executes the frozen baseline BEFORE a fix.
-    # No xfail/skip, no middleware override, and no weakened equality assertion.
+    # ROOT reproduced M18-RID-01 on the frozen baseline. Preserve that equality
+    # for the corrective retest, without xfail/skip or middleware overrides.
     response = checked(await fixture["client"].get("/api/v1/objects"), 401)
     assert response.json()["requestId"] == response.headers["x-request-id"]
+    forged = "00000000-0000-4000-8000-000000000018"
+    async def request():
+        response = checked(await fixture["client"].get("/api/v1/objects",
+                           headers={"X-Request-Id": forged}), 401)
+        assert response.json()["requestId"] == response.headers["x-request-id"]
+        assert response.headers["x-request-id"] != forged
+        assert uuid.UUID(response.headers["x-request-id"]).version == 4
+        return response.headers["x-request-id"]
+    assert await request() != response.headers["x-request-id"]
+    concurrent = await asyncio.gather(*(request() for _ in range(8)))
+    assert len(set(concurrent)) == 8 and response.headers["x-request-id"] not in concurrent
+    await fixture["proof"].check("main-trusted-request-ID-forgery-concurrency")
+
+
+async def test_standalone_child_unavailable_problem_request_id_without_sql(record_property):
+    from app.product_api import create_product_api
+    from app.security_context import current
+    assert current.get() is None
+    child = create_product_api(issuer=ISSUER, enabled=False)
+    attempted = []
+    def no_sql(conn, cursor, statement, parameters, context, executemany):
+        attempted.append(True)
+        raise AssertionError("standalone disabled child must not execute SQL")
+    event.listen(database.engine.sync_engine, "before_cursor_execute", no_sql)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=child), base_url=ISSUER) as client:
+            ids = []
+            for _ in range(2):
+                response = checked(await client.get("/objects", headers={
+                    "X-Request-Id": "00000000-0000-4000-8000-000000000018"}), 503)
+                assert response.json()["requestId"] == response.headers["x-request-id"]
+                assert uuid.UUID(response.headers["x-request-id"]).version == 4
+                assert response.headers["x-request-id"] != "00000000-0000-4000-8000-000000000018"
+                assert response.headers["cache-control"] == "no-store"
+                assert response.headers["content-type"].startswith("application/problem+json")
+                ids.append(response.headers["x-request-id"])
+            assert len(set(ids)) == 2
+    finally:
+        event.remove(database.engine.sync_engine, "before_cursor_execute", no_sql)
+        record_property("standalone_sql_attempts", len(attempted))
+        evidence("standalone-request-id-no-sql.json", {"sql_attempts": len(attempted), "responses": 2})
+    assert not attempted and current.get() is None
 
 
 async def test_main_mount_order_anonymous_docs_and_version_guards(fixture):
@@ -516,8 +558,13 @@ async def test_main_swagger_canonical_projection_assets_session_csrf_and_live_re
         assert schema["servers"] == [{"url": ISSUER + "/api/v1"}]
         assert sum("get" in methods for methods in schema["paths"].values()) == 12
         assert not any("/auth" in p or "/developer" in p for p in schema["paths"])
-    assert "clientCredentials" in schemas["/openapi.server.json"]["components"]["securitySchemes"]["ProductOAuth"]["flows"]
-    assert "clientCredentials" not in schemas["/openapi.json"]["components"]["securitySchemes"]["ProductOAuth"]["flows"]
+    canonical = schemas["/openapi.server.json"]["components"]["securitySchemes"]
+    browser = schemas["/openapi.json"]["components"]["securitySchemes"]
+    assert set(canonical) == {"ProductOAuth", "ProductServiceOAuth"}
+    assert set(canonical["ProductOAuth"]["flows"]) == {"authorizationCode"}
+    assert set(canonical["ProductServiceOAuth"]["flows"]) == {"clientCredentials"}
+    assert set(browser) == {"ProductOAuth"}
+    assert set(browser["ProductOAuth"]["flows"]) == {"authorizationCode"}
     checked(await f["client"].get(DOC_PREFIX + "/openapi.server.json", params={"url": "https://foreign.example.invalid"}), 400)
     checked(await f["client"].delete(DOC_PREFIX + "/session", headers={"Origin": ISSUER}), 403)
     # Owner broad grant really paginates through two visible rows in main.
