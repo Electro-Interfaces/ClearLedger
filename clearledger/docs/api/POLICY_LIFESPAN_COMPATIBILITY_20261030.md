@@ -1,7 +1,8 @@
 # Совместимость lifecycle PolicyRouter, 30.10.2026
 
 Статус: one-file fix реализован после actual traceback и явного допуска ROOT;
-подготовлен source-only кандидат для review, worker ничего не исполнял.
+ROOT подтвердил focused old 12/12 и new 12/12 PASS на corrected commit
+`335b0eec42205701d5b4b7cf4f39276be72dcdca`. Worker тесты не исполнял.
 Рабочая ветка `agent/api-lifespan-compatibility-20261030` создана в выделенном
 дереве `api-conf-context-20261030` от exact integration base
 `850004b35e261b8d9115cc44c414a88d79c3e98e`.
@@ -40,7 +41,7 @@ child reaped, штатная очистка disposable DB подтвержден
 
 Первичный документ, уже прочитанный ROOT:
 [FastAPI: lifespan events](https://fastapi.tiangolo.com/advanced/events/).
-Новых сетевых запросов worker не выполнял.
+Новых сетевых запросов за документацией worker не выполнял.
 
 ## Реализованная минимальная правка
 
@@ -102,12 +103,12 @@ dotenv, отправителей и app.services запрещены до pytest 
 в памяти. Общий `conftest.py` не загружается (`--noconftest`), autoload plugins
 отключён. Runner не создаёт/не удаляет схемы и не требует PostgreSQL.
 
-На текущем этапе выполнены только AST parse и compile в памяти новых файлов.
-pytest/collect/TestClient/app imports/SQL/установка зависимостей/контейнеры не запускались.
+Сам worker выполнил только AST parse и compile в памяти новых файлов;
+pytest/collect/TestClient/app imports/SQL/установку зависимостей/контейнеры не запускал.
 AST всего `routing.py` вне `create_policy_app` идентичен exact base; старый HTTP-файл
 побайтово идентичен base (SHA256 `f2e14cc84bfc878dd2f12d0174cbb2276f5a0cc6f87746861e45baf1d053edc6`).
-После source freeze и русского коммита/push: повторный review ROOT,
-затем два отдельных запуска ROOT old/new.
+После source freeze и русского коммита/push ROOT выполнил review
+и два отдельных запуска old/new, описанные ниже.
 После actual evidence допустимо только обновление отчёта; любые изменения source
 после freeze требуют нового review и результатов. Merge/deploy не поручены.
 
@@ -176,4 +177,35 @@ HTTP-файл не менялись. Это исправление оснаст�
 
 Для следующего запуска использовать corrected runner SHA и новый reviewed
 source commit, сохранять исходные evidence, выбирать свежие private directories.
-Повтор focused old/new: **PENDING ROOT**, PASS не заявлен.
+## Принятый повтор ROOT: old 12/12, new 12/12 PASS
+
+ROOT `msg_5fedea024735` подтвердил corrected commit
+`335b0eec42205701d5b4b7cf4f39276be72dcdca`, неизменный runtime из `b3b456f1`
+и runner SHA `4952f4f8cd05de5793120b1d591f874505bae06be5e811275311d410022b4c87`:
+
+| Runtime | PASS | FAIL / SKIP | Время pytest | Время supervisor | Предупреждения |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| FastAPI 0.115.6 / Starlette 0.41.3 | 12 | 0 / 0 | 0.64 сек | 1.5019843894988298 сек | 1 |
+| FastAPI 0.133.0 / Starlette 1.3.1 | 12 | 0 / 0 | 0.64 сек | 1.5025689015164971 сек | 2 |
+
+Для каждого runtime: exit 0, child reaped, ровно 12 collected и 36 passed
+setup/call/teardown reports, forbidden attempts 0, `database_allowed=false`,
+`app_main_imported=false`. Инвентари и полные исходные hashes прошли gate.
+Предупреждения не подавлялись. Worker прочитал `summary.json` и обе `boundary.json`,
+не запускал проверку повторно.
+
+Принятый evidence ROOT:
+`/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/root-policy-lifespan-review-v2-20261030/`.
+Файлы: `summary.json`, `old-process.json`, `new-process.json`, отдельные
+`old-lifespan-test-evidence/lifespan.xml`, `old-lifespan-test-evidence/boundary.json`,
+`new-lifespan-test-evidence/lifespan.xml`, `new-lifespan-test-evidence/boundary.json`.
+Log SHA old: `1382b9337d81507521981219d2d8dae6e6776c49ac5896f78a63bcc5d85ca857`;
+new: `f9dac5745eb79335614dbb244c75c218342e24ec583ba9fbe2a23b4745c88189`.
+Исходный неуспешный evidence и оба source commits сохранены.
+
+Результат подтверждает 12 конкретных lifecycle/guard/DI/schema сценариев на обоих
+runtime. Это не полная приёмка приложения: HTTP56, полный 376 и main8 относятся
+к объединённому кандидату ROOT; здесь не повторялись и PASS им не присваивается.
+Обновление dependencies, merge, CI, Docker, deploy и рабочие данные не входили
+в эту задачу. После принятого прогона менялся только этот отчёт; bytes runtime,
+новых тестов и runner остаются frozen `335b0eec`. M00–M19 остаются открыты.
