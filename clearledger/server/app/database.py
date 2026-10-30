@@ -3289,6 +3289,8 @@ async def create_all() -> None:
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS owner_user_id UUID",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS next_action VARCHAR(300)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS workspace_data JSONB",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS dismantle_location_ids JSONB",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS decommissioned_on VARCHAR(10)",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_purpose VARCHAR(40)",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS audience VARCHAR(16) NOT NULL DEFAULT 'mixed'",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_context_purpose ON chat_rooms (company_id, scope_ref, scope_purpose) WHERE scope_purpose IS NOT NULL AND is_active = true",

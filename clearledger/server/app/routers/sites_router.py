@@ -893,7 +893,10 @@ async def patch_site(
     """Правка карточки. Изменённые поля помечаются ручными — импорт их не трогает."""
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    res = await ezs_site_work.update_site(db, site, payload, user)
+    try:
+        res = await ezs_site_work.update_site(db, site, payload, user)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     await db.commit()
     out = await ezs_sites.site_detail(db, cid, site_id)
     return {**res, "site": out}

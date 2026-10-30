@@ -65,6 +65,8 @@ FIELD_META: dict[str, tuple[str, str]] = {
     "rent_cost_month": ("Аренда в месяц", "finance"),
     "rent_rate": ("Ставка аренды", "finance"),
     "smr_cost": ("Стоимость СМР", "finance"),
+    "dismantle_location_ids": ("ЭЗС к демонтажу", "technical"),
+    "decommissioned_on": ("Дата вывода ЭЗС из эксплуатации", "deadline"),
     "input_price_kwth": ("Цена электроэнергии", "finance"),
     "ownership": ("Право на площадку", "conditions"),
     "land_category": ("Категория земли", "conditions"),
