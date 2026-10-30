@@ -270,3 +270,11 @@ baseline2FAIL/2controlsPASS; root117PASS35.04с без SKIP. Сохранены1
 revoke/scope/demotion/move/delete проверены. Все writers модели и live
 organization/global/superadmin semantics не объявляются покрытыми.
 [Отчёт](contract-manual-serialization-20261030.md).
+
+
+Отложенные presence и три входа в конференции используют общий context guard.
+Для этих callers post передаёт opt-in guard до поздних401effects; обычный401
+сохраняет прежний ApiError. Root471PASS73.763с, app/nodeTypeScript и targeted
+ESLint PASS; binary/error/setters и9прежних source/test modules сохранены.
+Другие unguarded JSON callers и уже отправленные серверные действия этой
+гарантией не покрыты. [Отчёт](CONF_CONTEXT_BOUNDARY_20261030.md).

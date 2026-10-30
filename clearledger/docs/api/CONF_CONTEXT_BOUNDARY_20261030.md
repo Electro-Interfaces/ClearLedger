@@ -432,3 +432,19 @@ join/ping/leave не отменяются и не откатываются на 
 Полного UI/production/security scan, реальной приёмки API/ACL/Jitsi, токенов встреч,
 записей и БД не было. Проверка ограничена локальными синтетическими Node-тестами
 и source review; программа M00–M19, merge и deployment остаются за пределами пакета.
+
+
+## Независимая приёмка интеграции
+
+Source1493fe83 перенесён в интеграционную ветку коммитом59e6822b. Координатор
+повторил те же семь Node-модулей: **471 PASS, 73,763с**, без FAIL, SKIP,
+CANCELLED и TODO. Child EXIT0/reaped. App TypeScript, node TypeScript и
+targeted ESLint трёх сервисов и нового теста также EXIT0/reaped.
+
+Проверены четыре финальные SHA256 выше, разрешённые AST изменения трёх
+runtime-модулей и побайтовое совпадение девяти прежних source/test modules.
+В частности handleResponseError, binary functions, headers и setters не
+изменены. Private evidence: `.artifacts/root-conf-context-final.log`,
+`.artifacts/root-conf-context-boundaries.mjs` и
+`.artifacts/root-conf-context-expected-sha.json`. Это bounded клиентская
+приёмка; ограничения исходного отчёта и незавершённость M00–M19 сохраняются.
