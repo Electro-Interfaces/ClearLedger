@@ -76,3 +76,22 @@ schema migrations, runtime и инфраструктура остаются за
 
 Runtime, tests, requirements и config не менялись. OAuth/API/docs flags остаются
 выключенными по исходным defaults; merge, enablement и deploy не выполнялись.
+
+
+## Независимая приёмка координатора
+
+Source summary commit `114ed0983c8520c8874f512d67e7d807073db089` перенесён
+в integration как `a9249ac1`. Root сверил однофайловый diff, его parent,
+десять actual source blobs/SHA256 и 2020 строк с текущей integration основой.
+Через MCP scan context подтверждены exact target revision, status complete,
+reportAvailable=true, findingCount=0 и partial coverage десяти перечисленных
+файлов. Canonical FS не читался, complete повторно не вызывался, отдельные
+sealedAt/hash не заявляются. Это проверка результата инструмента и source
+identity, а не второй независимый security scan.
+
+Host usage: 3 129 273 total tokens, из них input 3 116 878
+(включая 3 011 200 cached), output 12 395. Source=`codex_rollout`,
+usage coverage=complete означает полноту счётчика, не покрытия исходников.
+Ограничения sequential fallback, app-envelope partial и отсутствия runtime
+приёмки сохраняются. Приватные доказательства: root-identity-security
+source/host proof в `.artifacts/`.
