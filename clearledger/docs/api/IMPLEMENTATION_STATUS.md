@@ -1,7 +1,8 @@
 # Партнёрский API: интеграционный кандидат
 
 Состав исходников на 30.10.2026: ветка
-`MagLook/api-modernization-integration-20261029`, runtime pin `e6659c6e`; инвентаризация Core на `7896039f`.
+`MagLook/api-modernization-integration-20261029`, runtime pin `e6659c6e`; Core export consumers `bc24daca`;
+инвентаризация Core на `7896039f`.
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
 
@@ -36,7 +37,9 @@ Events, schema namespace guard. Новые контрагенты без ИНН 
 гонки Core session и выбранные company-context consumers. Два общих binary
 метода Core используют тот же error handler, поддерживают caller AbortSignal
 и подавляют выдачу устаревших байтов после смены контекста. Прямые fetch
-других consumers ещё не переведены.
+других consumers ещё не переведены. Пять XLSX exports в charge sessions,
+corporate billing и sites используют этот общий метод; фильтры и прежние
+fallback names сохранены, server filename имеет приоритет.
 
 Общая PostgreSQL-квота считает company/installation/client между workers,
 возвращает безопасные429/503 и ограничивает очистку. OAuth/API/docs/quota
@@ -62,6 +65,7 @@ Events, schema namespace guard. Новые контрагенты без ИНН 
 | HTTPS Swagger после auth/service/mobile fixes | PASS110.21с: actual main/public builds, PKCE/Try SQL/logout/revoke/expiredCore recovery |
 | Responsive pinned Swagger | 7checks PASS на390/1200px |
 | Core binary/session/location на02e6e963 | 151PASS,4.513с; React/Chromium15PASS,12.729с; app/node TypeScript и ESLint PASS |
+| Пять Core export consumers наbc24daca | 403actual-service/binary/session/location PASS,4.669с; app/node TypeScript и ESLint PASS |
 | Types generation/parity/drift/negative | 6PASS; freshness/consumer/typecheck PASS |
 | Оба исправления контрагентов наe1cb1a53 | 52SQL/HTTP PASS,22.55с, прежний explicit-null test сохранён |
 | UserInfo на9c33d932 | 70offline PASS,8.140с;FULL89identity/docs SQL/HTTP PASS,117.79с, без SKIP/DESELECTED |
@@ -115,6 +119,7 @@ backup с фактическим восстановлением, состав р
 [контрагенты](counterparty-explicit-null-20261030.md),
 [UserInfo](userinfo-protocol-20261030.md),
 [binary transport](CORE_BINARY_TRANSPORT_20261030.md),
-[WS logging](WS_LOG_PRIVACY_20261030.md).
+[WS logging](WS_LOG_PRIVACY_20261030.md),
+[export consumers](CORE_EXPORT_CONSUMERS_20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.
