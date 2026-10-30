@@ -76,12 +76,13 @@ async def test_work_union_and_single_read_preserve_task_doc_acl(actors, db, visi
     public = DocCard(company_id=cid, kind_id=kind.id, title="Тест · Открытый документ",
                      confidentiality="company", author_id=users["author"].id, subject_ref=ref)
     strict = DocCard(company_id=cid, kind_id=kind.id, title="Тест · Закрытый документ",
-                     confidentiality="strict", author_id=users["author"].id, subject_ref=ref)
+                     confidentiality="strict", author_id=users["author"].id,
+                     subject_ref=f"boundary-strict:{uuid.uuid4()}")
     db.add_all([public, strict])
     await db.commit()
     user = users[role]
     before = await snapshot(db)
-    query = await work_links.visible_work(db, cid, user, ref=ref)
+    query = await work_links.visible_work(db, cid, user)
     result = {(row.kind, row.id) for row in (await db.execute(select(query))).all()}
     expected = {("doc", public.id)}
     if role == "author":
@@ -89,6 +90,11 @@ async def test_work_union_and_single_read_preserve_task_doc_acl(actors, db, visi
     if allowed:
         expected.add(("task", task.id))
     assert result == expected
+    same_ref = await work_links.visible_work(db, cid, user, ref=ref)
+    expected_same_ref = {("doc", public.id)}
+    if allowed:
+        expected_same_ref.add(("task", task.id))
+    assert {(row.kind, row.id) for row in (await db.execute(select(same_ref))).all()} == expected_same_ref
     assert (await work_links.readable_entity(db, cid, user, "doc", public.id)).id == public.id
     for entity_kind, entity_id, permitted in [
         ("task", task.id, allowed), ("task", foreign.id, False),
