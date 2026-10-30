@@ -216,9 +216,11 @@ expected lifecycle/delivery counts, cancelled8jobs, unchanged business/files,
 forbidden0 и отдельные complete receipts. Один PASS не заменяет другой.
 
 Normal DROP выполняет ROOT только по своему retained creation proof, fresh size/
-relations/connections и без FORCE/GUC. Прежние M18 normalDROP344relations receipts
-остаются историческими; новый actual relation count/normalDROP ещё не получен и
-не выводится из старого доказательства. SQL cleanup worker не выполняет.
+relations/connections и без FORCE/GUC. Для новых запусков получены отдельные
+доказательства: full376 — 0 relations, main8 и affected5 — по344 синтетические
+relations перед удалением; во всех случаях connections0 и existsAfterDrop0,
+maxlocks64. Эти результаты не заимствованы из прежних M18 receipts.
+SQL cleanup worker не выполнял.
 
 Actual warnings, FAIL/SKIP, несовпадения pins/source/counts сохраняются; assertions
 и public API не меняются ради gate. Активация requirements, production flags,
@@ -343,3 +345,18 @@ worker SQL/cleanup не выполнял. ВсеDBtargets и свежиеevidenc
 certification или Docker3.13.18 app proof. Новые installer/compiler/network,
 requirements activation, sourcefeatureflags, merge/deploy не выполнялись.
 Последняя правка — report-only; оба runner/app/tests после bff0ac14 заморожены.
+
+
+## Перенос в общую ветку
+
+ROOT независимо сверил все18 приведённых SHA фактических результатов и перенёс
+три code-коммита и отдельный итоговый report. Изменение
+[ObjectId](OBJECTID_SCHEMA_COMPATIBILITY_20261030.md) принято отдельно после
+14 PASS на старом и14 PASS на новом runtime. Прежний assertion сохранён.
+
+Сравнение полных Git-деревьев подтвердило точное наложение двух проверочных
+entrypoints и трёх файлов ObjectId. В общей ветке492app files,349test files,
+16migration files; иных изменений app/schema/tests между этими принятыми
+составами нет. Это проверка переноса исходников, а не новый общий CI.
+Дополнение ROOT исправляет только текст актуальности cleanup и поясняет
+интеграцию; проверенные runtime и runner bytes сохранены.
