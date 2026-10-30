@@ -48,8 +48,9 @@ export const isApiEnabled = (): boolean => isDemoMode() || !!BASE_URL
 // «по юзеру» (fuel/store/…) раньше игнорировали выбор компании в шапке и всегда
 // показывали дефолтную; теперь следуют выбору. Устанавливается из CompanyContext.
 let activeCompanyId: string | null = null
-// Только binary-запросы проверяют поколение. Оно замечает A→B→A и новый
-// вход с тем же токеном; JSON-контракты и их жизненный цикл не меняются.
+// Поколение проверяют binary transport и явно захваченные guards отложенных
+// действий. Оно замечает A→B→A и новый вход с тем же токеном;
+// общий JSON transport сохраняет прежний жизненный цикл.
 let binaryContextGeneration = 0
 
 /** Прокинуть активную компанию в HTTP-клиент (заголовок X-Company-Id). */
@@ -254,8 +255,10 @@ async function handleResponseError(
   }
 }
 
-async function handleResponse<T>(res: Response, sentAuthorization: string | undefined, signal?: AbortSignal): Promise<T> {
-  if (!res.ok) await handleResponseError(res, sentAuthorization, signal)
+async function handleResponse<T>(
+  res: Response, sentAuthorization: string | undefined, signal?: AbortSignal, contextGuard?: () => void,
+): Promise<T> {
+  if (!res.ok) await handleResponseError(res, sentAuthorization, signal, contextGuard)
 
   if (res.status === 204) return undefined as T
   const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
@@ -263,8 +266,11 @@ async function handleResponse<T>(res: Response, sentAuthorization: string | unde
     throw new ApiError(502, 'Сервис вернул неожиданный ответ. Обновите страницу или повторите позже.')
   }
   try {
-    return await res.json()
+    const value = await res.json()
+    contextGuard?.()
+    return value
   } catch {
+    contextGuard?.()
     throw new ApiError(502, 'Сервис вернул повреждённые данные. Обновите страницу или повторите позже.')
   }
 }
@@ -276,6 +282,21 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   if (activeCompanyId) h['X-Company-Id'] = activeCompanyId
   if (activeOrganizationId) h['X-Organization-Id'] = activeOrganizationId
   return h
+}
+
+/** Граница отложенного действия: проверяется вызывающим до его побочных эффектов. */
+export function captureApiContextGuard(): () => void {
+  const generation = binaryContextGeneration
+  const captured = headers()
+  return () => {
+    const current = headers()
+    if (generation !== binaryContextGeneration
+        || captured.Authorization !== current.Authorization
+        || captured['X-Company-Id'] !== current['X-Company-Id']
+        || captured['X-Organization-Id'] !== current['X-Organization-Id']) {
+      throw new DOMException('Контекст запроса изменился', 'AbortError')
+    }
+  }
 }
 
 /** GET запрос */
@@ -300,15 +321,24 @@ export async function get<T>(
 }
 
 /** POST запрос (JSON) */
-export async function post<T>(path: string, body?: unknown): Promise<T> {
+export async function post<T>(path: string, body?: unknown, options?: { contextGuard?: () => void }): Promise<T> {
+  const contextGuard = options?.contextGuard
+  contextGuard?.()
   if (isDemoMode()) return demoPost<T>(path)
   const requestHeaders = headers({ 'Content-Type': 'application/json' })
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: requestHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  return handleResponse<T>(res, requestHeaders.Authorization)
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch (error) {
+    contextGuard?.()
+    throw error
+  }
+  contextGuard?.()
+  return handleResponse<T>(res, requestHeaders.Authorization, undefined, contextGuard)
 }
 
 /** PATCH запрос */
