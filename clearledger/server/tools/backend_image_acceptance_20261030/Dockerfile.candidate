@@ -1,6 +1,7 @@
 # ROOT-only local candidate, offline context assembled from the frozen manifest.
 # No production Dockerfile/requirements/lock activation. No mutable FROM tags.
-FROM sha256:812e423c722ae3cbac7780e4d8bd1ac54387b27c013c33f89c9c1fdefb7cae51
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
 USER root
 WORKDIR /app
 COPY runtime-wheels/ /candidate-input/wheels/

@@ -30,7 +30,7 @@ ObjectId и lifecycle fixes, P2 и M18 входят в этот новый ROOT 
 прежние375/1 и раздельные3+5 не переименовываются в новый результат.
 
 `full376.py` сохраняет exact16-file selection и6 исходных probes из
-`tests/backend_upgrade_approved.py`. Шесть probes тестируют настоящий raw JWT,
+`tests/backend_upgrade_approved.py`, но собирает их из SELF нового runner, без импорта host-only gate. Шесть probes тестируют настоящий raw JWT,
 PDF/pypdf/app extraction, malformed PDF, multipart bytes/filename/limits и dotenv
 synthetic stream. Переиспользованы observer с exact owned anchor/ENOENT-only,
 atomic outcomes/redaction, CPU/AS/FD/file/log/deadline и kill/reap semantics.
@@ -48,7 +48,7 @@ has_ipv6=False; исходное значение восстанавливает
 
 ## Два образа и два новых контейнера
 
-`Dockerfile.candidate` начинается с retained immutable image
+`Dockerfile.candidate` получает через обязательный ARG BASE_IMAGE verified local name:tag@digest для retained image
 sha256:812e423c722ae3cbac7780e4d8bd1ac54387b27c013c33f89c9c1fdefb7cae51.
 ROOT повторно проверяет archive SHA/размер/layers/free-space до load; скачиваний нет.
 Retained61 wheels (в том числе единственный derived http-ece и pip) создают
@@ -96,6 +96,21 @@ AST review проверил29+35+3 top-level assignments для image paths; н�
 не импортировался и не исполнялся. HOME65534=/nonexistent сохраняется по passwd;
 записи идут только в ROOT-owned /acceptance, bytecode/cache отключены.
 Actual readonly-rootfs/user/mount proofs остаются за ROOT.
+V5 сохраняет дополнительно source-only исправление collection: ровно6 прежних
+AST-identical probes собираются из SELF, остальные15 файлов/370 cases неизменны.
+Импорт старого host gate исключён; его файл и assertions не изменялись.
+ROOT V4 candidate build завершился exit1 за2.001785599s до RUN/app: naked
+FROM sha256:812e был разобран как repository sha256, registry metadata TLS отказал.
+Это setup failure; прежний receipt сохраняется и не выдаётся за Python/app verdict.
+V5 использует ARG BASE_IMAGE и verified local name:tag@digest; acceptance получает
+аналогичный newly built candidate reference. ROOT повторяет build, не functional tests.
+Грамматика описана в [Dockerfile reference](https://docs.docker.com/reference/dockerfile/#from).
+[Buildx0.36.1](https://github.com/docker/buildx/blob/v0.36.1/build/opt.go#L529-L534)
+выбирает PreferLocal для Docker driver при pull=false;
+[BuildKit0.32.2](https://github.com/moby/buildkit/blob/v0.32.2/util/resolver/pool.go#L259-L279)
+проверяет local name:tag и digest. Local cache/build success подтверждает только
+actual ROOT execution; TLS и mirror configuration не меняются.
+
 Отдельным allocation decision msg_49b88fa5deb3 ROOT заменил собственный
 первоначальный плановый reserve16GiB на15GiB; upper bounds load/build не уменьшены.
 Это новое решение ROOT для данной локальной приёмки, не изменение прежних proofs.
