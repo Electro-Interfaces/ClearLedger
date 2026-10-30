@@ -1,11 +1,13 @@
 # M04/P1: общий запрос ведущих встречи
 
-**Статус: NOT RUN.** Runtime-патч и frozen tests/runner подготовлены; выполнение
-pytest, SQL, импорт приложения и приёмка принадлежат ROOT. Полный M04 не закрыт,
-выпуска, активации функций и изменения рабочих данных нет.
+**Статус: ROOT scoped PASS — 8/8 cases, cleanup подтверждён.** ROOT выполнил
+frozen runtime/tests/runner; worker выполнял только source-проверки и compile
+в памяти. Полный M04 не закрыт, выпуска, активации функций и изменения рабочих
+данных нет.
 
 База: `05e462d99009580bd529e3096740fdc077e83dd2`, собственная ветка
 `agent/api-meeting-hosts-query-20261030`. Историческая карта на d70581b4 не меняется.
+Проверенный frozen commit: `c4b245e627c716b09d1868b86a72dae9557145ab`.
 Полная воспроизводимая proposal и доказательства находятся в
 `.artifacts/meeting-hosts-query/` этого рабочего дерева.
 
@@ -37,12 +39,14 @@ repo consumer с monkeypatch этого helper исходники не пока�
 Все пять Python-файлов патча разобраны и скомпилированы только в памяти;
 `git diff --check` выполнен. App tests, pytest collect/gate/SQL worker не запускал.
 
-Новый source-only inventory на frozen prepared commit должен показать
+Новый source-only inventory на frozen commit подтвердил
 **492 файла / 482 AST / 19 sites / 28 bindings**, удалена ровно историческая E19.
-Точные pin, hashes, результат сравнения остальных refs и пути inventory
-фиксируются в приватной proposal после freeze, независимо от прежней карты.
+Остальные 28 полных edge records совпали за исключением перенумерованных ID.
+Pin, hashes и сравнение сохранены в приватных `proposal.json`,
+`inventory-comparison.json`, `inventory/receipt.json`. ROOT независимо
+подтвердил AST-границы трёх runtime-модулей.
 
-## Точный набор для ROOT: 8 cases
+## Принятый ROOT набор: 8 cases
 
 Новые `server/tests/test_meeting_hosts_query.py` содержат семь focused cases:
 три literal goldens (нет/один/несколько marked hosts с приоритетом над
@@ -80,8 +84,35 @@ meeting_hosts и не вычисляет ожидаемый список имё�
 | schema_migrations, 16 файлов | `51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d` |
 | runner | `3a52fc2b89b646fcf467847fb23ad712a1565ab1be2208205215968251c5012b` |
 
-ROOT резервирует disposable DB и даёт отдельный approval port/self-SHA, затем
-исполняет только frozen selection из пустого cwd без .env. Evidence ожидается
-в приватном evidence dir: `meeting-hosts.xml`, `meeting-hosts-boundary.json`,
-лог и подтверждение cleanup БД/временных данных. После фактического результата
-и cleanup обновляется только этот отчёт; до него статус остаётся **NOT RUN**.
+## Фактическая проверка и границы результата
+
+ROOT выполнил только frozen selection на отдельной
+`api_meeting_hosts_test_20261030`: **8 passed in 16.46s**, runner exit 0,
+внешнее время процесса 28.521037242375314s, child reaped. Проверены семь новых
+cases и обязательный прежний тест ведущих/пяти минут. XML содержит ровно восемь
+cases без failure/error/skip; worker проверил это чтением XML, не запуском тестов.
+
+Boundary evidence: `external_delivery_stubbed=true`,
+`network_attempts_blocked=0`; invitation case захватил **3 письма и 3 чат-сообщения**.
+Здесь ноль blocked attempts означает, что попыток запрещённой сети не было;
+само наличие stubs подтверждается отдельным boundary receipt.
+
+ROOT сообщил штатный DROP disposable БД: fresh non-system relations 0,
+connections 0, exists after DROP 0; maxLocks остался 64. Это подтверждение ROOT,
+worker SQL/драйверы/gate/pytest не запускал. Сообщение приёмки:
+`msg_9b4ffb0ef97d`, Dispatch `ctx_53ed903bb0bf`, 30.10.2026.
+
+Evidence находится в ROOT integration worktree, под
+`.artifacts/root-meeting-hosts-review-20261030/`:
+
+| Artifact | SHA-256 |
+|---|---|
+| test-process.json | `3ff52dafdbb97fc03a56acd99ca56ed6c33820e0d930b4c5ff1b03e174bfc6a8` |
+| evidence-test/meeting-hosts.xml | `d87a58792ff326aad7998f89f2fa8a4f7f1c91be98a4224b9c3956621470e082` |
+| evidence-test/meeting-hosts-boundary.json | `19797906aba18ebe69047698285913f56fe4fb5f2cef0e748e5e0a8b4c8e2131` |
+
+Пути и hashes также записаны в приватный
+`.artifacts/meeting-hosts-query/root-evidence-references.json` рабочего дерева
+worker. После actual evidence изменён только этот отчёт; runtime, test и runner
+сохраняют frozen bytes и hashes таблицы выше. Это focused приёмка P1, не полный
+conference/backend suite, не проверка live Jitsi/почты и не завершение всей M04.
