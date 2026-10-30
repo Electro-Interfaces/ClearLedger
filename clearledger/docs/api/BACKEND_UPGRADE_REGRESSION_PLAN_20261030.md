@@ -177,15 +177,21 @@ connect/listeners/datagrams/child subprocesses запрещены.
 
 Deadline supervisor900s, CPU600s, AS2GiB, child file2MiB, openfiles256; scratch
 ≤64MiB/4096files, aggregate log≤2MiB, JUnit/proofs bounded2MiB/file, DB≤256MiB
-pre/post. На failure/timeout/boundary violation supervisor kill process group,
+pre/post. Проверены unchanged file fixtures: запись 1001 файла по одному байту
+в test_doc_text; «large» fixture содержит9bytes; PDF upload samples — короткие
+синтетические bytes, docx — небольшой ZIP. Записи valid>2MiB в выбранных sources
+нет; RLIMIT_FSIZE2MiB сохранён без изменения testcase expectations.
+На failure/timeout/boundary violation supervisor kill process group,
 reap child и сохраняет bounded evidence. Retries, смена pin и application fixes
 автоматически не выполняются. ROOT после просмотра очищает только свои DB/dirs.
 
 Acceptance: collection counts точно равны AST expectation376, pytest exit0,
 каждый testcase passed (SKIP/XFAIL/missing не принимаются), JUnit содержит376 без
 failure/error/skipped, hashes после прогона сохранены, actual HOME не изменён,
-pre-import/boundary/supervisor proofs и log/JUnit SHA записаны. Неудачная boundary
-попытка видна в счётчиках; ROOT рассматривает её отдельно от HTTP deny probes.
+pre-import/boundary/supervisor proofs и log/JUnit SHA записаны. **Нулевые blocked_network/blocked_subprocess/denied_env_reads обязательны
+одновременно в child и независимо в supervisor**: даже подавленная background
+попытка отменяет PASS. Stub sender calls записываются отдельно и могут быть
+ненулевыми. SQL allow counters не считаются нарушением.
 Runner сохраняет full nodeids/outcomes и точный inventory; это private artifacts.
 
 ## Frozen исходники и следующий шаг
@@ -196,7 +202,7 @@ Runner сохраняет full nodeids/outcomes и точный inventory; эт�
 | schema_migrations | `c641925633181647d39f788fd29765322d3a2027f6fcaeaefe533e870d1f1f0e` |
 | tests | `faa034c1241dabd15aceb82f1ed6e90e47a0131b9af6ab0342cf00f7a898e722` |
 
-Runner SHA-256: `362fcbc02461e339ccadab6dd7df4c15c5c28cf8774831b05907bb0e3922a491`.
+Runner SHA-256: `d4377eb31c0823d2cfe4379f32590647f49801dd61d2ed8860c143669d5b9e8f`.
 
 ROOT получает отдельный private frozen proposal с commit, full file hashes,
 источниками16 tools без копирования retained40MB, принятыми installation receipts,
@@ -210,3 +216,13 @@ Docker target/host installation receipts не выдаются за functional P
 independent rebuild/security certification не проверяются этим планом.
 Requirements/Dockerfile/Compose/features/CI, baseline locks, прежние app/tests,
 рабочие данные и другие branches сохранены. Merge/deploy отсутствуют.
+
+
+## Коррекция после ROOT source review
+
+Исходный commit56b4a63a/runnerSHA362fcbc0 и private proposal-v1 сохранены без
+перезаписи. В corrective commit добавлены strict zero-forbidden-counters в двух
+независимых acceptance путях, sender stub counts до fixtures и .env/PG guard до
+импорта application sender modules. RLIMIT проверен против unchanged fixture
+sources; pin/runtime/порядок expected tests и все прежние assertions сохранены.
+Actual execution остаётся ROOT-only; source-only v2 proposal имеет отдельный hash.

@@ -43,6 +43,8 @@ RUNTIME_WITH_PIP = {'aiofiles': '24.1.0', 'aiohappyeyeballs': '2.7.1', 'aiohttp'
 TEST_TOOLS = {'iniconfig': '2.3.1', 'jsonschema': '4.26.0', 'jsonschema-path': '0.5.0', 'jsonschema-specifications': '2025.9.1', 'lazy-object-proxy': '1.13.0', 'openapi-schema-validator': '0.9.0', 'openapi-spec-validator': '0.9.0', 'pathable': '0.6.0', 'pluggy': '1.7.0', 'pygments': '2.21.0', 'pytest': '9.2.0', 'pytest-asyncio': '1.4.1', 'referencing': '0.37.0', 'rfc3339-validator': '0.1.4', 'rpds-py': '2026.9.1', 'six': '1.17.0'}
 EXPECTED_CASES = {'backend_upgrade_approved.py': 6, 'test_api_contracts_context.py': 34, 'test_api_contracts_http.py': 56, 'test_auth.py': 13, 'test_contract_liability.py': 1, 'test_doc_text.py': 9, 'test_docs_portal.py': 22, 'test_docs_register.py': 23, 'test_partner_identity.py': 67, 'test_partner_product_integration.py': 20, 'test_partner_userinfo_wire.py': 14, 'test_product_api.py': 57, 'test_product_http_profile.py': 12, 'test_product_object_ids.py': 27, 'test_product_openapi_http_contract.py': 8, 'test_product_service_openapi.py': 7}
 PREPARATION_RECEIPTS = {'runtime-prepare-proof.json': 'abbd7b18db3ba39bc18ad6ded7158347e8964af1126128472f9b9868a8863a42', 'test-tools-prepare-proof.json': 'f183375c1a42089673fe47824868e0670874aa3a884a32c0a3296cd5990bfe39'}
+FORBIDDEN_COUNTERS = ('blocked_network', 'blocked_subprocess', 'denied_env_reads')
+SENDER_COUNTS = {}
 BOUNDARY = {'blocked_network': 0, 'allowed_pg_connects': 0, 'blocked_subprocess': 0,
             'denied_env_reads': 0, 'db_connections': 0}
 
@@ -151,13 +153,21 @@ def install_boundaries():
                 raise RuntimeError('Reading .env prohibited')
     sys.addaudithook(audit)
     # Low-level socket restriction remains even if a test replaces an HTTP seam.
-    from unittest.mock import AsyncMock, Mock
     import aiohttp
     import aiosmtplib
     import httpx
     import pywebpush
     import requests
+    import smtplib
     stack = ExitStack()
+    def captured(label, result=None, *, asynchronous=False):
+        SENDER_COUNTS[label] = 0
+        def call(*args, **kwargs):
+            SENDER_COUNTS[label] += 1
+            return result
+        async def acall(*args, **kwargs):
+            return call(*args, **kwargs)
+        return acall if asynchronous else call
     def deny(*args, **kwargs):
         BOUNDARY['blocked_network'] += 1
         raise RuntimeError('External sender blocked')
@@ -165,20 +175,19 @@ def install_boundaries():
         return deny(*args, **kwargs)
     from unittest.mock import patch
     for owner, name, replacement in (
-        (aiosmtplib, 'send', AsyncMock(return_value=None)),
-        (pywebpush, 'webpush', Mock(side_effect=deny)),
+        (aiosmtplib, 'send', captured('smtp.aiosmtplib.send', asynchronous=True)),
+        (aiosmtplib.SMTP, 'connect', captured('smtp.aiosmtplib.connect', asynchronous=True)),
+        (smtplib.SMTP, 'connect', captured('smtp.smtplib.connect', (421, 'synthetic delivery disabled'))),
+        (smtplib.SMTP_SSL, 'connect', captured('smtp.smtplib.ssl_connect', (421, 'synthetic delivery disabled'))),
+        (smtplib.SMTP, 'sendmail', captured('smtp.smtplib.sendmail', {})),
+        (smtplib.SMTP, 'send_message', captured('smtp.smtplib.send_message', {})),
+        (pywebpush, 'webpush', captured('push.pywebpush.webpush')),
         (requests.sessions.Session, 'request', deny),
         (httpx.HTTPTransport, 'handle_request', deny),
         (httpx.AsyncHTTPTransport, 'handle_async_request', adeny),
         (aiohttp.ClientSession, '_request', adeny),
     ):
         stack.enter_context(patch.object(owner, name, replacement))
-    # No fixture has run. Import these modules only after env/site/socket guards.
-    from app.services import email_service, notify, doc_text
-    stack.enter_context(patch.object(notify, 'dispatch_async', Mock(return_value=None)))
-    for name in ('send_invite', 'send_access_invite', 'send_notice', 'send_meeting_invite', 'send_password_reset'):
-        stack.enter_context(patch.object(email_service, name, AsyncMock(return_value=False)))
-    stack.enter_context(patch.object(doc_text, '_command', AsyncMock(return_value=b'')))
     import asyncpg
     actual_connect = asyncpg.connect
     async def connect(dsn=None, **kwargs):
@@ -212,6 +221,43 @@ def install_boundaries():
         BOUNDARY['db_connections'] += 1
         return con
     stack.enter_context(patch.object(asyncpg, 'connect', connect))
+    # No fixture has run. Capture application senders before main/conftest imports.
+    # Internal auth/validators/routes are real; only delivery seams are replaced.
+    from app.services import email_service, notify, doc_text
+    for name in ('send_invite', 'send_access_invite', '_deliver', 'send_notice',
+                 'send_meeting_invite', 'send_password_reset'):
+        stack.enter_context(patch.object(email_service, name,
+            captured('email.' + name, False, asynchronous=True)))
+    stack.enter_context(patch.object(notify, 'dispatch_async', captured('notify.dispatch_async')))
+    for name in ('dispatch', 'notify_person', 'tell', 'post_alert'):
+        stack.enter_context(patch.object(notify, name,
+            captured('notify.' + name, asynchronous=True)))
+    # Import aliases after email stubs are installed, then replace public entrypoints.
+    from app.services import task_mail, chat_mail, web_push, chat_ws, mail_send
+    from app import guard as security_guard
+    from starlette.websockets import WebSocket
+    for owner, name, label, result, asynchronous in (
+        (task_mail, 'send_delegation_async', 'taskmail.delegation', None, False),
+        (task_mail, 'send_notice_async', 'taskmail.notice_async', None, False),
+        (task_mail, 'send_notice_checked', 'taskmail.notice_checked', (False, 'synthetic delivery disabled'), True),
+        (chat_mail, 'push_room_mail_async', 'chat.mail', None, False),
+        (web_push, 'push_room_async', 'push.room', None, False),
+        (web_push, '_send_one', 'push.subscription', None, False),
+        (mail_send, 'send_message', 'mail.send_message', {'error': 'synthetic delivery disabled'}, True),
+        (security_guard, '_alert', 'security.alert_delivery', None, True),
+        (chat_ws.ChatConnectionManager, 'broadcast', 'ws.broadcast', None, True),
+        (chat_ws.ChatConnectionManager, '_broadcast_local', 'ws.local', None, True),
+        (chat_ws.ChatConnectionManager, '_publish', 'ws.pg_publish', None, True),
+        (chat_ws.ChatConnectionManager, 'start', 'ws.start', None, True),
+        (chat_ws.ChatConnectionManager, 'stop', 'ws.stop', None, True),
+        (WebSocket, 'send_json', 'ws.send_json', None, True),
+        (WebSocket, 'send_text', 'ws.send_text', None, True),
+        (WebSocket, 'send_bytes', 'ws.send_bytes', None, True),
+    ):
+        stack.enter_context(patch.object(owner, name,
+            captured(label, result, asynchronous=asynchronous)))
+    stack.enter_context(patch.object(doc_text, '_command',
+        captured('isolation.doc_text_external_command', b'', asynchronous=True)))
     return stack
 
 
@@ -302,7 +348,12 @@ def child(approved_sha):
         code = 2
         record['failure_type'] = type(exc).__name__
     finally:
+        if any(BOUNDARY[name] != 0 for name in FORBIDDEN_COUNTERS):
+            code = code or 4
+        if os.environ.get('HOME') != pwd.getpwuid(os.getuid()).pw_dir:
+            code = code or 5
         record.update(status='PASS' if code == 0 else 'FAIL', boundary=dict(BOUNDARY),
+                      sender_counts=dict(SENDER_COUNTS),
                       home_preserved=os.environ.get('HOME') == pwd.getpwuid(os.getuid()).pw_dir)
         write_json(EVIDENCE / 'boundary-proof.json', record)
     return code
@@ -378,6 +429,10 @@ def supervise(approved_sha):
             accepted = (len(cases) == sum(EXPECTED_CASES.values()) and
                     not any(suites.findall('.//' + k) for k in ('failure', 'error', 'skipped')) and
                     json.loads(proof.read_text()).get('status') == 'PASS')
+            boundary = json.loads(proof.read_text())
+            accepted = (accepted and boundary.get('home_preserved') is True and
+                        all(boundary.get('boundary', {}).get(name) == 0 for name in FORBIDDEN_COUNTERS) and
+                        isinstance(boundary.get('sender_counts'), dict) and bool(boundary['sender_counts']))
     except Exception as exc:
         accepted = False
         reason = 'JUnit/proof validation failed: ' + type(exc).__name__
