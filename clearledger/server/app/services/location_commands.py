@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import inspect, select, text
@@ -293,6 +295,8 @@ async def _assert_numbers_free(db, company_id, values, *, except_id=None):
     rows = (await db.execute(select(columns.id, columns.code, columns.station_number,
         columns.extra_metadata).where(columns.company_id == company_id))).all()
     for other in rows:
+        if other.extra_metadata is not None and not isinstance(other.extra_metadata, dict):
+            raise LocationConflict(409, "Номер уже занят текущим или историческим объектом компании")
         md = other.extra_metadata or {}
         # A retired alias remains reserved even for its original point. Current
         # values of that same point are exempt; this is not a new assignment.
@@ -443,11 +447,14 @@ def _with_manual_name_provenance(loc, changes, *, name_intent=None, actor_id=Non
 
 async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None, name_intent=None):
     code_changed = "code" in changes and changes["code"] != loc.code
-    number_changed = "station_number" in changes and _number(changes["station_number"]) != _number(loc.station_number)
+    column_changed = "station_number" in changes and _number(changes["station_number"]) != _number(loc.station_number)
     # Include the snapshot number as well as its materialized column, including
     # explicit null/empty. They may disagree on legacy rows.
+    metadata_changed, next_number = False, None
     if "extra_metadata" in changes:
-        number_changed |= _number((changes["extra_metadata"] or {}).get("number")) != _number((loc.extra_metadata or {}).get("number"))
+        next_number = _number((changes["extra_metadata"] or {}).get("number"))
+        metadata_changed = next_number != _number((loc.extra_metadata or {}).get("number"))
+    number_changed = column_changed or metadata_changed
     if code_changed or number_changed:
         reasons = await freeze_reasons(db, company_id, loc.id)
         if reasons:
@@ -455,7 +462,8 @@ async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None, na
         changes = _with_identifier_history(loc, changes, actor_id=actor_id, source=source)
         await _assert_numbers_free(db, company_id,
             [changes["code"] if code_changed else None,
-             _number(changes.get("station_number")) if number_changed else None], except_id=loc.id)
+             _number(changes["station_number"]) if column_changed else None,
+             next_number if metadata_changed else None], except_id=loc.id)
     changes = _with_manual_name_provenance(loc, changes, name_intent=name_intent,
                                           actor_id=actor_id, source=source)
     applied = {key: {"from": getattr(loc, key), "to": value} for key, value in changes.items()
@@ -463,6 +471,71 @@ async def _apply(db, company_id, loc, changes, *, actor_id=None, source=None, na
     for key, value in changes.items():
         setattr(loc, key, value)
     return Mutation(loc, applied)
+
+
+def _source_number_value(value, *, metadata):
+    """Validate this internal patch's raw scalar without changing the public DTO."""
+    valid = value is None or isinstance(value, str)
+    if metadata and isinstance(value, (int, float)) and not isinstance(value, bool):
+        valid = not isinstance(value, float) or math.isfinite(value)
+    if not valid:
+        raise LocationConflict(422, "Недопустимое значение номера источника")
+    if metadata and isinstance(value, float):
+        # Match the JSONB/driver representation BEFORE reservation/history.
+        # JSONB expands integral exponents and drops a zero's sign. Decimal
+        # reads the JSON lexeme; int(float) would use binary rounding instead.
+        if value == 0:
+            value = 0.0
+        elif "e" in str(value).lower():
+            decimal = Decimal(str(value))
+            if decimal == decimal.to_integral_value():
+                value = int(decimal)
+    if value is not None:
+        try:
+            raw = str(value)
+        except ValueError as exc:
+            raise LocationConflict(422, "Недопустимое значение номера источника") from exc
+        if len(raw) > 60 or "\x00" in raw:
+            raise LocationConflict(422, "Номер источника должен содержать до 60 символов без нулевого байта")
+    return value
+
+
+async def apply_existing_source_number_patch(db, company_id, identifier, patch, locked_set,
+                                            *, actor_id=None, source=None) -> Mutation:
+    """Apply only independent column/metadata numbers under a PREHELD root set.
+
+    No creation, authority, raw-metadata replacement, flush or commit. Caller
+    must admit/flush its pending work first, including freeze facts; subsequent
+    mutations in this root require an explicit caller flush between patches.
+    This clean-entry rule cannot discover arbitrary prior SQL locks or make
+    an unprepared import/unit producer safe.
+    """
+    try:
+        validate_identifier(identifier)
+    except ValueError as exc:
+        raise LocationConflict(422, str(exc)) from exc
+    _require_location_set(db, company_id, identifier, locked_set)
+    if db.new or db.deleted or any(db.is_modified(entity, include_collections=True) for entity in db.dirty):
+        raise LocationConflict(409, "Изменение номера требует отсутствия отложенных изменений в сессии")
+    if not isinstance(patch, dict) or set(patch) - {"station_number", "metadata.number"}:
+        raise LocationConflict(422, "Недопустимое поле номера источника")
+    values = {key: _source_number_value(value, metadata=key == "metadata.number") for key, value in patch.items()}
+    with db.no_autoflush:
+        loc = await locked_visible_in_set(db, company_id, identifier, locked_set)
+        current = loc.extra_metadata
+        column_changed = ("station_number" in values
+                          and _number(values["station_number"]) != _number(loc.station_number))
+        if (current is not None and not isinstance(current, dict)
+                and ("metadata.number" in values or column_changed)):
+            raise LocationConflict(409, "Метаданные объекта повреждены: требуется сверка перед изменением номера")
+        changes = {}
+        if "station_number" in values:
+            changes["station_number"] = values["station_number"]
+        if "metadata.number" in values:
+            metadata = deepcopy(current if current is not None else {})
+            metadata["number"] = values["metadata.number"]
+            changes["extra_metadata"] = metadata
+        return await _apply(db, company_id, loc, changes, actor_id=actor_id, source=source)
 
 
 async def create(db, company_id, identifier, data):
