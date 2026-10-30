@@ -1,6 +1,7 @@
 # M02/M15: synthetic baseline продуктовых read queries, 30.10.2026
 
-Статус: **source preparation; SQL GO не получен, измерений ещё нет**.
+Статус: **первый approved run FAIL на ошибочном ожидании теста; source correction
+готова, повторный SQL GO ещё не получен**. Полный scaling baseline не завершён.
 Общая модернизация M00–M19 не завершена; PR остаётся draft. Merge/deploy,
 runtime optimization, индексы и EXPLAIN не входят в разрешённый состав.
 
@@ -8,8 +9,8 @@ runtime optimization, индексы и EXPLAIN не входят в разре�
 Ветка: `agent/api-product-query-scaling-20261030` в собственном чистом worktree
 `/home/mag/orca/workspaces/ledger-app/api-contract-manual-serialization-20261030`.
 Ownership: только этот документ и `server/tests/test_product_query_scaling.py`.
-SHA-256 теста после source review root (opt-out/expiry):
-`692f3f825d8ef1cb0c4f4791c06c555b860c77a127091ec912365da7dce2d208`.
+SHA-256 теста после поправки machine403/unused SET validation:
+`054f2c99deba32c25459f68688e5f29cfa4b83f8b3ec0bda2635c844620165c2`.
 
 ## Что именно измеряется
 
@@ -93,6 +94,11 @@ SQL shape проверяет tenant/resource/user/document predicates непос
 COUNT и limited SELECT, а не только фильтрацию готового ответа. Скрытые карточки
 не должны гидратироваться. Lookahead ограничен `min(visible_total, pageSize+1)`.
 Verifier-валидация SET ID остаётся включённой и учитывается в числе SQL.
+В частности, machine-document 403 не запрещает scalar SELECT document IDs
+для tenant-проверки неиспользуемого stored document SET. Тест отдельно учитывает
+эти statements, проверяет tenant/ID predicates и запрещает domain COUNT/page/
+entity SELECT, document hydration и выдачу карточек. Это сохранение действующей
+проверки verifier, уже известной existing resource-budget tests.
 
 ## Метрики и пределы интерпретации
 
@@ -101,7 +107,8 @@ transaction-local guards), cursor rowcount либо null при unknown, гид�
 по таблицам, visible total/response rows, фактические HTTP response bytes,
 SHA-256 нормализованных SQL shapes, wall seconds и tracemalloc peak bytes.
 Сырые bind parameters, токены, ключи, персональные данные и SQL с literal values
-не сохраняются. Count-result rowcount равен числу возвращённых scalar rows,
+не сохраняются в structured metrics. Приватный pytest/httpx log может содержать
+синтетические resource IDs/cursors. Count-result rowcount равен числу возвращённых scalar rows,
 **не** числу просмотренных PostgreSQL строк. ORM hydration тоже не измеряет
 heap/index rows examined. Для этих величин нет claims без отдельного EXPLAIN GO.
 
@@ -136,7 +143,8 @@ root отдельным grant. Runner не создаёт БД, не испол�
 не меняет maxlocks/config и не обращается к реальным URL/env/данным.
 Без opt-in обычный pytest import заканчивается module SKIP до app/DB imports;
 в режиме `__main__` отсутствие opt-in остаётся строгим отказом. Module opt-out
-пока не выполнялся: он также ожидает отдельного GO.
+первого approved run: **1 SKIP / EXIT 5** с `--noconftest`, без DB fixtures.
+Новый opt-out после source correction без отдельного GO не запускать.
 
 Runner — сам owned test file в режиме `__main__`; лог/evidence приватны, не Git.
 Команда ниже только спецификация до root GO. Она не меняет HOME, передаёт
@@ -152,7 +160,7 @@ import hashlib, os
 from pathlib import Path
 root = Path('/home/mag/orca/workspaces/ledger-app/api-contract-manual-serialization-20261030')
 test = root / 'clearledger/server/tests/test_product_query_scaling.py'
-assert hashlib.sha256(test.read_bytes()).hexdigest() == '692f3f825d8ef1cb0c4f4791c06c555b860c77a127091ec912365da7dce2d208'
+assert hashlib.sha256(test.read_bytes()).hexdigest() == '054f2c99deba32c25459f68688e5f29cfa4b83f8b3ec0bda2635c844620165c2'
 runtime = Path('/srv/projects/api-modernization-test-env-20261029')
 cwd = runtime / 'product-query-scaling-empty-test'
 upload = runtime / 'product-query-scaling-test-uploads'
@@ -182,15 +190,35 @@ PY
 `--confcutdir=<server>`, private `--basetemp`, `-o junit_family=legacy`,
 private `--junitxml`. JUnit содержит structured `product_query_scaling` property
 для каждого scale; `preflight.json` и `run.log` лежат рядом в private evidence.
+Completed samples дополнительно дописываются в private `samples-scale-N.jsonl`
+вне измеряемого request. Перед отдельным retry старые current artifacts нужно
+сохранить в `attempt-N`; первый run уже сохранён в `attempt-1`.
 Collect/optout/SQL до root GO не запускать. Размер/планы latency не выдаются
 за source proof. Любая правка test после согласования требует нового hash и
 root checkpoint перед следующим запуском.
 
 ## Проверки и дальнейшее решение
 
-До GO разрешены чтение/AST/compile своего test. AST/compile пройдены без импорта
-тестового модуля и без pytest/SQL. Runtime baseline, teardown, guard negatives и
-SQL cardinalities пока **NOT RUN**. Full CI и M00–M19 этим составом не закрыты.
+AST/compile corrected test и diff-check пройдены без импорта модуля/SQL.
+Root выдал первый GO на `b6a955f9`, test SHA
+`692f3f825d8ef1cb0c4f4791c06c555b860c77a127091ec912365da7dce2d208`.
+Preflight: PG `160015`, maxlocks64, otherclients0, fresh own DB 7 765 015 bytes.
+Первый runner: **EXIT 1, 1 FAILED за 37,23 s**. На scale100 выполнены 79 HTTP
+requests (30 list, 10 cursor, 10 positive detail, 27 negative detail, 2 service403).
+Последний assertion ошибочно запрещал обязательный scalar ID validation в
+unused document SET на service403; это defect нового expected-policy assertion,
+а не доказанный runtime defect. Проверки до него не равны PASS всего baseline.
+Scales1000/5000 **NOT RUN**; structured sample metrics до FAIL первоначальная
+версия не успела сохранить, их нельзя восстановить из одних HTTP logs.
+
+Child EXIT/reap подтверждены, shared-conftest teardown без ошибки. После
+SQL_SLOT_RELEASED root отдельно проверил `public/edge tables0`, `conns0`, сделал
+обычный DROP own DB и подтвердил DBexists0/otherclients0/maxlocks64. Worker не
+использовал admin/CREATE/DROP. Первый private evidence:
+`/srv/projects/api-modernization-test-env-20261029/private-product-query-scaling-20261030/attempt-1/`
+(`run.log`, `results.xml`, `preflight.json`, `optout.log`).
+После поправки root требуется свежий CREATE и отдельный literal GO на новый SHA;
+SQL/collect/optout повторно не запускались. Full CI и M00–M19 не закрыты.
 
 После approved run сюда добавляются фактический SHA, PASS/FAIL/SKIP, размеры,
 sample aggregates, ограничения и private evidence paths. Только после реальных
