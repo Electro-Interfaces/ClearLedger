@@ -113,8 +113,9 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     `повод` — `invite`, `cancel` или `move`; для переноса `было` — прежнее
     начало. `только` — известить лишь этих людей (новые участники), `кроме` —
     всех, кроме них. Гостям приглашение уходит своим путём (`/guests`), здесь
-    они получают только отмену и перенос. Тот, кто действует, извещение себе
-    не получает: он и так знает.
+    они получают только отмену и перенос. Тот, кто действует, не получает чат
+    с собой, но получает календарное письмо по своим настройкам: его внешний
+    календарь тоже должен узнать новое время или отмену.
     """
     from app.services import email_service, ics, jitsi, notify, space_time
 
@@ -153,7 +154,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
 
     люди = (await db.execute(select(User).join(
         CalendarAttendee, CalendarAttendee.user_id == User.id).where(
-        CalendarAttendee.event_id == ev.id, User.id != кто.id))).scalars().all()
+        CalendarAttendee.event_id == ev.id))).scalars().all()
     люди = [ч for ч in люди if (только is None or ч.id in только)
             and not (кроме and ч.id in кроме)]
     # Отозванному гостю ни переноса, ни отмены: приглашение у него уже снято.
@@ -189,6 +190,8 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
 
     чатом = письмом = 0
     for человек in люди:
+        if человек.id == кто.id:
+            continue
         try:
             значок = "📅 " if повод == "invite" else "❌ " if отмена else "🕑 "
             await в_личку(db, ev.company_id, кто, человек, значок + строка, тема)
