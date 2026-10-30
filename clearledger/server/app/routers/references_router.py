@@ -3,8 +3,6 @@ CRUD для НСИ (справочники): контрагенты, орган�
 Все ответы в camelCase для прямой совместимости с фронтендом.
 """
 
-import hashlib
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -95,9 +93,13 @@ from app.schemas import (
 
 from app.services.reference_overrides import mark_reference_changes, snapshot_reference_fields
 from app.services.reference_identity import (
-    counterparty_identity, contract_identity, id_key, lock_manual_creation,
+    counterparty_identity, id_key, lock_manual_creation,
 )
 from app.services.contract_usage import contract_usage, usage_by_contract
+from app.services.native_contract_commands import create_native_contract
+from app.services.reference_validation import (
+    _CONTRACT_REQ_FIELDS, _check_type_code, _parse_uuid, _req_val, _validate_contract_parties,
+)
 router = APIRouter(prefix="/references", tags=["НСИ (Справочники)"])
 
 
@@ -112,11 +114,6 @@ def _ts(dt: datetime | None) -> str:
     return dt.isoformat()
 
 
-def _parse_uuid(val: str, label: str = "ID") -> uuid.UUID:
-    try:
-        return uuid.UUID(val)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Невалидный {label}")
 
 
 # ---------------------------------------------------------------------------
@@ -750,19 +747,8 @@ async def delete_nomenclature(
 # Contract (Договоры)
 # ---------------------------------------------------------------------------
 
-_CONTRACT_REQ_FIELDS = {
-    "signed": "signed", "signedAt": "signed_at", "paymentTermDays": "payment_term_days",
-    "isStateContract": "is_state_contract", "igk": "igk", "responsibleId": "responsible_id",
-    "signerOur": "signer_our", "signerOurPosition": "signer_our_position", "signerCp": "signer_cp",
-    "signerCpPosition": "signer_cp_position", "signerCpBasis": "signer_cp_basis",
-}
 
 
-def _req_val(api: str, v):
-    # Пустая строка — очистка поля; ответственный — UUID пользователя.
-    if v == "" or v is None:
-        return None
-    return _parse_uuid(v) if api == "responsibleId" else v
 
 
 def _contract_resp(c: Contract) -> ContractResponse:
@@ -819,15 +805,6 @@ async def list_contracts(
     return out
 
 
-async def _check_type_code(db: AsyncSession, code: str | None) -> str | None:
-    """Вид договора — только из справочника contract_types."""
-    if not code:
-        return None
-    from sqlalchemy import text as _t
-    ok = (await db.execute(_t("SELECT 1 FROM contract_types WHERE code = :c AND is_active"), {"c": code})).first()
-    if not ok:
-        raise HTTPException(status_code=422, detail=f"Неизвестный вид договора: {code}")
-    return code
 
 
 @router.get("/contract-types")
@@ -842,16 +819,6 @@ async def list_contract_types(
     return [{"code": r["code"], "label": r["label"], "gkBasis": r["gk_basis"], "direction": r["direction"]} for r in rows]
 
 
-async def _validate_contract_parties(db, company_id, counterparty_id, organization_id):
-    cp_id = _parse_uuid(str(counterparty_id), "контрагента")
-    org_id = _parse_uuid(str(organization_id), "организации")
-    cp = await db.get(Counterparty, cp_id)
-    if cp is None or id_key(cp.company_id) != id_key(company_id):
-        raise HTTPException(400, "Контрагент не найден в справочнике пространства")
-    org = await db.get(Organization, org_id)
-    if org is None or id_key(org.company_id) != id_key(company_id):
-        raise HTTPException(400, "Организация не найдена в справочнике пространства")
-    return cp_id, org_id
 
 
 @router.post(
@@ -864,59 +831,7 @@ async def create_contract(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_member(body.company_id, current_user, db)
-    cp_id, org_id = await _validate_contract_parties(
-        db, cid, body.counterpartyId, body.organizationId)
-    identity = contract_identity(body.number, body.date, body.type)
-    request_hash = hashlib.sha256(json.dumps(
-        body.model_dump(mode="json", exclude={"company_id", "creationKey"}),
-        sort_keys=True, separators=(",", ":"),
-    ).encode()).hexdigest() if body.creationKey else None
-    if identity or body.creationKey:
-        await lock_manual_creation(db, cid, "contract")
-    if body.creationKey:
-        previous = (await db.execute(select(Contract).where(
-            Contract.company_id == cid, Contract.creation_key == body.creationKey,
-        ))).scalar_one_or_none()
-        if previous is not None:
-            if previous.creation_actor_id != current_user.id or previous.creation_request_hash != request_hash:
-                raise HTTPException(409, "Ключ создания договора уже использован с другими реквизитами")
-            return _contract_resp(previous)
-    if identity:
-        candidates = (await db.execute(select(Contract).where(
-            Contract.company_id == cid, Contract.counterparty_id == cp_id,
-            Contract.organization_id == org_id,
-        ))).scalars().all()
-        duplicates = [c for c in candidates if contract_identity(c.number, c.date, c.type) == identity]
-        if duplicates:
-            raise HTTPException(409, "Договор с такими сторонами и реквизитами уже существует: "
-                                + ", ".join(sorted(str(c.id) for c in duplicates)))
-    c = Contract(
-        company_id=cid,
-        creation_key=body.creationKey,
-        creation_actor_id=current_user.id if body.creationKey else None,
-        creation_request_hash=request_hash,
-        number=body.number,
-        date=body.date,
-        counterparty_id=cp_id,
-        organization_id=org_id,
-        type=body.type,
-        type_code=await _check_type_code(db, body.typeCode),
-        amount_limit=body.amountLimit,
-        kind=body.kind,
-        currency=body.currency,
-        valid_until=body.validUntil,
-        vat_rate=body.vatRate,
-        amount_incl_vat=body.amountInclVat,
-        settlement_kind=body.settlementKind,
-        comment=body.comment,
-        basis=body.basis,
-        is_closed=body.isClosed,
-        scope_type=body.scopeType,
-        **{col: _req_val(api, getattr(body, api)) for api, col in _CONTRACT_REQ_FIELDS.items()},
-    )
-    db.add(c)
-    await db.flush()
+    c = await create_native_contract(db, body, current_user)
     return _contract_resp(c)
 
 
