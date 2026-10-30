@@ -76,6 +76,17 @@ app.database импортируются для моделей; утвержде�
 драйверы БД, app.main, сервисы-отправители, DNS, connect, bind, datagram и
 дочерние процессы запрещены. Файлы `.env`, `.env.*` и каталоги секретов читать
 нельзя. Никакого разрешённого сетевого адреса или SQL-соединения нет.
+Статически разобранная цепочка импортов приложения содержит ровно 20 модулей:
+app, api_contracts с context/routing, config, database, models,
+models_product_budget, security_context, product_api с access/app/budget/dto/
+files/monitoring/queries, services с ops_monitor_context/session_scope.
+Последние два сервиса определяют функции и константу MSK; при импорте они
+не выполняют запросы. session_scope импортирует модели, а app.scope импортируется
+только внутри невызванной session_scope_conds. Родитель app.services пуст.
+Все прочие импорты приложения запрещены. Дополнительный profile guard запрещает
+любой вызов функции в трёх разрешённых service-модулях; реальные модули и
+обработчики не подменяются. В boundary-proof фиксируется точный фактический
+список 20 модулей и отсутствие исполнения сервисных функций.
 Только во время пяти заранее одобренных импортов aiohttp/aiosmtplib/httpx/
 pywebpush/requests значение socket.has_ipv6 временно False; exact restore
 происходит в finally до app-импортов, bind всё время запрещён.
@@ -99,6 +110,12 @@ old/new попытка v2 (1.5712869465/1.4284316627 с) также остано
 JUnit и logging направлены в evidence, tempfile тоже; faulthandler дублирует
 существующий stderr fd, assertion rewriting под `-B` не пишет pyc, tmpdir
 создаёт каталог только при запросе fixture, а выбранные тесты его не запрашивают.
-Повторная матрица v3 ожидает запуска ROOT после заморозки;
+Попытка v3 дошла до collection и завершилась ERROR без вызовов тестов:
+old/new pytest 1.66/1.70 с, outer 3.685/3.588 с. Blanket-запрет app.services
+заблокировал импорт monitoring → ops_monitor_context → session_scope.
+Доказательства сохранены в `.artifacts/root-objectid-schema-review-v3-20261030`.
+Для v4 применён описанный выше точный список 20 модулей с отдельным запретом
+исполнения сервисных функций. Продукт и тесты по-прежнему неизменны с de255800.
+Повторная матрица v4 ожидает запуска ROOT после заморозки;
 общие 375 успешных runtime/access/library проверок повторно не запускались.
 Никаких изменений общих папок, старых доказательств, merge или выпуска нет.
