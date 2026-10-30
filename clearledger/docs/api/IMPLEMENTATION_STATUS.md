@@ -107,8 +107,10 @@ Contract SELECT перечитывается после прежнегоflush/lo
 
 Общая native/registry команда сохраняет уходящие code/number aliases в
 numberHistory, не меняя ключ объекта и не выдавая это за valid-time ledger.
-Root190PASS31.64с; импорты/bulk и проверка глобальной занятости при scoped ORM
-остаются отдельными границами.
+Root190PASS31.64с. Повторный review выявил смешение технического code и номера
+в numberHistory: разделение доменов и отрицательные session-reader controls
+ещё требуются. Company-wide collision при scoped ORM исправляется отдельно;
+импорты/bulk остаются открытой границей.
 
 ## Что остаётся
 
