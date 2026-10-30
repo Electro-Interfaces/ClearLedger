@@ -29,8 +29,8 @@ management runtime hooks: 90/90 PASS. Семь исправлений дейст
 ошибочный expected UID фикстуры; старые MIME/hosts assertions сохранены.
 Все процессы завершены, выделенные БД удалены обычным DROP.
 
-Следующие потоки: M06-R3 типы/сроки договоров и scoped metadata; M04-P4 общий
-calendar selector (97/97 PASS на ветке исполнителя, интеграция ожидается);
+Следующие потоки: M06-R3 типы/сроки договоров и scoped metadata; M04-P5 владельцы
+management task helpers (P4 calendar selector принят, 97/97 PASS);
 M00/M17 сохранение трёх frontend consumers. Новый контракт15 операций ещё
 не принят. Полного CI текущего совместного HEAD и рабочего выпуска нет.
 
