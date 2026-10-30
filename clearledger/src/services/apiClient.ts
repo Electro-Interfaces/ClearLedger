@@ -48,9 +48,13 @@ export const isApiEnabled = (): boolean => isDemoMode() || !!BASE_URL
 // «по юзеру» (fuel/store/…) раньше игнорировали выбор компании в шапке и всегда
 // показывали дефолтную; теперь следуют выбору. Устанавливается из CompanyContext.
 let activeCompanyId: string | null = null
+// Только binary-запросы проверяют поколение. Оно замечает A→B→A и новый
+// вход с тем же токеном; JSON-контракты и их жизненный цикл не меняются.
+let binaryContextGeneration = 0
 
 /** Прокинуть активную компанию в HTTP-клиент (заголовок X-Company-Id). */
 export function setApiCompany(id: string | null): void {
+  if (activeCompanyId !== (id || null)) binaryContextGeneration++
   activeCompanyId = id || null
 }
 
@@ -63,6 +67,7 @@ let activeOrganizationId: string | null = localStorage.getItem(ORG_KEY)
 
 /** Прокинуть активную организацию в HTTP-клиент (заголовок X-Organization-Id). */
 export function setApiOrganization(id: string | null): void {
+  if (activeOrganizationId !== (id || null)) binaryContextGeneration++
   activeOrganizationId = id || null
   if (id) localStorage.setItem(ORG_KEY, id)
   else localStorage.removeItem(ORG_KEY)
@@ -80,12 +85,14 @@ export function getToken(): string | null {
 
 /** Сохранить токен */
 export function setToken(token: string): void {
+  binaryContextGeneration++
   cancelSessionRedirect()
   localStorage.setItem(TOKEN_KEY, token)
 }
 
 /** Удалить токен */
 export function clearToken(): void {
+  binaryContextGeneration++
   localStorage.removeItem(TOKEN_KEY)
 }
 
@@ -97,32 +104,31 @@ export function clearToken(): void {
  * здесь имя эту работу перечеркнёт и вернёт папку одинаковых файлов. Аргумент —
  * запасной вариант на случай, если заголовка нет.
  */
-export async function downloadFile(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: headers() })
-  if (!res.ok) {
-    // Тело ошибки — это JSON с `detail`, а не файл: показать человеку причину
-    // отказа лучше, чем сохранить на диск страницу с ошибкой.
-    let причина = `Выгрузка не удалась (${res.status})`
-    try {
-      const тело = await res.json()
-      if (тело?.detail) причина = String(тело.detail)
-    } catch { /* тело не JSON — остаётся код ответа */ }
-    throw new ApiError(res.status, причина)
-  }
+export async function downloadFile(path: string, fallbackName: string, options?: { signal?: AbortSignal }): Promise<void> {
+  const { res, blob, guard } = await fetchBinary(path, options?.signal)
   const заголовок = res.headers.get('Content-Disposition') ?? ''
   const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(заголовок)
   const ascii = /filename="([^"]+)"/i.exec(заголовок)
-  const имя = utf8 ? decodeURIComponent(utf8[1]) : ascii?.[1] ?? fallbackName
+  let имя = ascii?.[1] ?? fallbackName
+  if (utf8) {
+    try { имя = decodeURIComponent(utf8[1]) || имя } catch { /* повреждённый filename*: запасное имя */ }
+  }
 
-  const blob = await res.blob()
+  guard()
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = имя
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  let a: HTMLAnchorElement | undefined
+  try {
+    guard()
+    a = document.createElement('a')
+    a.href = url
+    a.download = имя
+    guard()
+    document.body.appendChild(a)
+    guard()
+    a.click()
+  } finally {
+    try { a?.remove() } finally { URL.revokeObjectURL(url) }
+  }
 }
 
 export class ApiError extends Error {
@@ -187,7 +193,9 @@ export function isPublicPage(pathname: string): boolean {
   return PUBLIC_PAGES.some((s) => p.endsWith(s.replace(/\/$/, '')) || p.includes(s))
 }
 
-async function handleResponse<T>(res: Response, sentAuthorization: string | undefined, signal?: AbortSignal): Promise<T> {
+async function handleResponseError(
+  res: Response, sentAuthorization: string | undefined, signal?: AbortSignal, guard?: () => void,
+): Promise<void> {
   if (!res.ok) {
     let detail = res.statusText
     let body: Record<string, unknown> | undefined
@@ -197,6 +205,10 @@ async function handleResponse<T>(res: Response, sentAuthorization: string | unde
       // ошибку было видно, а что именно сломалось, приходилось искать в логах.
       detail = (body?.detail as string) || JSON.stringify(body) || res.statusText
     } catch { /* ignore */ }
+
+    // Для binary отмена/смена контекста важнее позднего HTTP-ответа,
+    // особенно 401: прежний ответ не должен завершить новую сессию.
+    guard?.()
 
     // Parsing the body is asynchronous too: compare the exact Bearer sent by
     // this request with the session that is current now, after that await.
@@ -240,6 +252,10 @@ async function handleResponse<T>(res: Response, sentAuthorization: string | unde
 
     throw new ApiError(res.status, detail)
   }
+}
+
+async function handleResponse<T>(res: Response, sentAuthorization: string | undefined, signal?: AbortSignal): Promise<T> {
+  if (!res.ok) await handleResponseError(res, sentAuthorization, signal)
 
   if (res.status === 204) return undefined as T
   const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
@@ -375,10 +391,34 @@ export async function upload<T>(
   })
 }
 
-/** Скачать файл (blob) */
-export async function downloadBlob(path: string): Promise<Blob> {
-  if (isDemoMode()) return demoWrite<Blob>()
-  const res = await fetch(`${BASE_URL}${path}`, { headers: headers() })
-  if (!res.ok) throw new ApiError(res.status, res.statusText)
-  return res.blob()
+/** Общий binary transport: снимок заголовков и проверка каждого await. */
+async function fetchBinary(path: string, signal?: AbortSignal) {
+  signal?.throwIfAborted()
+  if (isDemoMode()) return demoWrite<never>()
+  const requestHeaders = headers()
+  const generation = binaryContextGeneration
+  const guard = () => {
+    signal?.throwIfAborted()
+    const currentHeaders = headers()
+    if (generation !== binaryContextGeneration
+        || requestHeaders.Authorization !== currentHeaders.Authorization
+        || requestHeaders['X-Company-Id'] !== currentHeaders['X-Company-Id']
+        || requestHeaders['X-Organization-Id'] !== currentHeaders['X-Organization-Id']) {
+      throw new DOMException('Контекст выгрузки изменился', 'AbortError')
+    }
+  }
+  const res = await fetch(`${BASE_URL}${path}`, { headers: requestHeaders, signal })
+  guard()
+  await handleResponseError(res, requestHeaders.Authorization, signal, guard)
+  guard()
+  const blob = await res.blob()
+  guard()
+  return { res, blob, guard }
+}
+
+/** Скачать файл (blob); прежний вызов без options остаётся совместимым. */
+export async function downloadBlob(path: string, options?: { signal?: AbortSignal }): Promise<Blob> {
+  const { blob, guard } = await fetchBinary(path, options?.signal)
+  guard()
+  return blob
 }
