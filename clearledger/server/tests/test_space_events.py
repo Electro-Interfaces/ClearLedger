@@ -119,6 +119,14 @@ def signed_delivery(monkeypatch):
         clients.append(client)
         return client
     monkeypatch.setattr(space_events.httpx, "AsyncClient", mock_client)
+    # Existing signing/outbox cases record bytes at the new external send seam.
+    # Actual destination/TLS/proxy/redirect conformance lives in boundary tests.
+    from app.services import webhook_delivery
+    async def recorded_external(url, *, body, headers, timeout):
+        async with mock_client(timeout=timeout) as client:
+            response = await client.post(url, content=body, headers=headers)
+        return response.status_code
+    monkeypatch.setattr(webhook_delivery, "send", recorded_external)
     return SimpleNamespace(sub=sub, row=row, clock=clock, requests=requests, outcomes=outcomes,
         key=secret_bytes, secret=secret, clients=clients)
 
