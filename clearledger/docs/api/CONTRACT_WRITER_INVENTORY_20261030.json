@@ -1,0 +1,3123 @@
+{
+  "call_edges": [
+    {
+      "calls": [
+        {
+          "ast_sha256": "a1ce6d96b2ba34a6e8ead8fb7be28efe7842ac1bd942049d890dd2027063650a",
+          "column": 24,
+          "line": 489
+        }
+      ],
+      "from": "channel-http",
+      "id": "E01",
+      "resolution": "direct call passed to asyncio.create_task",
+      "spelling": "_run_channel_background",
+      "to": "channel-background"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "9baddcebbded3cbf950a17adf27f480ca12fd033d31d74d4e5f6da8f69749bb4",
+          "column": 27,
+          "line": 341
+        }
+      ],
+      "from": "channel-background",
+      "id": "E02",
+      "resolution": "import alias",
+      "spelling": "orchestrate_channel",
+      "to": "channel-run"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "91d0a99d829d3377885a7525771326992868a26d070c71d48eebffb7fd4cb067",
+          "column": 23,
+          "line": 659
+        }
+      ],
+      "from": "channel-run",
+      "id": "E03",
+      "resolution": "direct local",
+      "spelling": "_dispatch",
+      "to": "channel-dispatch"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "2cd1fe96e71a9a74b88542027cbb438f456e4af8550e11e5fc24611cdf7e1239",
+          "column": 21,
+          "line": 729
+        }
+      ],
+      "from": "channel-dispatch",
+      "id": "E04",
+      "resolution": "direct branch",
+      "spelling": "_run_reestr",
+      "to": "channel-reestr"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "9a5df85d7bb2f825af976f97e73602684f2b6169d4d4f54a044c2c8720e7506a",
+          "column": 16,
+          "line": 497
+        },
+        {
+          "ast_sha256": "9a5df85d7bb2f825af976f97e73602684f2b6169d4d4f54a044c2c8720e7506a",
+          "column": 24,
+          "line": 475
+        }
+      ],
+      "from": "channel-reestr",
+      "id": "E05",
+      "resolution": "import binding",
+      "spelling": "run_reestr_file",
+      "to": "run-file"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "970a9daebea3d1ba5b2ef4750548316af2735863d52277e68fe3e55117c6b82a",
+          "column": 20,
+          "line": 1243
+        }
+      ],
+      "from": "run-file",
+      "id": "E06",
+      "resolution": "import binding in svod branch",
+      "spelling": "ingest_reestr",
+      "to": "legacy"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "b22ac7db4e5b5747fbf81217286b7ff52fff33533fd0b5701e7d2b0b9966344c",
+          "column": 20,
+          "line": 1245
+        }
+      ],
+      "from": "run-file",
+      "id": "E07",
+      "resolution": "direct branch",
+      "spelling": "ingest_svodnaya",
+      "to": "svodnaya"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "694ec16b1a50929e355e63131e1b1ff771fc004d9a6d69a7d0f1aecd9aba8eef",
+          "column": 20,
+          "line": 1249
+        }
+      ],
+      "from": "run-file",
+      "id": "E08",
+      "resolution": "direct branch",
+      "spelling": "ingest_arenda",
+      "to": "arenda"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "d2ffe980d48c4842f34eea81d8fa6003fdaeb5aa2205318c00c315c0a1af071c",
+          "column": 20,
+          "line": 1251
+        }
+      ],
+      "from": "run-file",
+      "id": "E09",
+      "resolution": "direct branch",
+      "spelling": "ingest_tariffs",
+      "to": "tariffs"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "926d3534209860313c5fbccf674a5387664e505dd254a4c9eea1d0beaa339216",
+          "column": 29,
+          "line": 725
+        },
+        {
+          "ast_sha256": "715dbed5d52cec758db0ce38be03db4f823473287058e563d8e0aef9c5527998",
+          "column": 29,
+          "line": 744
+        },
+        {
+          "ast_sha256": "a29d0001470e47c07120aeb161b6cb617775147ad9415d3344aee6efbcf00ddc",
+          "column": 29,
+          "line": 763
+        }
+      ],
+      "from": "svodnaya",
+      "id": "E10",
+      "resolution": "local instance constructed as L2Cache",
+      "spelling": "l2.contract",
+      "to": "l2"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "3b86afb88859841de95a203964849b038706c872a399d4326af69e1118820895",
+          "column": 25,
+          "line": 830
+        }
+      ],
+      "from": "arenda",
+      "id": "E11",
+      "resolution": "local instance constructed as L2Cache",
+      "spelling": "l2.contract",
+      "to": "l2"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "5d53fc52287d0bb7a1ab67f0a150d05e048401a630d7c808d71fc5b80bc30065",
+          "column": 29,
+          "line": 931
+        }
+      ],
+      "from": "tariffs",
+      "id": "E12",
+      "resolution": "local instance constructed as L2Cache",
+      "spelling": "l2.contract",
+      "to": "l2"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "e73d57ba2cd37814b96b499076e2703db9bb9ab6d7da66ba46abab2e8656fe3a",
+          "column": 19,
+          "line": 97
+        }
+      ],
+      "from": "corp-http",
+      "id": "E13",
+      "resolution": "import binding",
+      "spelling": "enrich_sessions_with_orgs",
+      "to": "org-enrich"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "b206457ce984c4566a91b54d19eb69454f0e8d08fdcd11b09203af5cc4dfb075",
+          "column": 10,
+          "line": 602
+        }
+      ],
+      "from": "org-enrich",
+      "id": "E14",
+      "resolution": "direct local",
+      "spelling": "_sync_corporate_contracts",
+      "to": "corporate"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "65c9b337b2cf1a4372e656b55a5028508e31d0bf0e478a8a8a9ded95129aedb7",
+          "column": 16,
+          "line": 230
+        }
+      ],
+      "from": "onec-http",
+      "id": "E15",
+      "resolution": "local instance constructed as OneCSyncService",
+      "spelling": "service.sync_catalogs",
+      "to": "onec-catalogs"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "65c9b337b2cf1a4372e656b55a5028508e31d0bf0e478a8a8a9ded95129aedb7",
+          "column": 10,
+          "line": 307
+        }
+      ],
+      "from": "onec-full",
+      "id": "E16",
+      "resolution": "local instance constructed as OneCSyncService",
+      "spelling": "service.sync_catalogs",
+      "to": "onec-catalogs"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "b19baeb1b7611568287214ec947d344ee15583340cd772fd0a9ec324f72c64d1",
+          "column": 45,
+          "line": 297
+        }
+      ],
+      "from": "onec-catalogs",
+      "id": "E17",
+      "resolution": "class member spelling",
+      "spelling": "self._sync_contracts",
+      "to": "onec"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "a15902c340db6f6ab6eb94919d6ba7165eed443f3e16380dc343920bee22c937",
+          "column": 21,
+          "line": 206
+        }
+      ],
+      "from": "liability-http",
+      "id": "E18",
+      "resolution": "module binding",
+      "spelling": "contract_liability.set_liability",
+      "to": "liability"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "abf2f2ca8163afa75516be614566e7e65a9b2d21487b9cf52973e354fe60de09",
+          "column": 20,
+          "line": 700
+        }
+      ],
+      "from": "term-create-http",
+      "id": "E19",
+      "resolution": "module binding",
+      "spelling": "ops_terms.create_term",
+      "to": "term-create"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "047604b2eb55fd5f95ba9e63c298c32dd780e5b1b44d6a26ea6848b8f26a2000",
+          "column": 20,
+          "line": 725
+        }
+      ],
+      "from": "term-update-http",
+      "id": "E20",
+      "resolution": "module binding",
+      "spelling": "ops_terms.update_term",
+      "to": "term-update"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "c33e05b6194a0cb8f61c139823767df6f689849f9ba73fe223156d570908b8e7",
+          "column": 23,
+          "line": 744
+        }
+      ],
+      "from": "term-delete-http",
+      "id": "E21",
+      "resolution": "module binding",
+      "spelling": "ops_terms.delete_term",
+      "to": "term-delete"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "c6e6999d70eea5f386c4ee92ea3c0682e6a4bf06c704d3f2c137554d185a9a8e",
+          "column": 4,
+          "line": 1002
+        }
+      ],
+      "from": "native-patch",
+      "id": "E22",
+      "resolution": "import binding",
+      "spelling": "mark_reference_changes",
+      "to": "mark"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "86ff5c61190be40bd1741af95bb34bd441457ef02056a1a3c054e4e075ee6106",
+          "column": 20,
+          "line": 1364
+        }
+      ],
+      "from": "onec",
+      "id": "E23",
+      "resolution": "import binding",
+      "spelling": "apply_import_values",
+      "to": "import-values"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "a836b23856724ab7614fe9609e719dfdab4a17c97faf343ed0a7c6d2cde57b19",
+          "column": 10,
+          "line": 143
+        }
+      ],
+      "from": "prepare-db",
+      "id": "E24",
+      "resolution": "import binding",
+      "spelling": "create_all",
+      "to": "bootstrap"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "d50878a2ec6681c81d65a9e7c0803d276fd8028e2e79c8983d7ac3e885daf37b",
+          "column": 16,
+          "line": 1337
+        }
+      ],
+      "from": "site-link-http",
+      "id": "E25",
+      "resolution": "module binding",
+      "spelling": "ezs_project.link_contract",
+      "to": "site-link"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "f1696b828ca6c2cfd24ebbdf5ebb01e7bfdd3abdea8f2e5605b7e2a42e39366d",
+          "column": 14,
+          "line": 258
+        }
+      ],
+      "from": "startup",
+      "id": "E26",
+      "resolution": "direct local",
+      "spelling": "_prepare_database_once",
+      "to": "prepare-once"
+    },
+    {
+      "calls": [
+        {
+          "ast_sha256": "6a934d3e4a5956069bdc87e29e29747cfce932b1e3e5611d4a3f6062266c8855",
+          "column": 10,
+          "line": 215
+        },
+        {
+          "ast_sha256": "6a934d3e4a5956069bdc87e29e29747cfce932b1e3e5611d4a3f6062266c8855",
+          "column": 14,
+          "line": 199
+        }
+      ],
+      "from": "prepare-once",
+      "id": "E27",
+      "resolution": "direct local",
+      "spelling": "_prepare_database",
+      "to": "prepare-db"
+    }
+  ],
+  "context_documents": [
+    {
+      "commit": "eb5cdc513275e428e004f134e6b16d417d6f135e",
+      "path": "clearledger/docs/api/contract-manual-freshness-20261030.md",
+      "repository": "ledger",
+      "sha256": "cdb9fd4fe8be1f52153e79a68a861ac307fd21866bc982865ca82e405d940aea"
+    },
+    {
+      "commit": "eb5cdc513275e428e004f134e6b16d417d6f135e",
+      "path": "clearledger/docs/api/contract-manual-serialization-20261030.md",
+      "repository": "ledger",
+      "sha256": "cf050c301de91aec1e1e37423b9cbc7ac7f5c9a7b40e154d3a7617b70df34c78"
+    },
+    {
+      "commit": "eb5cdc513275e428e004f134e6b16d417d6f135e",
+      "path": "clearledger/docs/api/counterparty-commands-20261030.md",
+      "repository": "ledger",
+      "sha256": "6ecfedf9e39aaad5a48be165db7119335ea044b1a86dd312a2432dac4ca7c2e2"
+    },
+    {
+      "commit": "eb5cdc513275e428e004f134e6b16d417d6f135e",
+      "path": "clearledger/docs/api/corporate-counterparty-commands-20261030.md",
+      "repository": "ledger",
+      "sha256": "aacdc248a284f634c19f4d0fe822a05d17ecf211c4a8dce49af32009f56fa40a"
+    },
+    {
+      "commit": "eb5cdc513275e428e004f134e6b16d417d6f135e",
+      "path": "clearledger/docs/api/IMPLEMENTATION_STATUS.md",
+      "repository": "ledger",
+      "sha256": "cdf0c23440abb15ea860c7fe70e660516892cebfae38bc3daad86f856e092d51"
+    },
+    {
+      "commit": "af80398398b5d625102b8d374f4ac6b9d58a4133",
+      "path": "docs/API-MODERNIZATION-PLAN.md",
+      "repository": "ecosystem-deploy",
+      "sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "working_equal_git": true,
+      "working_snapshot_sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352"
+    },
+    {
+      "commit": "af80398398b5d625102b8d374f4ac6b9d58a4133",
+      "path": "docs/api/execution-20261029/STATUS.md",
+      "repository": "ecosystem-deploy",
+      "sha256": "49e11e9d2c09e8f758cd8eb3232701dd3cf93f9a3e96dc89374734698815f960",
+      "working_equal_git": true,
+      "working_snapshot_sha256": "49e11e9d2c09e8f758cd8eb3232701dd3cf93f9a3e96dc89374734698815f960"
+    }
+  ],
+  "contract_model_columns": [
+    "amount_incl_vat",
+    "amount_limit",
+    "basis",
+    "comment",
+    "company_id",
+    "counterparty_id",
+    "created_at",
+    "creation_actor_id",
+    "creation_key",
+    "creation_request_hash",
+    "currency",
+    "date",
+    "external_ref",
+    "id",
+    "igk",
+    "is_closed",
+    "is_state_contract",
+    "kind",
+    "liability",
+    "manual_overrides",
+    "number",
+    "organization_id",
+    "payment_term_days",
+    "raw",
+    "responsible_id",
+    "scope_type",
+    "settlement_kind",
+    "signed",
+    "signed_at",
+    "signer_cp",
+    "signer_cp_basis",
+    "signer_cp_position",
+    "signer_our",
+    "signer_our_position",
+    "title",
+    "type",
+    "type_code",
+    "updated_at",
+    "valid_until",
+    "vat_rate"
+  ],
+  "countercases": [
+    {
+      "decision": "accepted both transaction orders and changed/same upstream; preserve 117 suite, not rerun",
+      "id": "CC01",
+      "references": [
+        "test-CC01"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "preserve no-autoflush barrier before pending write",
+      "id": "CC02",
+      "references": [
+        "test-CC02"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "preserve fresh membership/admission after waiting",
+      "id": "CC03",
+      "references": [
+        "test-CC03"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "same upstream is not evidence of persisted overwrite",
+      "id": "CC04",
+      "references": [
+        "test-CC04"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "same key replay; changed intent conflict",
+      "id": "CC05",
+      "references": [
+        "test-CC05"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "ContractDoc/document source key not permission to merge",
+      "id": "CC06",
+      "references": [
+        "test-CC06"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "ambiguous not first candidate",
+      "id": "CC07",
+      "references": [
+        "test-CC07"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "manual identity source retained",
+      "id": "CC08",
+      "references": [
+        "test-CC08"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "new terms version preserves closed history",
+      "id": "CC09",
+      "references": [
+        "test-CC09"
+      ],
+      "status": "source-preserved; not executed"
+    },
+    {
+      "decision": "ORM Contract vs DTO response; five actual imported constructors, dto.Contract excluded",
+      "id": "SC01",
+      "references": [
+        "native-create",
+        "dto-project",
+        "model",
+        "dto"
+      ],
+      "status": "current source distinction; no runtime assertion"
+    },
+    {
+      "decision": "legacy missing number skips; L2 missing number creates б/н; corporate matches type only: preserve asymmetry",
+      "id": "SC02",
+      "references": [
+        "legacy",
+        "l2",
+        "corporate"
+      ],
+      "status": "current source distinction; no runtime assertion"
+    },
+    {
+      "decision": "native markers vs raw shop UPDATE bypass: source difference, not proved persisted loss",
+      "id": "SC03",
+      "references": [
+        "native-patch",
+        "shop-contract",
+        "onec"
+      ],
+      "status": "current source distinction; no runtime assertion"
+    },
+    {
+      "decision": "contract-document source key and project promote write DocCard; do not count as Contract creation",
+      "id": "SC04",
+      "references": [
+        "doc-create",
+        "project-promote"
+      ],
+      "status": "current source distinction; no runtime assertion"
+    },
+    {
+      "decision": "ops-term-window and reference-create-v1 are different lock domains; do not assert mutual exclusion",
+      "id": "SC05",
+      "references": [
+        "term-lock",
+        "lock-create"
+      ],
+      "status": "current source distinction; no runtime assertion"
+    },
+    {
+      "decision": "dedicated scope writer replaces links, native PATCH scopeType changes scalar alone: product policy question, not automatic repair",
+      "id": "SC06",
+      "references": [
+        "scope-set",
+        "native-patch"
+      ],
+      "status": "current source distinction; no runtime assertion"
+    }
+  ],
+  "decisions": {
+    "m06_closed": false,
+    "next_minimal": "CW11/CW12/CW13 imported CREATE only",
+    "product_questions": [
+      "native PATCH scopeType scalar versus dedicated scope endpoint links: desired convergence requires separate product/policy decision",
+      "object-limited participant and new company-wide Contract/link/liability: specify action/field policy before shared authorizer expansion",
+      "shop manual update should freeze which promoted fields against 1C: source shows bypass, future persisted negative controls required",
+      "intentional importer match differences (number absent/date absent/type-only corporate) must not be silently normalized by helper",
+      "term barrier and Contract lifecycle barrier need a declared ordering before joint delete/link concurrency changes",
+      "native nullable kind/currency use non-null-only branches; do not expand explicit-null intent beyond accepted clearable field list without characterization"
+    ],
+    "runtime_guarantees": false,
+    "security_certification": false,
+    "unknown_dynamic": "not resolved; private candidates are overapproximation"
+  },
+  "families": [
+    {
+      "acl": "assert_company_member; parties belong to company; no get_owned/new-object object policy in this function; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "main → references router POST /contracts"
+      ],
+      "decision": "preserve; later native command extraction",
+      "fields": "Contract create: requisites + company/parties/creation metadata; _CONTRACT_REQ_FIELDS",
+      "fieldsets": {
+        "contract_create": [
+          "company_id",
+          "creation_key",
+          "creation_actor_id",
+          "creation_request_hash",
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "type_code",
+          "amount_limit",
+          "kind",
+          "currency",
+          "valid_until",
+          "vat_rate",
+          "amount_incl_vat",
+          "settlement_kind",
+          "comment",
+          "basis",
+          "is_closed",
+          "scope_type",
+          "signed",
+          "signed_at",
+          "payment_term_days",
+          "is_state_contract",
+          "igk",
+          "responsible_id",
+          "signer_our",
+          "signer_our_position",
+          "signer_cp",
+          "signer_cp_position",
+          "signer_cp_basis"
+        ]
+      },
+      "id": "CW01",
+      "identity": "company + parties + complete number/date/type duplicate check",
+      "locking": "company/contract advisory if complete identity OR creationKey",
+      "manual_null": "create nullable body values; no manual markers on creation",
+      "owner": "Core references",
+      "raw": "raw not assigned",
+      "references": [
+        "native-create",
+        "parties",
+        "schemas-create",
+        "lock-create",
+        "contract-identity",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "creationKey actor+request hash; conflict409; no key means distinct intent subject to business duplicate check",
+      "shared_command": "identity/lock helpers; no Contract command",
+      "transaction": "get_db commit/rollback; flush only"
+    },
+    {
+      "acl": "get_owned before/after barrier, fresh UserCompany after wait; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "main → references PATCH /contracts/{id}"
+      ],
+      "decision": "accepted PATCH↔1C boundary; do not rediscover fixed defect",
+      "fields": "explicit fields ContractUpdate; manual_overrides on changed columns",
+      "fieldsets": {
+        "contract_update": [
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "type_code",
+          "amount_limit",
+          "kind",
+          "currency",
+          "valid_until",
+          "vat_rate",
+          "amount_incl_vat",
+          "settlement_kind",
+          "comment",
+          "basis",
+          "is_closed",
+          "scope_type",
+          "signed",
+          "signed_at",
+          "payment_term_days",
+          "is_state_contract",
+          "igk",
+          "responsible_id",
+          "signer_our",
+          "signer_our_position",
+          "signer_cp",
+          "signer_cp_position",
+          "signer_cp_basis",
+          "manual_overrides"
+        ],
+        "explicit_null_clear": [
+          "valid_until",
+          "amount_limit",
+          "vat_rate",
+          "amount_incl_vat",
+          "settlement_kind",
+          "comment",
+          "basis",
+          "type_code",
+          "signed",
+          "signed_at",
+          "payment_term_days",
+          "is_state_contract",
+          "igk",
+          "responsible_id",
+          "signer_our",
+          "signer_our_position",
+          "signer_cp",
+          "signer_cp_position",
+          "signer_cp_basis"
+        ],
+        "non_null_only": [
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "currency",
+          "is_closed",
+          "scope_type"
+        ]
+      },
+      "id": "CW02",
+      "identity": "UUID retained; parties validated; no create matcher",
+      "locking": "shared company/contract barrier before read-to-write; accepted code",
+      "manual_null": "model_fields_set distinguishes omitted/null for selected nullable fields; unchanged/null→null not marked",
+      "owner": "Core references",
+      "raw": "raw/external_ref/creation metadata unchanged",
+      "references": [
+        "native-patch",
+        "parties",
+        "schemas-patch",
+        "get-owned",
+        "snapshot",
+        "mark",
+        "lock-create",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "update operation, no creationKey consumption",
+      "shared_command": "snapshot_reference_fields + mark_reference_changes; no general command",
+      "transaction": "no_autoflush → lock → flush → scoped populate_existing → fields/mark → flush/refresh; get_db commits"
+    },
+    {
+      "acl": "get_owned incl member/object scope",
+      "callers": [
+        "main → references DELETE /contracts/{id}"
+      ],
+      "decision": "separate lifecycle consolidation; syntax alone proves no race/vulnerability",
+      "fields": "DELETE Contract only",
+      "fieldsets": {
+        "contract_delete": [
+          "id"
+        ]
+      },
+      "id": "CW03",
+      "identity": "contract_usage checks direct+soft references",
+      "locking": "no explicit contract barrier in this function",
+      "manual_null": "not applicable",
+      "owner": "Core references",
+      "raw": "not modified",
+      "references": [
+        "native-delete",
+        "get-owned",
+        "usage",
+        "usage-sources"
+      ],
+      "replay": "repeat missing returns404",
+      "shared_command": "contract_usage; no Contract delete command",
+      "transaction": "db.delete; get_db commits/rolls back"
+    },
+    {
+      "acl": "SELECT Contract by id → assert_company_member; company-scoped locations when adding; no get_owned object check here; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "main → references router set_contract_scope"
+      ],
+      "decision": "separate scope/link policy task; preserve company/unassigned/locations and empty-set semantics",
+      "fields": "scope_type + replace ContractLocation",
+      "fieldsets": {
+        "contract_update": [
+          "scope_type"
+        ],
+        "related": [
+          "ContractLocation replace"
+        ]
+      },
+      "id": "CW04",
+      "identity": "contract UUID retained; relation keys as coded",
+      "locking": "no explicit shared contract lock in these functions",
+      "manual_null": "scope setters do not call mark_reference_changes; no import overwrite guarantee inferred",
+      "owner": "Core references",
+      "raw": "not touched",
+      "references": [
+        "scope-set",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "links/add location check existing; replacement operations reset sets",
+      "shared_command": "local handlers; bypass common Contract command",
+      "transaction": "flush/refresh as coded; get_db transaction"
+    },
+    {
+      "acl": "SELECT Contract by id → assert_company_member; company-scoped locations when adding; no get_owned object check here; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "main → references router link_contract_location"
+      ],
+      "decision": "separate scope/link policy task; preserve company/unassigned/locations and empty-set semantics",
+      "fields": "scope_type + add ContractLocation",
+      "fieldsets": {
+        "contract_update": [
+          "scope_type"
+        ],
+        "related": [
+          "ContractLocation add"
+        ]
+      },
+      "id": "CW05",
+      "identity": "contract UUID retained; relation keys as coded",
+      "locking": "no explicit shared contract lock in these functions",
+      "manual_null": "scope setters do not call mark_reference_changes; no import overwrite guarantee inferred",
+      "owner": "Core references",
+      "raw": "not touched",
+      "references": [
+        "scope-add",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "links/add location check existing; replacement operations reset sets",
+      "shared_command": "local handlers; bypass common Contract command",
+      "transaction": "flush/refresh as coded; get_db transaction"
+    },
+    {
+      "acl": "SELECT Contract by id → assert_company_member; company-scoped locations when adding; no get_owned object check here; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "main → references router unlink_contract_location"
+      ],
+      "decision": "separate scope/link policy task; preserve company/unassigned/locations and empty-set semantics",
+      "fields": "remove ContractLocation + last-link unassigned",
+      "fieldsets": {
+        "contract_update": [
+          "scope_type"
+        ],
+        "related": [
+          "ContractLocation delete"
+        ]
+      },
+      "id": "CW06",
+      "identity": "contract UUID retained; relation keys as coded",
+      "locking": "no explicit shared contract lock in these functions",
+      "manual_null": "scope setters do not call mark_reference_changes; no import overwrite guarantee inferred",
+      "owner": "Core references",
+      "raw": "not touched",
+      "references": [
+        "scope-remove",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "links/add location check existing; replacement operations reset sets",
+      "shared_command": "local handlers; bypass common Contract command",
+      "transaction": "flush/refresh as coded; get_db transaction"
+    },
+    {
+      "acl": "SELECT Contract by id → assert_company_member; company-scoped locations when adding; no get_owned object check here; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "main → references router set_contract_dimension"
+      ],
+      "decision": "separate scope/link policy task; preserve company/unassigned/locations and empty-set semantics",
+      "fields": "replace ContractDimension per dim_type",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "replace ContractDimension per dim_type"
+        ]
+      },
+      "id": "CW07",
+      "identity": "contract UUID retained; relation keys as coded",
+      "locking": "no explicit shared contract lock in these functions",
+      "manual_null": "scope setters do not call mark_reference_changes; no import overwrite guarantee inferred",
+      "owner": "Core references",
+      "raw": "not touched",
+      "references": [
+        "dimensions",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "links/add location check existing; replacement operations reset sets",
+      "shared_command": "local handlers; bypass common Contract command",
+      "transaction": "flush/refresh as coded; get_db transaction"
+    },
+    {
+      "acl": "get_owned Contract; app/project validation",
+      "callers": [
+        "main → references router add_contract_link"
+      ],
+      "decision": "separate scope/link policy task; preserve company/unassigned/locations and empty-set semantics",
+      "fields": "ContractLink(company,contract,app,project,actor)",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "ContractLink(company,contract,app,project,actor)"
+        ]
+      },
+      "id": "CW08",
+      "identity": "contract UUID retained; relation keys as coded",
+      "locking": "no explicit shared contract lock in these functions",
+      "manual_null": "scope setters do not call mark_reference_changes; no import overwrite guarantee inferred",
+      "owner": "Core references",
+      "raw": "not touched",
+      "references": [
+        "links-add"
+      ],
+      "replay": "links/add location check existing; replacement operations reset sets",
+      "shared_command": "local handlers; bypass common Contract command",
+      "transaction": "flush/refresh as coded; get_db transaction"
+    },
+    {
+      "acl": "get_owned Contract; app/project validation",
+      "callers": [
+        "main → references router delete_contract_link"
+      ],
+      "decision": "separate scope/link policy task; preserve company/unassigned/locations and empty-set semantics",
+      "fields": "delete ContractLink",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "delete ContractLink"
+        ]
+      },
+      "id": "CW09",
+      "identity": "contract UUID retained; relation keys as coded",
+      "locking": "no explicit shared contract lock in these functions",
+      "manual_null": "scope setters do not call mark_reference_changes; no import overwrite guarantee inferred",
+      "owner": "Core references",
+      "raw": "not touched",
+      "references": [
+        "links-remove"
+      ],
+      "replay": "links/add location check existing; replacement operations reset sets",
+      "shared_command": "local handlers; bypass common Contract command",
+      "transaction": "flush/refresh as coded; get_db transaction"
+    },
+    {
+      "acl": "router assert_company_member, SELECT Contract company+id; object policy not called here; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "ops PUT /contracts/{id}/liability → set_liability"
+      ],
+      "decision": "intentional local field; isolate commit ownership in later command task",
+      "fields": "Contract.liability",
+      "fieldsets": {
+        "contract_update": [
+          "liability"
+        ]
+      },
+      "id": "CW10",
+      "identity": "UUID/company",
+      "locking": "no explicit lock in function",
+      "manual_null": "None keys removed from input; source manual plus escalation defaults; no mark_reference_changes",
+      "owner": "Core ops liability",
+      "raw": "raw untouched; liability is local payload",
+      "references": [
+        "liability",
+        "liability-http",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "replace liability; no request key",
+      "shared_command": "local set_liability",
+      "transaction": "service commits itself"
+    },
+    {
+      "acl": "caller company and channel/file/user authorization; company-scoped Contract/CP/Organization indexes; no actor/object policy inside constructor; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "channels run/background → orchestrator dispatch → _run_reestr → run_reestr_file(svod) → ingest_reestr"
+      ],
+      "decision": "selected NEXT minimal shared imported CREATE command, preserve adapters/matcher/locks/raw/links",
+      "fields": "number[:100], date, parties, type/kind/basis, scope=locations, raw.referenceIdentity; add locations",
+      "fieldsets": {
+        "contract_create": [
+          "company_id",
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "basis",
+          "scope_type",
+          "raw"
+        ]
+      },
+      "id": "CW11",
+      "identity": "require_organization + ContractIndex.resolve(cp,type,number,date); no number => no creation",
+      "locking": "counterparty then contract company advisory locks in legacy/build/corporate",
+      "manual_null": "existing Contract untouched (except new locations by reestr); manual identity source handled by index",
+      "owner": "Core reference import adapters",
+      "raw": "identity snapshot only, no full 1C raw; fields adapted by each caller",
+      "references": [
+        "legacy",
+        "run-file",
+        "channel-reestr",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "same-run index and repeat matcher; no creationKey",
+      "shared_command": "ContractIndex + CP commands; inline Contract constructor",
+      "transaction": "caller transaction; flush then index.add; statistics/links caller-owned"
+    },
+    {
+      "acl": "caller company and channel/file/user authorization; company-scoped Contract/CP/Organization indexes; no actor/object policy inside constructor; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "same channel chain → svodnaya/arenda/tariffs → L2Cache.contract"
+      ],
+      "decision": "selected NEXT minimal shared imported CREATE command, preserve adapters/matcher/locks/raw/links",
+      "fields": "number[:100] or б/н, date, parties, type, supplier kind/basis, scope=locations, raw.referenceIdentity; add locations",
+      "fieldsets": {
+        "contract_create": [
+          "company_id",
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "basis",
+          "scope_type",
+          "raw"
+        ]
+      },
+      "id": "CW12",
+      "identity": "require_organization + ContractIndex.resolve(cp,type,number,date); missing number can create б/н",
+      "locking": "counterparty then contract company advisory locks in legacy/build/corporate",
+      "manual_null": "existing Contract untouched (except new locations by reestr); manual identity source handled by index",
+      "owner": "Core reference import adapters",
+      "raw": "identity snapshot only, no full 1C raw; fields adapted by each caller",
+      "references": [
+        "l2",
+        "l2-build",
+        "svodnaya",
+        "arenda",
+        "tariffs",
+        "run-file",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "same-run index and repeat matcher; no creationKey",
+      "shared_command": "ContractIndex + CP commands; inline Contract constructor",
+      "transaction": "caller transaction; flush then index.add; statistics/links caller-owned"
+    },
+    {
+      "acl": "HTTP assert_company_product(..., sales); indexes company-scoped; no actor/object policy inside constructor; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "charge_sessions POST /enrich → enrich_sessions → enrich_sessions_with_orgs → _sync_corporate_contracts"
+      ],
+      "decision": "selected NEXT minimal shared imported CREATE command, preserve adapters/matcher/locks/raw/links",
+      "fields": "number=б/н, ISO-adapted start, parties, corporate type, buyer kind,basis,scope=company,raw.referenceIdentity",
+      "fieldsets": {
+        "contract_create": [
+          "company_id",
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "basis",
+          "scope_type",
+          "raw"
+        ]
+      },
+      "id": "CW13",
+      "identity": "require_organization + ContractIndex.resolve(cp,CORP_CONTRACT_TYPE); retains existing requisites",
+      "locking": "counterparty then contract company advisory locks in legacy/build/corporate",
+      "manual_null": "existing Contract untouched (except new locations by reestr); manual identity source handled by index",
+      "owner": "Core reference import adapters",
+      "raw": "identity snapshot only, no full 1C raw; fields adapted by each caller",
+      "references": [
+        "corporate",
+        "org-enrich",
+        "corp-http",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "same-run index and repeat matcher; no creationKey",
+      "shared_command": "ContractIndex + CP commands; inline Contract constructor",
+      "transaction": "caller transaction; flush then index.add; statistics/links caller-owned"
+    },
+    {
+      "acl": "connection company; local CP/Org and Contract filtered by company; router _get_connection_or_404",
+      "callers": [
+        "onec sync_catalogs or sync_full → OneCSyncService.sync_catalogs → _sync_contracts"
+      ],
+      "decision": "separate later imported UPDATE command; do not fold into first three CREATE adapters",
+      "fields": "CREATE/UPDATE requisites; external_ref/raw; no existing scope/basis/liability/links/creation metadata write",
+      "fieldsets": {
+        "contract_create": [
+          "id",
+          "company_id",
+          "external_ref",
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "valid_until",
+          "is_closed",
+          "amount_limit",
+          "amount_incl_vat",
+          "comment",
+          "scope_type",
+          "raw",
+          "signed",
+          "is_state_contract",
+          "payment_term_days"
+        ],
+        "contract_update": [
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "valid_until",
+          "is_closed",
+          "signed",
+          "is_state_contract",
+          "payment_term_days",
+          "amount_limit",
+          "amount_incl_vat",
+          "comment",
+          "external_ref",
+          "raw"
+        ],
+        "import_promotions": [
+          "number",
+          "date",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "valid_until",
+          "is_closed",
+          "signed",
+          "is_state_contract",
+          "payment_term_days",
+          "amount_limit",
+          "amount_incl_vat",
+          "comment"
+        ],
+        "preserved_existing": [
+          "scope_type",
+          "basis",
+          "liability",
+          "creation_key",
+          "creation_actor_id",
+          "creation_request_hash",
+          "title",
+          "vat_rate",
+          "currency",
+          "settlement_kind"
+        ]
+      },
+      "id": "CW14",
+      "identity": "external_ref unique_candidate → complete business identity/index + org; explicit source/key/connection conflicts",
+      "locking": "company/contract advisory shared with native PATCH",
+      "manual_null": "apply_import_values respects manual markers incl NULL; accepted freshness/serialization kept",
+      "owner": "Core 1C adapter",
+      "raw": "full json_ids item, previous referenceIdentity preserved, referenceSource(kind=onec,connectionId); raw updates separately from manual promo",
+      "references": [
+        "onec",
+        "onec-source",
+        "onec-raw",
+        "onec-req",
+        "onec-catalogs",
+        "onec-http",
+        "onec-full",
+        "import-values",
+        "onec-owned"
+      ],
+      "replay": "same ref replay; skip DeletionMark; failures handled by sync_catalogs",
+      "shared_command": "reference_identity + reference_overrides; constructor/update in adapter",
+      "transaction": "service/caller transaction; flush pending before scoped populate_existing; per-item flush then index/by_ref publish"
+    },
+    {
+      "acl": "_receipt_access + access.network; organization presence checked, no local company ownership SELECT for organization in this block",
+      "callers": [
+        "store POST /partners → store_partner_create"
+      ],
+      "decision": "separate shop adapter consolidation; source gap requires negative evidence before claiming issue",
+      "fields": "optional INSERT contracts with supplier: id/company/number/date/title/parties/type/kind/currency/raw",
+      "fieldsets": {
+        "contract_create": [
+          "id",
+          "company_id",
+          "number",
+          "date",
+          "title",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "currency",
+          "raw"
+        ]
+      },
+      "id": "CW15",
+      "identity": "new UUID; CP from newly created canon; supplied organization",
+      "locking": "no reference advisory in function",
+      "manual_null": "manual_overrides not assigned; no Contract import helper",
+      "owner": "Shop supplier registry",
+      "raw": "center_manual/source/name JSON",
+      "references": [
+        "shop-partner",
+        "shop-access"
+      ],
+      "replay": "partner with matching INN returns before optional Contract creation; no Contract creationKey",
+      "shared_command": "raw text INSERT bypasses Contract commands/identity policy",
+      "transaction": "router commit; CP+edge partner+stations+contract same session"
+    },
+    {
+      "acl": "_receipt_access + network; UPDATE id+company; INSERT parties presence only in function",
+      "callers": [
+        "store POST /contracts → store_contract_save"
+      ],
+      "decision": "priority after shared root; characterize shop→1C manual promotion contract before behavior change",
+      "fields": "INSERT contracts or UPDATE number,date,title,kind,currency,comment; UPDATE does not write cp/org/type",
+      "fieldsets": {
+        "contract_create": [
+          "id",
+          "company_id",
+          "number",
+          "date",
+          "title",
+          "counterparty_id",
+          "organization_id",
+          "type",
+          "kind",
+          "currency",
+          "raw",
+          "comment"
+        ],
+        "contract_update": [
+          "number",
+          "date",
+          "title",
+          "kind",
+          "currency",
+          "comment"
+        ]
+      },
+      "id": "CW16",
+      "identity": "new UUID or supplied ID; no ContractIndex",
+      "locking": "no reference advisory in function",
+      "manual_null": "payload truthiness/defaults, comment empty→None; UPDATE does not mark manual fields",
+      "owner": "Shop supplier registry",
+      "raw": "INSERT center_manual; UPDATE leaves raw",
+      "references": [
+        "shop-contract",
+        "shop-access"
+      ],
+      "replay": "no creationKey; update response does not use rowcount",
+      "shared_command": "text SQL bypasses mark_reference_changes/Contract command",
+      "transaction": "router commit"
+    },
+    {
+      "acl": "startup namespace guard; no user ACL; migration exception",
+      "callers": [
+        "main lifespan → _prepare_database_once → _prepare_database → create_all"
+      ],
+      "decision": "preserve; M16 controlled migration ownership, not first M06 patch",
+      "fields": "Contract valid_until/date/type_code DML; backfill ContractLocation and OpsContractTerm; amount_limit Numeric cast and UUID party casts via legacy DDL; no claim DDL inventory covers commands",
+      "fieldsets": {
+        "contract_dml": [
+          "valid_until",
+          "date",
+          "type_code"
+        ],
+        "contract_legacy_cast": [
+          "amount_limit",
+          "counterparty_id",
+          "organization_id"
+        ],
+        "related": [
+          "ContractLocation backfill",
+          "OpsContractTerm backfill"
+        ]
+      },
+      "id": "CW17",
+      "identity": "existing IDs/backfill source markers",
+      "locking": "no contract command advisory; startup/schema ownership separate",
+      "manual_null": "normalization DML does not consult manual_overrides",
+      "owner": "Persistence bootstrap",
+      "raw": "not rewritten",
+      "references": [
+        "bootstrap",
+        "startup",
+        "schema-guard",
+        "prepare-db",
+        "prepare-once"
+      ],
+      "replay": "conditional source marker checks and ON CONFLICT; source-only repeat correctness not proven here",
+      "shared_command": "legacy migration DML intentional exception, not writer command coverage",
+      "transaction": "engine.begin blocks; not request transaction"
+    },
+    {
+      "acl": "HTTP company member; term/Contract company filters; object selection policy separate; startup ORM scope only ServiceLocation/ChargeSession, not automatic Contract policy",
+      "callers": [
+        "ops POST/PATCH/DELETE /terms → ops_terms"
+      ],
+      "decision": "preserve non-overlap/history; later delete/link concurrency characterization",
+      "fields": "OpsContractTerm CREATE/edit/version split/delete; expected OpsPeriodCharge cleanup; no Contract row mutation",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "OpsContractTerm CREATE/edit/version split/delete; expected OpsPeriodCharge cleanup; no Contract row mutation"
+        ]
+      },
+      "id": "CW18",
+      "identity": "same company/Contract; article+location interval; EDITABLE whitelist",
+      "locking": "_check_window term barrier; update barrier before populate_existing; delete has no term barrier in function",
+      "manual_null": "_clean empty→None; contract manual_overrides unrelated",
+      "owner": "Core ops terms",
+      "raw": "term source=manual; preserved charge history",
+      "references": [
+        "term-create",
+        "term-update",
+        "term-delete",
+        "term-window",
+        "term-lock",
+        "term-create-http",
+        "term-update-http",
+        "term-delete-http",
+        "scope-install",
+        "company-member"
+      ],
+      "replay": "version closes old at previous day; no creationKey",
+      "shared_command": "ops_terms commands intentional separate aggregate",
+      "transaction": "helpers flush; routers commit/rollback"
+    },
+    {
+      "acl": "company-scoped owner routines; full negative matrix not reviewed",
+      "callers": [
+        "references settlements; ops docs; intake verification/acceptance; books relink; materialize expectations"
+      ],
+      "decision": "usage producer group; audit link mutation versus deletion later",
+      "fields": "StationContractSettlement.contract_id; OpsCounterpartyDoc.contract_id; AccountingDoc/IntakeItem.contract_id; ledger-side dt/kt refs are separate facts",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "StationContractSettlement.contract_id; OpsCounterpartyDoc.contract_id; AccountingDoc/IntakeItem.contract_id; ledger-side dt/kt refs are separate facts"
+        ]
+      },
+      "id": "CW19",
+      "identity": "Contract UUID/subject_ref references only",
+      "locking": "no common Contract lifecycle barrier inferred from relation syntax",
+      "manual_null": "not Contract manual_overrides",
+      "owner": "Core ops settlements/intake/books",
+      "raw": "owner rows/raw only",
+      "references": [
+        "settlement",
+        "ops-doc",
+        "intake-match",
+        "intake-accept",
+        "books-relink",
+        "expectations"
+      ],
+      "replay": "owner lifecycle/replay; not Contract creation replay",
+      "shared_command": "owner-specific helpers; not a Contract passport command",
+      "transaction": "owner command/router transaction; see pinned functions"
+    },
+    {
+      "acl": "shop receipt access + owner validation; edge company key ingress",
+      "callers": [
+        "store create/update receipts and accepted canonical link; edge packet ingestion"
+      ],
+      "decision": "receipt writers do not create Contract; preserve accounting lifecycle boundary",
+      "fields": "StoreReceipt.contract_id and contract snapshot; edge ingestion references",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "StoreReceipt.contract_id and contract snapshot; edge ingestion references"
+        ]
+      },
+      "id": "CW20",
+      "identity": "Contract UUID/subject_ref references only",
+      "locking": "no common Contract lifecycle barrier inferred from relation syntax",
+      "manual_null": "not Contract manual_overrides",
+      "owner": "Shop receipts",
+      "raw": "owner rows/raw only",
+      "references": [
+        "receipt-party",
+        "receipt-create",
+        "receipt-update",
+        "receipt-link",
+        "edge-receipts"
+      ],
+      "replay": "owner lifecycle/replay; not Contract creation replay",
+      "shared_command": "owner-specific helpers; not a Contract passport command",
+      "transaction": "owner command/router transaction; see pinned functions"
+    },
+    {
+      "acl": "site/Contract company; project permissions remain owner-specific",
+      "callers": [
+        "sites link and integration workspaces; project file promotion"
+      ],
+      "decision": "project promote creates DocCard, not Contract; nested dynamic workspace unknown paths remain explicit",
+      "fields": "EzsSite/EzsProject contract_id; workspace_data.integration.contractIds; DocRelation",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "EzsSite/EzsProject contract_id; workspace_data.integration.contractIds; DocRelation"
+        ]
+      },
+      "id": "CW21",
+      "identity": "Contract UUID/subject_ref references only",
+      "locking": "no common Contract lifecycle barrier inferred from relation syntax",
+      "manual_null": "not Contract manual_overrides",
+      "owner": "Projects",
+      "raw": "owner rows/raw only",
+      "references": [
+        "site-link",
+        "site-link-http",
+        "integration-save",
+        "project-promote"
+      ],
+      "replay": "owner lifecycle/replay; not Contract creation replay",
+      "shared_command": "owner-specific helpers; not a Contract passport command",
+      "transaction": "owner command/router transaction; see pinned functions"
+    },
+    {
+      "acl": "owner company + check_contract where called; no full object ACL assertion",
+      "callers": [
+        "equipment router → owner services; ops meter owner"
+      ],
+      "decision": "related owner writes; generic draft payloads/dynamic field maps unknown unless locally traced",
+      "fields": "contract_id on equipment/supply/spare documents, ops meters; warehouse extra_metadata.warehouse.contractId",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "contract_id on equipment/supply/spare documents, ops meters; warehouse extra_metadata.warehouse.contractId"
+        ]
+      },
+      "id": "CW22",
+      "identity": "Contract UUID/subject_ref references only",
+      "locking": "no common Contract lifecycle barrier inferred from relation syntax",
+      "manual_null": "not Contract manual_overrides",
+      "owner": "Equipment/materials/warehouses",
+      "raw": "owner rows/raw only",
+      "references": [
+        "equipment-head",
+        "equipment-post",
+        "warehouse-save",
+        "supply-create",
+        "supply-update",
+        "spare-draft",
+        "spare-post"
+      ],
+      "replay": "owner lifecycle/replay; not Contract creation replay",
+      "shared_command": "owner-specific helpers; not a Contract passport command",
+      "transaction": "owner command/router transaction; see pinned functions"
+    },
+    {
+      "acl": "admin company operation; selected Contract company checked in function",
+      "callers": [
+        "users PUT /{id}/contracts"
+      ],
+      "decision": "membership grounds are separate from passport and object grants",
+      "fields": "UserCompany.contract_ids",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "UserCompany.contract_ids"
+        ]
+      },
+      "id": "CW23",
+      "identity": "Contract UUID/subject_ref references only",
+      "locking": "no common Contract lifecycle barrier inferred from relation syntax",
+      "manual_null": "not Contract manual_overrides",
+      "owner": "Core membership",
+      "raw": "owner rows/raw only",
+      "references": [
+        "member-contracts"
+      ],
+      "replay": "owner lifecycle/replay; not Contract creation replay",
+      "shared_command": "owner-specific helpers; not a Contract passport command",
+      "transaction": "owner command/router transaction; see pinned functions"
+    },
+    {
+      "acl": "owner policies; contract target resolution at docs _SUBJECTS; arbitrary JSON keys not exhaustively typed",
+      "callers": [
+        "docs/process/task/calendar/conf/partner/market adapters use subject or target ref; optional Support service_contracts is external app"
+      ],
+      "decision": "no automatic Contract promotion from document; usage must preserve refs across deletion",
+      "fields": "DocCard subject_ref/attrs.contract_id, DocRelation.target_ref; tasks/calendar/reminders/partner messages/conf/market subject refs",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "DocCard subject_ref/attrs.contract_id, DocRelation.target_ref; tasks/calendar/reminders/partner messages/conf/market subject refs"
+        ]
+      },
+      "id": "CW24",
+      "identity": "Contract UUID/subject_ref references only",
+      "locking": "no common Contract lifecycle barrier inferred from relation syntax",
+      "manual_null": "not Contract manual_overrides",
+      "owner": "Documents/processes/soft references",
+      "raw": "owner rows/raw only",
+      "references": [
+        "doc-create",
+        "doc-update",
+        "doc-rel",
+        "process-launch",
+        "process-task",
+        "task-create",
+        "calendar-create",
+        "reminder",
+        "partner-topic",
+        "partner-send",
+        "partner-incoming",
+        "meeting",
+        "market-lead"
+      ],
+      "replay": "owner lifecycle/replay; not Contract creation replay",
+      "shared_command": "owner-specific helpers; not a Contract passport command",
+      "transaction": "owner command/router transaction; see pinned functions"
+    },
+    {
+      "acl": "product domain read policy; distinct resource/DTO class",
+      "callers": [
+        "product /api/v1 contracts GET/list/detail → query.project"
+      ],
+      "decision": "exclude DTO constructors and api_contracts protocol package from passport writer totals",
+      "fields": "DTO Contract response only; no ORM writes",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "DTO Contract response only; no ORM writes"
+        ]
+      },
+      "id": "CW25",
+      "identity": "response IDs only",
+      "locking": "not applicable",
+      "manual_null": "not applicable",
+      "owner": "Product query/API DTO",
+      "raw": "projection only",
+      "references": [
+        "dto",
+        "dto-project",
+        "product-factory"
+      ],
+      "replay": "not write replay",
+      "shared_command": "query; no mutation",
+      "transaction": "read projection"
+    },
+    {
+      "acl": "unknown until receiver and caller/policy resolved; no fake zero",
+      "callers": [
+        "private all-app candidates and raw hits; no inference from name alone"
+      ],
+      "decision": "unknown; source inventory is not runtime/security certification",
+      "fields": "generic setattr(row,field), model maps, SQL fragments/execute, relationship/in-place JSON, external pg_restore and DB cascades",
+      "fieldsets": {
+        "contract_update": null,
+        "related": [
+          "unknown dynamic/reflection/external restore writers"
+        ]
+      },
+      "id": "CW26",
+      "identity": "not inferred",
+      "locking": "unknown for dynamic dispatch not locally proven",
+      "manual_null": "shared override helper generic but traced CW02/CW14 separately",
+      "owner": "Unresolved dynamic/reflection and external restore boundary",
+      "raw": "unknown for arbitrary dynamic payload",
+      "references": [
+        "import-values",
+        "source-model",
+        "get-db",
+        "model"
+      ],
+      "replay": "not inferred",
+      "shared_command": "no proof that all dynamic candidates target Contract",
+      "transaction": "unknown external restore boundary; owned session get_db documented"
+    },
+    {
+      "acl": "company member; referenced Contract company validated; object policy not certified",
+      "callers": [
+        "mail create/update rules → _validate_rule_refs"
+      ],
+      "decision": "related reference writer; preserve deletion usage source",
+      "fields": "MailRule.set_contract_id",
+      "fieldsets": {
+        "contract_update": [],
+        "related": [
+          "MailRule.set_contract_id"
+        ]
+      },
+      "id": "CW27",
+      "identity": "references existing Contract only",
+      "locking": "no shared Contract barrier here",
+      "manual_null": "rule update payload policy, not Contract manual markers",
+      "owner": "Mail rules",
+      "raw": "owner MailRule only",
+      "references": [
+        "mail-create",
+        "mail-update",
+        "mail-validate"
+      ],
+      "replay": "rule lifecycle",
+      "shared_command": "mail local commands",
+      "transaction": "router commit"
+    },
+    {
+      "acl": "not an HTTP policy; caller of parent deletion owns access",
+      "callers": [
+        "declared model FK/DDL, actual DB state not inspected"
+      ],
+      "decision": "intentional system exception; installed FK/trigger/restore state UNKNOWN",
+      "fields": "Contract.creation_actor_id/responsible_id SET NULL on user deletion; child links/locations/dimensions CASCADE on Contract delete",
+      "fieldsets": {
+        "contract_declared_fk_null": [
+          "creation_actor_id",
+          "responsible_id"
+        ],
+        "related": [
+          "child ContractLink/ContractLocation/ContractDimension CASCADE"
+        ]
+      },
+      "id": "CW28",
+      "identity": "Contract parties FK restrictive as declared",
+      "locking": "DB FK semantics not exercised",
+      "manual_null": "system NULL independent of manual_overrides",
+      "owner": "Persistence declared FK effects",
+      "raw": "unchanged",
+      "references": [
+        "model",
+        "location-relation-model",
+        "link-relation-model",
+        "dimension-relation-model",
+        "bootstrap",
+        "schema-guard"
+      ],
+      "replay": "not an API intention key",
+      "shared_command": "declared DB effects, not a Python command",
+      "transaction": "DB referential action within parent transaction if constraint actually exists"
+    }
+  ],
+  "owners": [
+    "Core references/contracts",
+    "Core import adapters",
+    "Shop supplier registry",
+    "Core ops",
+    "Persistence bootstrap",
+    "Adjacent link owners"
+  ],
+  "pin": "eb5cdc513275e428e004f134e6b16d417d6f135e",
+  "proof": {
+    "app_files": 489,
+    "app_manifest_sha256": "7cb11cfeace8357724362143b8d23e1751f5783d76dad02453581e617d93e4d8",
+    "byte_equal_files": 489,
+    "call_edge_count": 27,
+    "callsite_count": 109009,
+    "candidate_count": 13204,
+    "countercase_count": 15,
+    "exact_constructor_count": 5,
+    "family_count": 28,
+    "generator_sha256": "9235936947e00fa89d5d78f43fd29178efc4ca67284cfed81dc692b21a5bd52b",
+    "literal_sql_sink_count": 9,
+    "pure_controls": 13,
+    "python_files": 479,
+    "raw_hit_count": 2095,
+    "reference_count": 127,
+    "unknown_dynamic_receivers": "not resolved; candidate count is not writer count"
+  },
+  "references": [
+    {
+      "anchors": [
+        {
+          "ast_sha256": "9a626445231ed88869580858a9c34d5e1368cc2b59c5e828e7528387e95c072a",
+          "column": 8,
+          "kind": "Call",
+          "line": 894
+        }
+      ],
+      "ast_sha256": "29ec839ae642f8feea04b8ff0d9ed5cedc4247435ac31b88bc21207605a5dc24",
+      "end": 920,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "native-create",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 862,
+      "symbol": "create_contract"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "8007d7d5ef4d9a3992143d34416897566af459ed9664d7f14e2c3b9c0f803c1a",
+          "column": 12,
+          "kind": "Call",
+          "line": 964
+        },
+        {
+          "ast_sha256": "c6e6999d70eea5f386c4ee92ea3c0682e6a4bf06c704d3f2c137554d185a9a8e",
+          "column": 4,
+          "kind": "Call",
+          "line": 1002
+        }
+      ],
+      "ast_sha256": "0eb574c3a4b7465ccf1047c8eeff5e565517b19f674ba2ab3ea3b8efa729cce1",
+      "end": 1005,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "native-patch",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 924,
+      "symbol": "update_contract"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "63e38af7afb4dd7bf9dac4be34328a23cc3d67d05f8874beaa57624dca076cfd",
+          "column": 10,
+          "kind": "Call",
+          "line": 1023
+        }
+      ],
+      "ast_sha256": "9f6390d8899f45b733e873a56d29da2a59ed1d5cf49bf6a3ba783a7ba0be5f60",
+      "end": 1023,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "native-delete",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1009,
+      "symbol": "delete_contract"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "b8961c5ce3f86757adbaeb6cb558c8b0120b4145a2352c03f3613a287df60dd6",
+      "end": 854,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "parties",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 845,
+      "symbol": "_validate_contract_parties"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "f11ddae1e496b9fa77d3a0c998fa944f59abfc883c0c2fe3d10abe85a5208d6e",
+      "end": 765,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "request-fields",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 761,
+      "symbol": "_req_val"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "a712ef7f197f68a941bd0f82796af8625bd76d030f0ee98a9724e3a73728e86a",
+      "end": 830,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "type-code",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 822,
+      "symbol": "_check_type_code"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "0a3ff128f76d44a0377b06f4f48d90d24d8942c4d90f5fde3f1866dfb29248ec",
+      "end": 906,
+      "file_sha256": "561493cfd444ad27f0ee673fb3dd96156d891966451bcd7345e609bcb31cbe7d",
+      "id": "schemas-create",
+      "path": "clearledger/server/app/schemas.py",
+      "start": 876,
+      "symbol": "ContractCreate"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "2d12c16a085a17d75cd25b9d54ca647cb52c1694726216352ce3f37e76366b02",
+      "end": 937,
+      "file_sha256": "561493cfd444ad27f0ee673fb3dd96156d891966451bcd7345e609bcb31cbe7d",
+      "id": "schemas-patch",
+      "path": "clearledger/server/app/schemas.py",
+      "start": 909,
+      "symbol": "ContractUpdate"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "3b55b84de7e7b9a063a5288431cc97a33a0ac0617b48f44f39bf7a79056a07bb",
+      "end": 1455,
+      "file_sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "id": "model",
+      "path": "clearledger/server/app/models.py",
+      "start": 1346,
+      "symbol": "Contract"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "2871ce1164fbe6fdfe525ea50704506bbf3b1f8df89bb9043d9d57d2ec02eb01",
+      "end": 129,
+      "file_sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c",
+      "id": "get-owned",
+      "path": "clearledger/server/app/deps.py",
+      "start": 83,
+      "symbol": "get_owned"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "42c0e16f3006b34a71c92d7245ec2c8f86a6672e09c310971a108ec61435b183",
+      "end": 5561,
+      "file_sha256": "ee4633ecc50be527ccb15eda8a53633b9129bb97daac4ed8f4aa751a57c0b0a6",
+      "id": "get-db",
+      "path": "clearledger/server/app/database.py",
+      "start": 5553,
+      "symbol": "get_db"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "6c2941ee8c38c07cc0ecc3b6522e4446b09363e315c7cfd4b03dbbdb1dfd27cf",
+      "end": 199,
+      "file_sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97",
+      "id": "lock-create",
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "start": 188,
+      "symbol": "lock_manual_creation"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "e2ebe250b0a9f2222b50adfd0aa02dc6aa07336530741654dd1aeae784b66549",
+      "end": 147,
+      "file_sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97",
+      "id": "contract-index",
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "start": 109,
+      "symbol": "ContractIndex"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "85f1b90c61981070fcc3a13925bac2de1a8d2e64c2c04226a0562665d99a0328",
+      "end": 185,
+      "file_sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97",
+      "id": "contract-identity",
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "start": 176,
+      "symbol": "contract_identity"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "95925216c276da2316337a46ea70ceb12a5444b7d669bef42cc3952cc556b96d",
+      "end": 155,
+      "file_sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97",
+      "id": "org-resolve",
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "start": 150,
+      "symbol": "organization_for_import"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "820e5c84b17644250c805f39948de8f0326b844adb0005b5db621b78efab7e5f",
+      "end": 162,
+      "file_sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97",
+      "id": "org-require",
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "start": 158,
+      "symbol": "require_organization"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "9ebc64b27489397580a48f2cd30313c857e5a763e04b79ea0f83cff2f2b8c18d",
+      "end": 24,
+      "file_sha256": "37962f4615cd9c46e9f8e926c08167dfccfe2a0705beef082d46257d62ab08aa",
+      "id": "snapshot",
+      "path": "clearledger/server/app/services/reference_overrides.py",
+      "start": 19,
+      "symbol": "snapshot_reference_fields"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "40374c023861db66fd1aca6d576c70ec6ed72a1995f847bff2db79bde1e7c3e2",
+      "end": 30,
+      "file_sha256": "37962f4615cd9c46e9f8e926c08167dfccfe2a0705beef082d46257d62ab08aa",
+      "id": "mark",
+      "path": "clearledger/server/app/services/reference_overrides.py",
+      "start": 27,
+      "symbol": "mark_reference_changes"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "d3970e49c28bfa1c8169278a613ec24718b09b2509f76d060ea0c9bb89e185b3",
+      "end": 37,
+      "file_sha256": "37962f4615cd9c46e9f8e926c08167dfccfe2a0705beef082d46257d62ab08aa",
+      "id": "import-values",
+      "path": "clearledger/server/app/services/reference_overrides.py",
+      "start": 33,
+      "symbol": "apply_import_values"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "9b6b46c27122dc1c7ce71d2657609cff90e8134693fed39ddfd94e5af5c4bd8f",
+      "end": 131,
+      "file_sha256": "9f504f2150af86b9e33b238e1c69bd806f16fab492a368a30d1169d911cbcda7",
+      "id": "usage",
+      "path": "clearledger/server/app/services/contract_usage.py",
+      "start": 120,
+      "symbol": "contract_usage"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c0792769ef31eac8ecbde0dac4653e68ccc5a90219ce607225ddd665d4e5f138",
+      "end": 107,
+      "file_sha256": "9f504f2150af86b9e33b238e1c69bd806f16fab492a368a30d1169d911cbcda7",
+      "id": "usage-sources",
+      "path": "clearledger/server/app/services/contract_usage.py",
+      "start": 91,
+      "symbol": "_sources"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "2aa6d0d514ab4b05e801e8a93dc0948bca75dd942ce2447be02f767896f73820",
+      "end": 1241,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "scope-set",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1205,
+      "symbol": "set_contract_scope"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "d5ea8cb08c6bbb359586e651372b265f72ecd679b0d383b86a1768ccd3899f8b",
+      "end": 1269,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "scope-add",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1245,
+      "symbol": "link_contract_location"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "25b3d24ef3afb0d61b6f181eee02e5f202e6b080edb74826297f6ea8c442b522",
+      "end": 1291,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "scope-remove",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1273,
+      "symbol": "unlink_contract_location"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "1076622b8a38d312acf05e1c1a7f85b030f41ea25475780cbf19e99006e839db",
+      "end": 2125,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "dimensions",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 2098,
+      "symbol": "set_contract_dimension"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "4d506c27e130a38d3265d2e817231d63b244980a0a633d24396fa7265d6e2889",
+      "end": 1136,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "links-add",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1112,
+      "symbol": "add_contract_link"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c644f7391731aa5ff1a24947649175827eb19acdbb60db3837397700daa619b9",
+      "end": 1152,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "links-remove",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1140,
+      "symbol": "delete_contract_link"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "37c916f6dd3480b1ca057d7804bcb68a84fd7773f4eb0082fa5b40e9e2483e4a",
+          "column": 4,
+          "kind": "Assign",
+          "line": 290
+        }
+      ],
+      "ast_sha256": "bfae6385be1336a6d80a191e3519496c3606e5cd91a076f876c848b74da670bd",
+      "end": 292,
+      "file_sha256": "9f8263b72af31bc576441ac55576d02674a296db4783d79c8443d068c2fc172c",
+      "id": "liability",
+      "path": "clearledger/server/app/services/contract_liability.py",
+      "start": 266,
+      "symbol": "set_liability"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "e2538c94ee83c3539227637485202fb984c00721900a6d227ad80ec2ec49243b",
+      "end": 210,
+      "file_sha256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "id": "liability-http",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "start": 196,
+      "symbol": "put_contract_liability"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "4264d456f063d3d0c0b968dbecbafb99ef655a598f4c934771d2b5b6542771c0",
+          "column": 27,
+          "kind": "Call",
+          "line": 278
+        },
+        {
+          "ast_sha256": "7c33cea0ff78cc060b7ce6f1b87c5476404700ee18daf96e28de7282b4688d73",
+          "column": 16,
+          "kind": "Call",
+          "line": 292
+        }
+      ],
+      "ast_sha256": "6b395ff2cc14a05b684231aa605cba63a02a5594fab0d196fa0ba05d0b72c491",
+      "end": 359,
+      "file_sha256": "a997831525859290bd736b2936f817c0f96b6afc3cd2cd3b682de2a36572239f",
+      "id": "legacy",
+      "path": "clearledger/server/app/services/reestr_normalize.py",
+      "start": 171,
+      "symbol": "ingest_reestr"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "2b10f2220c2155b550623914d3f27b39eca1bf4cbdb19263874394aa1c466816",
+          "column": 23,
+          "kind": "Call",
+          "line": 462
+        },
+        {
+          "ast_sha256": "7c33cea0ff78cc060b7ce6f1b87c5476404700ee18daf96e28de7282b4688d73",
+          "column": 16,
+          "kind": "Call",
+          "line": 476
+        }
+      ],
+      "ast_sha256": "0c216b8c0ae0f8ff1f33b86066a03bd8e08a496ae7adda5d1a5c2e58c1d1d166",
+      "end": 479,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "l2",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 451,
+      "symbol": "L2Cache.contract"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "bca7521d2613db191d1846906ba2364ecbd292d07a1384f06ba785195977bde8",
+      "end": 428,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "l2-build",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 398,
+      "symbol": "L2Cache.build"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "e1cef7ef6a9a7037e68d41e53e843e698a9c255274b84133233640b39c4ae788",
+          "column": 19,
+          "kind": "Call",
+          "line": 671
+        }
+      ],
+      "ast_sha256": "4a45375ecd71155ce4b567c6bf7f9b42d052662f448ffe62ef4d08e329f76dcd",
+      "end": 692,
+      "file_sha256": "8e1ab95758054b85df13bfae478f40aca37ccc1b36cc3d95f8c91bc55772ec59",
+      "id": "corporate",
+      "path": "clearledger/server/app/services/charge_sessions_normalize.py",
+      "start": 617,
+      "symbol": "_sync_corporate_contracts"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "484527f170bbf9b1f4446ceeaca70c0fd50f6503d4c8ce42b4b35616c054710f",
+      "end": 607,
+      "file_sha256": "8e1ab95758054b85df13bfae478f40aca37ccc1b36cc3d95f8c91bc55772ec59",
+      "id": "org-enrich",
+      "path": "clearledger/server/app/services/charge_sessions_normalize.py",
+      "start": 562,
+      "symbol": "enrich_sessions_with_orgs"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "1b5dfeecbed7b11e61048d7987be08cf233a416ea76e1487439d1fcbf4fe9f47",
+      "end": 1253,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "run-file",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 1237,
+      "symbol": "run_reestr_file"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "bd12a08d4bcf820f7394975df01be17d5b10caa33b8063c8832cce422dade6f5",
+      "end": 791,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "svodnaya",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 677,
+      "symbol": "ingest_svodnaya"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "10468c89b044fa095ee80cd406def0a9a8ccc005672741078dcfb008c2efc1f9",
+      "end": 892,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "arenda",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 794,
+      "symbol": "ingest_arenda"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "bbe95243dedbc9528a01376ba00404b9c4b7e57803fdca5a420ec2992310479e",
+      "end": 953,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "tariffs",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 895,
+      "symbol": "ingest_tariffs"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c29971204acf9991f082ca082c407145ee8a348f433dc9e0beda3ab4562bcec0",
+      "end": 1221,
+      "file_sha256": "ccb2a2c33862b8e28f3387a3b66b72ab996f775196729cdca301a0fbae3bf7a2",
+      "id": "obshaya",
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "start": 1124,
+      "symbol": "ingest_obshaya"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "5759eb14590ae4b6f391355c8d38a8f12cc0794299ddac543e9cd881990e129a",
+      "end": 506,
+      "file_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+      "id": "channel-reestr",
+      "path": "clearledger/server/app/services/channel_orchestrator.py",
+      "start": 404,
+      "symbol": "_run_reestr"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "0cbfd6893d18a1a22e52da6a40a439c6021d12f709868ac79d2c3e4095a63c01",
+      "end": 669,
+      "file_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+      "id": "channel-run",
+      "path": "clearledger/server/app/services/channel_orchestrator.py",
+      "start": 631,
+      "symbol": "run_channel"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "4994989d64eb9c11e7f0a2b22c87dcca000a0745ce16ad0cbd4746b7cf921dc1",
+      "end": 743,
+      "file_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+      "id": "channel-dispatch",
+      "path": "clearledger/server/app/services/channel_orchestrator.py",
+      "start": 713,
+      "symbol": "_dispatch"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "ecaaae7130bacb23da51cacbd0eb9ad2b12a10758e4ac0dbb307217c47595f84",
+      "end": 491,
+      "file_sha256": "027df4a863a9f730b45e05ed8d283acf298b6835fa6cf42786222b3b8daf91a4",
+      "id": "channel-http",
+      "path": "clearledger/server/app/routers/channels_router.py",
+      "start": 457,
+      "symbol": "run_channel"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "89f749ac30e184e7997b70d42eaea7f9aa918ef9da8671ac0034a0fcc02b78da",
+      "end": 421,
+      "file_sha256": "027df4a863a9f730b45e05ed8d283acf298b6835fa6cf42786222b3b8daf91a4",
+      "id": "channel-background",
+      "path": "clearledger/server/app/routers/channels_router.py",
+      "start": 327,
+      "symbol": "_run_channel_background"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c2eff046e1fe67680ec41c7d773ac696950e181bd11f8bfdf2a499522326dfe3",
+      "end": 99,
+      "file_sha256": "62042ad5e4d910f46d53c15bedfe4d56334760832bf5bae6149fe21f68235f6f",
+      "id": "corp-http",
+      "path": "clearledger/server/app/routers/charge_sessions_router.py",
+      "start": 77,
+      "symbol": "enrich_sessions"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "9f498d2e238be6083b19a0f37fecc5e5f7b0bb1e30f5a32235c01ce3b19b56a1",
+          "column": 31,
+          "kind": "Call",
+          "line": 1325
+        },
+        {
+          "ast_sha256": "86ff5c61190be40bd1741af95bb34bd441457ef02056a1a3c054e4e075ee6106",
+          "column": 20,
+          "kind": "Call",
+          "line": 1364
+        }
+      ],
+      "ast_sha256": "5d24677411bdaa4705610b6cb0f595453e47988438ee72c2f99de88481de21ef",
+      "end": 1381,
+      "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+      "id": "onec",
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "start": 1239,
+      "symbol": "OneCSyncService._sync_contracts"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "f7830f602e70a9595363b4f0ed3998c19fb05dc4c72e9462d1182ad7b1c8f01c",
+      "end": 191,
+      "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+      "id": "onec-source",
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "start": 180,
+      "symbol": "_assert_reference_source"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "e091b31e5fb7b1f970f7ef3acd80cf0a9c2de47b8d70ce60cad1681081f9dc80",
+      "end": 201,
+      "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+      "id": "onec-raw",
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "start": 194,
+      "symbol": "_reference_raw"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "6f6b5dcdf42057d46a12de200382f9c91b7160a71590b191835dd31a1dec4177",
+      "end": 171,
+      "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+      "id": "onec-req",
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "start": 155,
+      "symbol": "_contract_requisites"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "af8aad10d084618eb8dbf047bb156e65c544e3d3725303078e72905b65fb60f8",
+      "end": 304,
+      "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+      "id": "onec-catalogs",
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "start": 290,
+      "symbol": "OneCSyncService.sync_catalogs"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "2abe85787a5d5e7511ba064156ee7e0fe417e80f57a4179c5f9522e45e7f8944",
+      "end": 233,
+      "file_sha256": "472d4f714a2f6dbccd0dc51371dc8271f6a7720e450df2992b5dd4e21a7ea78e",
+      "id": "onec-http",
+      "path": "clearledger/server/app/routers/onec_router.py",
+      "start": 223,
+      "symbol": "sync_catalogs"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "5487aadb5d989409e8084cdbdd788e20269629123b97821b9b0f4a75b4ed3b45",
+      "end": 321,
+      "file_sha256": "472d4f714a2f6dbccd0dc51371dc8271f6a7720e450df2992b5dd4e21a7ea78e",
+      "id": "onec-full",
+      "path": "clearledger/server/app/routers/onec_router.py",
+      "start": 298,
+      "symbol": "sync_full"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "53b7c48bfb4eda0724399b6afa6e04153d4c0190281b66dad7a1966f3db6cb9d",
+          "column": 30,
+          "kind": "Constant",
+          "line": 9566
+        }
+      ],
+      "ast_sha256": "b2133d09f46d40701fe9cb5e1cfeadee79819e234423d63d5b4dd0f265b70f11",
+      "end": 9586,
+      "file_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+      "id": "shop-partner",
+      "path": "clearledger/server/app/routers/store_router.py",
+      "start": 9485,
+      "symbol": "store_partner_create"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "c9bbddb2327b0aefac4fe670f87775f4e6b3e7ab4a1d163bf0d07af558b1035c",
+          "column": 30,
+          "kind": "Constant",
+          "line": 9657
+        },
+        {
+          "ast_sha256": "b6a296d87f9a0a0e988e147e701c0b135776fb73c5685a3446bed2a6e9ca1e49",
+          "column": 30,
+          "kind": "Constant",
+          "line": 9667
+        }
+      ],
+      "ast_sha256": "f7e0d9487da2bf27bcdeae78d65fcb2118b9eb21679c7aa9ba90790c61198249",
+      "end": 9676,
+      "file_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+      "id": "shop-contract",
+      "path": "clearledger/server/app/routers/store_router.py",
+      "start": 9623,
+      "symbol": "store_contract_save"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "4562af7c4a13699038c7b142f867ab70ff1be5980059c0b64ba7d9628da0b135",
+      "end": 173,
+      "file_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+      "id": "shop-access",
+      "path": "clearledger/server/app/routers/store_router.py",
+      "start": 162,
+      "symbol": "_receipt_access"
+    },
+    {
+      "anchors": [
+        {
+          "ast_sha256": "a7e6ec173cbae70708046410b86aaa087d332a598f913933a2b24bd298ca1fab",
+          "column": 12,
+          "kind": "Constant",
+          "line": 3015
+        },
+        {
+          "ast_sha256": "18867dad6b09fcd2cb162fcf2291221380383ad69ce9e1c2bfd8ee1d3b067c6f",
+          "column": 12,
+          "kind": "Constant",
+          "line": 3016
+        },
+        {
+          "ast_sha256": "35b137548fb2fe76d36d240ce3a715d6b9220039b1b6f02b167ef3ce9904feec",
+          "column": 12,
+          "kind": "Constant",
+          "line": 3587
+        },
+        {
+          "ast_sha256": "b9b26fea35d98c432061caee565566710d188818acfe2dd985b9a8925f597e77",
+          "column": 12,
+          "kind": "Constant",
+          "line": 3591
+        },
+        {
+          "ast_sha256": "cc174d58d3ec340e6d2d6f156aedf60ece7d3066a7573a5f5d10d53aac6fdf24",
+          "column": 40,
+          "kind": "Constant",
+          "line": 3724
+        },
+        {
+          "ast_sha256": "d485b0e2c039e7886515c4af8ee3ecc1ea1125a946b6199f5742882c736ed14f",
+          "column": 40,
+          "kind": "Constant",
+          "line": 3746
+        }
+      ],
+      "ast_sha256": "13fce6a4d5cfaddf3394ad2f3c2a7f04acea946a635465f2c027825249d2b518",
+      "end": 5550,
+      "file_sha256": "ee4633ecc50be527ccb15eda8a53633b9129bb97daac4ed8f4aa751a57c0b0a6",
+      "id": "bootstrap",
+      "path": "clearledger/server/app/database.py",
+      "start": 2231,
+      "symbol": "create_all"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "b18d6ef4fdcbc1a8c36b5f2795d6cfe7a027b23a5a9ad4c4e308e6f8f8920678",
+      "end": 358,
+      "file_sha256": "8a4f76e9ef8fe4c27418d8617b5d98b18d75ffbae2e6bbd24ac2994e9b488637",
+      "id": "startup",
+      "path": "clearledger/server/app/main.py",
+      "start": 228,
+      "symbol": "lifespan"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "eb6d3cdc83ef7c994d60f6d9fc50b68aea54b147b000a978423c3e68b46f7df8",
+      "end": 187,
+      "file_sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288",
+      "id": "term-create",
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "start": 152,
+      "symbol": "create_term"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "92b27f97e7d1d7f9428b05e025f09e91607aaf0305ddf02686f03864153ce8f1",
+      "end": 252,
+      "file_sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288",
+      "id": "term-update",
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "start": 190,
+      "symbol": "update_term"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "f974dab4b337c7177dc09d84026602ac069bf3a82023ef10450cc6bf85e445de",
+      "end": 281,
+      "file_sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288",
+      "id": "term-delete",
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "start": 255,
+      "symbol": "delete_term"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "07dac605fb963c75f0cb5322d4812d03253da4288813e0c3681fda9cfdde0492",
+      "end": 149,
+      "file_sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288",
+      "id": "term-window",
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "start": 126,
+      "symbol": "_check_window"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "54937e01e3aafd98c8cbb382043e71a78214c3fbf94b37790f701880467eaad8",
+      "end": 123,
+      "file_sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288",
+      "id": "term-lock",
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "start": 121,
+      "symbol": "_lock_contract_terms"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "152f6d5ee69936ee7b22a14ffd6795573846ed5337288617a4d07a2c63483a93",
+      "end": 705,
+      "file_sha256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "id": "term-create-http",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "start": 691,
+      "symbol": "post_ops_term"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "41ba8d76db06a432cfb0c81d71a0de8dc2be6e01785cd6a45b40cd2119f38605",
+      "end": 731,
+      "file_sha256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "id": "term-update-http",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "start": 709,
+      "symbol": "patch_ops_term"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "f44f38b54dc0021b8ca4dd617686e85ec3e63a8f1fc22085b787fee203c55505",
+      "end": 749,
+      "file_sha256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "id": "term-delete-http",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "start": 735,
+      "symbol": "delete_ops_term"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "b0f9f951928816d35c1e8d04f3bebaf115d106e22f33706b509f9bb15450415c",
+      "end": 1617,
+      "file_sha256": "2b755bf232c22b6c23d4a1534d14dee4e2289d4a13772d3846bf8b9f9d8b65a7",
+      "id": "settlement",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "start": 1557,
+      "symbol": "upsert_settlement"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c2f7ea1276341c44ed83cec828e5516b36a604e1fcbc5bada33c32d3faf874df",
+      "end": 412,
+      "file_sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288",
+      "id": "ops-doc",
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "start": 369,
+      "symbol": "create_doc"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "78709da48d1cfd8a28e500f12878e8848fb069d8d9465001d0e38c9c979f71eb",
+      "end": 351,
+      "file_sha256": "41abffe0e76424840a9cc776b6128b2c465ba8349fffd38a8bae42026cec5ca4",
+      "id": "intake-match",
+      "path": "clearledger/server/app/services/intake_docs.py",
+      "start": 221,
+      "symbol": "match_and_verify"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "facb4191194bb932645f26a3ee61a2ffd9dc9c5c1817d47548a9951851f27d28",
+      "end": 389,
+      "file_sha256": "41abffe0e76424840a9cc776b6128b2c465ba8349fffd38a8bae42026cec5ca4",
+      "id": "intake-accept",
+      "path": "clearledger/server/app/services/intake_docs.py",
+      "start": 359,
+      "symbol": "accept_items"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "4779b644393e0fd59b6b1918f2bedc5d1b8add18e7e78615e7b28772e1f89ec2",
+      "end": 221,
+      "file_sha256": "d08cc2d6a71becfb6257adda303c2cd1d60907f6736080ada851535b79ae527c",
+      "id": "books-relink",
+      "path": "clearledger/server/app/services/books_links.py",
+      "start": 171,
+      "symbol": "relink"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "026d588c1b98aee42502dfc127fbbfd6b1440f7940e405a45d9c46c056c3f848",
+      "end": 507,
+      "file_sha256": "6c703ffe6c79048d9cf5852f4826de1f249a0fefd8c0f901edee9119e8b69106",
+      "id": "expectations",
+      "path": "clearledger/server/app/services/ops_expectations.py",
+      "start": 410,
+      "symbol": "_plan_expectations"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "34c769b7120e24518f59c82244550af5459afee1826e8948f8ff30ee567179cf",
+      "end": 5917,
+      "file_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+      "id": "receipt-party",
+      "path": "clearledger/server/app/routers/store_router.py",
+      "start": 5854,
+      "symbol": "_set_receipt_party"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "fac295b588d77fb31d33b74af947a144c736f4b657bb4ce4a644efdfcfc42163",
+      "end": 6906,
+      "file_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+      "id": "receipt-create",
+      "path": "clearledger/server/app/routers/store_router.py",
+      "start": 6834,
+      "symbol": "create_receipt"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "b7ee06c73e955029e4878ba53e591c6693eaceebcf61138bc23c07b559956f34",
+      "end": 7120,
+      "file_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+      "id": "receipt-update",
+      "path": "clearledger/server/app/routers/store_router.py",
+      "start": 7006,
+      "symbol": "update_receipt"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "735b0371f759ecc5f5cadf1cc28242b0e250fb76257991a01cea90ef7cdd3a10",
+      "end": 630,
+      "file_sha256": "8c6ec9fd912557e7f9d5d7cda76cee4bab4627f2a218c1a4ac4c360ded14e5c5",
+      "id": "receipt-link",
+      "path": "clearledger/server/app/services/store_receipt_accounting.py",
+      "start": 570,
+      "symbol": "link_receipt_canonical_refs"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "6a00d9c5e63dcb9fcbe41929d6beffac481483ba5ea839704e08f2b293005ea2",
+      "end": 640,
+      "file_sha256": "415bd7dcd784507af286c04d84d3e7c4481e7b285d56c1dc32c63591145823c8",
+      "id": "edge-receipts",
+      "path": "clearledger/server/app/routers/edge_router.py",
+      "start": 326,
+      "symbol": "_ingest_receipts"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "562a5b3c4250ff015bad7b676012486fa8d46920b50383fde68b9b4e3053a101",
+      "end": 1787,
+      "file_sha256": "6572971632e9f9506b85102d6f29d2bbcb1eca8c78ca9f2c9b9aafddf4d224b4",
+      "id": "site-link",
+      "path": "clearledger/server/app/services/ezs_project.py",
+      "start": 1760,
+      "symbol": "link_contract"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "f72d27b518478d99a1820d704587aa7a88135e3eb4dacfea797a80bf58832341",
+      "end": 1341,
+      "file_sha256": "806fa73096f7e83ceb0f59e52b54c7a0e60d5845baec0d2e0a3aa9ebaf728fc7",
+      "id": "site-link-http",
+      "path": "clearledger/server/app/routers/sites_router.py",
+      "start": 1330,
+      "symbol": "link_contract"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "032c9983494dfc554b2734067ef79a3ad9d4447633044f46d0cb4c7c1a44dd47",
+      "end": 724,
+      "file_sha256": "1d12a2c9817449d8ceb5196a00ad1845cc9e03f828438e45b1853b7097c837cd",
+      "id": "integration-save",
+      "path": "clearledger/server/app/services/project_integration.py",
+      "start": 698,
+      "symbol": "save"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "20e45dc7210fdb5456997fac12914d94ba9c212e65175709f0acea953d6a5a7d",
+      "end": 293,
+      "file_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea",
+      "id": "project-promote",
+      "path": "clearledger/server/app/routers/project_workspace_router.py",
+      "start": 264,
+      "symbol": "promote"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "5a36ac4e727883a65bfa5ee87a6086f4c97ae5366668fbf74d14eca2377784f2",
+      "end": 245,
+      "file_sha256": "413c4109fa3b52ce81011acf593d3059c5721b814254083b2d2478f98978ddc5",
+      "id": "equipment-head",
+      "path": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "start": 223,
+      "symbol": "_head"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "988e76cac10efa216cbc4fa210bc27744ef1492839fbc1a3f8e9ec4f5c049fd0",
+      "end": 412,
+      "file_sha256": "413c4109fa3b52ce81011acf593d3059c5721b814254083b2d2478f98978ddc5",
+      "id": "equipment-post",
+      "path": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "start": 352,
+      "symbol": "post_document"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "b7e3228564108ba4dd1e9faf74798888346ff4450ee4c5e3cce2184e67d2886b",
+      "end": 679,
+      "file_sha256": "413c4109fa3b52ce81011acf593d3059c5721b814254083b2d2478f98978ddc5",
+      "id": "warehouse-save",
+      "path": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "start": 620,
+      "symbol": "save_warehouse"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "f0524b1244a1469e22d3bc77219d359fc0675e461b6e67e3cffc8bebf72009f0",
+      "end": 315,
+      "file_sha256": "3113a0f1321603df0be0c58e9cac67f526cc4498ca13e974dff327597865a337",
+      "id": "supply-create",
+      "path": "clearledger/server/app/services/ezs_supply.py",
+      "start": 262,
+      "symbol": "create_supply"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "7011eef2680b63beb1ec11823c565df5fa77abdf0c8566411fed5b846172cbd0",
+      "end": 374,
+      "file_sha256": "3113a0f1321603df0be0c58e9cac67f526cc4498ca13e974dff327597865a337",
+      "id": "supply-update",
+      "path": "clearledger/server/app/services/ezs_supply.py",
+      "start": 318,
+      "symbol": "update_supply"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "3dc513bef32e6f42a22274d2bd16a655ecacdcb00f6c7b7dde62bc513097804b",
+      "end": 253,
+      "file_sha256": "860ba67cd44e544969eac8668686183704b371aa84e12c04a0b6736bd3d37fb3",
+      "id": "spare-draft",
+      "path": "clearledger/server/app/services/ezs_spare_docs.py",
+      "start": 212,
+      "symbol": "save_draft"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "531721b5c76c218ad8972d39737a85a33499d781b2f5daaf0f6ff28a657c87c4",
+      "end": 416,
+      "file_sha256": "860ba67cd44e544969eac8668686183704b371aa84e12c04a0b6736bd3d37fb3",
+      "id": "spare-post",
+      "path": "clearledger/server/app/services/ezs_spare_docs.py",
+      "start": 275,
+      "symbol": "post_document"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "fe6d74f0fb85b509c88fc0f1e3b1f36c9bd5b7592d485c99d238fc3b0b08379d",
+      "end": 600,
+      "file_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+      "id": "member-contracts",
+      "path": "clearledger/server/app/routers/users_router.py",
+      "start": 562,
+      "symbol": "set_member_contracts"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "038291845bce551fdf5f066597667cc28876fc6029cf9dd3fa842cb7b5b72b45",
+      "end": 2284,
+      "file_sha256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "id": "doc-create",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "start": 2211,
+      "symbol": "create_doc"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "9665a59141c7ca63c9afbbd7f168c8b5cd2dc51a0f33c9b5f7ab69ea24dbd1dd",
+      "end": 2687,
+      "file_sha256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "id": "doc-update",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "start": 2479,
+      "symbol": "doc_action"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "95f8d91c34e70c5d482879b6a8c902cc6e3418ef00c8998081ffa0a9c9109ed8",
+      "end": 5619,
+      "file_sha256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "id": "doc-rel",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "start": 5588,
+      "symbol": "add_relation"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "aac9ffffe6413bde39174b6321c3e75bbcda9a22c1ba3b6eff3c226ee0eea63b",
+      "end": 426,
+      "file_sha256": "7e3159ea2c047d0affe7a491318fab0a07dbf0a45a08bda38472186c22b2616b",
+      "id": "process-launch",
+      "path": "clearledger/server/app/services/process_templates.py",
+      "start": 312,
+      "symbol": "launch"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "cacf4751e149ea8a727e7f473a912570c8a0d1e800aea50158714610620bdb9c",
+      "end": 309,
+      "file_sha256": "7e3159ea2c047d0affe7a491318fab0a07dbf0a45a08bda38472186c22b2616b",
+      "id": "process-task",
+      "path": "clearledger/server/app/services/process_templates.py",
+      "start": 212,
+      "symbol": "launch_task"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "aba321796a8d4551daacf784fe425aca66facdce2ceb81d18ec66c4db222490c",
+      "end": 1670,
+      "file_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758",
+      "id": "task-create",
+      "path": "clearledger/server/app/routers/tasks_router.py",
+      "start": 1572,
+      "symbol": "create_task"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c50c08670a80d3fa85ef77010854d0ba3b8bd22330771625befef6a5461035ec",
+      "end": 1700,
+      "file_sha256": "cd597a0d2a5dc30c4475dc8778a226352961ff889cfb986f009cc6068c62a8c9",
+      "id": "calendar-create",
+      "path": "clearledger/server/app/routers/work_router.py",
+      "start": 1630,
+      "symbol": "calendar_create"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "7ae6c966c2d3754404c34650b5cc2580c030cd372311cc4492e895ece7c44159",
+      "end": 48,
+      "file_sha256": "cfb2b5fa74eb7669c5334fe3301a2d41cc4992e70957a2d1ac23783e0df2628c",
+      "id": "reminder",
+      "path": "clearledger/server/app/services/reminders.py",
+      "start": 31,
+      "symbol": "put"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "9b60fa97d04920b71d7ec5b3148b6593b178e8222b1f45603523f1cc975cd7f6",
+      "end": 135,
+      "file_sha256": "8dc0140735e70ef6dbe89658fb7a2a99ec1d25c332675a297eae4898568301a5",
+      "id": "partner-topic",
+      "path": "clearledger/server/app/services/partner_bridge.py",
+      "start": 106,
+      "symbol": "ensure_topic"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "cf77eff928b85c2dce52e2e464db1d25813288074eefd6dbded393c0c0f632d9",
+      "end": 373,
+      "file_sha256": "8dc0140735e70ef6dbe89658fb7a2a99ec1d25c332675a297eae4898568301a5",
+      "id": "partner-send",
+      "path": "clearledger/server/app/services/partner_bridge.py",
+      "start": 288,
+      "symbol": "send"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "99941725b62c91bd44e4c6eade44105e672e12eaeb1a68b7e60414d8e1324bfd",
+      "end": 255,
+      "file_sha256": "8dc0140735e70ef6dbe89658fb7a2a99ec1d25c332675a297eae4898568301a5",
+      "id": "partner-incoming",
+      "path": "clearledger/server/app/services/partner_bridge.py",
+      "start": 212,
+      "symbol": "record_incoming"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "a96148df0434f585ba1dbec0d1c01610747a47e2e0a9c04d0a6f5b962f419f4a",
+      "end": 658,
+      "file_sha256": "26e23816acd0da74284e7f92b2e54f6a1d505fee1367d0d36f9d1e0d1a7e0557",
+      "id": "meeting",
+      "path": "clearledger/server/app/routers/conf_router.py",
+      "start": 618,
+      "symbol": "войти_во_встречу"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "339ab41626db229479b27992a9701ce3916b659122442cd9825d8f5acf19b745",
+      "end": 3522,
+      "file_sha256": "b920c314daef10fbdb5de2c5d2cd0320aa84579e2f4aae600f96adff3bdae3bf",
+      "id": "market-lead",
+      "path": "clearledger/server/app/routers/market_router.py",
+      "start": 3507,
+      "symbol": "create_growth_lead"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "d6181d379966e1523f40767bfedeeac7907b3b87c143edb6d81fbd94e87723f7",
+      "end": 147,
+      "file_sha256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "id": "dto",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "start": 140,
+      "symbol": "Contract"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "3c06e8dad29a2c634969397a02c41c57fc1d5ab9b183416362e52ff87801b5fb",
+      "end": 211,
+      "file_sha256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "id": "dto-project",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "start": 179,
+      "symbol": "Query.project"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "339d65b85b328dcc6627e48bc658767eea59dc07b5c0df338a60e7c433613a4d",
+      "end": 201,
+      "file_sha256": "f6c4e3950d6365b087cf92addc82e9c039d3b0425b389283ff7596e02862f526",
+      "id": "product-factory",
+      "path": "clearledger/server/app/product_api/app.py",
+      "start": 91,
+      "symbol": "create_product_api"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "db53fc767f2d2b4767dfbc5bb9f1a39d0b2c9523441ec20b2730d3b87ec49658",
+      "end": 40,
+      "file_sha256": "4c32d672a356427d1b54a4a5c9761a94a62ed4aee76ad2b3cb67873037c1a0f1",
+      "id": "cp-command",
+      "path": "clearledger/server/app/services/counterparty_commands.py",
+      "start": 17,
+      "symbol": "create_imported_counterparty"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "72be6fc5ec4bd27c83d7c89ed17b372886e632312e9c379379c81d179ba6251a",
+      "end": 353,
+      "file_sha256": "9629a86faf77d1b66832798751981ab3c3b08d06f2adcbc6e9086143fed67a70",
+      "id": "source-model",
+      "path": "clearledger/server/app/services/space_data_model.py",
+      "start": 307,
+      "symbol": "data_model"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "6d4894d62f30793848cedc4525cb6f5534d63ae61d3f15bb97bc5140a0ba8c1a",
+      "end": 233,
+      "file_sha256": "4b19dc90f9d7c6f8347f2fecd088fb872bc48a399c6d9a4681a64b9646adf388",
+      "id": "test-CC01",
+      "path": "clearledger/server/tests/test_contract_manual_serialization.py",
+      "start": 149,
+      "symbol": "test_concurrent_manual_null_survives_actual_import"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "628edcc88f80038ca92b99498660f99a57bb1ca9dc93902af15a7c8b53f0ed1a",
+      "end": 311,
+      "file_sha256": "4b19dc90f9d7c6f8347f2fecd088fb872bc48a399c6d9a4681a64b9646adf388",
+      "id": "test-CC02",
+      "path": "clearledger/server/tests/test_contract_manual_serialization.py",
+      "start": 306,
+      "symbol": "test_pending_dirty_request_joins_company_barrier_before_autoflush"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "cc4b452d5da22438c217fc9691ca55fdb941376052ef339be141a844cdfe311f",
+      "end": 403,
+      "file_sha256": "4b19dc90f9d7c6f8347f2fecd088fb872bc48a399c6d9a4681a64b9646adf388",
+      "id": "test-CC03",
+      "path": "clearledger/server/tests/test_contract_manual_serialization.py",
+      "start": 338,
+      "symbol": "test_current_admission_after_wait_with_retained_membership"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "2708571f5e863b4b55f5b24396f7b893d881de783b23749419306ec95ae80735",
+      "end": 208,
+      "file_sha256": "c5b0258f8575c737c65bcc68f29290d0977e24944f03ab0f985b9f8d44793bc3",
+      "id": "test-CC04",
+      "path": "clearledger/server/tests/test_contract_manual_freshness.py",
+      "start": 198,
+      "symbol": "test_same_upstream_control_does_not_claim_persisted_overwrite"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "af236deb5c6d762e9255dc63b1f001925ae61bcdc57d1ef33a25f54d737a4af6",
+      "end": 27,
+      "file_sha256": "145ca5509f81ff4d9956923af783765088c5f270f81530a0181e77e34566571e",
+      "id": "test-CC05",
+      "path": "clearledger/server/tests/test_contract_creation_replay.py",
+      "start": 8,
+      "symbol": "test_contract_creation_key_replays_one_intention_and_preserves_business_conflicts"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "d8e7dad5835f4182b817c2de9fa2c32fb9721dc3cc4731d54c163ffbe0d0cd6c",
+      "end": 57,
+      "file_sha256": "d1f86e066331ff7af613fce8af752aa7c5ad2675523f1a8feb61b537d94f953f",
+      "id": "test-CC06",
+      "path": "clearledger/server/tests/test_contract_doc_replay.py",
+      "start": 47,
+      "symbol": "test_different_intentions_and_unkeyed_docs_remain_independent"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "ea72ce6c04ffe5b487a3475f624e6702eb3e552c68454c422988e269fc83cdd4",
+      "end": 60,
+      "file_sha256": "dc392053ae98134c48de9b2e4e9ca4c72eb626139ba89b2d7954874985d4dc11",
+      "id": "test-CC07",
+      "path": "clearledger/server/tests/test_reference_identity_unit.py",
+      "start": 56,
+      "symbol": "test_duplicate_contract_same_number_and_date_is_not_first"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "b0a4b039fba948388664be3923d983ecb598fbf344640b1871fbf970486e2221",
+      "end": 107,
+      "file_sha256": "dc392053ae98134c48de9b2e4e9ca4c72eb626139ba89b2d7954874985d4dc11",
+      "id": "test-CC08",
+      "path": "clearledger/server/tests/test_reference_identity_unit.py",
+      "start": 94,
+      "symbol": "test_pinned_fields_can_be_resolved_by_original_source_snapshot"
+    },
+    {
+      "anchors": [],
+      "ast_sha256": "c7813b2f841e15fc67f46a626294e4b39764168df5825ef621591c05ef35995b",
+      "end": 48,
+      "file_sha256": "fe8a2321ffbea19439b0107decec13408820396185a35302bd6983bebb80189a",
+      "id": "test-CC09",
+      "path": "clearledger/server/tests/test_ops_term_windows.py",
+      "start": 40,
+      "symbol": "test_new_version_closes_old_window_and_preserves_history"
+    },
+    {
+      "ast_sha256": "40ffc23180a41db7ece262a309c4ccbe71efc3c0876f37026f9bcbbbad683519",
+      "end": 423,
+      "file_sha256": "c7d5965f0afe0391a78fd1441e16f615d57d2147ace659e1fbb105cd797cd013",
+      "id": "mail-create",
+      "path": "clearledger/server/app/routers/mail_router.py",
+      "start": 408,
+      "symbol": "create_rule"
+    },
+    {
+      "ast_sha256": "4709420746a03a59c3e508b75aedb855a5dc8c4b3408b7641590b5a8745aedea",
+      "end": 446,
+      "file_sha256": "c7d5965f0afe0391a78fd1441e16f615d57d2147ace659e1fbb105cd797cd013",
+      "id": "mail-update",
+      "path": "clearledger/server/app/routers/mail_router.py",
+      "start": 427,
+      "symbol": "update_rule"
+    },
+    {
+      "ast_sha256": "f5ef7fe797bfe255b99d708f479cb7b902b66e4fa8285abaaa55f768e64b6315",
+      "end": 390,
+      "file_sha256": "c7d5965f0afe0391a78fd1441e16f615d57d2147ace659e1fbb105cd797cd013",
+      "id": "mail-validate",
+      "path": "clearledger/server/app/routers/mail_router.py",
+      "start": 360,
+      "symbol": "_validate_rule_refs"
+    },
+    {
+      "ast_sha256": "c44eea54ac8366250c8032485aa46d7ad2b29c056afdf4c6dd36767021da7425",
+      "end": 2228,
+      "file_sha256": "ee4633ecc50be527ccb15eda8a53633b9129bb97daac4ed8f4aa751a57c0b0a6",
+      "id": "schema-guard",
+      "path": "clearledger/server/app/database.py",
+      "start": 2206,
+      "symbol": "_assert_bootstrap_namespace"
+    },
+    {
+      "ast_sha256": "5c1ec8805309b10ebf828e6fc572324c89ac21bd820785df45dc1c0b44d6e3e7",
+      "end": 1515,
+      "file_sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "id": "location-relation-model",
+      "path": "clearledger/server/app/models.py",
+      "start": 1490,
+      "symbol": "ContractLocation"
+    },
+    {
+      "ast_sha256": "d9cb871ad5467288f880aa74a7c3c75ed49d18be0e6baf48659cc356159ab4b8",
+      "end": 1487,
+      "file_sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "id": "link-relation-model",
+      "path": "clearledger/server/app/models.py",
+      "start": 1466,
+      "symbol": "ContractLink"
+    },
+    {
+      "ast_sha256": "2ee7f5e77f86761fb5bfa68934b0f3c0555da9c8f80a593722e453a2bc716834",
+      "end": 1724,
+      "file_sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "id": "dimension-relation-model",
+      "path": "clearledger/server/app/models.py",
+      "start": 1698,
+      "symbol": "ContractDimension"
+    },
+    {
+      "ast_sha256": "510d0209364660cc90a7313f10a655fe9302d150fb6daae39cffa44aedc1312d",
+      "end": 81,
+      "file_sha256": "472d4f714a2f6dbccd0dc51371dc8271f6a7720e450df2992b5dd4e21a7ea78e",
+      "id": "onec-owned",
+      "path": "clearledger/server/app/routers/onec_router.py",
+      "start": 75,
+      "symbol": "_get_connection_or_404"
+    },
+    {
+      "ast_sha256": "d63845c9ae9515ab70da9a590bc266474a0aedc6e34f9877101ea6a6cbb3da05",
+      "end": 188,
+      "file_sha256": "8a4f76e9ef8fe4c27418d8617b5d98b18d75ffbae2e6bbd24ac2994e9b488637",
+      "id": "prepare-db",
+      "path": "clearledger/server/app/main.py",
+      "start": 142,
+      "symbol": "_prepare_database"
+    },
+    {
+      "ast_sha256": "16cc2d5be5832c87bef4215e9d102814a2cb93652d721452840ba7e2146c0dd5",
+      "end": 224,
+      "file_sha256": "8a4f76e9ef8fe4c27418d8617b5d98b18d75ffbae2e6bbd24ac2994e9b488637",
+      "id": "prepare-once",
+      "path": "clearledger/server/app/main.py",
+      "start": 191,
+      "symbol": "_prepare_database_once"
+    },
+    {
+      "ast_sha256": "367dec43147d7223adfee691556c77b92f717d4b82321c722b4fc8551f85642c",
+      "end": 167,
+      "file_sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b",
+      "id": "scope-install",
+      "path": "clearledger/server/app/scope.py",
+      "start": 138,
+      "symbol": "install_orm_scope"
+    },
+    {
+      "ast_sha256": "a0ed5858f9beaae278e4b82e0c9c190ee19c41a444e238166f2be4df1c697b2b",
+      "end": 345,
+      "file_sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+      "id": "company-member",
+      "path": "clearledger/server/app/auth.py",
+      "start": 294,
+      "symbol": "assert_company_member"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "complete tracked clearledger/server/app; byte equality + stdlib AST/text only"
+}
