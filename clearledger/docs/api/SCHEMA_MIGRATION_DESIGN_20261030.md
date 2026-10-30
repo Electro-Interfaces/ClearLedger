@@ -356,7 +356,7 @@ Synthetic adoption проверяет неизменность OID, ACL/catalog 
 
 **Без этого cutover implementation runner не готов к включению.** Current Base
 metadata включает budget table; только добавление CLI создало бы два DDL owner.
-Следующий implementation dispatch обязан сделать явный managed-mode branch:
+Отдельный cutover-пакет до включения managed mode обязан сделать явную ветвь:
 
 - Legacy metadata registration сохраняет модель для ORM/namespace guard, но
   create_all получает exact table subset без budget table в managed Core mode.
@@ -465,3 +465,18 @@ f8eea104f0c096521cc937b6367ebca30ddea485e6b271a59e37f60359346af5  clearledger/se
 ```
 
 Inventory JSON SHA-256: `a3634f237b56106acb295036a3f33b57bbced567efc809f0c52f0cd54212cf1d`.
+
+
+## Независимая приёмка координатора
+
+Source commit `9733ffab22effb2a62a0ef3d9e872b50a1d0fc4e` перенесён в
+integration как `b55d99597ae0dbd3986e8cde0469f7e117d18177`. Root проверил
+точный состав трёх новых файлов и их SHA256. Генератор запущен независимо
+на immutable основе: JSON совпал побайтно. Сверены 14 source pin blobs,
+SHA256 и числа строк, 31 immutable source link и шесть приватных deployment
+pins. Приватные source bytes в публичный отчёт не копировались.
+
+Это приёмка source inventory и дизайна. SQL, app imports, actual runner и
+restore не выполнялись. Реализация CLI foundation, её SQL-проверки и
+последующий ownership cutover остаются отдельными этапами. Приватная сводка:
+`.artifacts/root-schema-design-proof.json`.
