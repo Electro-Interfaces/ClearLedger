@@ -1,0 +1,16 @@
+# ROOT MUST provide the independently inspected immutable final candidate image ID.
+ARG CANDIDATE_IMAGE
+FROM ${CANDIDATE_IMAGE}
+USER root
+COPY testtools-wheels/ /acceptance-input/wheels/
+COPY test-tools.lock /acceptance-input/test-tools.lock
+RUN /opt/candidate/bin/python -I -B -m pip install --no-index --no-cache-dir --no-compile --no-deps --require-hashes --only-binary=:all: --find-links=/acceptance-input/wheels -r /acceptance-input/test-tools.lock \
+ && /opt/candidate/bin/python -I -B -m pip check \
+ && rm -rf /acceptance-input
+COPY tests/ /app/tests/
+COPY locks/ /app/locks/
+COPY Dockerfile requirements.txt requirements-upgrade-20261030.in pytest.ini /app/
+# Exact byte alias prepared by ROOT from unchanged .dockerignore; no Dockerfile-specific filter dependency.
+COPY support.dockerignore /app/.dockerignore
+# app/schema are inherited byte-for-byte. Only the new image owns testtools16.
+LABEL api-modernization.scope="local-acceptance-only" api-modernization.owner="ctx_b4e579b3aef1"
