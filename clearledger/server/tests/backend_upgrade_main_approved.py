@@ -4,6 +4,7 @@ Launch only with reviewed SHA and -I -S -B in the NEW candidate environment.
 Preparation uses AST/compile only: this module was never imported by its author.
 """
 import argparse
+import contextvars
 import errno
 import asyncio
 from collections import Counter
@@ -24,6 +25,7 @@ import subprocess
 import sys
 import time
 import traceback
+import weakref
 from urllib.parse import urlsplit
 
 SERVER = Path(__file__).resolve().parents[1]
@@ -36,7 +38,7 @@ SOURCE_BASE = '330883aaf8e387e106e93d790806a182acbe526d'
 FROZEN_COUNTS = {'app': 492, 'tests': 345, 'schema_migrations': 16}
 CANDIDATE = Path('/srv/projects/api-modernization-upgrade-test-env-20261030/.venv')
 SITE = CANDIDATE / 'lib/python3.13/site-packages'
-RUN = REPO / '.artifacts/backend-upgrade-composed-main8-execution-20261030-attempt1'
+RUN = REPO / '.artifacts/backend-upgrade-composed-main8-execution-20261030-attempt2'
 EMPTY, UPLOAD, EVIDENCE = (RUN / n for n in ('main8-empty-test', 'main8-test-uploads', 'main8-test-evidence'))
 DSN = 'postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/api_partner_main_test_20261030'
 RAW_DSN = DSN.replace('postgresql+asyncpg:', 'postgresql:', 1)
@@ -52,6 +54,7 @@ TEST_TOOLS = {'iniconfig': '2.3.1', 'jsonschema': '4.26.0', 'jsonschema-path': '
 
 SELECTION = ('test_main_problem_request_id_matches_outer_security_context', 'test_standalone_child_unavailable_problem_request_id_without_sql', 'test_main_mount_order_anonymous_docs_and_version_guards', 'test_ordinary_employee_scoped_entities_refresh_and_revoke', 'test_ordinary_employee_document_eligibility_denial_is_not_owner_consent', 'test_explicit_docs_role_employee_allowed_bytes_hidden_and_foreign_404', 'test_main_swagger_canonical_projection_assets_session_csrf_and_live_revoke', 'test_main_confidential_registration_admin_machine_grant_and_live_revoke')
 EXPECTED_CASES = {'test_partner_main_composition.py': 8}
+AFFECTED_SELECTION = ('test_ordinary_employee_scoped_entities_refresh_and_revoke', 'test_ordinary_employee_document_eligibility_denial_is_not_owner_consent', 'test_explicit_docs_role_employee_allowed_bytes_hidden_and_foreign_404', 'test_main_swagger_canonical_projection_assets_session_csrf_and_live_revoke', 'test_main_confidential_registration_admin_machine_grant_and_live_revoke')
 FLAG = 'RUN_PARTNER_MAIN_COMPOSITION_TESTS'
 ISSUER = 'https://m18-space.example.invalid'
 SECRET = 'm18-synthetic-core-secret-never-production-20261030'
@@ -62,7 +65,7 @@ SENDER_COUNTS = {}
 AUDIT_DIAGNOSTICS = []
 IMPORT_CAPABILITY_PROOF = {}
 BOUNDARY = {'blocked_network': 0, 'allowed_pg_connects': 0, 'blocked_subprocess': 0,
-            'denied_env_reads': 0, 'db_connections': 0}
+            'denied_env_reads': 0, 'db_connections': 0, 'allowed_pg_sendmsg': 0}
 
 
 def sha(path):
@@ -213,7 +216,48 @@ def safe_failure_text(report, available):
     return result, len(raw) > limit
 
 
+def pg_sendmsg_metadata_allowed(family, socktype, protocol, owned_fd, current_fd,
+                               peer_exact, extra_args, extra_kwargs):
+    """Pure metadata policy; no data buffers, addresses, sockets or I/O inspected."""
+    return (family == socket.AF_INET and socktype == socket.SOCK_STREAM
+            and protocol in (0, socket.IPPROTO_TCP)
+            and type(owned_fd) is int and owned_fd >= 0
+            and type(current_fd) is int and current_fd >= 0 and current_fd == owned_fd
+            and peer_exact is True and not extra_args and not extra_kwargs)
+
+
+def sendmsg_metadata_controls():
+    """One positive and exact negative source matrix; no live socket/probe is created."""
+    good = dict(family=socket.AF_INET, socktype=socket.SOCK_STREAM,
+                protocol=socket.IPPROTO_TCP, owned_fd=17, current_fd=17,
+                peer_exact=True, extra_args=(), extra_kwargs={})
+    bad = {
+        'unowned': {'owned_fd': None}, 'closed': {'current_fd': -1},
+        'fd_reused_or_detached': {'current_fd': 18}, 'wrong_peer_or_unconnected': {'peer_exact': False},
+        'datagram': {'socktype': socket.SOCK_DGRAM}, 'unix': {'family': socket.AF_UNIX},
+        'ipv6': {'family': socket.AF_INET6}, 'raw': {'socktype': socket.SOCK_RAW},
+        'other_protocol': {'protocol': 132}, 'ancillary': {'extra_args': ((('forbidden',),),)},
+        'explicit_flags_even_zero': {'extra_args': ((), 0)},
+        'explicit_address': {'extra_args': ((), 0, ('forbidden', 1))},
+        'keyword_flags': {'extra_kwargs': {'flags': 0}},
+        'keyword_ancillary': {'extra_kwargs': {'ancdata': ()}},
+        'keyword_address': {'extra_kwargs': {'address': None}},
+    }
+    checks = {'owned_connected_pg_stream_only': pg_sendmsg_metadata_allowed(**good)}
+    checks.update({name: not pg_sendmsg_metadata_allowed(**{**good, **changed}) for name, changed in bad.items()})
+    if not all(checks.values()):
+        raise RuntimeError('PG sendmsg metadata source controls failed')
+    return checks
+
+
 def install_boundaries():
+    # Weak object ownership plus original fd prevents closed/detached/fd-reused sockets.
+    owned_pg_sockets = weakref.WeakKeyDictionary()
+    active_sendmsg = contextvars.ContextVar('approved_pg_sendmsg', default=None)
+    native_sendmsg = socket.socket.sendmsg
+    native_fileno = socket.socket.fileno
+    native_peer = socket.socket.getpeername
+    native_type = socket.socket.getsockopt
     def diagnostic(event):
         if len(AUDIT_DIAGNOSTICS) >= 32:
             return
@@ -228,6 +272,15 @@ def install_boundaries():
         AUDIT_DIAGNOSTICS.append({'event': event, 'stack': [
             {'file': safe_file(frame.filename), 'function': frame.name, 'line': frame.lineno}
             for frame in stack]})
+    def owned_stream_allowed(sock, extra_args=(), extra_kwargs=None):
+        try:
+            return pg_sendmsg_metadata_allowed(
+                sock.family, native_type(sock, socket.SOL_SOCKET, socket.SO_TYPE), sock.proto,
+                owned_pg_sockets.get(sock), native_fileno(sock),
+                native_peer(sock) == ('127.0.0.1', 33546), extra_args,
+                {} if extra_kwargs is None else extra_kwargs)
+        except (OSError, TypeError, AttributeError):
+            return False
     def audit(event, args):
         if event == 'socket.connect':
             sock, address = args
@@ -236,7 +289,21 @@ def install_boundaries():
                 BOUNDARY['blocked_network'] += 1
                 raise RuntimeError('Only approved PostgreSQL loopback socket allowed')
             BOUNDARY['allowed_pg_connects'] += 1
-        elif event in {'socket.bind', 'socket.sendto', 'socket.sendmsg', 'socket.gethostbyname', 'socket.gethostbyaddr'}:
+            if (sock.family == socket.AF_INET and native_type(sock, socket.SOL_SOCKET, socket.SO_TYPE) == socket.SOCK_STREAM
+                    and sock.proto in (0, socket.IPPROTO_TCP)):
+                owned_pg_sockets[sock] = native_fileno(sock)
+        elif event == 'socket.sendmsg':
+            active = active_sendmsg.get()
+            if (active is None or len(args) != 2 or args[0] is not active[0] or args[1] is not None
+                    or sys._getframe(1).f_code is not exact_pg_sendmsg.__code__
+                    or not owned_stream_allowed(args[0])
+                    or native_fileno(args[0]) != active[1]
+                    or owned_pg_sockets.get(args[0]) != active[1]):
+                diagnostic(event)
+                BOUNDARY['blocked_network'] += 1
+                raise RuntimeError('Unapproved sendmsg context')
+            BOUNDARY['allowed_pg_sendmsg'] += 1
+        elif event in {'socket.bind', 'socket.sendto', 'socket.gethostbyname', 'socket.gethostbyaddr'}:
             diagnostic(event)
             BOUNDARY['blocked_network'] += 1
             raise RuntimeError('No listeners/datagrams in candidate tests')
@@ -256,6 +323,18 @@ def install_boundaries():
                 diagnostic(event)
                 BOUNDARY['denied_env_reads'] += 1
                 raise RuntimeError('Reading .env prohibited')
+    def exact_pg_sendmsg(sock, buffers, *extra_args, **extra_kwargs):
+        allowed = owned_stream_allowed(sock, extra_args, extra_kwargs)
+        if not allowed:
+            diagnostic('socket.sendmsg-policy-denied')
+            BOUNDARY['blocked_network'] += 1
+            raise RuntimeError('Only an owned connected PG stream with buffer-only sendmsg is allowed')
+        token = active_sendmsg.set((sock, native_fileno(sock)))
+        try:
+            # No ancillary data, flags or address are ever forwarded, even explicit empty/default options.
+            return native_sendmsg(sock, buffers)
+        finally:
+            active_sendmsg.reset(token)
     sys.addaudithook(audit)
     # Low-level socket restriction remains even if a test replaces an HTTP seam.
     # ROOT-approved isolation of urllib3's import-only IPv6 bind capability probe.
@@ -293,6 +372,7 @@ def install_boundaries():
         return deny(*args, **kwargs)
     from unittest.mock import patch
     stack.enter_context(patch.object(socket.socket, 'listen', deny))
+    stack.enter_context(patch.object(socket.socket, 'sendmsg', exact_pg_sendmsg))
     for owner, name, replacement in (
         (aiosmtplib, 'send', captured('smtp.aiosmtplib.send', asynchronous=True)),
         (aiosmtplib.SMTP, 'connect', captured('smtp.aiosmtplib.connect', asynchronous=True)),
@@ -398,8 +478,11 @@ def child(approved_sha, profile):
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
     signal.signal(signal.SIGALRM, lambda *_: sys.exit('M18 540s execution bound exceeded'))
     signal.alarm(540)
-    cases = EXPECTED_CASES
-    record = {'profile': profile, 'main8_accepted': False, 'status': 'starting', 'python': '3.13.7', 'glibc': '2.36', 'runner_sha256': approved_sha,
+    selection = SELECTION if profile == 'main8' else AFFECTED_SELECTION
+    cases = {'test_partner_main_composition.py': len(selection)}
+    controls = sendmsg_metadata_controls()
+    record = {'profile': profile, 'main8_accepted': False, 'affected5_accepted': False,
+              'sendmsg_metadata_controls': controls, 'status': 'starting', 'python': '3.13.7', 'glibc': '2.36', 'runner_sha256': approved_sha,
               'inventory': packages, 'runtime_count': 61, 'test_tool_count': 16,
               'home_preserved': True, 'no_site_before_guards': True, 'no_env_files': True,
               'source_trees': FROZEN_TREES, 'source_counts': FROZEN_COUNTS,
@@ -501,9 +584,9 @@ def child(approved_sha, profile):
                 def pytest_collection_modifyitems(self, session, config, items):
                     record['collected'] = dict(Counter(Path(item.path).name for item in items))
                     record['nodeids'] = [item.nodeid for item in items]
-                    if (len(items) != 8 or {item.name for item in items} != set(SELECTION)
+                    if (len(items) != len(selection) or {item.name for item in items} != set(selection)
                             or any(Path(item.path).name != 'test_partner_main_composition.py' for item in items)):
-                        raise pytest.UsageError('Exact unchanged full main8 selection required')
+                        raise pytest.UsageError('Exact unchanged M18 profile selection required')
 
                 def pytest_runtest_logreport(self, report):
                     if report.when == 'call' or report.failed or report.skipped:
@@ -531,7 +614,7 @@ def child(approved_sha, profile):
                                           **{"scheduler." + n: 1 for n in SCHEDULERS}}
                     outcomes = [(r["when"], r["outcome"]) for r in self.results]
                     exact_outcomes = sum(when == "call" and outcome in {"passed", "failed"}
-                                         for when, outcome in outcomes) == 8 and len(outcomes) == 8
+                                         for when, outcome in outcomes) == len(selection) and len(outcomes) == len(selection)
                     if (any(BOUNDARY[name] for name in FORBIDDEN_COUNTERS) or unexpected
                             or self.counts != expected_lifecycle or not exact_outcomes
                             or len(self.jobs) != 8 or not all(job.cancelled() for job in self.jobs)):
@@ -546,7 +629,7 @@ def child(approved_sha, profile):
                         'unexpected_delivery_counts': unexpected, 'expected_lifecycle_counts': expected_lifecycle,
                         'results': self.results, 'full_main_asgi': True, 'nginx_browser_sso': False,
                         'parked_jobs': len(self.jobs), 'all_jobs_cancelled': record['m18_jobs_cancelled'],
-                        'source_scope': 'accepted composed source on new runtime; full8 distinct cases'})
+                        'source_scope': f'accepted composed source on new runtime; {profile}; {len(selection)} distinct cases'})
 
 
                 def pytest_unconfigure(self, config):
@@ -557,7 +640,7 @@ def child(approved_sha, profile):
                     '--confcutdir=' + str(SERVER), '--import-mode=importlib', '-p', 'pytest_asyncio.plugin',
                     '-p', 'no:cacheprovider', '--noconftest', '--show-capture=no', '--basetemp=' + str(EMPTY / 'pytest-test-temp'),
                     '--junitxml=' + str(EVIDENCE / 'junit.xml'), '--tb=short', '-q',
-                    *[str(SERVER / 'tests' / n) for n in cases]]
+                    *[str(SERVER / 'tests/test_partner_main_composition.py') + '::' + name for name in selection]]
             code = int(pytest.main(argv, plugins=[boundary]))
             record['pytest_exit'] = code
             if not record.get('m18_lifecycle_accepted'):
@@ -589,8 +672,9 @@ def child(approved_sha, profile):
             code = code or 4
         if os.environ.get('HOME') != pwd.getpwuid(os.getuid()).pw_dir:
             code = code or 5
-        record.update(status=('PASS' if profile == 'main8' else 'DIAGNOSTIC_PASS') if code == 0 else 'FAIL',
-                      main8_accepted=profile == 'main8' and code == 0, boundary=dict(BOUNDARY),
+        record.update(status='PASS' if code == 0 else 'FAIL',
+                      main8_accepted=profile == 'main8' and code == 0,
+                      affected5_accepted=profile == 'affected5' and code == 0, boundary=dict(BOUNDARY),
                       sender_counts=dict(record.get('m18_counts', {})),
                       transport_stub_counts=dict(SENDER_COUNTS), audit_diagnostics=list(AUDIT_DIAGNOSTICS),
                       import_capability_proof=dict(IMPORT_CAPABILITY_PROOF),
@@ -625,7 +709,8 @@ def supervise(approved_sha, profile):
         directory.mkdir(mode=0o700)
     anchor = RUN.lstat()
     anchor_identity = (anchor.st_dev, anchor.st_ino, anchor.st_uid)
-    cases = EXPECTED_CASES
+    selection = SELECTION if profile == 'main8' else AFFECTED_SELECTION
+    cases = {'test_partner_main_composition.py': len(selection)}
     argv = [str(CANDIDATE / 'bin/python'), '-I', '-S', '-B', str(SELF),
             '--approved-sha256', approved_sha, '--approved-other-sha256', APPROVED_OTHER_SHA, '--profile', profile, '--root-reviewed-child']
     started = time.monotonic()
@@ -667,9 +752,9 @@ def supervise(approved_sha, profile):
             from xml.etree import ElementTree
             suites = ElementTree.parse(junit).getroot()
             cases = suites.findall('.//testcase')
-            accepted = (len(cases) == sum((EXPECTED_CASES).values()) and
+            accepted = (len(cases) == len(selection) and
                     not any(suites.findall('.//' + k) for k in ('failure', 'error', 'skipped')) and
-                    json.loads(proof.read_text()).get('status') == ('PASS' if profile == 'main8' else 'DIAGNOSTIC_PASS'))
+                    json.loads(proof.read_text()).get('status') == 'PASS')
             boundary = json.loads(proof.read_text())
             accepted = (accepted and boundary.get('home_preserved') is True and
                         all(boundary.get('boundary', {}).get(name) == 0 for name in FORBIDDEN_COUNTERS) and
@@ -682,16 +767,20 @@ def supervise(approved_sha, profile):
                         all(value == 0 for value in boundary['transport_stub_counts'].values()) and
                         boundary.get('m18_lifecycle_accepted') is True and
                         boundary.get('m18_jobs_cancelled') is True and
-                        boundary.get('main8_accepted') is True and
-                        boundary.get('collected') == {'test_partner_main_composition.py': 8} and
+                        boundary.get('main8_accepted' if profile == 'main8' else 'affected5_accepted') is True and
+                        all(boundary.get('sendmsg_metadata_controls', {}).values()) and
+                        len(boundary.get('sendmsg_metadata_controls', {})) == 16 and
+                        boundary.get('boundary', {}).get('allowed_pg_sendmsg', 0) > 0 and
+                        boundary.get('collected') == {'test_partner_main_composition.py': len(selection)} and
                         boundary.get('m18_counts') == {
                             'startup.prepare': 1, 'chat_ws.start': 1, 'chat_ws.stop': 1,
                             'notify.dispatch_async': 8, **{'scheduler.' + name: 1 for name in SCHEDULERS}})
     except Exception as exc:
         accepted = False
         reason = 'JUnit/proof validation failed: ' + type(exc).__name__
-    receipt = {'status': ('PASS' if profile == 'main8' else 'DIAGNOSTIC_PASS') if accepted else 'FAIL',
-               'profile': profile, 'main8_accepted': profile == 'main8' and accepted, 'child_exit': child_exit,
+    receipt = {'status': 'PASS' if accepted else 'FAIL',
+               'profile': profile, 'main8_accepted': profile == 'main8' and accepted,
+               'affected5_accepted': profile == 'affected5' and accepted, 'child_exit': child_exit,
                'scratch_anchor_identity': anchor_identity,
                'scratch_policy': 'lstat/no-follow; exact owned root; only exact child ENOENT ignored',
                'reason': reason, 'child_reaped': True, 'elapsed_seconds': time.monotonic() - started,
@@ -720,7 +809,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--approved-sha256', required=True)
     parser.add_argument('--approved-other-sha256', required=True)
-    parser.add_argument('--profile', required=True, choices=['main8'])
+    parser.add_argument('--profile', required=True, choices=['main8', 'affected5'])
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--execute-root-reviewed', action='store_true')
     group.add_argument('--root-reviewed-child', action='store_true')
