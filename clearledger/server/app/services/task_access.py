@@ -1,7 +1,7 @@
 """Единый круг чтения поручения и его файлов; членство/продукт проверяет caller."""
 import uuid
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -99,3 +99,27 @@ async def assert_work(company_ref: str, user: User, db: AsyncSession, *, product
         return await product_gate(company_ref, user, db, "docs")
     except HTTPException:
         return await product_gate(company_ref, user, db, "plan")
+
+
+async def can_edit_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task, *,
+                        can_view=None, admin_check=None) -> bool:
+    """То же полномочие для API и интерфейса, включая охват руководителя."""
+    can_view = can_view if can_view is not None else can_view_task
+    admin_check = admin_check if admin_check is not None else is_admin
+    if not await can_view(db, cid, user, t):
+        return False
+    if t.visibility == "personal":
+        return t.author_id == user.id
+    if user.id in (t.assignee_id, t.author_id) or await admin_check(db, cid, user):
+        return True
+    from app.services import oversight
+    return (await oversight.охват(db, cid, user)).входит(t.assignee_id)
+
+
+async def assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task, *,
+                       view_guard=None, edit_check=None) -> None:
+    view_guard = view_guard if view_guard is not None else assert_view_task
+    edit_check = edit_check if edit_check is not None else can_edit_task
+    await view_guard(db, cid, user, t)
+    if not await edit_check(db, cid, user, t):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
