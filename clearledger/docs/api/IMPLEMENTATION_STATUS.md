@@ -515,3 +515,15 @@ Major pypdf5→6 иStarlette0→1 требуют отдельных regressions.
 семь артефактов, candidate input/constraints и ROOT-only execution proposal;
 старые locks/requirements/Dockerfile и runtime settings не переключены.
 [План обновления](BACKEND_DEPENDENCY_UPGRADE_PLAN_20261030.md).
+
+
+M04: карта services→routers принята в05e462d9 (sourcef21b17ea). Root
+независимо воспроизвёл четыре outputs побайтно:492app files/482AST,0parse
+unknown,20import sites/29bindings/36call-spelling refs. Все29связей получили
+owner/решение; динамические loader/rebinding/runtime пути остаются ограничениями.
+Авторские12purefixtures и отдельный ast.walk oracle сохранены; app/SQL в этой
+задаче не выполнялись. Runtime не менялся, карта историческая наd70581b4.
+Новый отдельный P1 переносит запрос ведущих из conf router в существующий
+jitsi service, сохраняет wrapper и убирает один обратный импорт meeting_notice.
+Отправители в будущих проверках полностью синтетические.
+[Карта границ](SERVICE_ROUTER_BOUNDARIES_20261030.md).
