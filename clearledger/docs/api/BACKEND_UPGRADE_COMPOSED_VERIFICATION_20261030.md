@@ -1,8 +1,9 @@
 # Совмещённая проверка backend upgrade, 30.10.2026
 
-**SOURCE-ONLY READY FOR ROOT REVIEW; composed full376 и fullmain8 NOT RUN.**
-Этот пакет замораживает актуальный общий source с принятым lifecycle fix и готовит
-два независимых ROOT-only прогона на уже установленном candidate runtime77.
+**SCOPED VERIFICATION COMPLETE: full376 —375PASS/1schemaFAIL; M18 —3сохранённыхPASS+5correctivePASS. Единого нового376GREEN или single8GREEN нет.**
+Пакет замораживает согласованный source с принятым lifecycle fix и содержит
+два ROOT-only entrypoint на candidate runtime77. ROOT выполнил full376, main8
+и единственный affected5 retest; worker проверил retained receipts без исполнения.
 Worker не импортировал/не исполнял app, pytest, ORM, SQL, entrypoint или драйвер,
 не создавал env, не устанавливал пакеты и не обращался в сеть за зависимостями.
 
@@ -47,7 +48,7 @@ interrupted partial с неизвестными accepted counts и diagnostic56c
 
 Full376 runner SHA-256: `b77fe80f9cdd3ab54cc60ec04469c26f1fde8d9bd8035b6fa7b5fd70e7f94f23`.
 
-Main8 runner SHA-256: `717811dcabb14c04024422306765bb99f51298c2e17399c72bba298d097366b7`.
+Main8 runner SHA-256: `4ea9370970cbe79182efca907791c01ad2ea47f63b8137f3ce2003644baf24cd`.
 
 Support freeze содержит Dockerfile, .dockerignore, requirements.txt,
 requirements-upgrade input, pytest.ini и **все** server/locks files. Их содержимое
@@ -67,7 +68,8 @@ Packaging26.3 остаётся runtime; дополнительных пакет�
 эти host regressions не доказывают приложение внутри Docker. ROOT lifecycle
 focused12 old/new PASS — отдельное уже принятое evidence, здесь не повторяется.
 Old M18 five baseline PASS и corrective three PASS были раздельными на old env;
-fullmain8 на новом runtime — обоснованная проверка union после изменения deps/source.
+новый main8 плюс affected5 проверяют тот же union на изменённых deps/source.
+Старые old-env proofs не переименованы в новые; ниже точный объём новых запусков.
 
 | ROOT-only profile | Объём | Exact disposable DB | Fresh execution root |
 |---|---|---|---|
@@ -107,7 +109,9 @@ pypdf/app extraction и malformed PDF, multipart filenames/bytes/limits/errors.
 | `tests/test_product_openapi_http_contract.py` | 8 |
 | `tests/test_product_service_openapi.py` | 7 |
 
-Итого376; ни одного completed composed runtime result пока нет. Прежние HTTP
+Итого376: ROOT завершил375PASS/1FAIL/0ERROR/0SKIP и149passed subtests.
+XML содержит376testcase elements; suite tests525 включает149subtests.
+Неудача — unchanged test_pure_schema_distinguishes_object_identity_from_other_ids. Прежние HTTP
 expectations не исправлялись ради upgrade. Full376 работает со штатным conftest
 на отдельной exact DB; он выполняет actual create_all/seed и свои схемные операции.
 Full gate изменяет только source approval/profiles/counts/fresh target: прежние
@@ -219,5 +223,123 @@ relations/connections и без FORCE/GUC. Прежние M18 normalDROP344relat
 Actual warnings, FAIL/SKIP, несовпадения pins/source/counts сохраняются; assertions
 и public API не меняются ради gate. Активация requirements, production flags,
 CI/fullrepository certification, Docker app proof, browser/nginx/SSO, release,
-merge/deploy отсутствуют. После actual evidence здесь будет только report-only
+merge/deploy отсутствуют. После actual evidence здесь выполнена только report-only
 finalization; M00–M19 не закрывается этим пакетом.
+
+
+## Фактические ROOT результаты на source330883aa /new77
+
+| Запуск | Exact scope | Результат | Время pytest /ROOT outer |
+|---|---|---|---|
+| Full376 attempt4 |376collected,16selectedfiles,6original probes |375PASS/1FAIL/0ERROR/0SKIP,149subtestsPASS |200.62s /217.6631768811494s |
+| Main8 attempt1 |8distinct existing cases |3PASS/5guardFAIL; не app defect verdict |45.94s /62.046643800102174s |
+| Corrective main affected5 attempt2 |exact5::nodeids,3PASSнеповторялись |5PASS/0FAIL/ERROR/SKIP |69.72s /86.57828894723207s |
+
+Supervisor full376216.80523755121976s, affected5 child85.83150733355433s;
+все owned children завершены/reaped. Ни worker, ни gate не меняли dependencies,
+app или testcase expectations для получения PASS. Данные/manifest fingerprints
+проверяются внутри каждого synthetic baseline; разные attempts не приравниваются
+по UUID/содержимому разных новых fixture datasets.
+
+Единственный full376 failure:
+`tests/test_product_object_ids.py::test_pure_schema_distinguishes_object_identity_from_other_ids`.
+FastAPI0.133 inlines objectId path schema с прежними type/min1/max40/NULpattern,
+а assertion требует `$ref` на ObjectId; model refs/Monitoring не изменились.
+Root noSQL diagnostic установил эту compatibility причину, старый assertion не
+ослаблялся. Отдельный publisher fix принят ROOT после14old/14new tests и включён
+в его более позднюю integration, но **не включён в наш замороженный source330**.
+Здесь остаётся actual375/1 этого snapshot; это не376GREEN позднего HEAD.
+
+Main8 first attempt:5failures вызваны audit socket.sendmsg в Python3.13
+asyncio.selector_events._write_sendmsg/writelines →asyncpg.executemany →bulk
+installation_locations INSERT. Первый gate строже старого M18 запрещал sendmsg
+целиком; это guard defect, не установленная ошибка бизнес-логики. ROOT штатно
+удалил own DB после344relations/0connections, затем открыл NEWmain-only correction.
+
+Сохранённые3PASS — main trusted request-ID, standalone child/noSQL request-ID и
+main mount/anonymous/version guards. Они не запускались повторно. Affected5 —
+ordinary employee scopes/refresh/revoke, explicit eligibility denial, docs-role
+bytes/foreign404, Swagger/canonical/browser/CSRF и confidential machine grant/revoke.
+Их unchanged fixture login counts2+2+2+1+1 дают expectednotify8;8parked jobs остаются.
+
+## Узкое transport исправление только NEWmain
+
+Buffer-only sendmsg разрешён лишь ранее учтённому exact PG socket:
+AF_INET, native SO_TYPE=SOCK_STREAM, TCP/defaultTCP, connected peer127.0.0.1:33546,
+weak object identity и тот же nonnegative nativefd от approved connect audit.
+Closed/detached/reused/unowned socket не проходит. Wrapper не принимает никаких
+extra args/kwargs, включая explicit empty ancillary, flags0 или addressNone, и
+вызывает native sendmsg только с buffers без чтения/записи/логирования payload.
+
+Native audit разрешает это только в privateContextVar scope и exact wrapper
+code frame, повторяя peer/type/protocol/fd/weak-ownership checks; direct native
+bypass запрещён. Bind/listen, UDP/Unix/IPv6/raw/otherpeer, ancillary/flags/address
+не получили exemptions. Остальные source/site/HOME/privacy/strictzero/limits
+остались прежними. Full376 runner/probes не менялись.
+
+ROOT исполнил16pure metadata controls: один positive и15negative (unowned,closed,
+fdreuse,wrongpeer/unconnected,dgram,Unix,IPv6,raw,protocol,ancillary/flags/address
+в positional/keyword формах). Это проверки predicate metadata без socket probes;
+worker их не исполнял. В actual affected5 согласованный PG sendmsg использован5раз,
+PGconnect3; forbiddennetwork/process/env0, audit[]. ВсеglobalSMTP/pushcaptures0,
+notify8, prepare/start/stop1, восемь jobs started/cancelled. Exact inventory77,
+реальный HOME, noenv/nosite и capability suppressed/restored подтверждены receipts.
+`affected5_accepted=True`, **`main8_accepted=False`**: частичный retest не выдаётся
+за single full8 run. По case coverage сохранённые3+corrective5 покрывают8разныхcases.
+
+## Пары gates и сохранённые scopes
+
+| Actual run | Full gate SHA-256 | Main gate SHA-256 |
+|---|---|---|
+| Full376 |`b77fe80f9cdd3ab54cc60ec04469c26f1fde8d9bd8035b6fa7b5fd70e7f94f23`|`717811dcabb14c04024422306765bb99f51298c2e17399c72bba298d097366b7`|
+| Main8 first attempt |`b77fe80f9cdd3ab54cc60ec04469c26f1fde8d9bd8035b6fa7b5fd70e7f94f23`|`7b6b2efdf60f8294fd13f77150034c24c02bd5235c46d87a74af955019c8e7d9`|
+| Corrective affected5 |`b77fe80f9cdd3ab54cc60ec04469c26f1fde8d9bd8035b6fa7b5fd70e7f94f23`|`4ea9370970cbe79182efca907791c01ad2ea47f63b8137f3ce2003644baf24cd`|
+
+Не-runner app/tests/schema/support bytes и runtime одинаковы на всех этих runs.
+Main gate менялся только между ROOTreap+normalDROP и следующимreview; SourceGuard
+не обманывался редактированием взаимно hashed file во время активного child.
+Full376375PASS не повторялись из-за изменения guard/profile. Frozen proposals и
+неудачные attempts сохранены полностью, включая прежние v1–v4 прошлого пакета.
+
+ROOT independently сверил все58items affected5 retained manifest по SHA/bytes,
+затем42phase snapshots пяти baseline cases: business/files равныbaseline,
+authchanged совпадаетrecorded, withinallowed и includesrequired, final==lastphase.
+Worker дополнительно read-only сверил58file SHA/size, log/JUnit/boundary receipts,
+exact5outcomes и controls/counters. Это receipt audit, без SQL/retest.
+
+| Actual evidence | SHA-256 |
+|---|---|
+|ROOT full376 summary|`0ea930ed87e1db496b1dd5167516de63755bb0d80fe901ec254f69329b1cc4c3`|
+|ROOT affected5 summary|`45968937e8ba8f1769360ad02d524e62c53f83f7983318d9238cd310ea894347`|
+|full376 boundary_sha256|`8eff3c810e439c1495c897853733d0fb1e1e0224528a478f4f18b53ea751c351`|
+|full376 supervisor_sha256|`b3f5ba0e397785e01e9628adcb9c505ee3f62b64d45e1460ae59fe292980f8c0`|
+|full376 junit_sha256|`50ac3252a3479db73541fe79e9860ce61619cc3af0dceb895fafe99eec7e6250`|
+|full376 log_sha256|`f0e3961f8548024290801373d1c5b78ac23f7cd58b8e4f562379448934b177e4`|
+|full376 checkpoint_sha256|`c4af0bcb0f6d7e18e134fd9960f6971086c142c2763044f8d04c68c3c49e6003`|
+|main8_attempt1 boundary_sha256|`b618dbc645b34597d238ebcf16f3549664feae4e11dd05d2a17963e13c87e012`|
+|main8_attempt1 supervisor_sha256|`3d711d57908fc65993c8155b3c4629c2d894a6bd4db0e486cb9003bc89472bbb`|
+|main8_attempt1 junit_sha256|`ebac7818eaf655e1595ff7a9e37085816ab4f60ad2877f83f5986a8aadc7422e`|
+|main8_attempt1 log_sha256|`c195f9ee810c1ea5f61e0f7b5bb7de6432309e41210dea6cea5232d039240cfd`|
+|main8_attempt1 checkpoint_sha256|`df04b06a7b5178a414ad7b7900a8a02b9f90cf50e942d40fd137ea08c0531148`|
+|affected5 boundary_sha256|`04d4cc769659d02c1a9d6d8a0ebc4ba9d94447809b98d51aa8ae3b25c9c60739`|
+|affected5 supervisor_sha256|`1f7b0f3c8c3ada93f0b0d291170b8eb4d21354ec590b2ba9dbf7d8eb49b045a6`|
+|affected5 junit_sha256|`8cab0b53a2bff97e64c8c5e5bd62a74c1affb3df9c0c9372e48c59e2cd1dbb88`|
+|affected5 log_sha256|`2b537a3eb748e7f0ff875497b8f7a3834337fd281422b66e615b4ba589c591e3`|
+|affected5 checkpoint_sha256|`20c1db675a6a984e4a4811bc7b3523129e9940afb3064ce81a8ab13779ade9ec`|
+|affected5 manifest|`0cef5e1b17f8e46a9de591937f7405b79c3ffda99daca2887482e5976887ef47`|
+
+Full376 warnings сохранены: deprecated Starlette httpx TestClient path,
+anyio BlockingPortal alias и InsecureKeyLengthWarning на **преднамеренном22byte
+HMAC fixture** token-confusion testcase. Они не означают смену production key и
+не исправлялись изменением versions/assertions. Affected5 log:5passed69.72s.
+
+ROOT normalDROP proofs: full376 freshrelations0/connections0/exists0/maxlocks64;
+main8 first attempt и corrective affected5 —344relations/connections0/exists0,
+maxlocks64. Retained own creation/size/read-only checks, без FORCE/globalGUC;
+worker SQL/cleanup не выполнял. ВсеDBtargets и свежиеevidenceкаталоги различены.
+
+Подготовка и scoped verification этого пакета завершены. ProgrammeM00–M19 открыт;
+нет заявления о single376GREEN/single8GREEN, полномCI, production/security
+certification или Docker3.13.18 app proof. Новые installer/compiler/network,
+requirements activation, sourcefeatureflags, merge/deploy не выполнялись.
+Последняя правка — report-only; оба runner/app/tests после bff0ac14 заморожены.
