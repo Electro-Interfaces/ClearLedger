@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import redirect_stderr, redirect_stdout
 import functools
 import hashlib
@@ -23,6 +23,9 @@ SERVER = Path(__file__).resolve().parents[1] / "server"
 FLAGS = {"partner_oauth_enabled": False, "partner_api_enabled": False, "partner_docs_enabled": False}
 TIMEZONE = Path("/usr/share/zoneinfo/Europe/Moscow")
 MIME_TYPES = Path("/etc/mime.types")
+# Reviewed candidate77 FastAPI utils.py: default generator takes list(methods)[0].
+# A different implementation gets strict raw comparison until separately reviewed.
+DEFAULT_ID_UTILS_SHA256 = "0d7d15ae73307d5b19c51cfc222b50e36736fbef9f0f398566479131947650ca"
 
 
 class OfflineViolation(RuntimeError):
@@ -124,10 +127,145 @@ def join_path(prefix, path):
     return prefix.rstrip("/") + path if path else prefix or "/"
 
 
+def source_metadata(endpoint, cache):
+    """Only public source coordinates; never serialize closures/defaults/filenames outside Core."""
+    if isinstance(endpoint, functools.partial):
+        endpoint = endpoint.func
+    code = getattr(endpoint, "__code__", None)
+    if code is None:
+        return {"file": None, "sha256": None, "line": None, "status": "unknown"}
+    path = Path(code.co_filename).resolve()
+    if not path.is_relative_to(SERVER) or path.suffix != ".py":
+        return {"file": None, "sha256": None, "line": None, "status": "outside_core_source"}
+    relative = path.relative_to(SERVER).as_posix()
+    if relative not in cache:
+        cache[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"file": relative, "sha256": cache[relative], "line": code.co_firstlineno,
+            "status": "actual_endpoint_source"}
+
+
+def python_source_manifest():
+    files = {}
+    for path in sorted((SERVER / 'app').rglob('*.py')):
+        if path.is_symlink():
+            raise ValueError('source_symlink_not_supported')
+        files[path.relative_to(SERVER).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"scope": "server/app/**/*.py", "files": files,
+            "sha256": hashlib.sha256(json.dumps(files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
+
+
+def validate_product_registration(product_app, policy_type, observed):
+    """Identity/method multiset parity, independent of the number of product operations.
+
+    Framework documentation routes are not APIRoute. Every product APIRoute must
+    have a real PolicyRoute binding and occur exactly once in the supplied tree.
+    This validates composition, not authorization or a list of business features.
+    """
+    from fastapi.routing import APIRoute
+    expected = Counter()
+    for route in product_app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if policy_type is None or not isinstance(route, policy_type) or getattr(route, "binding", None) is None:
+            raise ValueError("product_route_without_real_policy")
+        route.binding.policy.metadata()
+        expected.update((id(route), method) for method in sorted(route.methods or ["*"]))
+    if not expected or expected != Counter(observed):
+        raise ValueError("product_route_identity_method_parity_failed")
+    return {"basis": "real_PolicyRoute_product_app_identity_method_multiset",
+            "expectedOperations": sum(expected.values()), "observedOperations": len(observed), "matches": True}
+
+
+def generated_id_basis(route, cache):
+    from fastapi.datastructures import DefaultPlaceholder
+    from fastapi.utils import generate_unique_id
+    methods = sorted(getattr(route, 'methods', None) or [])
+    if getattr(route, 'operation_id', None) is not None or len(methods) <= 1:
+        return None
+    generator = getattr(route, 'generate_unique_id_function', None)
+    if isinstance(generator, DefaultPlaceholder):
+        generator = generator.value
+    if generator is not generate_unique_id:
+        return None
+    path = Path(generate_unique_id.__code__.co_filename).resolve()
+    if path not in cache:
+        cache[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if cache[path] != DEFAULT_ID_UTILS_SHA256:
+        return None
+    return {'generator': 'fastapi.utils.generate_unique_id', 'sourceFile': 'fastapi/utils.py',
+            'sourceSha256': cache[path], 'methods': methods, 'name': route.name, 'pathFormat': route.path_format}
+
+
+def approved_id_values(row):
+    basis, methods = row.get('generatedUniqueIdBasis'), row.get('registeredMethods')
+    if basis is None:
+        return None
+    if (row.get('operationId') is not None or row.get('operationIdSource') != 'generated_only'
+            or not isinstance(methods, list) or len(methods) < 2 or methods != sorted(set(methods))
+            or any(not isinstance(m, str) or not re.fullmatch('[A-Z]+', m) for m in methods)
+            or not isinstance(row.get('name'), str) or not isinstance(row.get('pathFormat'), str)):
+        return []
+    expected = {'generator': 'fastapi.utils.generate_unique_id', 'sourceFile': 'fastapi/utils.py',
+                'sourceSha256': DEFAULT_ID_UTILS_SHA256, 'methods': methods,
+                'name': row['name'], 'pathFormat': row['pathFormat']}
+    if basis != expected:
+        return []
+    prefix = re.sub(r'\W', '_', row['name'] + row['pathFormat'])
+    return [prefix + '_' + method.lower() for method in methods]
+
+
+def compare_operation_records(left, right):
+    """Only reviewed default-generator method suffix variation; observed IDs stay raw."""
+    def result(equal, reason=None, variations=()):
+        return {'equivalent': equal, 'rawIdentical': left == right, 'reason': reason,
+                'allowedGeneratedIdVariations': list(variations)}
+    if len(left) != len(right) or len(left) > 10000:
+        return result(False, 'operation_count_changed_or_limit')
+    for records in (left, right):
+        groups = defaultdict(list)
+        for row in records:
+            values = approved_id_values(row)
+            if values is None:
+                continue
+            if row.get('generatedUniqueId') not in values:
+                return result(False, 'unapproved_generated_id_basis_or_value')
+            key = (tuple(row['order']), tuple(row['mountChain']), row['path'], row['declaredPath'])
+            groups[key].append(row)
+        for rows in groups.values():
+            if (sorted(r['method'] for r in rows) != rows[0]['registeredMethods']
+                    or len({r['generatedUniqueId'] for r in rows}) != 1):
+                return result(False, 'incoherent_multimethod_route_ids')
+    variations = []
+    for index, (before, after) in enumerate(zip(left, right)):
+        if before == after:
+            continue
+        values = approved_id_values(before)
+        before_copy, after_copy = dict(before), dict(after)
+        before_copy.pop('generatedUniqueId', None)
+        after_copy.pop('generatedUniqueId', None)
+        if (not values or values != approved_id_values(after) or before_copy != after_copy
+                or before['generatedUniqueId'] not in values or after['generatedUniqueId'] not in values):
+            return result(False, 'route_declaration_or_unapproved_id_changed')
+        variations.append({'operationIndex': index, 'method': before['method'], 'path': before['path'],
+                           'order': before['order'], 'before': before['generatedUniqueId'],
+                           'after': after['generatedUniqueId'], 'allowedValues': values,
+                           'basis': before['generatedUniqueIdBasis']})
+    return result(True, variations=variations)
+
+
+def compare_runtime_reports(left, right):
+    operations = compare_operation_records(left['operations'], right['operations'])
+    other_equal = ({k: v for k, v in left.items() if k != 'operations'} ==
+                   {k: v for k, v in right.items() if k != 'operations'})
+    return {'equivalent': operations['equivalent'] and other_equal,
+            'allOtherFieldsExact': other_equal, 'rawIdentical': left == right,
+            'operations': operations}
+
+
 def inventory(app, *, revision, policy_type=None, product_app=None, resources=()):
     from fastapi.routing import APIRoute
     from starlette.routing import Mount, Route, WebSocketRoute
-    rows, mounts, unresolved = [], [], []
+    rows, mounts, unresolved, observed_product, source_hashes, generator_sources = [], [], [], [], {}, {}
     def walk(routes, prefix, chain, ancestors, mount_chain):
         for index, route in enumerate(routes):
             order = [*chain, index]
@@ -161,9 +299,19 @@ def inventory(app, *, revision, policy_type=None, product_app=None, resources=()
             full_pattern = "^" + re.escape(prefix) + pattern.removeprefix("^")
             shape = re.sub(r"\(\?P<[^>]+>", "(?:", full_pattern)
             for method in methods:
+                if curated:
+                    observed_product.append((id(route), method))
                 rows.append({"method": method, "protocol": "websocket" if method == "WEBSOCKET" else "http",
                     "path": full, "declaredPath": path, "mountPath": prefix or "/", "mountChain": mount_chain, "order": order,
                     "endpoint": qualified(route.endpoint), "routeClass": route_class,
+                    "registeredMethods": sorted(route.methods or []) if hasattr(route, 'methods') else [],
+                    "pathFormat": getattr(route, 'path_format', None),
+                    "generatedUniqueIdBasis": generated_id_basis(route, generator_sources),
+                    "operationId": getattr(route, "operation_id", None),
+                    "generatedUniqueId": getattr(route, "unique_id", None),
+                    "operationIdSource": "explicit" if getattr(route, "operation_id", None) else
+                        "generated_only" if getattr(route, "unique_id", None) else "none",
+                    "source": source_metadata(route.endpoint, source_hashes),
                     "name": route.name, "responseClass": qualified(route.response_class) if isinstance(getattr(route, "response_class", None), type) else None,
                     "dependencies": dependencies(route), "policy": policy,
                     "category": "curated_policy" if curated else "declared_policy" if policy else "legacy_public_internal_unclassified",
@@ -171,6 +319,8 @@ def inventory(app, *, revision, policy_type=None, product_app=None, resources=()
                     "authAssessment": "declared_policy_not_request_validated" if policy else "not_proven_by_dependency_names",
                     "manualReview": not curated, "pathShape": shape, "matchPattern": full_pattern})
     walk(app.routes, "", [], {id(app)}, [])
+    product_parity = (validate_product_registration(product_app, policy_type, observed_product)
+                      if product_app is not None else None)
     groups, shapes, paths = defaultdict(list), defaultdict(list), defaultdict(list)
     for index, row in enumerate(rows):
         groups[(row["protocol"], row["method"], row["path"])].append(index)
@@ -195,6 +345,7 @@ def inventory(app, *, revision, policy_type=None, product_app=None, resources=()
         "provenance": {"entrypoint": "provided-app", "lifespanExecuted": False, "requestsExecuted": False,
                        "openapiGenerated": False, "readOnlyResources": list(resources)},
         "operations": rows, "mounts": mounts, "unresolved": unresolved, "duplicates": duplicates,
+        "productRegistrationParity": product_parity, "endpointSourceHashes": source_hashes,
         "parameterCollisions": collisions, "sharedPaths": mixed, "literalParameterOverlaps": overlaps,
         "statistics": {"operations": len(rows), "curatedOperations": sum(r["category"] == "curated_policy" for r in rows),
                        "websocketOperations": sum(r["protocol"] == "websocket" for r in rows),
@@ -283,6 +434,7 @@ def child_export(revision):
                 raise RuntimeError("actual_database_module_required")
             result = inventory(app, revision=revision, policy_type=PolicyRoute, product_app=product_api, resources=guard.resources)
             result["kind"] = "actual-core-runtime-route-inventory"
+            result["sourceManifest"] = python_source_manifest()
             result["provenance"].update({"entrypoint": "app.main.app", "compositionFlags": FLAGS,
                 "ambientEnvironment": "replaced", "pythonIsolated": True, "appEnv": "dev",
                 "importPath": "server_and_existing_interpreter_directories", "realDatabaseBase": True,
@@ -290,8 +442,6 @@ def child_export(revision):
                           "network": "socket_audit_denied", "writes": "audit_denied", "processes": "audit_denied"}})
             if guard.denied:
                 raise OfflineViolation("recovered_denial")
-            if result["statistics"]["curatedOperations"] != 12:
-                raise RuntimeError("unexpected_curated_operation_count")
     except Exception as error:
         result = safe_failure(error, guard)
         result["sourceRevision"] = revision
