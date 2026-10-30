@@ -48,7 +48,7 @@ async def read_local(db: AsyncSession, user: User, cid: uuid.UUID, kind: Kind, *
 
     # Объединение «мой» + «общий» календарь; закрытая встреча — только участникам.
     # Используем исходный общий предикат, без прав администратора на чужое личное.
-    from app.routers.work_router import _my_events_clause
+    from app.services.calendar_queries import my_events_clause as _my_events_clause
     sel = select(CalendarEvent).where(
         CalendarEvent.company_id == cid,
         or_(_my_events_clause(user.id), CalendarEvent.visibility == "company"),
