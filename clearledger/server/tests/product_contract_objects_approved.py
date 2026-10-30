@@ -387,6 +387,7 @@ def main():
         result = pytest.main(["-c", str(SERVER / "pytest.ini"), "--noconftest", "-p", "pytest_asyncio.plugin",
             "-p", "tests.test_product_contract_objects", "-p", "no:cacheprovider", "-q", "--tb=no", "--show-capture=no",
             "--capture=sys", "--basetemp=" + str(scratch / "pytest-test"),
+            "--log-file=" + str(evidence / "pytest.log"),
             "--junitxml=" + str(evidence / "contract-objects.xml"),
             *(str(SERVER / item) for item in SELECTION)], plugins=[boundary])
         signal.alarm(0)
