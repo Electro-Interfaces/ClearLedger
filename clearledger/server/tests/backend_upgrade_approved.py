@@ -4,6 +4,7 @@ Launch only with reviewed SHA and -I -S -B in the NEW candidate environment.
 Preparation uses AST/compile only: this module was never imported by its author.
 """
 import argparse
+import errno
 import asyncio
 from collections import Counter
 from contextlib import ExitStack
@@ -18,6 +19,7 @@ import resource
 import selectors
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -29,7 +31,7 @@ REPO = SERVER.parents[1]
 SELF = Path(__file__).resolve()
 CANDIDATE = Path('/srv/projects/api-modernization-upgrade-test-env-20261030/.venv')
 SITE = CANDIDATE / 'lib/python3.13/site-packages'
-RUN = REPO / '.artifacts/backend-upgrade-functional-execution-20261030-attempt2'
+RUN = REPO / '.artifacts/backend-upgrade-functional-execution-20261030-attempt3'
 EMPTY, UPLOAD, EVIDENCE = (RUN / n for n in ('empty-test', 'upgrade-test-uploads', 'evidence'))
 DSN = 'postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/api_backend_upgrade_test_20261030'
 RAW_DSN = DSN.replace('postgresql+asyncpg:', 'postgresql:', 1)
@@ -128,8 +130,68 @@ def write_json(path, value):
     data = (json.dumps(value, indent=2, sort_keys=True) + '\n').encode()
     if len(data) > LIMIT_LOG:
         raise RuntimeError('Evidence exceeds bound')
-    path.write_bytes(data)
-    path.chmod(0o600)
+    temp = path.with_name('.' + path.name + '.atomic-tmp')
+    # Exact private sibling, exclusive/no-follow; replace commits a complete JSON.
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as output:
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temp, path)
+
+
+def owned_scratch_bytes(root, expected_anchor):
+    """Reviewed target-driver ENOENT-only live-child policy, with exact root identity."""
+    root = Path(root)
+    anchor = root.lstat()  # A missing root, symlink, permission error or drift always fails.
+    identity = lambda info: (info.st_dev, info.st_ino, info.st_uid)
+    if (not stat.S_ISDIR(anchor.st_mode) or anchor.st_uid != os.geteuid()
+            or anchor.st_mode & 0o077 or identity(anchor) != expected_anchor):
+        raise RuntimeError('Owned scratch anchor identity mismatch')
+    def vanished(exc, path):
+        return (isinstance(exc, FileNotFoundError) and exc.errno == errno.ENOENT
+                and path != root and path.is_relative_to(root) and exc.filename is not None
+                and Path(exc.filename) == path)
+    def walk_error(exc):
+        if exc.filename is not None and vanished(exc, Path(exc.filename)):
+            return
+        raise exc
+    size, count = 0, 0
+    for parent, directories, files in os.walk(root, followlinks=False, onerror=walk_error):
+        for name in directories + files:
+            path = Path(parent) / name
+            if path == root or not path.is_relative_to(root):
+                raise RuntimeError('Scratch entry outside exact owned anchor')
+            count += 1  # Even vanished entries/symlinks count toward the upper bound.
+            if count > 4096:
+                raise RuntimeError('Scratch 4096-entry bound')
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                if vanished(exc, path):
+                    continue
+                raise
+            # Do not follow symlinks; negative file-policy fixtures intentionally create them/FIFOs.
+            if stat.S_ISREG(info.st_mode):
+                size += info.st_size
+                if size > LIMIT_SCRATCH:
+                    raise RuntimeError('Scratch 64MiB bound')
+    after = root.lstat()
+    if not stat.S_ISDIR(after.st_mode) or identity(after) != expected_anchor:
+        raise RuntimeError('Owned scratch anchor changed during observation')
+    return size
+
+
+def safe_failure_text(report, available):
+    # Pytest --tb=short, without showlocals; retain bounded synthetic-source trace only.
+    text = report.longreprtext
+    text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s:@]+(?::[^/@\s]*)?@', r'\1[redacted]@', text)
+    text = re.sub(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b', '[redacted-jwt]', text)
+    text = re.sub(r'(?i)(authorization|password|secret|access_token|refresh_token)([\"\' ]*[:=][\"\' ]*)[^\s,}]+', r'\1\2[redacted]', text)
+    raw = text.encode('utf-8')
+    limit = min(16384, max(0, available))
+    result = raw[:limit].decode('utf-8', errors='ignore')
+    return result, len(raw) > limit
 
 
 def install_boundaries():
@@ -312,7 +374,7 @@ async def database_preflight():
         await con.close()
 
 
-def child(approved_sha):
+def child(approved_sha, profile):
     interpreter_guard()
     source_guard(approved_sha)
     no_env_files()
@@ -337,7 +399,8 @@ def child(approved_sha):
     resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
     resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT_LOG, LIMIT_LOG))
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
-    record = {'status': 'starting', 'python': '3.13.7', 'glibc': '2.36', 'runner_sha256': approved_sha,
+    cases = EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}
+    record = {'profile': profile, 'full376_accepted': False, 'status': 'starting', 'python': '3.13.7', 'glibc': '2.36', 'runner_sha256': approved_sha,
               'inventory': packages, 'runtime_count': 61, 'test_tool_count': 16,
               'home_preserved': True, 'no_site_before_guards': True, 'no_env_files': True,
               'source_trees': FROZEN_TREES, 'sql_target': DATABASE}
@@ -354,22 +417,37 @@ def child(approved_sha):
                     counts = dict(Counter(Path(item.path).name for item in items))
                     record['collected'] = counts
                     record['nodeids'] = [item.nodeid for item in items]
-                    if counts != EXPECTED_CASES:
+                    if counts != cases:
                         raise pytest.UsageError('Collection differs from frozen AST case counts')
                 def pytest_runtest_logreport(self, report):
                     if report.when == 'call' or report.failed or report.skipped:
                         outcomes = record.setdefault('outcomes', {})
                         outcomes[report.nodeid] = ('xpassed' if report.passed else 'xfailed') if hasattr(report, 'wasxfail') else report.outcome
+                    if report.failed:
+                        used = record.get('failure_text_bytes', 0)
+                        trace, truncated = safe_failure_text(report, 1024 * 1024 - used)
+                        record['failure_text_bytes'] = used + len(trace.encode('utf-8'))
+                        key = report.nodeid + '::' + report.when
+                        record.setdefault('failures', {})[key] = {
+                            'when': report.when, 'trace': trace, 'truncated': truncated}
+                    # Atomic after every phase; interruption preserves the previous completed report.
+                    record.update(checkpoint_complete=False, last_report_phase=report.when,
+                                  boundary=dict(BOUNDARY), sender_counts=dict(SENDER_COUNTS),
+                                  audit_diagnostics=list(AUDIT_DIAGNOSTICS),
+                                  import_capability_proof=dict(IMPORT_CAPABILITY_PROOF))
+                    write_json(EVIDENCE / 'outcome-checkpoint.json', record)
             argv = ['-c', str(SERVER / 'pytest.ini'), '--rootdir=' + str(SERVER),
                     '--confcutdir=' + str(SERVER), '--import-mode=importlib', '-p', 'pytest_asyncio.plugin',
                     '-p', 'no:cacheprovider', '--basetemp=' + str(EMPTY / 'pytest-test-temp'),
                     '--junitxml=' + str(EVIDENCE / 'junit.xml'), '--tb=short', '-q',
-                    *[str(SERVER / 'tests' / n) for n in EXPECTED_CASES]]
+                    *[str(SERVER / 'tests' / n) for n in cases]]
+            if profile == 'api-contracts-http-first-failure':
+                argv.append('--maxfail=1')
             code = int(pytest.main(argv, plugins=[Record()]))
             record['pytest_exit'] = code
             outcomes = record.get('outcomes', {})
             # A zero exit with missing/skip/xfail cases is not accepted.
-            if len(outcomes) != sum(EXPECTED_CASES.values()) or set(outcomes.values()) != {'passed'}:
+            if len(outcomes) != sum(cases.values()) or set(outcomes.values()) != {'passed'}:
                 code = code or 3
             source_guard(approved_sha)
             import asyncpg
@@ -391,7 +469,8 @@ def child(approved_sha):
             code = code or 4
         if os.environ.get('HOME') != pwd.getpwuid(os.getuid()).pw_dir:
             code = code or 5
-        record.update(status='PASS' if code == 0 else 'FAIL', boundary=dict(BOUNDARY),
+        record.update(status=('PASS' if profile == 'full376' else 'DIAGNOSTIC_PASS') if code == 0 else 'FAIL',
+                      full376_accepted=profile == 'full376' and code == 0, boundary=dict(BOUNDARY),
                       sender_counts=dict(SENDER_COUNTS), audit_diagnostics=list(AUDIT_DIAGNOSTICS),
                       import_capability_proof=dict(IMPORT_CAPABILITY_PROOF),
                       ipv6_import_probe_suppressed=IMPORT_CAPABILITY_PROOF.get('suppressed') is True,
@@ -413,7 +492,7 @@ def clean_environment():
             'SEED_SUPERADMIN_PASSWORD': 'admin123'}
 
 
-def supervise(approved_sha):
+def supervise(approved_sha, profile):
     interpreter_guard()
     source_guard(approved_sha)
     no_env_files()
@@ -425,8 +504,11 @@ def supervise(approved_sha):
     RUN.mkdir(mode=0o700)
     for directory in (EMPTY, UPLOAD, EVIDENCE):
         directory.mkdir(mode=0o700)
+    anchor = RUN.lstat()
+    anchor_identity = (anchor.st_dev, anchor.st_ino, anchor.st_uid)
+    cases = EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}
     argv = [str(CANDIDATE / 'bin/python'), '-I', '-S', '-B', str(SELF),
-            '--approved-sha256', approved_sha, '--root-reviewed-child']
+            '--approved-sha256', approved_sha, '--profile', profile, '--root-reviewed-child']
     started = time.monotonic()
     proc = subprocess.Popen(argv, cwd=EMPTY, env=clean_environment(), start_new_session=True,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -439,9 +521,7 @@ def supervise(approved_sha):
             while poll.get_map():
                 if time.monotonic() - started > DEADLINE:
                     raise RuntimeError('Global 900s deadline')
-                files = [p for p in RUN.rglob('*') if p.is_file() and not p.is_symlink()]
-                if len(files) > 4096 or sum(p.stat().st_size for p in files) > LIMIT_SCRATCH:
-                    raise RuntimeError('Scratch 64MiB/4096 files bound')
+                owned_scratch_bytes(RUN, anchor_identity)
                 for key, _ in poll.select(timeout=0.25):
                     data = os.read(key.fileobj.fileno(), 65536)
                     if not data:
@@ -468,9 +548,9 @@ def supervise(approved_sha):
             from xml.etree import ElementTree
             suites = ElementTree.parse(junit).getroot()
             cases = suites.findall('.//testcase')
-            accepted = (len(cases) == sum(EXPECTED_CASES.values()) and
+            accepted = (len(cases) == sum((EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}).values()) and
                     not any(suites.findall('.//' + k) for k in ('failure', 'error', 'skipped')) and
-                    json.loads(proof.read_text()).get('status') == 'PASS')
+                    json.loads(proof.read_text()).get('status') == ('PASS' if profile == 'full376' else 'DIAGNOSTIC_PASS'))
             boundary = json.loads(proof.read_text())
             accepted = (accepted and boundary.get('home_preserved') is True and
                         all(boundary.get('boundary', {}).get(name) == 0 for name in FORBIDDEN_COUNTERS) and
@@ -481,7 +561,10 @@ def supervise(approved_sha):
     except Exception as exc:
         accepted = False
         reason = 'JUnit/proof validation failed: ' + type(exc).__name__
-    receipt = {'status': 'PASS' if accepted else 'FAIL', 'child_exit': child_exit,
+    receipt = {'status': ('PASS' if profile == 'full376' else 'DIAGNOSTIC_PASS') if accepted else 'FAIL',
+               'profile': profile, 'full376_accepted': profile == 'full376' and accepted, 'child_exit': child_exit,
+               'scratch_anchor_identity': anchor_identity,
+               'scratch_policy': 'lstat/no-follow; exact owned root; only exact child ENOENT ignored',
                'reason': reason, 'child_reaped': True, 'elapsed_seconds': time.monotonic() - started,
                'runner_sha256': approved_sha, 'log_bytes': size, 'log_sha256': sha(EVIDENCE / 'run.log'),
                'junit_sha256': sha(junit) if junit.is_file() else None,
@@ -606,11 +689,12 @@ async def test_upgrade_multipart_validation_and_limits():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--approved-sha256', required=True)
+    parser.add_argument('--profile', required=True, choices=['full376', 'api-contracts-http-first-failure'])
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--execute-root-reviewed', action='store_true')
     group.add_argument('--root-reviewed-child', action='store_true')
     args = parser.parse_args()
-    return child(args.approved_sha256) if args.root_reviewed_child else supervise(args.approved_sha256)
+    return child(args.approved_sha256, args.profile) if args.root_reviewed_child else supervise(args.approved_sha256, args.profile)
 
 
 if __name__ == '__main__':
