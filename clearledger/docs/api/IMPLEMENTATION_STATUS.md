@@ -547,6 +547,9 @@ setuptools80.9.0→84.1.0 иwheel0.45.1→0.46.2;64других manifest entries
 runtime/input/constraints сохранены побайтно. Root вновь проверил66SHA/metadata,
 60runtime closure и9tooling edges; новый OSV query66 дал0version matches.
 Исторический http-ece build provenance сохраняет прежние tools; пересборки нет.
-Фактическая target-проверка нового состава выполняется отдельно; её результат
-ещё не принят. Requirements.txt/Dockerfile/feature flags не переключены.
+ROOT targetrun нового состава PASS32,118с/EXIT0/OOMFalse: exact8tooling,
+compiler60pins, cleanoffline61distributions сpip, оба pipcheck PASS.
+Все10commands exit0 и log hashes совпали; owncontainer/image удалены, прежний
+PostgreSQL сохранён. App/functionalSQL нового runtime ещё NOT RUN.
+Requirements.txt/Dockerfile/feature flags не переключены.
 [Артефакты кандидата](BACKEND_UPGRADE_ARTIFACTS_20261030.md).
