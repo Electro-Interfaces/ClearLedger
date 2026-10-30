@@ -274,18 +274,20 @@ def policy_registry(app, *, prefix: str = "", _seen: frozenset[int] = frozenset(
 
 def create_policy_app(*, context_resolver: ContextResolver, title: str = "Product API",
                       version: str = "1") -> FastAPI:
-    @asynccontextmanager
-    async def lifespan(app):
-        policy_registry(app)
-        await app.router.startup()
-        try:
-            yield
-        finally:
-            await app.router.shutdown()
-
     # Specs remain available as Python data for a future curated publisher.
     # No anonymous documentation HTTP surface is installed by this foundation.
     app = FastAPI(title=title, version=version, docs_url=None, redoc_url=None, openapi_url=None)
-    app.router = PolicyRouter(context_resolver=context_resolver, lifespan=lifespan,
-                              dependency_overrides_provider=app)
+    router = PolicyRouter(context_resolver=context_resolver, dependency_overrides_provider=app)
+    # Capture the new router's bound context before wrapping it. The framework
+    # owns event dispatch on both older and newer FastAPI/Starlette versions.
+    default_lifespan = router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(app):
+        policy_registry(app)
+        async with default_lifespan(app) as state:
+            yield state
+
+    router.lifespan_context = lifespan
+    app.router = router
     return app
