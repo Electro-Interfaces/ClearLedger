@@ -1,7 +1,7 @@
 # Партнёрский API: интеграционный кандидат
 
 Состав исходников на 30.10.2026: ветка
-`MagLook/api-modernization-integration-20261029`, runtime pin `7b204fee`.
+`MagLook/api-modernization-integration-20261029`, runtime pin `02e6e963`.
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
 
@@ -33,7 +33,10 @@ materialization и чистый основной GET, batch live resource loader
 Events, schema namespace guard. Новые контрагенты без ИНН используют NULL при
 неизменном raw. Импорт 1С обновляет stale manual markers под существующей
 блокировкой и сохраняет ручное очищение полей. Исправлены late response/401/login
-гонки Core session и выбранные company-context consumers.
+гонки Core session и выбранные company-context consumers. Два общих binary
+метода Core используют тот же error handler, поддерживают caller AbortSignal
+и подавляют выдачу устаревших байтов после смены контекста. Прямые fetch
+других consumers ещё не переведены.
 
 Общая PostgreSQL-квота считает company/installation/client между workers,
 возвращает безопасные429/503 и ограничивает очистку. OAuth/API/docs/quota
@@ -58,6 +61,7 @@ Events, schema namespace guard. Новые контрагенты без ИНН 
 | Canonical/browser OpenAPI | 56offline,6pinned Swagger/interceptor,22HTTP/PostgreSQL PASS |
 | HTTPS Swagger после auth/service/mobile fixes | PASS110.21с: actual main/public builds, PKCE/Try SQL/logout/revoke/expiredCore recovery |
 | Responsive pinned Swagger | 7checks PASS на390/1200px |
+| Core binary/session/location на02e6e963 | 151PASS,4.513с; React/Chromium15PASS,12.729с; app/node TypeScript и ESLint PASS |
 | Types generation/parity/drift/negative | 6PASS; freshness/consumer/typecheck PASS |
 | Оба исправления контрагентов наe1cb1a53 | 52SQL/HTTP PASS,22.55с, прежний explicit-null test сохранён |
 | UserInfo на9c33d932 | 70offline PASS,8.140с;FULL89identity/docs SQL/HTTP PASS,117.79с, без SKIP/DESELECTED |
@@ -97,6 +101,7 @@ backup с фактическим восстановлением, состав р
 [types](../PARTNER_SDK_TYPES.md), [OpenAPI profiles](service-openapi-20261030.md),
 [пилоты](PARTNER_SYNTHETIC_PILOTS.md), [quota](product-budget-20261030.md),
 [контрагенты](counterparty-explicit-null-20261030.md),
-[UserInfo](userinfo-protocol-20261030.md).
+[UserInfo](userinfo-protocol-20261030.md),
+[binary transport](CORE_BINARY_TRANSPORT_20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.
