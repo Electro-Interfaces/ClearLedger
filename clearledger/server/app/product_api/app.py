@@ -319,6 +319,8 @@ def _describe_http_responses(schema):
 
 def _canonical_object_id_paths(schema):
     """Keep the named SDK contract across equivalent FastAPI path schemas."""
+    from json import dumps
+
     expected = {"/objects/{objectId}": "getObject",
                 "/objects/{objectId}/monitoring": "getObjectMonitoring"}
     reference = {"$ref": "#/components/schemas/ObjectId"}
@@ -345,8 +347,8 @@ def _canonical_object_id_paths(schema):
                 # Only the framework's display title may differ. All validation
                 # keywords, including future/unknown ones, must match exactly.
                 if (not isinstance(actual, dict)
-                        or {k: v for k, v in actual.items() if k != "title"}
-                        != {k: v for k, v in component.items() if k != "title"}):
+                        or dumps({k: v for k, v in actual.items() if k != "title"}, sort_keys=True, allow_nan=False)
+                        != dumps({k: v for k, v in component.items() if k != "title"}, sort_keys=True, allow_nan=False)):
                     raise ValueError("Canonical ObjectId path constraints differ: " + path)
                 replacements.append(parameter)
             seen.add(path)
