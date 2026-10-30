@@ -62,6 +62,9 @@ BOUNDARY = {'blocked_network': 0, 'allowed_pg_connects': 0, 'blocked_subprocess'
             'denied_env_reads': 0, 'db_connections': 0, 'allowed_pg_sendmsg': 0}
 
 
+DOCS_REGISTER_AFFECTED6 = ('test_загрузка_и_вывод_редакции_не_дают_две_текущие', 'test_пакет_согласования_фиксирует_файл_и_блокирует_новую_редакцию', 'test_публичная_проверка_не_раскрывает_карточку_и_видит_отмену', 'test_ссылка_получателя_фиксирует_редакцию', 'test_тот_же_файл_второй_редакции_не_создаёт', 'test_удаление_текущей_редакции_возвращает_предыдущую')
+
+
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -423,6 +426,9 @@ def install_boundaries():
         BOUNDARY['db_connections'] += 1
         return con
     stack.enter_context(patch.object(asyncpg, 'connect', connect))
+    from app.services import doc_text
+    stack.enter_context(patch.object(doc_text, '_command',
+        captured('isolation.doc_text_external_command', b'', asynchronous=True)))
     return stack
 
 
@@ -467,7 +473,7 @@ def child(approved_sha, profile):
     resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
     resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT_LOG, LIMIT_LOG))
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
-    cases = EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}
+    cases = profile_cases(profile)
     record = {'profile': profile, 'full376_accepted': False, 'status': 'starting', 'python': '3.13.18', 'glibc': '2.41', 'runner_sha256': approved_sha,
               'inventory': packages, 'runtime_count': 61, 'test_tool_count': 16,
               'home_preserved': True, 'no_site_before_guards': True, 'no_env_files': True,
@@ -487,6 +493,9 @@ def child(approved_sha, profile):
                     counts = dict(Counter(Path(item.path).name for item in items))
                     record['collected'] = counts
                     record['nodeids'] = [item.nodeid for item in items]
+                    if (profile == 'docs-register-affected6' and
+                            {item.name for item in items} != set(DOCS_REGISTER_AFFECTED6)):
+                        raise pytest.UsageError('Exact unchanged six nodeids required')
                     if counts != cases:
                         raise pytest.UsageError('Collection differs from frozen AST case counts')
                 def pytest_runtest_logreport(self, report):
@@ -510,7 +519,7 @@ def child(approved_sha, profile):
                     '--confcutdir=' + str(SERVER), '--import-mode=importlib', '-p', 'pytest_asyncio.plugin',
                     '-p', 'no:cacheprovider', '--basetemp=' + str(EMPTY / 'pytest-test-temp'),
                     '--junitxml=' + str(EVIDENCE / 'junit.xml'), '--tb=short', '-q',
-                    *[str(SELF) if n == SELF.name else str(SERVER / 'tests' / n) for n in cases]]
+                    *profile_selectors(profile)]
             if profile == 'api-contracts-http-first-failure':
                 argv.append('--maxfail=1')
             code = int(pytest.main(argv, plugins=[Record()]))
@@ -539,7 +548,10 @@ def child(approved_sha, profile):
             code = code or 4
         if os.environ.get('HOME') != pwd.getpwuid(os.getuid()).pw_dir:
             code = code or 5
-        record.update(status=('PASS' if profile == 'full376' else 'DIAGNOSTIC_PASS') if code == 0 else 'FAIL',
+        if profile == 'docs-register-affected6' and SENDER_COUNTS.get('isolation.doc_text_external_command', 0) <= 0:
+            code = code or 6
+        record.update(status='PASS' if code == 0 else 'FAIL',
+                      affected6_accepted=profile == 'docs-register-affected6' and code == 0,
                       full376_accepted=profile == 'full376' and code == 0, boundary=dict(BOUNDARY),
                       sender_counts=dict(SENDER_COUNTS), audit_diagnostics=list(AUDIT_DIAGNOSTICS),
                       import_capability_proof=dict(IMPORT_CAPABILITY_PROOF),
@@ -576,7 +588,7 @@ def supervise(approved_sha, profile):
         directory.mkdir(mode=0o700)
     anchor = RUN.lstat()
     anchor_identity = (anchor.st_dev, anchor.st_ino, anchor.st_uid)
-    cases = EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}
+    cases = profile_cases(profile)
     argv = [str(CANDIDATE / 'bin/python'), '-I', '-S', '-B', str(SELF),
             '--approved-sha256', approved_sha, '--approved-other-sha256', APPROVED_OTHER_SHA, '--approved-manifest-sha256', APPROVED_MANIFEST_SHA, '--profile', profile, '--root-reviewed-child']
     started = time.monotonic()
@@ -618,9 +630,9 @@ def supervise(approved_sha, profile):
             from xml.etree import ElementTree
             suites = ElementTree.parse(junit).getroot()
             cases = suites.findall('.//testcase')
-            accepted = (len(cases) == sum((EXPECTED_CASES if profile == 'full376' else {'test_api_contracts_http.py': 56}).values()) and
+            accepted = (len(cases) == sum((profile_cases(profile)).values()) and
                     not any(suites.findall('.//' + k) for k in ('failure', 'error', 'skipped')) and
-                    json.loads(proof.read_text()).get('status') == ('PASS' if profile == 'full376' else 'DIAGNOSTIC_PASS'))
+                    json.loads(proof.read_text()).get('status') == 'PASS')
             boundary = json.loads(proof.read_text())
             accepted = (accepted and boundary.get('home_preserved') is True and
                         all(boundary.get('boundary', {}).get(name) == 0 for name in FORBIDDEN_COUNTERS) and
@@ -628,10 +640,18 @@ def supervise(approved_sha, profile):
                         boundary.get('import_capability_proof', {}).get('suppressed') is True and
                         boundary.get('import_capability_proof', {}).get('restored') is True and
                         boundary.get('import_capability_proof', {}).get('bind_allowance') is False)
+            if profile == 'docs-register-affected6':
+                accepted = (accepted and boundary.get('affected6_accepted') is True and
+                            boundary.get('full376_accepted') is False and
+                            boundary.get('collected') == {'test_docs_register.py': 6} and
+                            set(boundary.get('nodeids', [])) == {
+                                'tests/test_docs_register.py::' + name for name in DOCS_REGISTER_AFFECTED6} and
+                            boundary.get('sender_counts', {}).get('isolation.doc_text_external_command', 0) > 0)
     except Exception as exc:
         accepted = False
         reason = 'JUnit/proof validation failed: ' + type(exc).__name__
-    receipt = {'status': ('PASS' if profile == 'full376' else 'DIAGNOSTIC_PASS') if accepted else 'FAIL',
+    receipt = {'status': 'PASS' if accepted else 'FAIL',
+               'affected6_accepted': profile == 'docs-register-affected6' and accepted,
                'profile': profile, 'full376_accepted': profile == 'full376' and accepted, 'child_exit': child_exit,
                'scratch_anchor_identity': anchor_identity,
                'scratch_policy': 'lstat/no-follow; exact owned root; only exact child ENOENT ignored',
@@ -756,16 +776,41 @@ async def test_upgrade_multipart_validation_and_limits():
         assert response.status_code == 400 and 'maximum size' in response.json()['detail']
 
 
+def profile_cases(profile):
+    if profile == 'full376':
+        return EXPECTED_CASES
+    if profile == 'docs-register-affected6':
+        return {'test_docs_register.py': 6}
+    raise RuntimeError('Unapproved exact profile')
+
+
+def profile_selectors(profile):
+    if profile == 'docs-register-affected6':
+        return [str(SERVER / 'tests/test_docs_register.py') + '::' + name
+                for name in DOCS_REGISTER_AFFECTED6]
+    return [str(SELF) if name == SELF.name else str(SERVER / 'tests' / name)
+            for name in profile_cases(profile)]
+
+
+def configure_profile(profile):
+    global RUN, EMPTY, UPLOAD, EVIDENCE
+    if profile == 'docs-register-affected6':
+        RUN = Path('/acceptance/docs-register-affected6-test-attempt1')
+        EMPTY, UPLOAD, EVIDENCE = (RUN / name for name in
+            ('affected6-empty-test', 'affected6-test-uploads', 'affected6-test-evidence'))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--approved-sha256', required=True)
     parser.add_argument('--approved-other-sha256', required=True)
     parser.add_argument('--approved-manifest-sha256', required=True)
-    parser.add_argument('--profile', required=True, choices=['full376'])
+    parser.add_argument('--profile', required=True, choices=['full376', 'docs-register-affected6'])
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--execute-root-reviewed', action='store_true')
     group.add_argument('--root-reviewed-child', action='store_true')
     args = parser.parse_args()
+    configure_profile(args.profile)
     global APPROVED_OTHER_SHA, CURRENT_APPROVED_SHA, APPROVED_MANIFEST_SHA
     APPROVED_MANIFEST_SHA = args.approved_manifest_sha256
     APPROVED_OTHER_SHA, CURRENT_APPROVED_SHA = args.approved_other_sha256, args.approved_sha256
