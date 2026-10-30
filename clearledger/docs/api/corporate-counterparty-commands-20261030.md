@@ -132,3 +132,25 @@ private runner `.artifacts/corporate-counterparty/run.py`. Для повторе
 сначала новое выделенное SQL-окно и отдельная тестовая БД, затем те же opt-in и
 guard; conftest разрушает public/edge только явно выбранной тестовой базы.
 Коммит и push этого состава не являются merge или deploy.
+
+
+## Независимая проверка общего кандидата
+
+Координатор перенёс c45ea2907cdf8350c2cb67d50b0e3f63555e3c14 как ffab2a10
+поверх принятой истории номеров 2ed52b9c. Неизменный новый тест сохранил SHA256
+73f25eccb83e6cae327283fef8e11f2f9c36ac6e005a7a373361b74bdeece05f.
+Один независимый прогон дал **79 PASS за24.70с**, без SKIP/DESELECTED: новый
+23-case модуль, все семь авторских regression-модулей, а также прежние
+`test_counterparty_explicit_null.py` и `test_reference_identity_onec.py`.
+Таким образом повтор проверяет common helper вместе с прежними importer,
+ручными значениями и native HTTP/replay, а не только новый corporate caller.
+
+Процесс19186 завершён EXIT0, дочерний pytest reaped. Private runner использовал
+собственную отдельную synthetic DB, empty cwd, absolute PYTHONPATH и отдельный
+UPLOAD_DIR; HOME сохранён без подмены. Свежая проверка после закрытия test engine:
+public/edge tables0 и own connections0, затем обычный DROP DATABASE без FORCE
+или terminate; свежий dbexists0/max_locks64. Все probes закрыты до передачи SQL
+окна следующему исполнителю. Evidence только локально:
+`.artifacts/root-corporate-counterparty-final.log`; raw runtime inventory и
+подключения в публичный отчёт не включены. Полный CI/рабочий импорт/выпуск
+этой целевой проверкой не подтверждены.

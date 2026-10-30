@@ -139,3 +139,12 @@ backup с фактическим восстановлением, состав р
 [история номеров](location-number-history-20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.
+
+
+Корпоративный четвёртый producer CP также переведён на общие create/alias команды
+(c45ea290→ffab2a10): исходный baseline4FAIL/19PASS воспроизвёл конфликт второй
+unknown-INN карточки; root79PASS24.70с без SKIP подтвердил исправление вместе
+с прежними importer/explicit-null/1С identity regressions. Optional KPP различает
+omitted и explicitNone, прежние три raw формы не расширены. Схема и старые
+данные не переписывались; Contract/phone/matcher/locks/callercommit сохранены.
+[Доказательства](corporate-counterparty-commands-20261030.md).
