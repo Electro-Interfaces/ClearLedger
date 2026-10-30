@@ -22,6 +22,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getIntegration } from '@/services/projectIntegrationService'
 import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
+import { ProjectDismantleStations } from './ProjectDismantleStations'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { openAuthAttachment } from '@/lib/authFiles'
@@ -1352,7 +1353,7 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
 
 /* ── Вкладка «Паспорт» ──────────────────────────────────────────────────── */
 
-const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool'; options?: string[];
+const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool' | 'stations'; options?: string[];
   /** Графа-уточнение: видна, пока другая графа блока даёт для неё повод. */
   when?: (val: (k: string) => string) => boolean }[] }[] = [
   {
@@ -1401,11 +1402,13 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
     title: 'СМР',
     fields: [
       { k: 'plannedEzsCount', label: 'ЭЗС к установке, шт', type: 'number' },
+      { k: 'dismantleLocationIds', label: 'ЭЗС к демонтажу', type: 'stations' },
       { k: 'plannedPowerKwt', label: 'Мощность к установке, кВт', type: 'number' },
       { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
       { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
       { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
       { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
+      { k: 'decommissionedOn', label: 'Дата вывода ЭЗС из эксплуатации', type: 'date' },
       { k: 'supplier', label: 'Поставщик' },
       { k: 'contractor', label: 'Подрядчик' },
       { k: 'tuStatus', label: 'Статус согласования / ТУ', type: 'area' },
@@ -1472,6 +1475,7 @@ const API_FIELD: Record<string, string> = {
   archiveReason: 'archive_reason',
   // графы чек-листа согласования
   inputPriceKwth: 'input_price_kwth', smrCost: 'smr_cost', longTermContract: 'long_term_contract',
+  dismantleLocationIds: 'dismantle_location_ids', decommissionedOn: 'decommissioned_on',
   hasVideo: 'has_video', hasMobile: 'has_mobile', hasInternet: 'has_internet',
   hasLighting: 'has_lighting', access24x7: 'access_24x7', parkingSpots: 'parking_spots',
   subsidyPlanned: 'subsidy_planned', subsidyAmount: 'subsidy_amount',
@@ -1499,15 +1503,20 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
     title: g.title === 'СМР' ? 'План и участники' : g.title,
     fields: g.fields.filter((f) => ['region', 'city', 'address', 'placeKind', 'installPlace', 'supplier', 'contractor', 'comment'].includes(f.k)) })) : PASSPORT_GROUPS
   const [draft, setDraft] = useState<Record<string, string>>({})
+  const [dismantleDraft, setDismantleDraft] = useState<string[] | null>(null)
   const [showRaw, setShowRaw] = useState(false)
-  useEffect(() => setDraft({}), [site])
+  useEffect(() => { setDraft({}); setDismantleDraft(null) }, [site])
 
-  const dirty = Object.keys(draft).length > 0
+  const dirtyCount = Object.keys(draft).length + (dismantleDraft === null ? 0 : 1)
+  const dirty = dirtyCount > 0
   const m = useMutation({
-    mutationFn: () => patchSite(companyId, site.id, Object.fromEntries(
-      Object.entries(draft).map(([k, v]) => [API_FIELD[k] ?? k, v === '' ? null : v]))),
+    mutationFn: () => patchSite(companyId, site.id, {
+      ...Object.fromEntries(Object.entries(draft).map(([k, v]) => [API_FIELD[k] ?? k, v === '' ? null : v])),
+      ...(dismantleDraft === null ? {} : { dismantle_location_ids: dismantleDraft }),
+    }),
     onSuccess: async (r) => {
       setDraft({})
+      setDismantleDraft(null)
       toast.success(r.changed.length ? `Сохранено полей: ${r.changed.length}` : 'Изменений нет')
       await onDone()
     },
@@ -1578,7 +1587,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
         </p>
         <Button size="sm" className="h-8 text-sm" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
           {m.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
-          Сохранить{dirty ? ` (${Object.keys(draft).length})` : ''}
+          Сохранить{dirty ? ` (${dirtyCount})` : ''}
         </Button>
       </div>
 
@@ -1593,9 +1602,9 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
               const needFor = needs(key)
               if (f.when && !f.when(val)) return null
               return (
-                <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
+                <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' || f.type === 'stations' ? 'md:col-span-3' : ''} ${
                   needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
-                  <Label>
+                  <Label htmlFor={`passport-${key}`}>
                     {f.label}
                     {isManual && <span className="ml-1 text-xs text-primary" title="Ведётся вручную, импорт не перезапишет">✎</span>}
                     {needFor && (
@@ -1605,9 +1614,12 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                       </span>
                     )}
                   </Label>
-                  {f.type === 'area' ? (
+                  {f.type === 'stations' ? (
+                    <ProjectDismantleStations companyId={companyId}
+                      value={dismantleDraft ?? site.dismantleLocationIds ?? []} onChange={setDismantleDraft} />
+                  ) : f.type === 'area' ? (
                     <>
-                      <Textarea rows={2} className="text-sm min-h-[46px]" value={val(key)}
+                      <Textarea id={`passport-${key}`} rows={2} className="text-sm min-h-[46px]" value={val(key)}
                         onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
                       {/* Переписка с контрагентом идёт из карточки, а не из почтового
                           клиента: в контакте собственника обычно записан адрес, и по
@@ -1627,7 +1639,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                   ) : f.type === 'select' || f.type === 'bool' ? (
                     <Select value={val(key) || '__none__'}
                       onValueChange={(v) => setDraft((d) => ({ ...d, [key]: v === '__none__' ? '' : v }))}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger id={`passport-${key}`} className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {(f.type === 'bool' ? ['да', 'нет'] : f.options ?? []).map((o) => (
@@ -1636,7 +1648,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Input className="h-8 text-sm" type={f.type === 'date' ? 'date' : 'text'}
+                    <Input id={`passport-${key}`} className="h-8 text-sm" type={f.type === 'date' ? 'date' : 'text'}
                       inputMode={f.type === 'number' ? 'decimal' : undefined}
                       value={val(key)} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
                   )}
@@ -3183,8 +3195,9 @@ export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: s
  * подняли до 12 px: ниже начинается «мелкий шрифт», о который спотыкается любой,
  * кто сидит с этим экраном полдня.
  */
-export function Label({ children }: { children: ReactNode }) {
-  return <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{children}</div>
+export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+  const className = 'block text-xs uppercase tracking-wide text-muted-foreground mb-1'
+  return htmlFor ? <label htmlFor={htmlFor} className={className}>{children}</label> : <div className={className}>{children}</div>
 }
 
 export function fmtDate(iso: string | null | undefined): string {

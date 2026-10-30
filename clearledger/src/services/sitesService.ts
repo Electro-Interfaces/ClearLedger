@@ -209,6 +209,8 @@ export interface SiteDetail extends SiteRow {
   // графы чек-листа согласования: экономика этапа 3, условия площадки, контакты
   inputPriceKwth: number | null
   smrCost: number | null
+  dismantleLocationIds: string[]
+  decommissionedOn: string | null
   longTermContract: boolean | null
   // условия аренды и площадки (предложения отдела развития 09.10.2026)
   contractKind: string | null
