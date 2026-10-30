@@ -1,7 +1,7 @@
 // Видеоконференции TradeLedger (Jitsi meet.dataworker.ru). Бэк подписывает токен
 // организатора своим ключом (RS256/ASAP), фронт открывает ссылку.
 import { toast } from 'sonner'
-import { get, isDemoMode, post } from './apiClient'
+import { captureApiContextGuard, get, isDemoMode, post } from './apiClient'
 import { следитьЗаВкладкой } from './confService'
 
 export interface MeetingUrls {
@@ -74,19 +74,25 @@ export async function getMeetingsConfig(): Promise<{ enabled: boolean; domain: s
  */
 export async function startEventMeeting(companyId: string, eventId: string): Promise<MeetingUrls> {
   const вкладка = window.open('about:blank', '_blank')
+  const проверитьКонтекст = captureApiContextGuard()
   if (вкладка) вкладка.opener = null
   try {
     const m = await post<MeetingUrls>(
-      `/api/work/calendar/${eventId}/meeting?company_id=${encodeURIComponent(companyId)}`)
+      `/api/work/calendar/${eventId}/meeting?company_id=${encodeURIComponent(companyId)}`,
+      undefined, { contextGuard: проверитьКонтекст })
+    проверитьКонтекст()
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    проверитьКонтекст()
     // Присутствие — как у входа из «Конференций»: по нему решается, есть ли
     // ведущий в комнате, когда истекут пять минут ожидания.
     if (m.session_id) следитьЗаВкладкой(companyId, m.session_id, вкладка)
+    проверитьКонтекст()
     сказатьОВходе(m)
+    проверитьКонтекст()
     return m
   } catch (e) {
-    вкладка?.close()
+    try { if (вкладка?.location.href === 'about:blank') вкладка.close() } catch { /* чужой origin */ }
     throw e
   }
 }
