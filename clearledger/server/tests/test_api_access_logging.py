@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from starlette.datastructures import QueryParams
 
 from app.api_access_logging import OAuthAccessFilter, install_oauth_access_filters, safe_target
 
@@ -32,6 +33,37 @@ def test_normal_access_diagnostics_are_preserved():
     assert safe_target("/ordinary?token=PRIVATE") == "/ordinary"
     assert safe_target("/developer/authorize?requestId=PRIVATE") == "/developer/authorize"
     assert safe_target("/api/oauth2/authorize?state=PRIVATE") == "/api/oauth2/authorize"
+
+
+@pytest.mark.parametrize("query", [
+    "t%6fken=SYNTHETIC_AUTHORITY", "%74%6f%6b%65%6e=SYNTHETIC_AUTHORITY",
+    "token=SYNTHETIC_AUTHORITY&q=charger&page=2", "q=charger&page=2",
+])
+def test_exact_chat_ws_path_drops_query_independent_of_key_encoding(query):
+    if "SYNTHETIC_AUTHORITY" in query:
+        assert QueryParams(query)["token"] == "SYNTHETIC_AUTHORITY"
+    target = f"/api/chat/ws?{query}"
+    assert safe_target(target) == "/api/chat/ws"
+    # The same shared target policy applies to HTTP and Gunicorn atom records.
+    http = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1,
+                             '%s - "%s %s HTTP/%s" %d', ("client", "GET", target, "1.1", 400), None)
+    OAuthAccessFilter().filter(http)
+    assert http.getMessage() == 'client - "GET /api/chat/ws HTTP/1.1" 400'
+    atoms = {"r": f"GET {target} HTTP/1.1", "m": "GET", "U": "/api/chat/ws",
+             "q": query, "H": "HTTP/1.1"}
+    gunicorn = logging.LogRecord("gunicorn.access", logging.INFO, __file__, 1,
+                                 '%(r)s %(q)s', (atoms,), None)
+    OAuthAccessFilter().filter(gunicorn)
+    assert gunicorn.getMessage() == 'GET /api/chat/ws HTTP/1.1 '
+    assert atoms["q"] == query
+
+
+@pytest.mark.parametrize("target", [
+    "/ordinary-ws?q=charger&page=2", "/api/chat/ws/other?q=charger&page=2",
+    "/api/chat/ws/?q=charger&page=2", "/api/chat/ws-extra?q=charger&page=2",
+])
+def test_chat_ws_noquery_policy_requires_exact_path(target):
+    assert safe_target(target) == target
 
 
 def test_filter_installation_is_idempotent():
@@ -72,8 +104,13 @@ def test_pinned_backend_handshake_log_records_from_source(backend):
     for call in calls:
         assert ast.unparse(call.args[1]) == "self.scope['client']"
         assert ast.unparse(call.args[2]) == "get_path_with_query_string(self.scope)"
-        for query in (b"token=SYNTHETIC_AUTHORITY", b"ACCESS_TOKEN=SYNTHETIC_AUTHORITY", b"q=charger&page=2"):
-            scope = {"path": "/api/chat/ws", "query_string": query}
+        for path, query in (("/api/chat/ws", b"token=SYNTHETIC_AUTHORITY"),
+                            ("/api/chat/ws", b"t%6fken=SYNTHETIC_AUTHORITY"),
+                            ("/api/chat/ws", b"%74%6f%6b%65%6e=SYNTHETIC_AUTHORITY"),
+                            ("/api/chat/ws", b"ACCESS_TOKEN=SYNTHETIC_AUTHORITY"),
+                            ("/api/chat/ws", b"q=charger&page=2"),
+                            ("/ordinary-ws", b"q=charger&page=2")):
+            scope = {"path": path, "query_string": query}
             target = get_path_with_query_string(scope)
             args = (("127.0.0.1", 1234), target) + ((401,) if len(call.args) == 4 else ())
             record = logging.LogRecord("uvicorn.error", logging.INFO, str(source), call.lineno,
@@ -82,6 +119,7 @@ def test_pinned_backend_handshake_log_records_from_source(backend):
             assert OAuthAccessFilter().filter(record)
             assert record.args[0] == args[0]
             assert record.args[2:] == args[2:]
+            assert record.args[1] == (path if path == "/api/chat/ws" else target)
             assert record.getMessage() == before.replace(target, safe_target(target))
             assert "SYNTHETIC_AUTHORITY" not in record.getMessage()
 
@@ -92,6 +130,8 @@ def test_pinned_backend_handshake_log_records_from_source(backend):
     ("Ordinary error %(target)s", ({"target": "/ordinary?token=SYNTHETIC"},)),
     ('%s - "WebSocket %s" [accepted] (custom)', ("client", "/ordinary?token=SYNTHETIC")),
     ('client - "WebSocket /ordinary?token=SYNTHETIC" [accepted]', ()),
+    ("Ordinary error %s %s", ("client", "/api/chat/ws?t%6fken=SYNTHETIC")),
+    ('%s - "WebSocket %s" [accepted] (custom)', ("client", "/api/chat/ws?t%6fken=SYNTHETIC")),
 ])
 def test_uvicorn_error_non_handshake_records_unchanged(message, args):
     error = ValueError("synthetic exception")

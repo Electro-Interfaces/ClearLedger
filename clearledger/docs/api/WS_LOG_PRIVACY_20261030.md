@@ -4,6 +4,8 @@
 стандартные handshake-сообщения `uvicorn.error`. Синтетический baseline показал
 маркер в журнале; кандидат убрал его, сохранив клиентский адрес, путь и статус.
 Фактическая утечка на production этим исследованием не установлена. Выпуска не было.
+После root review дополнительно закрыт query точного `/api/chat/ws` независимо от
+кодировки ключа; актуальный итог **25 PASS, 2 SKIP**. Детали follow-up ниже.
 
 ## Источник и граница исправления
 
@@ -30,7 +32,8 @@
 `uvicorn.error` и отдельную ветку только для этих точных шаблонов и числа аргументов.
 Она применяет прежний `safe_target()` ко второму аргументу. Если URL содержит уже
 распознаваемый authority-параметр, query удаляется целиком; путь остаётся.
-Обычные query без authority сохраняются. Произвольные сообщения, exception-текст,
+Обычные query без authority сохраняются вне точного `/api/chat/ws`, где query
+всегда удаляется по правилу follow-up ниже. Произвольные сообщения, exception-текст,
 mapping-записи и HTTP-подобные пятиаргументные ошибки `uvicorn.error` проходят без изменений.
 
 HTTP/Gunicorn-ветки, набор распознаваемых ключей и публичные имена функций сохранены.
@@ -61,7 +64,7 @@ PYTHONPATH="$PWD/clearledger/server" \
 git diff --check
 ```
 
-Итог: **15 PASS, 2 SKIP**, `git diff --check` PASS. Из них 13 pure-проверок,
+Первоначальный итог `f873ac00`: **15 PASS, 2 SKIP**, `git diff --check` PASS. Из них 13 pure-проверок,
 включая пять существовавших; две actualwire-проверки — baseline и candidate для
 websockets. Два SKIP — baseline/candidate actualwire для отсутствующего wsproto.
 Проверка синтаксиса трёх Python-файлов через `compile()` также PASS.
@@ -113,7 +116,7 @@ query; client/status сохраняются. Это статическая пр�
 
 Гарантия ограничена известными стандартными handshake-форматами Uvicorn 0.34.0
 при вызове установщика. Произвольные error/debug/custom-журналы, другие версии
-Uvicorn, дополнительные кодировки query-ключей и журналы других компонентов не
+Uvicorn, кодировки query-ключей вне точного `/api/chat/ws` и журналы других компонентов не
 проверены и этой правкой не объявляются безопасными. wsproto actualwire остаётся
 непроверенным до отдельного прогона в окружении с этим backend.
 
@@ -121,3 +124,64 @@ Uvicorn, дополнительные кодировки query-ключей и �
 `git pull --ff-only` сообщил об отсутствии upstream; выполнен `git fetch origin`,
 база не переключалась и не смешивалась с другой линией. Дальнейшая интеграция,
 PR, merge и выпуск остаются у координатора и человека.
+
+## Follow-up root review: кодированный ключ token
+
+На неизменённом модуле из `f873ac00` воспроизведён конкретный пробел:
+`starlette.datastructures.QueryParams("t%6fken=SYNTHETIC_WS_AUTHORITY_20261030")`
+возвращает значение по ключу `token`, но прежний `safe_target()` и сформированный
+`LogRecord` оставляют маркер в строке принятого handshake. Это действительная
+форма query-параметра; реальный JWT для доказательства не требовался.
+
+Расширенный wire-тест до изменения модуля дал **1 PASS, 1 FAIL, 2 SKIP**:
+baseline-before-handshake-filter PASS, установленный фильтр из `f873ac00` FAIL.
+Локальный Uvicorn с этим фильтром записал:
+
+```text
+('127.0.0.1', <ephemeral>) - "WebSocket /api/chat/ws?t%6fken=SYNTHETIC_WS_AUTHORITY_20261030&q=charger" [accepted]
+('127.0.0.1', <ephemeral>) - "WebSocket /api/chat/ws?%74%6f%6b%65%6e=SYNTHETIC_WS_AUTHORITY_20261030&refuse=1" 403
+```
+
+Исправление добавляет в общий `safe_target()` ровно одно правило: если path до
+`?` равен `/api/chat/ws`, вернуть этот path без query. Известный endpoint требует
+query credential; потому query удаляется целиком, включая обычные дополнительные
+параметры и запрос без token, который может быть отклонён до handshake. Такое
+правило не зависит от способа кодирования ключей и не вводит новый парсер query
+для всех остальных URL. Оно действует также на HTTP access и Gunicorn atoms,
+использующие тот же helper; их остальные правила и SafeAtoms-семантика сохранены.
+
+В wire-harness добавлены только синтетический разбор `QueryParams` и запросы:
+
+| Query точного `/api/chat/ws` | Ответ синтетического ASGI | Candidate handshake |
+|---|---|---|
+| `t%6fken=<marker>&q=charger` | 101 | `/api/chat/ws` без query |
+| `%74%6f%6b%65%6e=<marker>&refuse=1` | 403 | `/api/chat/ws` без query |
+| `q=charger&page=2` | 403 | `/api/chat/ws` без query |
+
+Эта ASGI-модель подтверждает только разбор ключа и логирование handshake, она не
+вызывает проверку CoreJWT, реальную аутентификацию, БД или приложение. Предыдущие
+baseline-before-handshake-filter accepted/403/401 и ordinary HTTP/WS cases
+сохранены; baseline по-прежнему показывает маркер, candidate проверяет его полное
+отсутствие в захваченном INFO-журнале. Cleanup всех собственных процессов и
+сокетов остаётся прежним и проверяется тем же harness.
+
+Актуальный полный selected suite по команде выше: **25 PASS, 2 SKIP**
+(23 pure, 2 actualwire websockets; wsproto actualwire baseline/candidate SKIP).
+Syntax через `compile()` трёх Python-файлов и `git diff --check` PASS.
+Исходники обоих backend и их LogRecord-форматы проверяются прежним AST-тестом,
+расширенным partially/fully encoded ключами, известным path с обычным query и
+отдельным `/ordinary-ws?q=charger&page=2`, где query сохраняется.
+
+Review проверил, что правило относится к точному пути, а не к префиксу:
+`/api/chat/ws/`, `/api/chat/ws/other` и `/api/chat/ws-extra` с обычными query
+остаются прежними. Unknown error/custom-форматы с URL `/api/chat/ws?t%6fken=…`
+также остаются неизменными; exception/debug-текст не переписывается.
+
+Область проверки соответствует текущему deployment path `/api/chat/ws`, который
+Uvicorn записывает в известных handshake-форматах. Произвольные ASGI `root_path`,
+композиции proxy path, нестандартные логгеры и журналы других компонентов не
+охвачены. Результат не является подтверждением приватности всех логов или
+сертификатом безопасности; факт production leak не устанавливался.
+Зависимости, окружение общего venv, ingress, ВМ и рабочие данные не изменялись.
+Follow-up сохраняется отдельным коммитом поверх `f873ac00` в той же ветке;
+для root integration нужны оба коммита, PR/merge/deploy не выполнялись.

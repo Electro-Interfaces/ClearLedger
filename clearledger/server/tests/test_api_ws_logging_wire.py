@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 import pytest
+from starlette.datastructures import QueryParams
 
 from app.api_access_logging import OAuthAccessFilter, install_oauth_access_filters
 
@@ -28,6 +29,13 @@ async def synthetic_app(scope, receive, send):
         return
     assert scope["type"] == "websocket"
     assert (await receive())["type"] == "websocket.connect"
+    if scope["path"] == "/api/chat/ws":
+        # Model only query parsing, without importing chat/auth or making JWTs.
+        params = QueryParams(scope["query_string"])
+        if "token" not in params or params.get("refuse") == "1":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        assert params["token"] == SENTINEL
     if scope["path"] == "/refused":
         await send({"type": "websocket.close", "code": 1008})
     elif scope["path"] == "/denied":
@@ -74,6 +82,9 @@ def _capture(filtered, backend):
             assert _request(port, f"/refused?token={SENTINEL}", True) == 403
             assert _request(port, f"/denied?access_token={SENTINEL}", True) == 401
             assert _request(port, "/ordinary-ws?q=charger&page=2", True) == 101
+            assert _request(port, f"/api/chat/ws?t%6fken={SENTINEL}&q=charger", True) == 101
+            assert _request(port, f"/api/chat/ws?%74%6f%6b%65%6e={SENTINEL}&refuse=1", True) == 403
+            assert _request(port, "/api/chat/ws?q=charger&page=2", True) == 403
             assert _request(port, f"/ordinary-http?token={SENTINEL}") == 200
             assert _request(port, "/ordinary-http?q=charger&page=2") == 200
         finally:
@@ -102,6 +113,11 @@ def test_uvicorn_wire_handshake_and_http_logs(filtered, backend):
         assert f'"WebSocket {target}" {status}' in logs, logs
     assert (SENTINEL in logs) is not filtered, logs
     assert '"WebSocket /ordinary-ws?q=charger&page=2" [accepted]' in logs
+    for query, status in [(f"t%6fken={SENTINEL}&q=charger", "[accepted]"),
+                          (f"%74%6f%6b%65%6e={SENTINEL}&refuse=1", "403"),
+                          ("q=charger&page=2", "403")]:
+        target = "/api/chat/ws" + ("" if filtered else f"?{query}")
+        assert f'"WebSocket {target}" {status}' in logs, logs
     assert '"GET /ordinary-http HTTP/1.1" 200' in logs
     assert '"GET /ordinary-http?q=charger&page=2 HTTP/1.1" 200' in logs
 
