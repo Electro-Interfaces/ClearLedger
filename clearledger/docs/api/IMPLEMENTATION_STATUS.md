@@ -598,3 +598,15 @@ Network/processattempts0,deliverycapture/lifecyclecounts точны; обе exac
 Productionseed/jobs изолированы; nginx/browserSSO/реальныйпартнёр/полныйM18
 остаются открыты. Sourceoverlay четырёхP2файлов совпал с ихfrozencommit;
 полный совмещённыйCI текущегоHEAD не заявляется.
+
+
+Дополнение к candidate functional run: следующий376attempt прерван гонкой
+наблюдателя временных файлов; точные PASS counts не принимаются без завершённых
+JUnit/boundary. Failure сохранён. После исправления наблюдателя короткий
+diagnostic profile собрал56прежнихHTTPcases и остановился на первомFAIL0,96с:
+TestClient lifespan → routing.py280 → AttributeError PolicyRouter.startup.
+Запрещённых network/process/env попыток0, diagnostic не является376acceptance.
+Точная БД штатно удалена после каждой попытки, безFORCE/GUC. Подтверждённый
+compatibilityfix готовится через public router.lifespan_context с сохранением
+registry-before-startup, callbacks/state/cleanup; проверка нужна на обоихruntime.
+Runtime77/requirements/Dockerfile пока не переключаются.
