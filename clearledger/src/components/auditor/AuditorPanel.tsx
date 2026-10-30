@@ -174,6 +174,13 @@ const FALLBACK_PROMPTS: auditor.AuditorPrompt[] = [
 ]
 
 export function AuditorPanel() {
+  const { companyId, organizationId } = useCompany()
+  // Компания/пользователь уже меняют ключ родителей. Организация меняется
+  // внутри того же дерева: разговор, вложения и занятость принадлежат её выбору.
+  return <AuditorConversation key={JSON.stringify([companyId, organizationId])} />
+}
+
+function AuditorConversation() {
   const { pathname } = useLocation()
   const { companyId } = useCompany()
   const [messages, setMessages] = useState<Message[]>([])
@@ -188,6 +195,7 @@ export function AuditorPanel() {
   const fileRef = useRef<HTMLInputElement>(null)
   const ctrlRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const aliveRef = useRef(false)
 
 
   // Микрофон показываем, только если распознаватель в стеке поднят.
@@ -220,7 +228,10 @@ export function AuditorPanel() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, status])
   // Панель закрыли на середине ответа — обрываем поток: незаконченный ответ никто
   // не прочитает, а обращение к модели платное.
-  useEffect(() => () => ctrlRef.current?.abort(), [])
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false; ctrlRef.current?.abort() }
+  }, [])
 
   async function attach(f: File | null | undefined) {
     if (!f || !companyId) return
@@ -229,12 +240,15 @@ export function AuditorPanel() {
       // Загрузка ждётся ДО setFiles: `await` внутри не-async колбэка обновления
       // состояния не компилируется, и сборка падала на всём фронте.
       const uploaded = await auditor.uploadFile(companyId, f)
+      if (!aliveRef.current) return
       setFiles((prev) => [...prev, uploaded])
     } catch (e) {
-      toast.error((e as Error).message)
+      if (aliveRef.current) toast.error((e as Error).message)
     } finally {
-      setUploading(false)
-      if (fileRef.current) fileRef.current.value = ''
+      if (aliveRef.current) {
+        setUploading(false)
+        if (fileRef.current) fileRef.current.value = ''
+      }
     }
   }
 
@@ -405,7 +419,10 @@ export function AuditorPanel() {
             <DictateButton disabled={busy}
               // Фокус возвращаем в поле: иначе текст появился, а Enter уходит в кнопку
               // микрофона, и приходится тыкать мышью в строку, чтобы отправить.
-              onText={(t) => { setInput((v) => (v ? `${v} ${t}` : t)); askRef.current?.focus() }}
+              onText={(t) => {
+                if (!aliveRef.current) return
+                setInput((v) => (v ? `${v} ${t}` : t)); askRef.current?.focus()
+              }}
               title="Продиктовать вопрос" />
           )}
           <Button size="icon" variant="outline" disabled={uploading || busy}
