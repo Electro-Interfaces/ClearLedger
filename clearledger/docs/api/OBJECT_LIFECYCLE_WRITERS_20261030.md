@@ -391,3 +391,11 @@ bootstrap или app import. Результаты прежних тестов LO
 для review: A–C; D/E и отдельная event/reservation wave нужны перед реальным
 temporal retirement. Публикация retire API, изменение ACL и изменение рабочих
 данных не выполнены и не следуют из наличия этого плана.
+
+
+Независимая сверка координатора после переноса dc54b38d как f9b6cf4c:
+все59Ledger и5deploy blobs совпали по SHA256 и размеру с manifest на его
+закреплённых ревизиях. Source/policy выводы остаются bounded исследованием.
+Для W16 назначен отдельный implementation пакет: обязательный доступ к target
+и связь DELETE с объектом из URL. Он не меняет временную семантику закрытия,
+commit ownership или публичный API retirement.
