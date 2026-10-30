@@ -1,8 +1,8 @@
 # M18: подготовка actual app.main composition, 30.10.2026
 
-Статус: **ROOT BASELINE 5 PASS / 2 FAIL; CORRECTIVE RETEST PENDING**.
+Статус: **ROOT BASELINE 5 PASS / 2 FAIL; CORRECTIVE RETEST 3 PASS**.
 Исходный frozen baseline выполнен ROOT, дефект request ID подтверждён.
-Подготовлен ограниченный фикс и повтор трёх затронутых cases; M18 не закрыт.
+Ограниченный фикс проверен ROOT в трёх затронутых cases; M18 не закрыт.
 База исходников:
 `46c6ea484476569f17e8957335bf010acbd66bb4`, ветка
 `agent/api-partner-main-composition-20261030`. Auth/ACL, requirements/locks, Compose, CI, версии и значения feature flags
@@ -191,7 +191,7 @@ Worker сделал source review, stdlib AST parse двух новых Python �
 source manifests и Git checks. **Не выполнялись** compile gate, pytest/collect,
 runner, imports app/ORM, SQL, HTTP server/browser, Docker, npm install/build,
 venv или настоящая доставка **со стороны worker**. ROOT actual baseline
-выполнен отдельно; corrective HTTP/PG verdict ещё ожидается.
+выполнен отдельно; corrective actual HTTP/PG: 3 PASS.
 
 Даже будущий successful ASGI main run с перечисленными seams не проверяет
 nginx/Traefik/CORS deployment trust chain, native SSO browser handoff,
@@ -274,4 +274,48 @@ jobs и один lifecycle сохраняются. Все остальные gat
 
 ROOT отдельно reviewed/re-reserves fresh target/directories и исполняет этот
 повтор после своего dependency-candidate окна. Worker corrective code не запускал.
-До новых actual evidence фикс остаётся подготовленным, не принятым по runtime.
+ROOT выполнил corrective run, ограниченный результат приведён ниже.
+
+
+## Финальный ROOT affected-only результат
+
+ROOT исполнил frozen corrective `79daf4c6a8d8e149fea912012fd4f1847351af34`:
+**3 PASS, 0 FAIL/ERROR/SKIP**, pytest31.98s,
+outer46.07293967809528s, exit0, child reaped. Подтверждены сохранённое equality,
+игнорирование forged incoming request ID, изоляция восьми concurrent requests,
+standalone503 с двумя UUID и **0 SQL attempts**, а также весь Swagger flow
+до CSRF close, replay старой cookie и отказа исходного product token.
+
+Первоначальные **5 PASS не повторялись**. Это две отдельные серии:
+baseline7 = 5 PASS / 2 FAIL, затем affected3 = 3 PASS. Восемь различных cases
+имеют положительные наблюдения по совокупности двух серий; это **не один
+непрерывный full8 run**. Исходные FAIL, исходные hashes и artifacts сохранены.
+
+Есть одно нефатальное pytest-предупреждение `record_property` с JUnit xunit2.
+Его ROOT сохранил в evidence; ради удаления предупреждения frozen тесты или
+runner не менялись. Worker после результата изменил только этот отчёт.
+
+ROOT evidence:
+`/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/root-main-composition-review-v2-20261030/`.
+
+| Artifact | SHA256 |
+|---|---|
+| `summary.json` | `b581698845611c00a67a7c79ad0feeb71524c940168c75099b7fa2ddfb9d9f9d` |
+| `cleanup-observed.json` | `15d52f5d50aa435b35819b38084b6ae9fb013e511ce94266bd3503f622ab80c2` |
+| `test-process.json` | `754178db14f174d89b07128b6369567899a61e62f466d485332b620ce647feb1` |
+| `evidence-test/main-composition.xml` | `7cd9a223a4bfc0bab9a989cf692520cad19142aa1014602b827f2029dd745b26` |
+| `evidence-test/boundary.json` | `cdd09e2a136a8c087491286bb3c48b9a9e0c6e4b18bc4c149b96955fcfbe7f89` |
+| `evidence-test/standalone-request-id-no-sql.json` | `80294a54df629bd544e796b8b556325cf202f1f8d064559e0ae96e5a7bc0c409` |
+
+Boundary: network/process attempts0, unexpected delivery0; prepare1,
+chat_ws start/stop по1, notify1, восемь schedulers по1 с корректной отменой.
+Baseline/final и все наблюдавшиеся phases сохраняют business rows и file bytes.
+Ожидаемые auth-state transitions учитывались отдельно; credentials/tokens
+не переписывались в публичный отчёт.
+
+ROOT сделал **обычный DROP** exact `api_partner_main_test_20261030`:
+relations перед удалением344, connections0, exists после DROP0, maxlocks64.
+Это завершение synthetic проверки, не выкатка. Runtime/tests/runner после
+actual PASS остаются побайтно frozen79daf4c6. nginx/SSO browser, production
+seed/jobs и release acceptance этой проверкой не подтверждены; **M18 и
+программа остаются открытыми**.
