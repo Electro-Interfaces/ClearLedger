@@ -2,9 +2,7 @@
  * Клиент API /api/corporate/* — корпоративное направление ЭЗС (ЮЛ):
  * реестр клиентов, KPI-обзор, рентабельность (розница vs договор), биллинг.
  */
-import { get, getToken } from './apiClient'
-
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
+import { get, downloadFile } from './apiClient'
 
 export interface CorpClient {
   name: string
@@ -131,24 +129,14 @@ export async function getCorporateClientCard(
  * Скачать реестр к выставлению под УПД (xlsx, 2 листа: Реестр + Детализация,
  * НДС выделен). Опц. фильтр по клиенту (один клиент = один УПД).
  */
-export async function exportCorporateBillingUpd(p: P & { client?: string; vatRate?: number }): Promise<void> {
+export async function exportCorporateBillingUpd(
+  p: P & { client?: string; vatRate?: number }, options?: { signal?: AbortSignal },
+): Promise<void> {
   const qs = new URLSearchParams({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
   if (p.client) qs.set('client', p.client)
   if (p.vatRate != null) qs.set('vat_rate', String(p.vatRate))
   if (p.stations?.length) qs.set('stations', p.stations.join(','))
   if (p.regions?.length) qs.set('regions', p.regions.join(','))
-  const token = getToken()
-  const res = await fetch(`${API_BASE}/api/corporate/billing-export?${qs.toString()}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `billing_upd_${p.client ? 'client' : 'all'}_${p.dateFrom}_${p.dateTo}.xlsx`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  return downloadFile(`/api/corporate/billing-export?${qs.toString()}`,
+    `billing_upd_${p.client ? 'client' : 'all'}_${p.dateFrom}_${p.dateTo}.xlsx`, options)
 }
