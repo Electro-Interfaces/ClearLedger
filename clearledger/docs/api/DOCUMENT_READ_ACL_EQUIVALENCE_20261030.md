@@ -288,3 +288,22 @@ collect/retry не выполняет; независимая проверка f
 normal DROP own DB принадлежат root. На момент этой записи подтверждение root
 ещё ожидается. Полный CI, future candidate comparison, индексы, merge и deploy
 не выполнялись; общая программа M00–M19 открыта.
+
+
+## Независимая приёмка координатора
+
+Root принял source commit `7ba64e2c32934a4d9970fe666f7357cf7377b9a0`
+в integration как `ccfcd653f5cc01490bbf8571f9e89eae4a230ead`. Повторно
+измерены SHA теста и все 10 source pins; diff содержит ровно два новых файла,
+JUnit подтверждает 8 PASS / 0 FAIL / 0 SKIP за 17,786 с. Проверены preflight
+и хеши четырёх приватных artifacts. Это независимая проверка исходников и
+артефактов авторского прогона; второго SQL-прогона root не выполнял.
+
+После SQL_SLOT_RELEASED root отдельно подтвердил fresh public/edge tables=0,
+затем выполнил обычный DROP своей тестовой БД без FORCE. Новое соединение
+подтвердило DBexists=0, ownconns=0, otherclients=0, max_locks=64. Очистка
+завершена. Приватная сводка: `.artifacts/root-document-read-acl-artifact-proof.json`.
+
+Матрица закрепляет существующие различающиеся list/detail goldens для strict
+с break-glass. Новая реализация ACL не выбиралась и не сравнивалась; runtime,
+схема, индексы и рабочие данные не менялись. Полный CI и выпуск не заявляются.
