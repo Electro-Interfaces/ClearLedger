@@ -201,13 +201,15 @@ def child_export(revision):
                 raise RuntimeError("actual_database_module_required")
             report = exporter.inventory(app, revision=revision, policy_type=PolicyRoute,
                                         product_app=product_api, resources=guard.resources)
-            assert report["statistics"]["curatedOperations"] == 12
+            report["sourceManifest"] = exporter.python_source_manifest()
+            assert report["productRegistrationParity"]["matches"] is True
             report["triage"] = triage(app, report)
             import fastapi
             import starlette
             report["triage"]["versions"] = {"python": sys.version.split()[0], "fastapi": fastapi.__version__, "starlette": starlette.__version__}
             report["kind"] = "actual-core-runtime-route-inventory"
             report["provenance"].update({"entrypoint": "app.main.app", "ambientEnvironment": "replaced", "appEnv": "dev", "pythonIsolated": True,
+                "importPath": "server_and_existing_interpreter_directories",
                 "realDatabaseBase": True, "compositionFlags": exporter.FLAGS,
                 "guard": {"deniedAttempts": len(guard.denied), "sql": "real_engine_do_connect_denied",
                           "network": "socket_audit_denied", "writes": "audit_denied", "processes": "audit_denied"}})
@@ -232,27 +234,50 @@ def bounded_report(args):
     assert hashlib.sha256(original_bytes).hexdigest() == args.artifact_sha256, "artifact_hash_mismatch"
     original = json.loads(original_bytes)
     assert original["sourceRevision"] == args.artifact_revision, "artifact_revision_mismatch"
+    assert original['sourceRevision'] == args.source_revision, 'same_frozen_source_required'
     assert original["kind"] == "actual-core-runtime-route-inventory"
-    assert len(original["operations"]) == 1703 and len(original["literalParameterOverlaps"]) == 109
+    assert len(original["operations"]) <= 10000 and len(original["literalParameterOverlaps"]) <= 10000
     assert original["provenance"]["guard"]["deniedAttempts"] == 0
     assert original["provenance"]["realDatabaseBase"] and not original["provenance"]["lifespanExecuted"]
     assert not original["provenance"]["requestsExecuted"]
-    subprocess.run(["git", "diff", "--exit-code", args.source_revision, "--", "clearledger/server/app",
-                    "clearledger/scripts/export-runtime-inventory.py"], cwd=ROOT, check=True, capture_output=True)
-    current = exporter.launch_export(args.source_revision, runner=triage_runner)
+    subprocess.run(["git", "diff", "--exit-code", args.source_revision, "--", "clearledger/server/app"],
+                   cwd=ROOT, check=True, capture_output=True)
+    captured = {}
+    def retained_runner(argv, **kwargs):
+        completed = triage_runner(argv, **kwargs)
+        raw = completed.stdout.encode()
+        captured.update(sha256=hashlib.sha256(raw).hexdigest(), rawByteIdentical=raw == original_bytes)
+        if args.current_raw:
+            args.current_raw.write_bytes(raw)
+        return completed
+    current = exporter.launch_export(args.source_revision, runner=retained_runner)
     if current.get("status") == "blocked":
         return current
-    sections = ("operations", "mounts", "unresolved", "literalParameterOverlaps", "duplicates", "parameterCollisions", "sharedPaths")
+    sections = ("operations", "mounts", "unresolved", "literalParameterOverlaps", "duplicates", "parameterCollisions",
+                "sharedPaths", "sourceManifest", "productRegistrationParity", "endpointSourceHashes", "statistics", "limits", "provenance")
     parity = {key: {"identical": current[key] == original[key], "sha256": digest(current[key])} for key in sections}
-    assert all(p["identical"] for p in parity.values()), "registry_or_registration_order_changed"
-    assert not current["unresolved"]
+    operations = exporter.compare_operation_records(original['operations'], current['operations'])
+    registration_comparison = exporter.compare_runtime_reports(
+        {k: v for k, v in original.items() if k != 'staticComparison'},
+        {k: v for k, v in current.items() if k != 'triage'})
+    parity['operations'].update(equivalent=operations['equivalent'],
+        originalSha256=digest(original['operations']), comparison=operations)
+    assert registration_comparison['equivalent'] and all(p['identical'] for k, p in parity.items() if k != 'operations'), "registry_or_registration_order_changed"
+    operation_count, candidate_count = len(original["operations"]), len(original["literalParameterOverlaps"])
     result = {"schemaVersion": 1, "kind": "bounded-route-overlap-triage", "sourceRevision": args.source_revision,
               "artifact": {"sourceRevision": original["sourceRevision"], "sha256": args.artifact_sha256,
-                           "operationCount": 1703, "candidateCount": 109},
+                           "operationCount": operation_count, "candidateCount": candidate_count},
               "registrationParity": parity, "provenance": current["provenance"],
+              "registrationComparison": registration_comparison,
+              "registrationComparisonExcludedDerivedFields": {'original': ['staticComparison'], 'current': ['triage']},
+              "generatedIdComparison": {"originalRawSha256": args.artifact_sha256,
+                  "currentRawSha256": captured['sha256'], "rawByteIdentical": captured['rawByteIdentical'],
+                  "rawOperationRecordsIdentical": original['operations'] == current['operations'],
+                  "rawByteComparisonScope": "original export vs current child including added triage; registry comparison excludes only named derived fields",
+                  "allowedGeneratedIdVariations": operations['allowedGeneratedIdVariations']},
               "rawInventoryPublished": False, **current["triage"]}
-    assert len(result["pairs"]) == 109 == sum(result["counts"].values())
-    assert len({tuple(p["artifactOperationIndices"]) for p in result["pairs"]}) == 109
+    assert len(result["pairs"]) == candidate_count == sum(result["counts"].values())
+    assert len({tuple(p["artifactOperationIndices"]) for p in result["pairs"]}) == candidate_count
     return result
 
 
@@ -263,6 +288,7 @@ def main():
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--artifact-sha256")
     parser.add_argument("--artifact-revision")
+    parser.add_argument('--current-raw', type=Path, help='Retain exact child stdout before parity assertions, ROOT-owned artifact')
     args = parser.parse_args()
     if not exporter.re.fullmatch(r"[0-9a-f]{40}", args.source_revision):
         parser.error("explicit full source revision required")

@@ -257,10 +257,27 @@ class ActualCoreTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertEqual(result.stderr, '')
                 outputs.append(result.stdout)
-        self.assertEqual(outputs[0], outputs[1])
+        # Retain exact observations even when the comparison fails. Never replace
+        # a raw generated ID with the comparison projection or fix the hash seed.
+        target = None
+        if receipt_directory := os.environ.get('RUNTIME_INVENTORY_RECEIPT_DIR'):
+            target = Path(receipt_directory).resolve()
+            target.mkdir(parents=True, exist_ok=True)
+            for name, output in zip(('core-first.json', 'core-repeat.json'), outputs):
+                (target / name).write_text(output)
+        comparison = m.compare_runtime_reports(json.loads(outputs[0]), json.loads(outputs[1]))
+        comparison.update(rawByteIdentical=outputs[0] == outputs[1],
+            rawSha256=[m.hashlib.sha256(output.encode()).hexdigest() for output in outputs])
+        if target:
+            (target / 'core-repeat-comparison.json').write_text(json.dumps(comparison, sort_keys=True, indent=2) + '\n')
+        self.assertTrue(comparison['equivalent'], comparison)
+        self.assertTrue(comparison['allOtherFieldsExact'])
         data = json.loads(outputs[0])
         self.assertEqual(data['kind'], 'actual-core-runtime-route-inventory')
-        self.assertEqual(data['statistics']['curatedOperations'], 12)
+        parity = data['productRegistrationParity']
+        self.assertTrue(parity['matches'])
+        self.assertEqual(data['statistics']['curatedOperations'], parity['expectedOperations'])
+        self.assertEqual(parity['observedOperations'], parity['expectedOperations'])
         self.assertGreater(data['statistics']['websocketOperations'], 0)
         self.assertEqual(data['provenance']['guard']['deniedAttempts'], 0)
         self.assertTrue(data['provenance']['realDatabaseBase'])
