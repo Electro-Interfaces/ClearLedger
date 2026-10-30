@@ -2705,19 +2705,19 @@
     },
     {
       "artifact": {
-        "filename": "setuptools-80.9.0-py3-none-any.whl",
+        "filename": "setuptools-84.1.0-py3-none-any.whl",
         "packagetype": "bdist_wheel",
-        "requires_python": ">=3.9",
-        "sha256": "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922",
-        "size": 1201486,
-        "url": "https://files.pythonhosted.org/packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl"
+        "requires_python": ">=3.10",
+        "sha256": "5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9",
+        "size": 819380,
+        "url": "https://files.pythonhosted.org/packages/18/02/b4bbb90f8f29e334898ff45c6d9b1fffaa6f378017052b3023a06262b5f7/setuptools-84.1.0-py3-none-any.whl"
       },
       "inspection": {
         "declaration_validation": "supported-subset-syntax-only-not-resolution",
         "kind": "wheel",
         "metadata_sha256": {
-          "METADATA": "7f890ca8dbc16b63b568c89312ed6a7f9f0a79d0b2b7f3c83bf796ac3d930615",
-          "WHEEL": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b"
+          "METADATA": "adc9c90a8475c9efce59d6dbe2bfdfc3a68a9806a83b7771245ac6e9bb0e8649",
+          "WHEEL": "d7a7dcffd469f39e122dc761683123af4bbae69d1edc5859c6284d81c9c213df"
         },
         "name": "setuptools",
         "provides_extra": [
@@ -2771,40 +2771,59 @@
           "importlib_metadata>=6; python_version < \"3.10\" and extra == \"core\"",
           "tomli>=2.0.1; python_version < \"3.11\" and extra == \"core\"",
           "wheel>=0.43.0; extra == \"core\"",
-          "platformdirs>=4.2.2; extra == \"core\"",
           "jaraco.functools>=4; extra == \"core\"",
           "more_itertools; extra == \"core\"",
-          "pytest-checkdocs>=2.4; extra == \"check\"",
+          "pytest-checkdocs>=2.14; extra == \"check\"",
           "pytest-ruff>=0.2.1; sys_platform != \"cygwin\" and extra == \"check\"",
-          "ruff>=0.8.0; sys_platform != \"cygwin\" and extra == \"check\"",
+          "ruff>=0.13.0; sys_platform != \"cygwin\" and extra == \"check\"",
           "pytest-cov; extra == \"cover\"",
-          "pytest-enabler>=2.2; extra == \"enabler\"",
-          "pytest-mypy; extra == \"type\"",
-          "mypy==1.14.*; extra == \"type\"",
+          "pytest-enabler>=3.4; extra == \"enabler\"",
+          "pytest-mypy>=1.0.1; platform_python_implementation != \"PyPy\" and extra == \"type\"",
+          "mypy==1.18.*; extra == \"type\"",
           "importlib_metadata>=7.0.2; python_version < \"3.10\" and extra == \"type\"",
           "jaraco.develop>=7.21; sys_platform != \"cygwin\" and extra == \"type\""
         ],
-        "requires_python": ">=3.9",
+        "requires_python": ">=3.10",
         "tags": [
           "py3-none-any"
         ],
-        "version": "80.9.0"
+        "version": "84.1.0"
       },
       "name": "setuptools",
       "provenance": {
-        "baseline_manifest_sha256": "3390cbfaa680b9bb970ce43e8d3e32014230908c46fd9e7b1d4464c7cf7365ee",
-        "kind": "retained-upstream-cache"
+        "artifact_download_receipt": {
+          "elapsed_seconds": 0.128379,
+          "method": "GET",
+          "outcome": "retrieved",
+          "sha256": "5231689c6ac8156cd155cfb98c3fd6fb252c3e7e9bd3d78b64d3c55f132624c9",
+          "size": 819380,
+          "status": 200,
+          "timestamp_utc": "2026-10-30T15:59:35.456813+00:00",
+          "url": "https://files.pythonhosted.org/packages/18/02/b4bbb90f8f29e334898ff45c6d9b1fffaa6f378017052b3023a06262b5f7/setuptools-84.1.0-py3-none-any.whl"
+        },
+        "kind": "new-tooling-wheel-official-pinned-version-json",
+        "release_download_receipt": {
+          "elapsed_seconds": 0.159103,
+          "method": "GET",
+          "outcome": "retrieved",
+          "sha256": "75427bb7a4289a8f06fe176e3eab998710051b36706c80c1df7e796000372f02",
+          "size": 8162,
+          "status": 200,
+          "timestamp_utc": "2026-10-30T15:59:35.192521+00:00",
+          "url": "https://pypi.org/pypi/setuptools/84.1.0/json"
+        }
       },
       "release_metadata": {
-        "path": "metadata/setuptools-80.9.0.json",
-        "sha256": "e3188a9a8921b0bd16ae2728753269376a4b90ca3413f67b77f77417ab2e503e",
-        "size": 15392,
-        "url": "https://pypi.org/pypi/setuptools/80.9.0/json"
+        "path": "metadata/setuptools-84.1.0.json",
+        "retrieved_at_utc": "2026-10-30T15:59:35.192521+00:00",
+        "sha256": "75427bb7a4289a8f06fe176e3eab998710051b36706c80c1df7e796000372f02",
+        "size": 8162,
+        "url": "https://pypi.org/pypi/setuptools/84.1.0/json"
       },
       "roles": [
         "tooling"
       ],
-      "version": "80.9.0"
+      "version": "84.1.0"
     },
     {
       "artifact": {
@@ -3308,49 +3327,70 @@
     },
     {
       "artifact": {
-        "filename": "wheel-0.45.1-py3-none-any.whl",
+        "filename": "wheel-0.46.2-py3-none-any.whl",
         "packagetype": "bdist_wheel",
-        "requires_python": ">=3.8",
-        "sha256": "708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248",
-        "size": 72494,
-        "url": "https://files.pythonhosted.org/packages/0b/2c/87f3254fd8ffd29e4c02732eee68a83a1d3c346ae39bc6822dcbcb697f2b/wheel-0.45.1-py3-none-any.whl"
+        "requires_python": ">=3.9",
+        "sha256": "33ae60725d69eaa249bc1982e739943c23b34b58d51f1cb6253453773aca6e65",
+        "size": 29971,
+        "url": "https://files.pythonhosted.org/packages/13/2c/5e079cefe955ae58e5a052fe037c850ce493eb7269dedeb960237e78fb0f/wheel-0.46.2-py3-none-any.whl"
       },
       "inspection": {
         "declaration_validation": "supported-subset-syntax-only-not-resolution",
         "kind": "wheel",
         "metadata_sha256": {
-          "METADATA": "98acfce07ee6ee3b31272cde21c4d53918936f434f315dfd2af3886211a09a30",
-          "WHEEL": "0a950253178741b44de54191407611268acee407fe432fdf1cc72d710f034862"
+          "METADATA": "9ecd205f01afb7684c72fb2367d3e69a640ce06f1d4af4e22a982e09b5ff75fa",
+          "WHEEL": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db"
         },
         "name": "wheel",
         "provides_extra": [
           "test"
         ],
         "requires_dist": [
+          "packaging >= 24.0",
           "pytest >= 6.0.0 ; extra == \"test\"",
-          "setuptools >= 65 ; extra == \"test\""
+          "setuptools >= 77 ; extra == \"test\""
         ],
-        "requires_python": ">=3.8",
+        "requires_python": ">=3.9",
         "tags": [
           "py3-none-any"
         ],
-        "version": "0.45.1"
+        "version": "0.46.2"
       },
       "name": "wheel",
       "provenance": {
-        "baseline_manifest_sha256": "3390cbfaa680b9bb970ce43e8d3e32014230908c46fd9e7b1d4464c7cf7365ee",
-        "kind": "retained-upstream-cache"
+        "artifact_download_receipt": {
+          "elapsed_seconds": 0.051599,
+          "method": "GET",
+          "outcome": "retrieved",
+          "sha256": "33ae60725d69eaa249bc1982e739943c23b34b58d51f1cb6253453773aca6e65",
+          "size": 29971,
+          "status": 200,
+          "timestamp_utc": "2026-10-30T15:59:35.454156+00:00",
+          "url": "https://files.pythonhosted.org/packages/13/2c/5e079cefe955ae58e5a052fe037c850ce493eb7269dedeb960237e78fb0f/wheel-0.46.2-py3-none-any.whl"
+        },
+        "kind": "new-tooling-wheel-official-pinned-version-json",
+        "release_download_receipt": {
+          "elapsed_seconds": 0.159905,
+          "method": "GET",
+          "outcome": "retrieved",
+          "sha256": "de75a6d8388c2bc34f1c79f2002d344c6f466eeaa54aba79e791bb14cbf1c205",
+          "size": 4473,
+          "status": 200,
+          "timestamp_utc": "2026-10-30T15:59:35.180594+00:00",
+          "url": "https://pypi.org/pypi/wheel/0.46.2/json"
+        }
       },
       "release_metadata": {
-        "path": "metadata/wheel-0.45.1.json",
-        "sha256": "617c2b62cc17caeef3fc1e10144bd3d5b8dc2fb93bb67a87f2802c2d0a856c32",
-        "size": 12040,
-        "url": "https://pypi.org/pypi/wheel/0.45.1/json"
+        "path": "metadata/wheel-0.46.2.json",
+        "retrieved_at_utc": "2026-10-30T15:59:35.180594+00:00",
+        "sha256": "de75a6d8388c2bc34f1c79f2002d344c6f466eeaa54aba79e791bb14cbf1c205",
+        "size": 4473,
+        "url": "https://pypi.org/pypi/wheel/0.46.2/json"
       },
       "roles": [
         "tooling"
       ],
-      "version": "0.45.1"
+      "version": "0.46.2"
     },
     {
       "artifact": {
@@ -3400,13 +3440,107 @@
       "version": "1.25.1"
     }
   ],
-  "base_commit": "5a67955b6a79098cb2436338bb4135a0acca6898",
+  "base_commit": "19fda5c6a15ac111a89f5593d3b09e2309dddc35",
   "baseline_manifest_sha256": "3390cbfaa680b9bb970ce43e8d3e32014230908c46fd9e7b1d4464c7cf7365ee",
+  "build_tooling": {
+    "build": "1.3.0",
+    "click": "8.5.0",
+    "packaging": "26.3",
+    "pip": "26.2.2",
+    "pip-tools": "7.6.2",
+    "pyproject-hooks": "1.2.0",
+    "setuptools": "80.9.0",
+    "wheel": "0.45.1"
+  },
+  "cache_references": {
+    "layout": "logical files/metadata union assembled read-only by ROOT;64 previous references+2new; no complete new cache copy",
+    "new_names": [
+      "setuptools",
+      "wheel"
+    ],
+    "retained_manifest_sha256": "833b2d37033c31608a4af235937838d8cc9ab040a94f4284ec2d5beb36279edf",
+    "retained_names": [
+      "aiofiles",
+      "aiohappyeyeballs",
+      "aiohttp",
+      "aiosignal",
+      "aiosmtplib",
+      "annotated-doc",
+      "annotated-types",
+      "anyio",
+      "asyncpg",
+      "attrs",
+      "authlib",
+      "bcrypt",
+      "build",
+      "certifi",
+      "cffi",
+      "charset-normalizer",
+      "click",
+      "cryptography",
+      "dnspython",
+      "email-validator",
+      "et-xmlfile",
+      "fastapi",
+      "frozenlist",
+      "greenlet",
+      "gunicorn",
+      "h11",
+      "http-ece",
+      "httpcore",
+      "httptools",
+      "httpx",
+      "idna",
+      "joserfc",
+      "lxml",
+      "multidict",
+      "openpyxl",
+      "packaging",
+      "passlib",
+      "pip",
+      "pip-tools",
+      "propcache",
+      "py-vapid",
+      "pycparser",
+      "pydantic",
+      "pydantic-core",
+      "pydantic-settings",
+      "pyjwt",
+      "pypdf",
+      "pyproject-hooks",
+      "python-docx",
+      "python-dotenv",
+      "python-multipart",
+      "pywebpush",
+      "pyyaml",
+      "requests",
+      "sqlalchemy",
+      "starlette",
+      "typing-extensions",
+      "typing-inspection",
+      "urllib3",
+      "uvicorn",
+      "uvloop",
+      "watchfiles",
+      "websockets",
+      "yarl"
+    ]
+  },
+  "compiler_tooling": {
+    "build": "1.3.0",
+    "click": "8.5.0",
+    "packaging": "26.3",
+    "pip": "26.2.2",
+    "pip-tools": "7.6.2",
+    "pyproject-hooks": "1.2.0",
+    "setuptools": "84.1.0",
+    "wheel": "0.46.2"
+  },
   "counts": {
     "direct_roots": 22,
-    "new_wheels": 7,
+    "new_wheels": 2,
     "overlap": 2,
-    "reused_wheels": 59,
+    "reused_wheels": 64,
     "root_extras": 3,
     "runtime": 60,
     "tooling": 8,
@@ -6512,9 +6646,9 @@
     },
     "tooling": {
       "counts": {
-        "active": 8,
+        "active": 9,
         "declarations": 79,
-        "inactive": 71
+        "inactive": 70
       },
       "enabled_extras": {},
       "kind": "source-only-active-declaration-check-not-resolution",
@@ -6690,7 +6824,7 @@
             ""
           ],
           "parent": "pip-tools",
-          "selected_version": "80.9.0",
+          "selected_version": "84.1.0",
           "status": "active-pin-satisfied"
         },
         {
@@ -6702,7 +6836,7 @@
             ""
           ],
           "parent": "pip-tools",
-          "selected_version": "0.45.1",
+          "selected_version": "0.46.2",
           "status": "active-pin-satisfied"
         },
         {
@@ -7187,16 +7321,6 @@
         },
         {
           "active_contexts": [],
-          "declaration": "platformdirs>=4.2.2; extra == \"core\"",
-          "evaluated_contexts": [
-            ""
-          ],
-          "parent": "setuptools",
-          "selected_version": null,
-          "status": "inactive-for-requested-extras-and-target"
-        },
-        {
-          "active_contexts": [],
           "declaration": "jaraco.functools>=4; extra == \"core\"",
           "evaluated_contexts": [
             ""
@@ -7217,7 +7341,7 @@
         },
         {
           "active_contexts": [],
-          "declaration": "pytest-checkdocs>=2.4; extra == \"check\"",
+          "declaration": "pytest-checkdocs>=2.14; extra == \"check\"",
           "evaluated_contexts": [
             ""
           ],
@@ -7237,7 +7361,7 @@
         },
         {
           "active_contexts": [],
-          "declaration": "ruff>=0.8.0; sys_platform != \"cygwin\" and extra == \"check\"",
+          "declaration": "ruff>=0.13.0; sys_platform != \"cygwin\" and extra == \"check\"",
           "evaluated_contexts": [
             ""
           ],
@@ -7257,7 +7381,7 @@
         },
         {
           "active_contexts": [],
-          "declaration": "pytest-enabler>=2.2; extra == \"enabler\"",
+          "declaration": "pytest-enabler>=3.4; extra == \"enabler\"",
           "evaluated_contexts": [
             ""
           ],
@@ -7267,7 +7391,7 @@
         },
         {
           "active_contexts": [],
-          "declaration": "pytest-mypy; extra == \"type\"",
+          "declaration": "pytest-mypy>=1.0.1; platform_python_implementation != \"PyPy\" and extra == \"type\"",
           "evaluated_contexts": [
             ""
           ],
@@ -7277,7 +7401,7 @@
         },
         {
           "active_contexts": [],
-          "declaration": "mypy==1.14.*; extra == \"type\"",
+          "declaration": "mypy==1.18.*; extra == \"type\"",
           "evaluated_contexts": [
             ""
           ],
@@ -7306,6 +7430,18 @@
           "status": "inactive-for-requested-extras-and-target"
         },
         {
+          "active_contexts": [
+            ""
+          ],
+          "declaration": "packaging >= 24.0",
+          "evaluated_contexts": [
+            ""
+          ],
+          "parent": "wheel",
+          "selected_version": "26.3",
+          "status": "active-pin-satisfied"
+        },
+        {
           "active_contexts": [],
           "declaration": "pytest >= 6.0.0 ; extra == \"test\"",
           "evaluated_contexts": [
@@ -7317,7 +7453,7 @@
         },
         {
           "active_contexts": [],
-          "declaration": "setuptools >= 65 ; extra == \"test\"",
+          "declaration": "setuptools >= 77 ; extra == \"test\"",
           "evaluated_contexts": [
             ""
           ],
@@ -7328,6 +7464,2575 @@
       ],
       "unresolved": []
     }
+  },
+  "history": {
+    "maintenance_scope": "two prospective compiler-tooling pins only; retained http-ece built with historical toolchain, not current compiler toolchain",
+    "previous_candidate_manifest_sha256": "833b2d37033c31608a4af235937838d8cc9ab040a94f4284ec2d5beb36279edf",
+    "previous_driver_sha256": "be57dfd15801be2440bb08507963c57642c2fd74f608e09f8f8e70fb4c50c645",
+    "previous_network_receipt": {
+      "closed_at_utc": "2026-10-30T15:41:08.520282+00:00",
+      "elapsed_seconds": 1.149349,
+      "events": 8,
+      "events_sha256": "ec796e8807487c1c3511829060f8e239e9c46eb484951167981bd9574cf6c452",
+      "further_fetch_authorized": false,
+      "private_bytes": 40315554,
+      "status": "completed"
+    },
+    "previous_osv": {
+      "matched_packages": 2,
+      "pairs": 5,
+      "query_count": 66,
+      "request_sha256": "8b62a9b22cc443ec8cb89b9e34a03c977b55a3351cceff2aaf0dc1dbb2a073f4",
+      "response_sha256": "7c9a3be47db0e365eb471b56f6b80662cc5704982a7303770896099bcda78c2b",
+      "rows": [
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "aiofiles"
+            },
+            "version": "24.1.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "aiohappyeyeballs"
+            },
+            "version": "2.7.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "aiohttp"
+            },
+            "version": "3.14.5"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "aiosignal"
+            },
+            "version": "1.4.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "aiosmtplib"
+            },
+            "version": "5.1.3"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "annotated-doc"
+            },
+            "version": "0.0.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "annotated-types"
+            },
+            "version": "0.8.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "anyio"
+            },
+            "version": "4.15.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "asyncpg"
+            },
+            "version": "0.30.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "attrs"
+            },
+            "version": "26.1.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "authlib"
+            },
+            "version": "1.9.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "bcrypt"
+            },
+            "version": "4.2.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "build"
+            },
+            "version": "1.3.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "certifi"
+            },
+            "version": "2026.10.23"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "cffi"
+            },
+            "version": "2.1.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "charset-normalizer"
+            },
+            "version": "3.5.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "click"
+            },
+            "version": "8.5.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "cryptography"
+            },
+            "version": "50.0.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "dnspython"
+            },
+            "version": "2.9.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "email-validator"
+            },
+            "version": "2.3.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "et-xmlfile"
+            },
+            "version": "2.0.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "fastapi"
+            },
+            "version": "0.133.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "frozenlist"
+            },
+            "version": "1.8.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "greenlet"
+            },
+            "version": "3.5.6"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "gunicorn"
+            },
+            "version": "23.0.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "h11"
+            },
+            "version": "0.16.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "http-ece"
+            },
+            "version": "1.2.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "httpcore"
+            },
+            "version": "1.0.9"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "httptools"
+            },
+            "version": "0.9.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "httpx"
+            },
+            "version": "0.28.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "idna"
+            },
+            "version": "3.20"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "joserfc"
+            },
+            "version": "1.7.7"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "lxml"
+            },
+            "version": "6.1.3"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "multidict"
+            },
+            "version": "7.2.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "openpyxl"
+            },
+            "version": "3.1.5"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "packaging"
+            },
+            "version": "26.3"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "passlib"
+            },
+            "version": "1.7.4"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pip"
+            },
+            "version": "26.2.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pip-tools"
+            },
+            "version": "7.6.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "propcache"
+            },
+            "version": "0.5.4"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "py-vapid"
+            },
+            "version": "1.9.6"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pycparser"
+            },
+            "version": "3.12"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pydantic"
+            },
+            "version": "2.14.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pydantic-core"
+            },
+            "version": "2.50.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pydantic-settings"
+            },
+            "version": "2.7.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pyjwt"
+            },
+            "version": "2.15.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pypdf"
+            },
+            "version": "6.21.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pyproject-hooks"
+            },
+            "version": "1.2.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "python-docx"
+            },
+            "version": "1.1.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "python-dotenv"
+            },
+            "version": "1.2.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "python-multipart"
+            },
+            "version": "0.0.31"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pywebpush"
+            },
+            "version": "2.5.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "pyyaml"
+            },
+            "version": "6.0.3"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "requests"
+            },
+            "version": "2.34.2"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "setuptools"
+            },
+            "version": "80.9.0"
+          },
+          "result": {
+            "vulns": [
+              {
+                "id": "GHSA-h35f-9h28-mq5c",
+                "modified": "2026-09-10T03:50:52.323347Z"
+              },
+              {
+                "id": "GHSA-xmj3-9gf7-h52w",
+                "modified": "2026-10-23T22:00:03.739009Z"
+              },
+              {
+                "id": "PYSEC-2026-3447",
+                "modified": "2026-07-14T10:56:37.948360Z"
+              }
+            ]
+          },
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "sqlalchemy"
+            },
+            "version": "2.0.36"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "starlette"
+            },
+            "version": "1.3.1"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "typing-extensions"
+            },
+            "version": "4.16.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "typing-inspection"
+            },
+            "version": "0.4.4"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "urllib3"
+            },
+            "version": "2.8.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "uvicorn"
+            },
+            "version": "0.34.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "uvloop"
+            },
+            "version": "0.23.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "watchfiles"
+            },
+            "version": "1.3.0"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "websockets"
+            },
+            "version": "17.3"
+          },
+          "result": {},
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "wheel"
+            },
+            "version": "0.45.1"
+          },
+          "result": {
+            "vulns": [
+              {
+                "id": "GHSA-8rrh-rw8j-w5fx",
+                "modified": "2026-09-10T03:50:32.887502Z"
+              },
+              {
+                "id": "PYSEC-2026-2047",
+                "modified": "2026-07-07T17:47:43.451695Z"
+              }
+            ]
+          },
+          "unresolved": false
+        },
+        {
+          "input": {
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "yarl"
+            },
+            "version": "1.25.1"
+          },
+          "result": {},
+          "unresolved": false
+        }
+      ],
+      "scope": "candidate-runtime-and-tooling-union-not-security-certification",
+      "unresolved": 0
+    },
+    "previous_proposal_sha256": "c5d1fd6107e7e07c6f8bb3a44871b5dd695ecc2207fd91f728db06d56f022cee",
+    "previous_runtime_and_tooling_preparation_commit": "d12065242ed92fdf8d841fd447d8b80ebe8a2d18",
+    "previous_tooling": {
+      "build": "1.3.0",
+      "click": "8.5.0",
+      "packaging": "26.3",
+      "pip": "26.2.2",
+      "pip-tools": "7.6.2",
+      "pyproject-hooks": "1.2.0",
+      "setuptools": "80.9.0",
+      "wheel": "0.45.1"
+    },
+    "tooling_advisory_details_supplied_by_ROOT": [
+      {
+        "affected": [
+          {
+            "database_specific": {
+              "last_known_affected_version_range": "<= 0.46.1",
+              "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/01/GHSA-8rrh-rw8j-w5fx/GHSA-8rrh-rw8j-w5fx.json"
+            },
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "wheel",
+              "purl": "pkg:pypi/wheel"
+            },
+            "ranges": [
+              {
+                "events": [
+                  {
+                    "introduced": "0.40.0"
+                  },
+                  {
+                    "fixed": "0.46.2"
+                  }
+                ],
+                "type": "ECOSYSTEM"
+              }
+            ],
+            "versions": [
+              "0.40.0",
+              "0.41.0",
+              "0.41.1",
+              "0.41.2",
+              "0.41.3",
+              "0.42.0",
+              "0.43.0",
+              "0.44.0",
+              "0.45.0",
+              "0.45.1",
+              "0.46.0",
+              "0.46.1"
+            ]
+          }
+        ],
+        "aliases": [
+          "CVE-2026-24049",
+          "PYSEC-2026-2047"
+        ],
+        "id": "GHSA-8rrh-rw8j-w5fx",
+        "sha256": "9a598bd1237ee0267e23e92cf268f2da782b817349b54946e37b570b9e6f8abf",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-8rrh-rw8j-w5fx",
+        "withdrawn": null
+      },
+      {
+        "affected": [
+          {
+            "database_specific": {
+              "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/07/GHSA-h35f-9h28-mq5c/GHSA-h35f-9h28-mq5c.json"
+            },
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "setuptools",
+              "purl": "pkg:pypi/setuptools"
+            },
+            "ranges": [
+              {
+                "events": [
+                  {
+                    "introduced": "0"
+                  },
+                  {
+                    "fixed": "83.0.0"
+                  }
+                ],
+                "type": "ECOSYSTEM"
+              }
+            ],
+            "versions": [
+              "0.6b1",
+              "0.6b2",
+              "0.6b3",
+              "0.6b4",
+              "0.6c1",
+              "0.6c10",
+              "0.6c11",
+              "0.6c2",
+              "0.6c3",
+              "0.6c4",
+              "0.6c5",
+              "0.6c6",
+              "0.6c7",
+              "0.6c8",
+              "0.6c9",
+              "0.7.2",
+              "0.7.3",
+              "0.7.4",
+              "0.7.5",
+              "0.7.6",
+              "0.7.7",
+              "0.7.8",
+              "0.8",
+              "0.9",
+              "0.9.1",
+              "0.9.2",
+              "0.9.3",
+              "0.9.4",
+              "0.9.5",
+              "0.9.6",
+              "0.9.7",
+              "0.9.8",
+              "1.0",
+              "1.1",
+              "1.1.1",
+              "1.1.2",
+              "1.1.3",
+              "1.1.4",
+              "1.1.5",
+              "1.1.6",
+              "1.1.7",
+              "1.2",
+              "1.3",
+              "1.3.1",
+              "1.3.2",
+              "1.4",
+              "1.4.1",
+              "1.4.2",
+              "10.0",
+              "10.0.1",
+              "10.1",
+              "10.2",
+              "10.2.1",
+              "11.0",
+              "11.1",
+              "11.2",
+              "11.3",
+              "11.3.1",
+              "12.0",
+              "12.0.1",
+              "12.0.2",
+              "12.0.3",
+              "12.0.4",
+              "12.0.5",
+              "12.1",
+              "12.2",
+              "12.3",
+              "12.4",
+              "13.0",
+              "13.0.1",
+              "13.0.2",
+              "14.0",
+              "14.1",
+              "14.1.1",
+              "14.2",
+              "14.3",
+              "14.3.1",
+              "15.0",
+              "15.1",
+              "15.2",
+              "16.0",
+              "17.0",
+              "17.1",
+              "17.1.1",
+              "18.0",
+              "18.0.1",
+              "18.1",
+              "18.2",
+              "18.3",
+              "18.3.1",
+              "18.3.2",
+              "18.4",
+              "18.5",
+              "18.6",
+              "18.6.1",
+              "18.7",
+              "18.7.1",
+              "18.8",
+              "18.8.1",
+              "19.0",
+              "19.1",
+              "19.1.1",
+              "19.2",
+              "19.3",
+              "19.4",
+              "19.4.1",
+              "19.5",
+              "19.6",
+              "19.6.1",
+              "19.6.2",
+              "19.7",
+              "2.0",
+              "2.0.1",
+              "2.0.2",
+              "2.1",
+              "2.1.1",
+              "2.1.2",
+              "2.2",
+              "20.0",
+              "20.1",
+              "20.1.1",
+              "20.10.1",
+              "20.2.2",
+              "20.3",
+              "20.3.1",
+              "20.4",
+              "20.6.6",
+              "20.6.7",
+              "20.6.8",
+              "20.7.0",
+              "20.8.0",
+              "20.8.1",
+              "20.9.0",
+              "21.0.0",
+              "21.1.0",
+              "21.2.0",
+              "21.2.1",
+              "21.2.2",
+              "22.0.0",
+              "22.0.1",
+              "22.0.2",
+              "22.0.4",
+              "22.0.5",
+              "23.0.0",
+              "23.1.0",
+              "23.2.0",
+              "23.2.1",
+              "24.0.0",
+              "24.0.1",
+              "24.0.2",
+              "24.0.3",
+              "24.1.0",
+              "24.1.1",
+              "24.2.0",
+              "24.2.1",
+              "24.3.0",
+              "24.3.1",
+              "25.0.0",
+              "25.0.1",
+              "25.0.2",
+              "25.1.0",
+              "25.1.1",
+              "25.1.2",
+              "25.1.3",
+              "25.1.4",
+              "25.1.5",
+              "25.1.6",
+              "25.2.0",
+              "25.3.0",
+              "25.4.0",
+              "26.0.0",
+              "26.1.0",
+              "26.1.1",
+              "27.0.0",
+              "27.1.0",
+              "27.1.2",
+              "27.2.0",
+              "27.3.0",
+              "27.3.1",
+              "28.0.0",
+              "28.1.0",
+              "28.2.0",
+              "28.3.0",
+              "28.4.0",
+              "28.5.0",
+              "28.6.0",
+              "28.6.1",
+              "28.7.0",
+              "28.7.1",
+              "28.8.0",
+              "28.8.1",
+              "29.0.0",
+              "29.0.1",
+              "3.0",
+              "3.0.1",
+              "3.0.2",
+              "3.1",
+              "3.2",
+              "3.3",
+              "3.4",
+              "3.4.1",
+              "3.4.2",
+              "3.4.3",
+              "3.4.4",
+              "3.5",
+              "3.5.1",
+              "3.5.2",
+              "3.6",
+              "3.7",
+              "3.7.1",
+              "3.8",
+              "3.8.1",
+              "30.0.0",
+              "30.1.0",
+              "30.2.0",
+              "30.2.1",
+              "30.3.0",
+              "30.4.0",
+              "31.0.0",
+              "31.0.1",
+              "32.0.0",
+              "32.1.0",
+              "32.1.1",
+              "32.1.2",
+              "32.1.3",
+              "32.2.0",
+              "32.3.0",
+              "32.3.1",
+              "33.1.0",
+              "33.1.1",
+              "34.0.0",
+              "34.0.1",
+              "34.0.2",
+              "34.0.3",
+              "34.1.0",
+              "34.1.1",
+              "34.2.0",
+              "34.3.0",
+              "34.3.1",
+              "34.3.2",
+              "34.3.3",
+              "34.4.0",
+              "34.4.1",
+              "35.0.0",
+              "35.0.1",
+              "35.0.2",
+              "36.0.1",
+              "36.1.0",
+              "36.1.1",
+              "36.2.0",
+              "36.2.1",
+              "36.2.2",
+              "36.2.3",
+              "36.2.4",
+              "36.2.5",
+              "36.2.6",
+              "36.2.7",
+              "36.3.0",
+              "36.4.0",
+              "36.5.0",
+              "36.6.0",
+              "36.6.1",
+              "36.7.0",
+              "36.7.1",
+              "36.7.2",
+              "36.8.0",
+              "37.0.0",
+              "38.0.0",
+              "38.1.0",
+              "38.2.0",
+              "38.2.1",
+              "38.2.3",
+              "38.2.4",
+              "38.2.5",
+              "38.3.0",
+              "38.4.0",
+              "38.4.1",
+              "38.5.0",
+              "38.5.1",
+              "38.5.2",
+              "38.6.0",
+              "38.6.1",
+              "38.7.0",
+              "39.0.0",
+              "39.0.1",
+              "39.1.0",
+              "39.2.0",
+              "4.0",
+              "4.0.1",
+              "40.0.0",
+              "40.1.0",
+              "40.1.1",
+              "40.2.0",
+              "40.3.0",
+              "40.4.0",
+              "40.4.1",
+              "40.4.2",
+              "40.4.3",
+              "40.5.0",
+              "40.6.0",
+              "40.6.1",
+              "40.6.2",
+              "40.6.3",
+              "40.7.0",
+              "40.7.1",
+              "40.7.2",
+              "40.7.3",
+              "40.8.0",
+              "40.9.0",
+              "41.0.0",
+              "41.0.1",
+              "41.1.0",
+              "41.2.0",
+              "41.3.0",
+              "41.4.0",
+              "41.5.0",
+              "41.5.1",
+              "41.6.0",
+              "42.0.0",
+              "42.0.1",
+              "42.0.2",
+              "43.0.0",
+              "44.0.0",
+              "44.1.0",
+              "44.1.1",
+              "45.0.0",
+              "45.1.0",
+              "45.2.0",
+              "45.3.0",
+              "46.0.0",
+              "46.1.0",
+              "46.1.1",
+              "46.1.2",
+              "46.1.3",
+              "46.2.0",
+              "46.3.0",
+              "46.3.1",
+              "46.4.0",
+              "47.0.0",
+              "47.1.0",
+              "47.1.1",
+              "47.2.0",
+              "47.3.0",
+              "47.3.1",
+              "47.3.2",
+              "48.0.0",
+              "49.0.0",
+              "49.0.1",
+              "49.1.0",
+              "49.1.1",
+              "49.1.2",
+              "49.1.3",
+              "49.2.0",
+              "49.2.1",
+              "49.3.0",
+              "49.3.1",
+              "49.3.2",
+              "49.4.0",
+              "49.5.0",
+              "49.6.0",
+              "5.0",
+              "5.0.1",
+              "5.0.2",
+              "5.1",
+              "5.2",
+              "5.3",
+              "5.4",
+              "5.4.1",
+              "5.4.2",
+              "5.5",
+              "5.5.1",
+              "5.6",
+              "5.7",
+              "5.8",
+              "50.0.0",
+              "50.0.1",
+              "50.0.2",
+              "50.0.3",
+              "50.1.0",
+              "50.2.0",
+              "50.3.0",
+              "50.3.1",
+              "50.3.2",
+              "51.0.0",
+              "51.1.0",
+              "51.1.0.post20201221",
+              "51.1.1",
+              "51.1.2",
+              "51.2.0",
+              "51.3.0",
+              "51.3.1",
+              "51.3.2",
+              "51.3.3",
+              "52.0.0",
+              "53.0.0",
+              "53.1.0",
+              "54.0.0",
+              "54.1.0",
+              "54.1.1",
+              "54.1.2",
+              "54.1.3",
+              "54.2.0",
+              "56.0.0",
+              "56.1.0",
+              "56.2.0",
+              "57.0.0",
+              "57.1.0",
+              "57.2.0",
+              "57.3.0",
+              "57.4.0",
+              "57.5.0",
+              "58.0.0",
+              "58.0.1",
+              "58.0.2",
+              "58.0.3",
+              "58.0.4",
+              "58.1.0",
+              "58.2.0",
+              "58.3.0",
+              "58.4.0",
+              "58.5.0",
+              "58.5.1",
+              "58.5.2",
+              "58.5.3",
+              "59.0.1",
+              "59.1.0",
+              "59.1.1",
+              "59.2.0",
+              "59.3.0",
+              "59.4.0",
+              "59.5.0",
+              "59.6.0",
+              "59.7.0",
+              "59.8.0",
+              "6.0.1",
+              "6.0.2",
+              "6.1",
+              "60.0.0",
+              "60.0.1",
+              "60.0.2",
+              "60.0.3",
+              "60.0.4",
+              "60.0.5",
+              "60.1.0",
+              "60.1.1",
+              "60.10.0",
+              "60.2.0",
+              "60.3.0",
+              "60.3.1",
+              "60.4.0",
+              "60.5.0",
+              "60.6.0",
+              "60.7.0",
+              "60.7.1",
+              "60.8.0",
+              "60.8.1",
+              "60.8.2",
+              "60.9.0",
+              "60.9.1",
+              "60.9.2",
+              "60.9.3",
+              "61.0.0",
+              "61.1.0",
+              "61.1.1",
+              "61.2.0",
+              "61.3.0",
+              "61.3.1",
+              "62.0.0",
+              "62.1.0",
+              "62.2.0",
+              "62.3.0",
+              "62.3.1",
+              "62.3.2",
+              "62.3.3",
+              "62.3.4",
+              "62.4.0",
+              "62.5.0",
+              "62.6.0",
+              "63.0.0",
+              "63.0.0b1",
+              "63.1.0",
+              "63.2.0",
+              "63.3.0",
+              "63.4.0",
+              "63.4.1",
+              "63.4.2",
+              "63.4.3",
+              "64.0.0",
+              "64.0.1",
+              "64.0.2",
+              "64.0.3",
+              "65.0.0",
+              "65.0.1",
+              "65.0.2",
+              "65.1.0",
+              "65.1.1",
+              "65.2.0",
+              "65.3.0",
+              "65.4.0",
+              "65.4.1",
+              "65.5.0",
+              "65.5.1",
+              "65.6.0",
+              "65.6.1",
+              "65.6.2",
+              "65.6.3",
+              "65.7.0",
+              "66.0.0",
+              "66.1.0",
+              "66.1.1",
+              "67.0.0",
+              "67.1.0",
+              "67.2.0",
+              "67.3.1",
+              "67.3.2",
+              "67.3.3",
+              "67.4.0",
+              "67.5.0",
+              "67.5.1",
+              "67.6.0",
+              "67.6.1",
+              "67.7.0",
+              "67.7.1",
+              "67.7.2",
+              "67.8.0",
+              "68.0.0",
+              "68.1.0",
+              "68.1.2",
+              "68.2.0",
+              "68.2.1",
+              "68.2.2",
+              "69.0.0",
+              "69.0.1",
+              "69.0.2",
+              "69.0.3",
+              "69.1.0",
+              "69.1.1",
+              "69.2.0",
+              "69.3.0",
+              "69.3.1",
+              "69.4.0",
+              "69.4.1",
+              "69.4.2",
+              "69.5.0",
+              "69.5.1",
+              "7.0",
+              "70.0.0",
+              "70.1.0",
+              "70.1.1",
+              "70.2.0",
+              "70.3.0",
+              "71.0.0",
+              "71.0.1",
+              "71.0.2",
+              "71.0.3",
+              "71.0.4",
+              "71.1.0",
+              "72.0.0",
+              "72.1.0",
+              "72.2.0",
+              "73.0.0",
+              "73.0.1",
+              "74.0.0",
+              "74.1.0",
+              "74.1.1",
+              "74.1.2",
+              "74.1.3",
+              "75.0.0",
+              "75.1.0",
+              "75.2.0",
+              "75.3.0",
+              "75.3.1",
+              "75.3.2",
+              "75.3.3",
+              "75.3.4",
+              "75.4.0",
+              "75.5.0",
+              "75.6.0",
+              "75.7.0",
+              "75.8.0",
+              "75.8.1",
+              "75.8.2",
+              "75.9.0",
+              "75.9.1",
+              "76.0.0",
+              "76.1.0",
+              "77.0.1",
+              "77.0.3",
+              "78.0.1",
+              "78.0.2",
+              "78.1.0",
+              "78.1.1",
+              "79.0.0",
+              "79.0.1",
+              "8.0",
+              "8.0.1",
+              "8.0.2",
+              "8.0.3",
+              "8.0.4",
+              "8.1",
+              "8.2",
+              "8.2.1",
+              "8.3",
+              "80.0.0",
+              "80.0.1",
+              "80.1.0",
+              "80.10.1",
+              "80.10.2",
+              "80.2.0",
+              "80.3.0",
+              "80.3.1",
+              "80.4.0",
+              "80.6.0",
+              "80.7.0",
+              "80.7.1",
+              "80.8.0",
+              "80.9.0",
+              "81.0.0",
+              "82.0.0",
+              "82.0.1",
+              "9.0",
+              "9.0.1",
+              "9.1"
+            ]
+          }
+        ],
+        "aliases": [
+          "BIT-setuptools-2026-59890",
+          "CVE-2026-59890",
+          "PYSEC-2026-3447"
+        ],
+        "id": "GHSA-h35f-9h28-mq5c",
+        "sha256": "dfc41c8f70520dcc90052b75f2bbb6120f98167dbda905c89aa04d20a1d7ee7a",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-h35f-9h28-mq5c",
+        "withdrawn": null
+      },
+      {
+        "affected": [
+          {
+            "database_specific": {
+              "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/10/GHSA-xmj3-9gf7-h52w/GHSA-xmj3-9gf7-h52w.json"
+            },
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "setuptools",
+              "purl": "pkg:pypi/setuptools"
+            },
+            "ranges": [
+              {
+                "events": [
+                  {
+                    "introduced": "38.2.2"
+                  },
+                  {
+                    "fixed": "84.1.0"
+                  }
+                ],
+                "type": "ECOSYSTEM"
+              }
+            ],
+            "versions": [
+              "38.2.3",
+              "38.2.4",
+              "38.2.5",
+              "38.3.0",
+              "38.4.0",
+              "38.4.1",
+              "38.5.0",
+              "38.5.1",
+              "38.5.2",
+              "38.6.0",
+              "38.6.1",
+              "38.7.0",
+              "39.0.0",
+              "39.0.1",
+              "39.1.0",
+              "39.2.0",
+              "40.0.0",
+              "40.1.0",
+              "40.1.1",
+              "40.2.0",
+              "40.3.0",
+              "40.4.0",
+              "40.4.1",
+              "40.4.2",
+              "40.4.3",
+              "40.5.0",
+              "40.6.0",
+              "40.6.1",
+              "40.6.2",
+              "40.6.3",
+              "40.7.0",
+              "40.7.1",
+              "40.7.2",
+              "40.7.3",
+              "40.8.0",
+              "40.9.0",
+              "41.0.0",
+              "41.0.1",
+              "41.1.0",
+              "41.2.0",
+              "41.3.0",
+              "41.4.0",
+              "41.5.0",
+              "41.5.1",
+              "41.6.0",
+              "42.0.0",
+              "42.0.1",
+              "42.0.2",
+              "43.0.0",
+              "44.0.0",
+              "44.1.0",
+              "44.1.1",
+              "45.0.0",
+              "45.1.0",
+              "45.2.0",
+              "45.3.0",
+              "46.0.0",
+              "46.1.0",
+              "46.1.1",
+              "46.1.2",
+              "46.1.3",
+              "46.2.0",
+              "46.3.0",
+              "46.3.1",
+              "46.4.0",
+              "47.0.0",
+              "47.1.0",
+              "47.1.1",
+              "47.2.0",
+              "47.3.0",
+              "47.3.1",
+              "47.3.2",
+              "48.0.0",
+              "49.0.0",
+              "49.0.1",
+              "49.1.0",
+              "49.1.1",
+              "49.1.2",
+              "49.1.3",
+              "49.2.0",
+              "49.2.1",
+              "49.3.0",
+              "49.3.1",
+              "49.3.2",
+              "49.4.0",
+              "49.5.0",
+              "49.6.0",
+              "50.0.0",
+              "50.0.1",
+              "50.0.2",
+              "50.0.3",
+              "50.1.0",
+              "50.2.0",
+              "50.3.0",
+              "50.3.1",
+              "50.3.2",
+              "51.0.0",
+              "51.1.0",
+              "51.1.0.post20201221",
+              "51.1.1",
+              "51.1.2",
+              "51.2.0",
+              "51.3.0",
+              "51.3.1",
+              "51.3.2",
+              "51.3.3",
+              "52.0.0",
+              "53.0.0",
+              "53.1.0",
+              "54.0.0",
+              "54.1.0",
+              "54.1.1",
+              "54.1.2",
+              "54.1.3",
+              "54.2.0",
+              "56.0.0",
+              "56.1.0",
+              "56.2.0",
+              "57.0.0",
+              "57.1.0",
+              "57.2.0",
+              "57.3.0",
+              "57.4.0",
+              "57.5.0",
+              "58.0.0",
+              "58.0.1",
+              "58.0.2",
+              "58.0.3",
+              "58.0.4",
+              "58.1.0",
+              "58.2.0",
+              "58.3.0",
+              "58.4.0",
+              "58.5.0",
+              "58.5.1",
+              "58.5.2",
+              "58.5.3",
+              "59.0.1",
+              "59.1.0",
+              "59.1.1",
+              "59.2.0",
+              "59.3.0",
+              "59.4.0",
+              "59.5.0",
+              "59.6.0",
+              "59.7.0",
+              "59.8.0",
+              "60.0.0",
+              "60.0.1",
+              "60.0.2",
+              "60.0.3",
+              "60.0.4",
+              "60.0.5",
+              "60.1.0",
+              "60.1.1",
+              "60.10.0",
+              "60.2.0",
+              "60.3.0",
+              "60.3.1",
+              "60.4.0",
+              "60.5.0",
+              "60.6.0",
+              "60.7.0",
+              "60.7.1",
+              "60.8.0",
+              "60.8.1",
+              "60.8.2",
+              "60.9.0",
+              "60.9.1",
+              "60.9.2",
+              "60.9.3",
+              "61.0.0",
+              "61.1.0",
+              "61.1.1",
+              "61.2.0",
+              "61.3.0",
+              "61.3.1",
+              "62.0.0",
+              "62.1.0",
+              "62.2.0",
+              "62.3.0",
+              "62.3.1",
+              "62.3.2",
+              "62.3.3",
+              "62.3.4",
+              "62.4.0",
+              "62.5.0",
+              "62.6.0",
+              "63.0.0",
+              "63.0.0b1",
+              "63.1.0",
+              "63.2.0",
+              "63.3.0",
+              "63.4.0",
+              "63.4.1",
+              "63.4.2",
+              "63.4.3",
+              "64.0.0",
+              "64.0.1",
+              "64.0.2",
+              "64.0.3",
+              "65.0.0",
+              "65.0.1",
+              "65.0.2",
+              "65.1.0",
+              "65.1.1",
+              "65.2.0",
+              "65.3.0",
+              "65.4.0",
+              "65.4.1",
+              "65.5.0",
+              "65.5.1",
+              "65.6.0",
+              "65.6.1",
+              "65.6.2",
+              "65.6.3",
+              "65.7.0",
+              "66.0.0",
+              "66.1.0",
+              "66.1.1",
+              "67.0.0",
+              "67.1.0",
+              "67.2.0",
+              "67.3.1",
+              "67.3.2",
+              "67.3.3",
+              "67.4.0",
+              "67.5.0",
+              "67.5.1",
+              "67.6.0",
+              "67.6.1",
+              "67.7.0",
+              "67.7.1",
+              "67.7.2",
+              "67.8.0",
+              "68.0.0",
+              "68.1.0",
+              "68.1.2",
+              "68.2.0",
+              "68.2.1",
+              "68.2.2",
+              "69.0.0",
+              "69.0.1",
+              "69.0.2",
+              "69.0.3",
+              "69.1.0",
+              "69.1.1",
+              "69.2.0",
+              "69.3.0",
+              "69.3.1",
+              "69.4.0",
+              "69.4.1",
+              "69.4.2",
+              "69.5.0",
+              "69.5.1",
+              "70.0.0",
+              "70.1.0",
+              "70.1.1",
+              "70.2.0",
+              "70.3.0",
+              "71.0.0",
+              "71.0.1",
+              "71.0.2",
+              "71.0.3",
+              "71.0.4",
+              "71.1.0",
+              "72.0.0",
+              "72.1.0",
+              "72.2.0",
+              "73.0.0",
+              "73.0.1",
+              "74.0.0",
+              "74.1.0",
+              "74.1.1",
+              "74.1.2",
+              "74.1.3",
+              "75.0.0",
+              "75.1.0",
+              "75.2.0",
+              "75.3.0",
+              "75.3.1",
+              "75.3.2",
+              "75.3.3",
+              "75.3.4",
+              "75.4.0",
+              "75.5.0",
+              "75.6.0",
+              "75.7.0",
+              "75.8.0",
+              "75.8.1",
+              "75.8.2",
+              "75.9.0",
+              "75.9.1",
+              "76.0.0",
+              "76.1.0",
+              "77.0.1",
+              "77.0.3",
+              "78.0.1",
+              "78.0.2",
+              "78.1.0",
+              "78.1.1",
+              "79.0.0",
+              "79.0.1",
+              "80.0.0",
+              "80.0.1",
+              "80.1.0",
+              "80.10.1",
+              "80.10.2",
+              "80.2.0",
+              "80.3.0",
+              "80.3.1",
+              "80.4.0",
+              "80.6.0",
+              "80.7.0",
+              "80.7.1",
+              "80.8.0",
+              "80.9.0",
+              "81.0.0",
+              "82.0.0",
+              "82.0.1",
+              "83.0.0",
+              "84.0.0"
+            ]
+          }
+        ],
+        "aliases": [],
+        "id": "GHSA-xmj3-9gf7-h52w",
+        "sha256": "c2ed95c070c38f6cf82556efa02bd251820b48eff4d271869853b88e2c2e4720",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-xmj3-9gf7-h52w",
+        "withdrawn": null
+      },
+      {
+        "affected": [
+          {
+            "database_specific": {
+              "source": "https://github.com/pypa/advisory-database/blob/main/vulns/wheel/PYSEC-2026-2047.yaml"
+            },
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "wheel",
+              "purl": "pkg:pypi/wheel"
+            },
+            "ranges": [
+              {
+                "events": [
+                  {
+                    "introduced": "0.40.0"
+                  },
+                  {
+                    "fixed": "0.46.2"
+                  }
+                ],
+                "type": "ECOSYSTEM"
+              }
+            ],
+            "versions": [
+              "0.40.0",
+              "0.41.0",
+              "0.41.1",
+              "0.41.2",
+              "0.41.3",
+              "0.42.0",
+              "0.43.0",
+              "0.44.0",
+              "0.45.0",
+              "0.45.1",
+              "0.46.0",
+              "0.46.1"
+            ]
+          }
+        ],
+        "aliases": [
+          "CVE-2026-24049",
+          "GHSA-8rrh-rw8j-w5fx"
+        ],
+        "id": "PYSEC-2026-2047",
+        "sha256": "7d88b0b018171d04e6e45a2eaa6cab405b7db01491ebe2b063bc5b8537da6ec1",
+        "url": "https://api.osv.dev/v1/vulns/PYSEC-2026-2047",
+        "withdrawn": null
+      },
+      {
+        "affected": [
+          {
+            "database_specific": {
+              "source": "https://github.com/pypa/advisory-database/blob/main/vulns/setuptools/PYSEC-2026-3447.yaml"
+            },
+            "ecosystem_specific": {},
+            "package": {
+              "ecosystem": "PyPI",
+              "name": "setuptools",
+              "purl": "pkg:pypi/setuptools"
+            },
+            "ranges": [
+              {
+                "events": [
+                  {
+                    "introduced": "0"
+                  },
+                  {
+                    "fixed": "83.0.0"
+                  }
+                ],
+                "type": "ECOSYSTEM"
+              }
+            ],
+            "versions": [
+              "0.6b1",
+              "0.6b2",
+              "0.6b3",
+              "0.6b4",
+              "0.6c1",
+              "0.6c10",
+              "0.6c11",
+              "0.6c2",
+              "0.6c3",
+              "0.6c4",
+              "0.6c5",
+              "0.6c6",
+              "0.6c7",
+              "0.6c8",
+              "0.6c9",
+              "0.7.2",
+              "0.7.3",
+              "0.7.4",
+              "0.7.5",
+              "0.7.6",
+              "0.7.7",
+              "0.7.8",
+              "0.8",
+              "0.9",
+              "0.9.1",
+              "0.9.2",
+              "0.9.3",
+              "0.9.4",
+              "0.9.5",
+              "0.9.6",
+              "0.9.7",
+              "0.9.8",
+              "1.0",
+              "1.1",
+              "1.1.1",
+              "1.1.2",
+              "1.1.3",
+              "1.1.4",
+              "1.1.5",
+              "1.1.6",
+              "1.1.7",
+              "1.2",
+              "1.3",
+              "1.3.1",
+              "1.3.2",
+              "1.4",
+              "1.4.1",
+              "1.4.2",
+              "10.0",
+              "10.0.1",
+              "10.1",
+              "10.2",
+              "10.2.1",
+              "11.0",
+              "11.1",
+              "11.2",
+              "11.3",
+              "11.3.1",
+              "12.0",
+              "12.0.1",
+              "12.0.2",
+              "12.0.3",
+              "12.0.4",
+              "12.0.5",
+              "12.1",
+              "12.2",
+              "12.3",
+              "12.4",
+              "13.0",
+              "13.0.1",
+              "13.0.2",
+              "14.0",
+              "14.1",
+              "14.1.1",
+              "14.2",
+              "14.3",
+              "14.3.1",
+              "15.0",
+              "15.1",
+              "15.2",
+              "16.0",
+              "17.0",
+              "17.1",
+              "17.1.1",
+              "18.0",
+              "18.0.1",
+              "18.1",
+              "18.2",
+              "18.3",
+              "18.3.1",
+              "18.3.2",
+              "18.4",
+              "18.5",
+              "18.6",
+              "18.6.1",
+              "18.7",
+              "18.7.1",
+              "18.8",
+              "18.8.1",
+              "19.0",
+              "19.1",
+              "19.1.1",
+              "19.2",
+              "19.3",
+              "19.4",
+              "19.4.1",
+              "19.5",
+              "19.6",
+              "19.6.1",
+              "19.6.2",
+              "19.7",
+              "2.0",
+              "2.0.1",
+              "2.0.2",
+              "2.1",
+              "2.1.1",
+              "2.1.2",
+              "2.2",
+              "20.0",
+              "20.1",
+              "20.1.1",
+              "20.10.1",
+              "20.2.2",
+              "20.3",
+              "20.3.1",
+              "20.4",
+              "20.6.6",
+              "20.6.7",
+              "20.6.8",
+              "20.7.0",
+              "20.8.0",
+              "20.8.1",
+              "20.9.0",
+              "21.0.0",
+              "21.1.0",
+              "21.2.0",
+              "21.2.1",
+              "21.2.2",
+              "22.0.0",
+              "22.0.1",
+              "22.0.2",
+              "22.0.4",
+              "22.0.5",
+              "23.0.0",
+              "23.1.0",
+              "23.2.0",
+              "23.2.1",
+              "24.0.0",
+              "24.0.1",
+              "24.0.2",
+              "24.0.3",
+              "24.1.0",
+              "24.1.1",
+              "24.2.0",
+              "24.2.1",
+              "24.3.0",
+              "24.3.1",
+              "25.0.0",
+              "25.0.1",
+              "25.0.2",
+              "25.1.0",
+              "25.1.1",
+              "25.1.2",
+              "25.1.3",
+              "25.1.4",
+              "25.1.5",
+              "25.1.6",
+              "25.2.0",
+              "25.3.0",
+              "25.4.0",
+              "26.0.0",
+              "26.1.0",
+              "26.1.1",
+              "27.0.0",
+              "27.1.0",
+              "27.1.2",
+              "27.2.0",
+              "27.3.0",
+              "27.3.1",
+              "28.0.0",
+              "28.1.0",
+              "28.2.0",
+              "28.3.0",
+              "28.4.0",
+              "28.5.0",
+              "28.6.0",
+              "28.6.1",
+              "28.7.0",
+              "28.7.1",
+              "28.8.0",
+              "28.8.1",
+              "29.0.0",
+              "29.0.1",
+              "3.0",
+              "3.0.1",
+              "3.0.2",
+              "3.1",
+              "3.2",
+              "3.3",
+              "3.4",
+              "3.4.1",
+              "3.4.2",
+              "3.4.3",
+              "3.4.4",
+              "3.5",
+              "3.5.1",
+              "3.5.2",
+              "3.6",
+              "3.7",
+              "3.7.1",
+              "3.8",
+              "3.8.1",
+              "30.0.0",
+              "30.1.0",
+              "30.2.0",
+              "30.2.1",
+              "30.3.0",
+              "30.4.0",
+              "31.0.0",
+              "31.0.1",
+              "32.0.0",
+              "32.1.0",
+              "32.1.1",
+              "32.1.2",
+              "32.1.3",
+              "32.2.0",
+              "32.3.0",
+              "32.3.1",
+              "33.1.0",
+              "33.1.1",
+              "34.0.0",
+              "34.0.1",
+              "34.0.2",
+              "34.0.3",
+              "34.1.0",
+              "34.1.1",
+              "34.2.0",
+              "34.3.0",
+              "34.3.1",
+              "34.3.2",
+              "34.3.3",
+              "34.4.0",
+              "34.4.1",
+              "35.0.0",
+              "35.0.1",
+              "35.0.2",
+              "36.0.1",
+              "36.1.0",
+              "36.1.1",
+              "36.2.0",
+              "36.2.1",
+              "36.2.2",
+              "36.2.3",
+              "36.2.4",
+              "36.2.5",
+              "36.2.6",
+              "36.2.7",
+              "36.3.0",
+              "36.4.0",
+              "36.5.0",
+              "36.6.0",
+              "36.6.1",
+              "36.7.0",
+              "36.7.1",
+              "36.7.2",
+              "36.8.0",
+              "37.0.0",
+              "38.0.0",
+              "38.1.0",
+              "38.2.0",
+              "38.2.1",
+              "38.2.3",
+              "38.2.4",
+              "38.2.5",
+              "38.3.0",
+              "38.4.0",
+              "38.4.1",
+              "38.5.0",
+              "38.5.1",
+              "38.5.2",
+              "38.6.0",
+              "38.6.1",
+              "38.7.0",
+              "39.0.0",
+              "39.0.1",
+              "39.1.0",
+              "39.2.0",
+              "4.0",
+              "4.0.1",
+              "40.0.0",
+              "40.1.0",
+              "40.1.1",
+              "40.2.0",
+              "40.3.0",
+              "40.4.0",
+              "40.4.1",
+              "40.4.2",
+              "40.4.3",
+              "40.5.0",
+              "40.6.0",
+              "40.6.1",
+              "40.6.2",
+              "40.6.3",
+              "40.7.0",
+              "40.7.1",
+              "40.7.2",
+              "40.7.3",
+              "40.8.0",
+              "40.9.0",
+              "41.0.0",
+              "41.0.1",
+              "41.1.0",
+              "41.2.0",
+              "41.3.0",
+              "41.4.0",
+              "41.5.0",
+              "41.5.1",
+              "41.6.0",
+              "42.0.0",
+              "42.0.1",
+              "42.0.2",
+              "43.0.0",
+              "44.0.0",
+              "44.1.0",
+              "44.1.1",
+              "45.0.0",
+              "45.1.0",
+              "45.2.0",
+              "45.3.0",
+              "46.0.0",
+              "46.1.0",
+              "46.1.1",
+              "46.1.2",
+              "46.1.3",
+              "46.2.0",
+              "46.3.0",
+              "46.3.1",
+              "46.4.0",
+              "47.0.0",
+              "47.1.0",
+              "47.1.1",
+              "47.2.0",
+              "47.3.0",
+              "47.3.1",
+              "47.3.2",
+              "48.0.0",
+              "49.0.0",
+              "49.0.1",
+              "49.1.0",
+              "49.1.1",
+              "49.1.2",
+              "49.1.3",
+              "49.2.0",
+              "49.2.1",
+              "49.3.0",
+              "49.3.1",
+              "49.3.2",
+              "49.4.0",
+              "49.5.0",
+              "49.6.0",
+              "5.0",
+              "5.0.1",
+              "5.0.2",
+              "5.1",
+              "5.2",
+              "5.3",
+              "5.4",
+              "5.4.1",
+              "5.4.2",
+              "5.5",
+              "5.5.1",
+              "5.6",
+              "5.7",
+              "5.8",
+              "50.0.0",
+              "50.0.1",
+              "50.0.2",
+              "50.0.3",
+              "50.1.0",
+              "50.2.0",
+              "50.3.0",
+              "50.3.1",
+              "50.3.2",
+              "51.0.0",
+              "51.1.0",
+              "51.1.0.post20201221",
+              "51.1.1",
+              "51.1.2",
+              "51.2.0",
+              "51.3.0",
+              "51.3.1",
+              "51.3.2",
+              "51.3.3",
+              "52.0.0",
+              "53.0.0",
+              "53.1.0",
+              "54.0.0",
+              "54.1.0",
+              "54.1.1",
+              "54.1.2",
+              "54.1.3",
+              "54.2.0",
+              "56.0.0",
+              "56.1.0",
+              "56.2.0",
+              "57.0.0",
+              "57.1.0",
+              "57.2.0",
+              "57.3.0",
+              "57.4.0",
+              "57.5.0",
+              "58.0.0",
+              "58.0.1",
+              "58.0.2",
+              "58.0.3",
+              "58.0.4",
+              "58.1.0",
+              "58.2.0",
+              "58.3.0",
+              "58.4.0",
+              "58.5.0",
+              "58.5.1",
+              "58.5.2",
+              "58.5.3",
+              "59.0.1",
+              "59.1.0",
+              "59.1.1",
+              "59.2.0",
+              "59.3.0",
+              "59.4.0",
+              "59.5.0",
+              "59.6.0",
+              "59.7.0",
+              "59.8.0",
+              "6.0.1",
+              "6.0.2",
+              "6.1",
+              "60.0.0",
+              "60.0.1",
+              "60.0.2",
+              "60.0.3",
+              "60.0.4",
+              "60.0.5",
+              "60.1.0",
+              "60.1.1",
+              "60.10.0",
+              "60.2.0",
+              "60.3.0",
+              "60.3.1",
+              "60.4.0",
+              "60.5.0",
+              "60.6.0",
+              "60.7.0",
+              "60.7.1",
+              "60.8.0",
+              "60.8.1",
+              "60.8.2",
+              "60.9.0",
+              "60.9.1",
+              "60.9.2",
+              "60.9.3",
+              "61.0.0",
+              "61.1.0",
+              "61.1.1",
+              "61.2.0",
+              "61.3.0",
+              "61.3.1",
+              "62.0.0",
+              "62.1.0",
+              "62.2.0",
+              "62.3.0",
+              "62.3.1",
+              "62.3.2",
+              "62.3.3",
+              "62.3.4",
+              "62.4.0",
+              "62.5.0",
+              "62.6.0",
+              "63.0.0",
+              "63.0.0b1",
+              "63.1.0",
+              "63.2.0",
+              "63.3.0",
+              "63.4.0",
+              "63.4.1",
+              "63.4.2",
+              "63.4.3",
+              "64.0.0",
+              "64.0.1",
+              "64.0.2",
+              "64.0.3",
+              "65.0.0",
+              "65.0.1",
+              "65.0.2",
+              "65.1.0",
+              "65.1.1",
+              "65.2.0",
+              "65.3.0",
+              "65.4.0",
+              "65.4.1",
+              "65.5.0",
+              "65.5.1",
+              "65.6.0",
+              "65.6.1",
+              "65.6.2",
+              "65.6.3",
+              "65.7.0",
+              "66.0.0",
+              "66.1.0",
+              "66.1.1",
+              "67.0.0",
+              "67.1.0",
+              "67.2.0",
+              "67.3.1",
+              "67.3.2",
+              "67.3.3",
+              "67.4.0",
+              "67.5.0",
+              "67.5.1",
+              "67.6.0",
+              "67.6.1",
+              "67.7.0",
+              "67.7.1",
+              "67.7.2",
+              "67.8.0",
+              "68.0.0",
+              "68.1.0",
+              "68.1.2",
+              "68.2.0",
+              "68.2.1",
+              "68.2.2",
+              "69.0.0",
+              "69.0.1",
+              "69.0.2",
+              "69.0.3",
+              "69.1.0",
+              "69.1.1",
+              "69.2.0",
+              "69.3.0",
+              "69.3.1",
+              "69.4.0",
+              "69.4.1",
+              "69.4.2",
+              "69.5.0",
+              "69.5.1",
+              "7.0",
+              "70.0.0",
+              "70.1.0",
+              "70.1.1",
+              "70.2.0",
+              "70.3.0",
+              "71.0.0",
+              "71.0.1",
+              "71.0.2",
+              "71.0.3",
+              "71.0.4",
+              "71.1.0",
+              "72.0.0",
+              "72.1.0",
+              "72.2.0",
+              "73.0.0",
+              "73.0.1",
+              "74.0.0",
+              "74.1.0",
+              "74.1.1",
+              "74.1.2",
+              "74.1.3",
+              "75.0.0",
+              "75.1.0",
+              "75.2.0",
+              "75.3.0",
+              "75.3.1",
+              "75.3.2",
+              "75.3.3",
+              "75.3.4",
+              "75.4.0",
+              "75.5.0",
+              "75.6.0",
+              "75.7.0",
+              "75.8.0",
+              "75.8.1",
+              "75.8.2",
+              "75.9.0",
+              "75.9.1",
+              "76.0.0",
+              "76.1.0",
+              "77.0.1",
+              "77.0.3",
+              "78.0.1",
+              "78.0.2",
+              "78.1.0",
+              "78.1.1",
+              "79.0.0",
+              "79.0.1",
+              "8.0",
+              "8.0.1",
+              "8.0.2",
+              "8.0.3",
+              "8.0.4",
+              "8.1",
+              "8.2",
+              "8.2.1",
+              "8.3",
+              "80.0.0",
+              "80.0.1",
+              "80.1.0",
+              "80.10.1",
+              "80.10.2",
+              "80.2.0",
+              "80.3.0",
+              "80.3.1",
+              "80.4.0",
+              "80.6.0",
+              "80.7.0",
+              "80.7.1",
+              "80.8.0",
+              "80.9.0",
+              "81.0.0",
+              "82.0.0",
+              "82.0.1",
+              "9.0",
+              "9.0.1",
+              "9.1"
+            ]
+          }
+        ],
+        "aliases": [
+          "BIT-setuptools-2026-59890",
+          "CVE-2026-59890",
+          "GHSA-h35f-9h28-mq5c"
+        ],
+        "id": "PYSEC-2026-3447",
+        "sha256": "e1c11dec8038932a21d576c16fe50d09e3a87540c114f6d280576a7027d3e055",
+        "url": "https://api.osv.dev/v1/vulns/PYSEC-2026-3447",
+        "withdrawn": null
+      }
+    ]
   },
   "inputs": {
     "requirements-upgrade-20261030.in": {
@@ -7341,12 +10046,12 @@
   },
   "kind": "upgrade-artifact-preparation-not-lock-or-resolver-acceptance",
   "network_receipt": {
-    "closed_at_utc": "2026-10-30T15:41:08.520282+00:00",
-    "elapsed_seconds": 1.149349,
-    "events": 8,
-    "events_sha256": "ec796e8807487c1c3511829060f8e239e9c46eb484951167981bd9574cf6c452",
+    "closed_at_utc": "2026-10-30T15:59:36.232513+00:00",
+    "elapsed_seconds": 1.145642,
+    "events": 5,
+    "events_sha256": "c01c82623c33ead7607e53105965a138d63eb06d153747e2ab60496cd4dec02e",
     "further_fetch_authorized": false,
-    "private_bytes": 40315554,
+    "private_bytes_at_close": 1226862,
     "status": "completed"
   },
   "not_run": [
@@ -7364,11 +10069,11 @@
     "activation"
   ],
   "osv": {
-    "matched_packages": 2,
-    "pairs": 5,
+    "matched_packages": 0,
+    "pairs": 0,
     "query_count": 66,
-    "request_sha256": "8b62a9b22cc443ec8cb89b9e34a03c977b55a3351cceff2aaf0dc1dbb2a073f4",
-    "response_sha256": "7c9a3be47db0e365eb471b56f6b80662cc5704982a7303770896099bcda78c2b",
+    "request_sha256": "1270aacb0b7c378d08b5ca00db3591941c653997027176c27156d6f89a94cdb0",
+    "response_sha256": "b6d1a26e330ddb48c74cda4970bd8416b1877a7d8ca06bc5a1125ec4faa2e152",
     "rows": [
       {
         "input": {
@@ -7970,24 +10675,9 @@
             "ecosystem": "PyPI",
             "name": "setuptools"
           },
-          "version": "80.9.0"
+          "version": "84.1.0"
         },
-        "result": {
-          "vulns": [
-            {
-              "id": "GHSA-h35f-9h28-mq5c",
-              "modified": "2026-09-10T03:50:52.323347Z"
-            },
-            {
-              "id": "GHSA-xmj3-9gf7-h52w",
-              "modified": "2026-10-23T22:00:03.739009Z"
-            },
-            {
-              "id": "PYSEC-2026-3447",
-              "modified": "2026-07-14T10:56:37.948360Z"
-            }
-          ]
-        },
+        "result": {},
         "unresolved": false
       },
       {
@@ -8095,20 +10785,9 @@
             "ecosystem": "PyPI",
             "name": "wheel"
           },
-          "version": "0.45.1"
+          "version": "0.46.2"
         },
-        "result": {
-          "vulns": [
-            {
-              "id": "GHSA-8rrh-rw8j-w5fx",
-              "modified": "2026-09-10T03:50:32.887502Z"
-            },
-            {
-              "id": "PYSEC-2026-2047",
-              "modified": "2026-07-07T17:47:43.451695Z"
-            }
-          ]
-        },
+        "result": {},
         "unresolved": false
       },
       {
@@ -8123,7 +10802,7 @@
         "unresolved": false
       }
     ],
-    "scope": "candidate-runtime-and-tooling-union-not-security-certification",
+    "scope": "runtime60-current-compiler-tooling8-union66-not-security-certification",
     "unresolved": 0
   },
   "schema": 1,
@@ -8138,6 +10817,77 @@
     "implementation": "cpython",
     "platform": "linux/amd64",
     "python": "3.13.18"
+  },
+  "tooling_plan": {
+    "activation": "separate-clean-target-tooling-environment-required",
+    "active_metadata_edges": [
+      {
+        "from": "build",
+        "requirement": "packaging >= 19.1",
+        "to": "packaging"
+      },
+      {
+        "from": "build",
+        "requirement": "pyproject_hooks",
+        "to": "pyproject-hooks"
+      },
+      {
+        "from": "pip-tools",
+        "requirement": "build>=1.0.0",
+        "to": "build"
+      },
+      {
+        "from": "pip-tools",
+        "requirement": "click>=8",
+        "to": "click"
+      },
+      {
+        "from": "pip-tools",
+        "requirement": "pip>=22.2",
+        "to": "pip"
+      },
+      {
+        "from": "pip-tools",
+        "requirement": "pyproject_hooks",
+        "to": "pyproject-hooks"
+      },
+      {
+        "from": "pip-tools",
+        "requirement": "setuptools",
+        "to": "setuptools"
+      },
+      {
+        "from": "pip-tools",
+        "requirement": "wheel",
+        "to": "wheel"
+      },
+      {
+        "from": "wheel",
+        "requirement": "packaging >= 24.0",
+        "to": "packaging"
+      }
+    ],
+    "pins": {
+      "build": "1.3.0",
+      "click": "8.5.0",
+      "packaging": "26.3",
+      "pip": "26.2.2",
+      "pip-tools": "7.6.2",
+      "pyproject-hooks": "1.2.0",
+      "setuptools": "84.1.0",
+      "wheel": "0.46.2"
+    },
+    "status": "numeric-declarations-only-no-resolver-or-runtime-compatibility-pass"
+  },
+  "tooling_startup_hooks": {
+    "setuptools": [
+      {
+        "name": "distutils-precedence.pth",
+        "sha256": "2638ce9e2500e572a5e0de7faed6661eb569d1b696fcba07b0dd223da5f5d224",
+        "size": 151
+      }
+    ],
+    "wheel": []
   },
   "verifier_sha256": "b306a05fc1a6222cd53ae2f4c3ed6ddf89752ee8be5adc847cf08a214d3cc091"
 }
