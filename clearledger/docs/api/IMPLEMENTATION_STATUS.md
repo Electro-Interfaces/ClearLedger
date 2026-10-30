@@ -390,3 +390,20 @@ hashed runtime/bootstrap/tooling locks, сохранённые wheels и про�
 contract; установки и resolver в этой задаче не запускались. Следующая отдельная
 задача готовит входные файлы и проверку артефактов, сохраняя текущий Dockerfile
 и requirements. [План](BACKEND_DEPENDENCY_REPRODUCIBILITY_20261030.md).
+
+M12/M17: SSE аудитора использует существующий context guard после fetch/body/read
+и между callbacks. Старый поток больше не меняет новый разговор; свой reader
+отменяется и освобождается. Явный company header, отдельный same-origin протокол,
+парсер и обычные ошибки сохранены. Панель перемонтирует разговор при смене
+организации и подавляет поздние upload/dictation эффекты; прежние company/user
+границы не менялись. Весь остальной сервис, включая exportWork, сохранил37AST
+statements побайтово.
+
+Source c0af0ad4→integration5a796007; root проверил47source/artifact hashes,
+независимо прошли66SSE leaf cases и5actual React/Chromium сценариев (3,004/16,016с
+внешних процессов), без FAIL/SKIP. Авторский774service набор, app/nodeTypeScript
+и предметный lint сверены по замороженным artifacts без повторного запуска.
+Baseline сервиса14PASS/41FAIL, caller2PASS/3FAIL; прежние ошибки оснастки и timeout
+typecheck сохранены отдельно. UI proof использует настоящие React providers и
+синтетические HTTP/media; server jobs, полный App/production ACL и универсальный
+same-token reset UI не проверялись. [Отчёт](AUDITOR_SSE_CONTEXT_20261030.md).
