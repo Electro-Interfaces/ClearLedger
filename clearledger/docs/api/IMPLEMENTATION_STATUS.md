@@ -2,7 +2,8 @@
 
 Состав исходников на 30.10.2026: ветка
 `MagLook/api-modernization-integration-20261029`, runtime пакеты: WS `e6659c6e`, mapping `45a03b51`, Contract refresh `efd06570`;
-Core export consumers `bc24daca`;
+Core export consumers `bc24daca`, corporate CP `ffab2a10`,
+company-wide occupancy `461c9ed4`, typed history `1f0cf49a`, route triage `18fd90cf`;
 инвентаризация Core на `7896039f`.
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
@@ -30,7 +31,7 @@ browser execution projection Code+PKCE. Шесть предметных груп
 openapi-typescript из настоящего curated exporter, без `.env`, сети и HTTP app.
 
 Общие механизмы: document policy, file writer с rollback cleanup, counterparty
-matcher и три импортные команды, ServiceLocation commands, отдельная closing
+matcher и общие команды четырёх импортных путей, ServiceLocation commands, отдельная closing
 materialization и чистый основной GET, batch live resource loader, attempt HMAC
 Events, schema namespace guard. Новые контрагенты без ИНН используют NULL при
 неизменном raw. Импорт 1С обновляет stale manual markers под существующей
@@ -71,6 +72,10 @@ fallback names сохранены, server filename имеет приоритет
 | Оба исправления контрагентов наe1cb1a53 | 52SQL/HTTP PASS,22.55с, прежний explicit-null test сохранён |
 | UserInfo на9c33d932 | 70offline PASS,8.140с;FULL89identity/docs SQL/HTTP PASS,117.79с, без SKIP/DESELECTED |
 | Events attempt signatures | 61mock-transport PASS; DNS/SSRF не проверены этим набором |
+| Corporate CP / четыре импортных пути | 79SQL/HTTP/domain PASS,24.70с, без SKIP |
+| Company-wide occupancy и admission | 224SQL/HTTP/domain PASS,37.58с, production listener, без SKIP |
+| Route overlap triage | 109firstFULL literal и124source refs PASS,7pure controls;0guard denials |
+| Разделение code/number history | 313SQL/HTTP/domain PASS,49.05с;89new+43updated+181unchanged, без SKIP;5pure shape controls PASS |
 
 Внешние synthetic clients на официальном openid-client и публичных types прошли
 8machine+6documents cases,89HTTPS requests; пять evidence digests проверены.
@@ -88,8 +93,10 @@ GitHub workflow `.github/workflows/checks.yml` имеет состояние
 
 Инструмент guarded runtime inventory прошёл root20PASS22.742с с двумя
 byte-identical actual Core экспортами. Он видит1703операции, включая12curated
-и1WS; exact duplicates и unresolved0. 109literal/parameter overlap candidates
-требуют ручного разбора. Паспорта44special+31integration операций привязаны
+и1WS; exact duplicates и unresolved0. Все109literal/parameter candidates
+независимо проверены через actual route.matches: literal firstFULL,0shadows,
+124source refs и7pure controls PASS; это не HTTP/ACL acceptance.
+Паспорта44special+31integration операций привязаны
 к75registry keys и62source hashes; это source review, не общий ACL acceptance.
 
 WS handshake privacy исправлена отдельно: root25PASS/2wsprotoSKIP1.34с.
@@ -105,12 +112,14 @@ Contract SELECT перечитывается после прежнегоflush/lo
 Даты mapping/повторное закрытие/собственные commits и остальные writer bypass
 этими пакетами не исправлялись.
 
-Общая native/registry команда сохраняет уходящие code/number aliases в
-numberHistory, не меняя ключ объекта и не выдавая это за valid-time ledger.
-Root190PASS31.64с. Повторный review выявил смешение технического code и номера
-в numberHistory: разделение доменов и отрицательные session-reader controls
-ещё требуются. Company-wide collision при scoped ORM исправляется отдельно;
-импорты/bulk остаются открытой границей.
+Общая native/registry команда сохраняет раздельную typed identifierHistory
+для code и station_number; legacy numberHistory содержит только фактические
+номера. Технический код остаётся занятым, но не становится station alias.
+Повторный review исправил ошибку первого пакета; root313PASS49.05с подтвердил
+оба actual reader controls, защиту серверной истории, no-reuse и прежние права.
+Company-wide Core collision check видит скрытые номера без скрытых ORM entities;
+hidden upsert404/new create403 сохранены. Импорты/bulk и valid-time ledger
+остаются открытой границей, совместимость отката старого writer требует оценки.
 
 ## Что остаётся
 
@@ -138,7 +147,8 @@ backup с фактическим восстановлением, состав р
 [export consumers](CORE_EXPORT_CONSUMERS_20261030.md),
 [mapping admission](station-mapping-admission-20261030.md),
 [Contract manual fields](contract-manual-freshness-20261030.md),
-[история номеров](location-number-history-20261030.md).
+[исторический пакет номеров](location-number-history-20261030.md),
+[разделение code/number](location-identifier-history-20261030.md).
 Общий план и статус M00–M19 находятся в ecosystem-deploy;
 Support create/retry — отдельные draft PR23/24 TSupport.
 

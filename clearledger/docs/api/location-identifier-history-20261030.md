@@ -164,3 +164,31 @@ Private runner/логи/JUnit/cleanup/source manifest хранятся в
 Полный repository CI, браузер, рабочий API, merge и deploy не выполнялись.
 Гарантия ограничена общей командой и поддерживаемыми native/registry wrappers;
 импортные/bulk bypass writers и полнота неизвестного прошлого не подтверждены.
+
+
+## Независимая проверка общего кандидата
+
+Координатор перенёс исходный `0b215a1e285328fda46e76efe59b9008ac06a2df`
+как `1f0cf49a`. Runtime SHA-256 `e581d0ec…` и новый тест `00b8013b…`
+совпали с авторскими. На общем кандидате выполнен тот же состав: 89 новых,
+43 с исправленными ожиданиями истории, 147 прежних и 34 scope-проверки.
+Результат: **313 PASS за 49,05 с**, без FAIL/ERROR/SKIP/DESELECTED.
+Все пять opt-in flags заданы явно, production ORM listener включён.
+
+Дополнительно пять pure input controls проверили точную AST-функцию из этого
+runtime без импорта приложения или SQL: отсутствие new и code/new=null дают409;
+явный station_number/new=null допустим; неизвестные dict с list/dict domain
+сохраняются без изменения. Это проверка формы, а не отдельный HTTP-прогон.
+
+Процесс35652 завершён EXIT0, дочерний pytest reaped. Использовались отдельная
+собственная synthetic DB, пустой cwd, абсолютные пути и test UPLOAD_DIR; HOME
+не подменялся. После закрытия engine свежая проверка дала public/edge tables0
+и connections0; обычный DROP без FORCE/terminate и новый контроль подтвердили
+dbexists0/max_locks64. Все probes закрыты. Локальные evidence:
+`.artifacts/root-identifier-history-final.log` и
+`.artifacts/root-identifier-history-shape.log`.
+
+Это приёмка поддерживаемой native/registry command boundary. Прямые import/bulk
+writers, global reservation ledger и фактический rollout по-прежнему отдельно.
+Старый helper не читает typed reservations; перед откатом writer необходимо
+отдельно оценить совместимость уже записанной истории.
