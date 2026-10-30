@@ -20,13 +20,15 @@ regions (get-or-create → region_id). Идемпотентно (UPSERT по с�
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 import hashlib
 import io
 import json as _json
 import logging
 import re as _re
 import uuid as _uuid
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -154,6 +156,37 @@ def _owner_by_class(num_class: str | None) -> str | None:
 def _loc_id(company_id, ext_id: str) -> str:
     """Стабильный ServiceLocation.id для станции (детерминирован по company+ext)."""
     return "ezs-" + hashlib.md5(f"{company_id}|{ext_id}".encode()).hexdigest()[:20]
+
+
+@dataclass(frozen=True)
+class _StationIdentity:
+    state: Literal["existing", "new", "ambiguous"]
+    location: ServiceLocation | None = None
+    strong: bool = False
+
+
+def _station_identity(*groups: Iterable[ServiceLocation], strong: bool = False) -> _StationIdentity:
+    """Один ID может встретиться по нескольким ключам; разные IDs не угадываем."""
+    candidates = {loc.id: loc for group in groups for loc in group}
+    if len(candidates) > 1:
+        return _StationIdentity("ambiguous")
+    if candidates:
+        return _StationIdentity("existing", next(iter(candidates.values())), strong)
+    return _StationIdentity("new")
+
+
+def _index_station(index: dict[str, dict[str, ServiceLocation]], key, loc: ServiceLocation) -> None:
+    if key is not None and str(key).strip():
+        index.setdefault(str(key).strip(), {})[loc.id] = loc
+
+
+def _reconcile_station_identity(ambiguous: list[str], details: list[dict[str, Any]],
+                               ordinal: int, source_kind: str) -> None:
+    # Прежний список строк сохраняет тип, но не раскрывает ключи/карточки кандидатов.
+    ambiguous.append(f"Строка {ordinal}: неоднозначная идентичность станции")
+    if len(details) < 50:
+        details.append({"rowOrdinal": ordinal, "sourceKind": source_kind,
+                        "reasonCode": "ambiguous_identity", "retryable": False})
 
 
 def _parse_compact(ws) -> list[dict[str, Any]]:
@@ -333,8 +366,8 @@ async def _ingest_compact(
     existing = (await db.execute(select(ServiceLocation).where(
         ServiceLocation.company_id == company_id, ServiceLocation.type == "ev_charging"))).scalars().all()
     by_num: dict[str, list[ServiceLocation]] = {}   # номер → ВСЕ носители (не уникален)
-    by_ocpp: dict[str, ServiceLocation] = {}        # только OCPP ID карточки
-    by_ident: dict[str, ServiceLocation] = {}       # идентификаторы источников и код карточки
+    by_ocpp: dict[str, dict[str, ServiceLocation]] = {}   # OCPP → все кандидаты
+    by_ident: dict[str, dict[str, ServiceLocation]] = {}  # source/code/serial → все кандидаты
     for loc in existing:
         # Тест-объекты исключены из индексов целиком: тест-строки мы не грузим, а
         # боевая строка не должна сесть на тестовую карточку по совпадению номера
@@ -342,8 +375,7 @@ async def _ingest_compact(
         if loc.is_test:
             continue
         md = loc.extra_metadata or {}
-        if md.get("ocppId") and str(md["ocppId"]).strip():
-            by_ocpp.setdefault(str(md["ocppId"]).strip(), loc)
+        _index_station(by_ocpp, md.get("ocppId"), loc)
         # Разные типы ключей — разные словари (12.08.2026): раньше OCPP ID, id
         # витрины, серийник и код карточки лежали в одном, и совпадение любого с
         # любым считалось попаданием. Так карточка получала чужой OCPP, а следующий
@@ -351,8 +383,7 @@ async def _ingest_compact(
         # nsp_0335, OCPP в снимке nsp_0306, у боевой соседки nsp_0338).
         for k in (md.get("stationId"), md.get("ext_id"), md.get("asuimStationId"),
                   loc.serial_number, loc.code):
-            if k is not None and str(k).strip():
-                by_ident.setdefault(str(k).strip(), loc)
+            _index_station(by_ident, k, loc)
         num = loc.station_number or md.get("number")
         if num is not None and str(num).strip():
             by_num.setdefault(str(num).strip(), []).append(loc)
@@ -361,6 +392,7 @@ async def _ingest_compact(
     tests = 0                   # тест-строки: в учёт не берём
     pair_split = 0              # вторые железки пар AC/DC → отдельные карточки
     ambiguous: list[str] = []   # номер носят несколько карточек — не угадываем
+    reconciliation: list[dict[str, Any]] = []
     touched: set[str] = set()   # карточки, уже занятые строкой этого файла
     total = len(rows)
     # Паспорт железа принадлежит станции (СТО, docs/OBJECTS.md). Карта берётся по
@@ -379,16 +411,22 @@ async def _ingest_compact(
             if row.get("is_test"):
                 tests += 1
                 continue
-            # OCPP-first: номер не уникален (пары AC/DC на одной площадке), OCPP — уникален.
-            # Дальше — идентификаторы источников (у части карточек OCPP ID лежит в code),
-            # и только потом номер, да и то если он принадлежит ровно одной карточке.
-            loc = ((by_ocpp.get(ocpp) or by_ident.get(ocpp)) if ocpp else None)
-            if loc is None and num:
-                cands = by_num.get(str(num).strip()) or []
-                if len(cands) > 1:
-                    ambiguous.append(f"№{num} (кандидатов {len(cands)})")
-                elif cands:
-                    loc = cands[0]
+            # Strong keys проверяем вместе: совпавшие OCPP/source не могут выбирать
+            # разные карточки. Shared number допустим при единственном strong match.
+            identity = (_station_identity(by_ocpp.get(ocpp, {}).values(),
+                                         by_ident.get(ocpp, {}).values(), strong=True)
+                        if ocpp else _StationIdentity("new"))
+            if identity.state == "new" and num:
+                identity = _station_identity(by_num.get(str(num).strip(), []))
+            if identity.state == "ambiguous":
+                errors += 1
+                _reconcile_station_identity(ambiguous, reconciliation, idx + 1, "stations_compact")
+                continue
+            loc = identity.location
+            if loc is not None and loc.id in touched and identity.strong:
+                # Повтор того же доказанного OCPP/source — дубль строки, не вторая железка.
+                skipped += 1
+                continue
             # Резолв по НОМЕРУ привёл на карточку, уже занятую другой строкой файла →
             # это вторая железка пары AC/DC (её OCPP-ключа в базе ещё нет). Раньше
             # строка молча пропускалась и DC-половина навсегда теряла статус —
@@ -415,6 +453,13 @@ async def _ingest_compact(
                         )
                         continue
                     loc = present
+            # Отказ до статуса, имени, паспорта unit, региона и audit. Distinct-new
+            # OCPP pair_split выше уже перевёл loc в new и остаётся прежним путём.
+            own_ocpp = str((loc.extra_metadata or {}).get("ocppId") or "").strip() if loc else ""
+            if ocpp and own_ocpp and own_ocpp != str(ocpp).strip():
+                errors += 1
+                _reconcile_station_identity(ambiguous, reconciliation, idx + 1, "stations_compact")
+                continue
             oper = _oper_status(row.get("status_dev"))
             md_extra = {k: v for k, v in {
                 "ocppId": ocpp,
@@ -478,14 +523,6 @@ async def _ingest_compact(
                 if loc.region_id is None:
                     loc.region_id = await _region_id(row.get("region"))
                 md = {**(loc.extra_metadata or {}), **md_extra}
-                # Чужой OCPP ID на карточку не штампуем. Строка, дошедшая по НОМЕРУ,
-                # раньше безусловно переписывала `ocppId`, и у карточки оказывались
-                # три расходящихся идентификатора; на следующем прогоне все три вели
-                # в один индекс и растаскивали идентичность станции.
-                own_ocpp = str((loc.extra_metadata or {}).get("ocppId") or "").strip()
-                if ocpp and own_ocpp and own_ocpp != str(ocpp).strip():
-                    md["ocppId"] = own_ocpp
-                    ambiguous.append(f"OCPP {ocpp} ↔ карточка {loc.code} ({own_ocpp})")
                 if num:
                     md.setdefault("number", num)
                 fs = canon_region(row.get("region")) or row.get("region")
@@ -528,8 +565,8 @@ async def _ingest_compact(
                 if num:
                     by_num.setdefault(str(num).strip(), []).append(loc)
                 if ocpp:
-                    by_ocpp.setdefault(str(ocpp).strip(), loc)
-                    by_ident.setdefault(str(ocpp).strip(), loc)
+                    _index_station(by_ocpp, ocpp, loc)
+                    _index_station(by_ident, ocpp, loc)
                 touched.add(loc.id)
                 created += 1
             if (idx + 1) % 200 == 0:
@@ -554,9 +591,10 @@ async def _ingest_compact(
     if ambiguous:
         msg += f", неоднозначных ключей {len(ambiguous)}"
         logger.warning("stations_compact: неоднозначные ключи: %s", ", ".join(ambiguous[:20]))
-    return {"status": "success", "mode": mode, "created": created, "updated": updated,
+    return {"status": "partial" if ambiguous else "success", "mode": mode, "created": created, "updated": updated,
             "skipped": skipped, "errors": errors, "tests": tests, "pair_split": pair_split,
-            "ambiguous": len(ambiguous), "ambiguous_keys": ambiguous[:50], "message": msg}
+            "ambiguous": len(ambiguous), "ambiguous_keys": ambiguous[:50], "message": msg,
+            "reconciliation_count": len(ambiguous), "reconciliation": reconciliation}
 
 
 async def ingest_stations(
@@ -577,23 +615,21 @@ async def ingest_stations(
     # и её серийник лежали в одном индексе, поэтому серийник входящей строки мог
     # совпасть с КОДОМ чужой карточки — так карточка-артефакт переноса перехватила
     # боевой серийник владивостокской станции и живёт с чужим именем и номером.
-    by_sid: dict[str, ServiceLocation] = {}                 # идентификаторы витрины/HubEx и код карточки
-    by_serial: dict[str, ServiceLocation] = {}              # только серийные номера
+    by_sid: dict[str, dict[str, ServiceLocation]] = {}      # source/code → все кандидаты
+    by_serial: dict[str, dict[str, ServiceLocation]] = {}   # serial → все кандидаты
     by_num: dict[str, list[ServiceLocation]] = {}           # номер → ВСЕ носители (номер не уникален)
     for loc in existing:
         md = loc.extra_metadata or {}
         for sid in (md.get("stationId"), md.get("ext_id"), md.get("asuimStationId"), loc.code):
             # code участвует как идентификатор витрины: у 385 станций её id лежит
             # именно там. Но как СЕРИЙНИК код больше не читается.
-            if sid is not None and str(sid).strip():
-                by_sid.setdefault(str(sid).strip(), loc)
+            _index_station(by_sid, sid, loc)
         # Тест-объекты — только по ext_id: НЕ индексируем по serial/№, чтобы боевые
         # строки не сливались в них (и наоборот). Иначе мусор «001/Симулятор» с чужим
         # № затирает боевую станцию.
         if loc.is_test:
             continue
-        if loc.serial_number and str(loc.serial_number).strip():
-            by_serial.setdefault(str(loc.serial_number).strip(), loc)
+        _index_station(by_serial, loc.serial_number, loc)
         num = loc.station_number or md.get("number")
         if num is not None and str(num).strip():
             by_num.setdefault(str(num).strip(), []).append(loc)
@@ -629,32 +665,33 @@ async def ingest_stations(
         return bool(ids) and str(ext_).strip() not in ids
 
     ambiguous: list[str] = []
+    reconciliation: list[dict[str, Any]] = []
 
-    def _resolve(r) -> ServiceLocation | None:
+    def _resolve(r) -> _StationIdentity:
         ext_, serial, num = r.get("ext_id"), r.get("serial_number"), r.get("number")
         # Тест/выведенные резолвим ТОЛЬКО по ext_id (уникален) — отдельные объекты,
         # не сливаем по serial/№ с боевыми станциями.
         if _is_non_network(r):
-            return by_sid.get(str(ext_).strip()) if ext_ else None
-        loc = by_sid.get(str(ext_).strip()) if ext_ else None
-        if loc is not None:
-            return loc
+            return (_station_identity(by_sid.get(str(ext_).strip(), {}).values(), strong=True)
+                    if ext_ else _StationIdentity("new"))
         # Серийный номер — доказательство сам по себе: именно по нему строка витрины
         # садится на карточку, заведённую из HubEx (у неё нет id витрины вовсе).
         # Проверку «чужой идентификатор» к нему не применяем — иначе обогащение
         # паспорта из витрины перестало бы работать для всего парка HubEx.
-        loc = by_serial.get(str(serial).strip()) if serial else None
-        if loc is not None:
-            return loc
+        identity = _station_identity(
+            by_sid.get(str(ext_).strip(), {}).values() if ext_ else (),
+            by_serial.get(str(serial).strip(), {}).values() if serial else (), strong=True)
+        if identity.state != "new":
+            return identity
         cands = by_num.get(str(num).strip()) if num else None
         if not cands:
-            return None
+            return _StationIdentity("new")
         if len(cands) > 1:
             # Номер носят несколько карточек — угадывать нельзя: молча выбранный
             # «первый из БД» зависит от порядка строк в базе и меняется на перезаливке.
-            ambiguous.append(f"№{num} (кандидатов {len(cands)})")
-            return None
-        return None if _foreign(cands[0], ext_) else cands[0]
+            return _StationIdentity("ambiguous")
+        return (_StationIdentity("new") if _foreign(cands[0], ext_)
+                else _StationIdentity("existing", cands[0]))
 
     created = updated = skipped = errors = 0
     total = len(rows)
@@ -668,7 +705,13 @@ async def ingest_stations(
             if not ext:
                 errors += 1
                 continue
-            loc = _resolve(row)
+            identity = _resolve(row)
+            if identity.state == "ambiguous":
+                errors += 1
+                _reconcile_station_identity(ambiguous, reconciliation, idx + 1,
+                                           "stations_partial" if row.get("partial") else "stations_full")
+                continue
+            loc = identity.location
             if loc is not None and mode == "append" and loc.serial_number is not None:
                 skipped += 1   # уже обогащён типизированным паспортом — не трогаем
                 continue
@@ -756,8 +799,8 @@ async def ingest_stations(
                 # под общим серийником «DC / AC» — он уже стоит у соседней карточки.
                 # Записать его значит уронить прогон на уникальном индексе, и тогда
                 # у станции не обновится ВЕСЬ паспорт. Чужой серийник не трогаем.
-                чужой = by_serial.get(str(typed.get("serial_number") or "").strip())
-                if чужой is not None and чужой is not loc:
+                чужие = by_serial.get(str(typed.get("serial_number") or "").strip(), {})
+                if any(identifier != loc.id for identifier in чужие):
                     typed.pop("serial_number", None)
                 # Переход статуса — в журнал станции, как в компактной выгрузке CPO:
                 # книга витрины идёт этой веткой и раньше перезаписывала статус молча.
@@ -804,10 +847,10 @@ async def ingest_stations(
                 db.add(fresh)
                 # в индексы — чтобы вторая строка того же объекта в этом же файле
                 # нашла свежесозданную карточку, а не завела ещё одну
-                by_sid.setdefault(str(ext).strip(), fresh)
-                by_sid.setdefault(str(code).strip(), fresh)
+                _index_station(by_sid, ext, fresh)
+                _index_station(by_sid, code, fresh)
                 if row.get("serial_number"):
-                    by_serial.setdefault(str(row["serial_number"]).strip(), fresh)
+                    _index_station(by_serial, row["serial_number"], fresh)
                 if num_key:
                     by_num.setdefault(num_key, []).append(fresh)
                 created += 1
@@ -837,9 +880,10 @@ async def ingest_stations(
                else f"добавлено {created}, пропущено {skipped}")
     if ambiguous:
         message += f", неоднозначных номеров {len(ambiguous)}"
-    return {"status": "success", "mode": mode, "created": created, "updated": updated,
+    return {"status": "partial" if ambiguous else "success", "mode": mode, "created": created, "updated": updated,
             "skipped": skipped, "errors": errors, "ambiguous": len(ambiguous),
-            "ambiguous_keys": ambiguous[:50], "message": message}
+            "ambiguous_keys": ambiguous[:50], "message": message,
+            "reconciliation_count": len(ambiguous), "reconciliation": reconciliation}
 
 
 async def build_source_station_index(db: AsyncSession, company_id) -> dict[str, str | None]:
