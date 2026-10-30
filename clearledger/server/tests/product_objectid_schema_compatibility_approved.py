@@ -287,6 +287,7 @@ def run(evidence, site, proof, attempts):
 
     code = pytest.main(["-c", str(SERVER / "pytest.ini"), "--noconftest", "-p", "pytest_asyncio.plugin",
         "-p", "no:cacheprovider", "--capture=no", "-vv", "--tb=long", "--show-capture=no",
+        "--log-file=" + str(evidence / "pytest.log"),
         "--junitxml=" + str(evidence / "junit.xml"), *[str(SERVER / s) for s in SELECTION]], plugins=[Boundary()])
     return int(code)
 
