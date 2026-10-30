@@ -37,15 +37,10 @@ SUPPORT = {'clearledger/server/requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b
 RUNTIME = {'aiofiles': '24.1.0', 'aiohappyeyeballs': '2.7.1', 'aiohttp': '3.14.5', 'aiosignal': '1.4.0', 'aiosmtplib': '5.1.3', 'annotated-doc': '0.0.2', 'annotated-types': '0.8.0', 'anyio': '4.15.1', 'asyncpg': '0.30.0', 'attrs': '26.1.0', 'authlib': '1.9.1', 'bcrypt': '4.2.1', 'certifi': '2026.10.23', 'cffi': '2.1.1', 'charset-normalizer': '3.5.2', 'click': '8.5.0', 'cryptography': '50.0.2', 'dnspython': '2.9.1', 'email-validator': '2.3.0', 'et-xmlfile': '2.0.0', 'fastapi': '0.133.0', 'frozenlist': '1.8.0', 'greenlet': '3.5.6', 'gunicorn': '23.0.0', 'h11': '0.16.0', 'http-ece': '1.2.1', 'httpcore': '1.0.9', 'httptools': '0.9.0', 'httpx': '0.28.1', 'idna': '3.20', 'joserfc': '1.7.7', 'lxml': '6.1.3', 'multidict': '7.2.1', 'openpyxl': '3.1.5', 'packaging': '26.3', 'passlib': '1.7.4', 'pip': '26.2.2', 'propcache': '0.5.4', 'py-vapid': '1.9.6', 'pycparser': '3.12', 'pydantic': '2.14.2', 'pydantic-core': '2.50.2', 'pydantic-settings': '2.7.1', 'pyjwt': '2.15.0', 'pypdf': '6.21.2', 'python-docx': '1.1.2', 'python-dotenv': '1.2.2', 'python-multipart': '0.0.31', 'pywebpush': '2.5.0', 'pyyaml': '6.0.3', 'requests': '2.34.2', 'sqlalchemy': '2.0.36', 'starlette': '1.3.1', 'typing-extensions': '4.16.0', 'typing-inspection': '0.4.4', 'urllib3': '2.8.0', 'uvicorn': '0.34.0', 'uvloop': '0.23.0', 'watchfiles': '1.3.0', 'websockets': '17.3', 'yarl': '1.25.1'}
 TOOLS = {'iniconfig': '2.3.1', 'jsonschema': '4.26.0', 'jsonschema-path': '0.5.0', 'jsonschema-specifications': '2025.9.1', 'lazy-object-proxy': '1.13.0', 'openapi-schema-validator': '0.9.0', 'openapi-spec-validator': '0.9.0', 'pathable': '0.6.0', 'pluggy': '1.7.0', 'pygments': '2.21.0', 'pytest': '9.2.0', 'pytest-asyncio': '1.4.1', 'referencing': '0.37.0', 'rfc3339-validator': '0.1.4', 'rpds-py': '2026.9.1', 'six': '1.17.0'}
 SELECTION = [
-    "tests/test_product_contract_objects.py",
     "tests/test_product_api.py",
-    "tests/test_product_http_profile.py",
-    "tests/test_product_openapi_http_contract.py",
-    "tests/test_product_service_openapi.py",
-    "tests/test_product_objectid_schema_compatibility.py",
-    "tests/test_product_object_ids.py::test_pure_schema_distinguishes_object_identity_from_other_ids",
 ]
-EXPECTED = {'test_product_contract_objects.py': 69, 'test_product_api.py': 57, 'test_product_http_profile.py': 12, 'test_product_openapi_http_contract.py': 8, 'test_product_service_openapi.py': 7, 'test_product_objectid_schema_compatibility.py': 13, 'test_product_object_ids.py': 1}
+EXPECTED = {"test_product_api.py": 57}
+EXPECTED_FIXTURES = {"contract_objects_database": 1, "db": 57, "api": 57, "env": 0, "password_hash": 0}
 LIMIT_LOG = 2 * 1024 * 1024
 LIMIT_SCRATCH = 64 * 1024 * 1024
 DEADLINE = 540
@@ -342,6 +337,8 @@ def main():
             fixture_count = 0
             def __init__(self):
                 self.results, self.collection, self.failures = [], {}, []
+                self.fixtures = {name: {"setup": 0, "ready": 0, "finalized": 0} for name in EXPECTED_FIXTURES}
+                self.finalized = set()
 
             def pytest_configure(self, config):
                 config._contract_objects_boundary = self
@@ -354,6 +351,22 @@ def main():
                         refuse()
                 if self.collection != EXPECTED:
                     raise pytest.UsageError("NEXT-R1 exact frozen case selection differs")
+
+            @pytest.hookimpl(hookwrapper=True)
+            def pytest_fixture_setup(self, fixturedef, request):
+                tracked = fixturedef.argname in self.fixtures
+                if tracked:
+                    self.fixtures[fixturedef.argname]["setup"] += 1
+                outcome = yield
+                if tracked and outcome.excinfo is None:
+                    self.fixtures[fixturedef.argname]["ready"] += 1
+
+            def pytest_fixture_post_finalizer(self, fixturedef, request):
+                key = (id(fixturedef), request.node.nodeid)
+                if (fixturedef.argname in self.fixtures and fixturedef.cached_result is not None
+                        and key not in self.finalized):
+                    self.finalized.add(key)
+                    self.fixtures[fixturedef.argname]["finalized"] += 1
 
             def pytest_runtest_logreport(self, report):
                 if report.when == "call" or report.failed or report.skipped:
@@ -369,6 +382,7 @@ def main():
                 for path, anchor in anchors.items():
                     scratch_bound(path, anchor)
 
+            @pytest.hookimpl(trylast=True)
             def pytest_sessionfinish(self, session, exitstatus):
                 source_guard()
                 if inventory() != installed or "app.main" in sys.modules or "tests.conftest" in sys.modules:
@@ -377,10 +391,14 @@ def main():
                         or len(self.results) != sum(EXPECTED.values())
                         or any(r["when"] != "call" or r["outcome"] != "passed" for r in self.results)
                         or set(counters["delivery"]) - {"notify.dispatch_async"}
-                        or counters["delivery"].get("notify.dispatch_async", 0) != self.fixture_count * 3):
+                        or counters["delivery"].get("notify.dispatch_async", 0) != 0 or self.fixture_count != 0
+                        or any(value != {"setup": EXPECTED_FIXTURES[name], "ready": EXPECTED_FIXTURES[name],
+                                         "finalized": EXPECTED_FIXTURES[name]} for name, value in self.fixtures.items())):
                     session.exitstatus = 1
                 write_json(evidence / "boundary.json", dict(counters=counters, results=self.results,
                     collection=self.collection, source_after="PASS", inventory_after="PASS",
+                    fixture_lifecycle=self.fixtures, expected_fixtures=EXPECTED_FIXTURES,
+                    retry_scope="only57previousSetupErrors;110previousPASSnotRepeated",
                     source_base=BASE_COMMIT, new_feature="NEXT-R1", full_main=False, production=False))
                 write_json(evidence / "failures.json", self.failures)
         boundary = Boundary()
