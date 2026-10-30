@@ -1,10 +1,28 @@
 # План регрессии обновления backend, 30.10.2026
 
-Статус: **SOURCE-ONLY READY FOR ROOT REVIEW; functional NOT RUN**.
+Статус: **пакет подготовки завершён; ROOT diagnostic FAIL подтверждён;
+full376 не принят**. На новом runtime обнаружен lifecycle compatibility defect:
+`PolicyRouter.startup` отсутствует, а `create_policy_app` вызывает его при startup.
+Исправление приложения передано отдельному владельцу; этот пакет его не меняет.
 Подготовлен отдельный [runner](../../server/tests/backend_upgrade_approved.py).
 Worker не импортировал runner/app/pytest, не выполнял collect/SQL/venv/install,
 не менял прежние testcase expectations, приложение или активные зависимости.
 Проверка подготовки ограничена чтением исходников/metadata, AST и compile в памяти.
+
+
+Фактические ROOT attempts различаются по объёму:
+
+| Attempt | Собрано / исполнено | Принятый результат |
+|---|---|---|
+| v2 / attempt1 | 327 cases +2 module-level SKIP;0test calls | Collection gate FAIL; missing opt-ins исправлены только в runner |
+| v3 / attempt2 | Частичный full376, точные outcomes неизвестны | Supervisor livefile race прервал child; PASS/FAIL counts не принимаются |
+| v4 / attempt3 | 56 collected;1test call,1FAIL;55не исполнялись | Нормально завершённый diagnostic: actual AttributeError startup, полный376 не принят |
+
+Worker ограничился source/metadata/receipts/AST/compile и Git. Все actual imports,
+pytest/SQL/install выполнены ROOT по отдельным review decisions. Полный v4 runner
+заморожен без изменений, SHA-256
+`b13d20b54e8dbf5804ba9ba77f2d00b42092847914e81fb4d88d226e50ca744a`;
+его source commit `078d4a79ac7057938ef0c837f06c0ac26e30ef57`.
 
 ## Два разных доказательства runtime
 
@@ -51,7 +69,8 @@ fixture/dynamic parametrization, skip/xfail или расхождение тре
 | `tests/test_product_openapi_http_contract.py` | 8 | Formal OAS3.1/local refs + actual response contracts; projections mocked |
 | `tests/test_product_service_openapi.py` | 7 | Canonical vs public browser schema, machine/security alternatives and protected HTTP wiring |
 
-Итого ожидается **376** testcase; actual PASS/FAIL/SKIP неизвестны.
+Итого ожидается **376** testcase. Завершённого full376 результата нет; точный
+объём каждого actual ROOT attempt указан ниже, diagnostic1FAIL не заменяет376.
 
 Точные новые selectors:
 
@@ -312,3 +331,55 @@ ROOT отметил source lead: sync TestClient/lifespan и app.router.startup/
 в create_policy_app. Это пока гипотеза; actual trace следующим diagnostic прогоном
 получает ROOT. Application/API/dependencies/tests ожидания не меняются ради обхода
 startup; никаких application fixes в ownership этого пакета нет.
+
+
+## ROOT attempt3: первая actual ошибка подтверждена, preparation принят
+
+Reviewed v4 diagnostic завершён нормально: **56 collected /1test call /1FAIL**,
+pytest0.96s, supervisor16.393642026931047s, ROOT outer17.513004108332098s,
+pytest/child exit1, own children reaped. Первый exact selector:
+`tests/test_api_contracts_http.py::test_missing_invalid_wrong_kind_tenant_scope_resource_or_action_deny_before_handler[None-401]`.
+
+Actual trace: `TestClient.__enter__` входит в настоящий lifespan и доходит до
+`app/api_contracts/routing.py:280`, `await app.router.startup()`, затем
+`AttributeError: 'PolicyRouter' object has no attribute 'startup'`. Ошибка
+воспроизведена на FastAPI0.133.0/Starlette1.3.1. Запрос ещё не дошёл до проверяемого
+401 response; ни startup, ни testcase expectation не обходились и не подменялись.
+ROOT передал runtime fix владельцу lifecycle, worker не менял application file.
+
+Boundary: blocked_network0, blocked_subprocess0, denied_env_reads0, audit[];
+PGconnect2 (preflight/final control), exact runtime61+tools16, actual HOME сохранён.
+IPv6 import probe suppressed=True, original flag restored=True, bind_allowance=False.
+Atomic checkpoint сохранил failed nodeid, call trace4616bytes без truncation и
+последний teardown phase. `full376_accepted=False` во всех итоговых receipts.
+Это подтверждённый diagnostic FAIL, не security/production certification.
+
+Получены две bounded warnings: Starlette deprecated httpx TestClient path и
+anyio.abc.BlockingPortal alias. Они сохранены в run.log, версии/оснастка по ним
+не менялись и новых network names не добавляли.
+
+Worker проверил SHA итоговых log/JUnit/boundary по supervisor receipt, один
+failed outcome в checkpoint/final boundary, collection56, strictzero counters и
+root summary. ROOT summary подтверждает normal DROP только own exact test DB:
+relations0/connections0/existsAfter0, max_locks_per_transaction64, без FORCE/GUC.
+Это чтение сохранённых ROOT receipts; live SQL worker не выполнял.
+
+| Actual attempt3 evidence | SHA-256 |
+|---|---|
+| ROOT summary | `ebeea461f822ff513d16f7dd869ab20df3ba8b7c353aea9e095967df7a91189a` |
+| ROOT process | `4c4248fc24ddc1000fbc692d50faf6243afb72dd08d697c636db3727d0fa75bf` |
+| Atomic outcome checkpoint | `5986b73fde40e04d3722b5402fc92a301509053463aefc1625bcab8f8526de6d` |
+| Boundary proof | `ac8dd14a3bee566a152f7e0614535d08b3e50a2e0c29e6cf5ce5ead9cfe6deab` |
+| Supervisor proof | `a13dc4fd02c1e131e0a6d88868e25204c5f461b8cf3c2d95e94a1fe328c5359d` |
+| JUnit | `f1436c2517d150edb4b63c6a546b3fd5b12060aef91c855d4a8de2170ba5a488` |
+| Run log | `f85adc3a3c4494849a98f990ab4b79046a7c77371b97777c83a12c0f240ed8a6` |
+| Frozen execution proposal v4 | `cc6d89125e6df5424b3f470c75f45da09f5c9458487a410ba135a404191336b7` |
+
+Подготовка target locks/evidence, test tooling и функционального runner завершена;
+ROOT принял report-only finalization этого пакета. Дальше нужны отдельный
+проверенный application lifespan fix, frozen updated source hashes и ROOT-owned
+verification сначала relevant HTTP/lifecycle, затем согласованный полный376.
+Текущие full376 claims не повышаются до PASS. Старые failures/provenance и все
+три actual attempt artifacts сохранены; v4 runner не меняется после diagnostic.
+Requirements/Dockerfile/Compose/features/CI, baseline locks, версии77, старые
+app/tests и рабочие данные worker не менял. Merge/deploy/production не выполнялись.
