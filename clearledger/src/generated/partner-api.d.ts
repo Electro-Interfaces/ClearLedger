@@ -3,7 +3,7 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: 712b46f2260c5d5431b736be5535b0fb526e45049490e35ffe00394fc60b1570
+// openapi-typescript 7.10.1; curated schema sha256: b1cb847e1e3327ceaadcc78b0b1f52be6f701840f78474c881271dbd2e26427e
 export interface paths {
     "/contracts": {
         parameters: {
@@ -31,6 +31,26 @@ export interface paths {
         };
         /** Contract Detail */
         get: operations["getContract"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/contracts/{contractId}/objects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read explicit contract object associations
+         * @description Only current explicit links to independently authorized service points. Requires both contracts and objects resource grants. Company/unassigned scope returns no explicit links; no implied legal coverage or historical interpretation. Live cursor pagination.
+         */
+        get: operations["listContractObjects"];
         put?: never;
         post?: never;
         delete?: never;
@@ -230,6 +250,22 @@ export interface components {
             scopeType: string;
             /** Title */
             title: string | null;
+        };
+        /** ContractObject */
+        ContractObject: {
+            objectId: components["schemas"]["ObjectId"];
+        };
+        /** ContractObjects */
+        ContractObjects: {
+            contractId: components["schemas"]["Id"];
+            /** Items */
+            items: components["schemas"]["ContractObject"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+            /** Scopetype */
+            scopeType: string;
+            /** Total */
+            total: number;
         };
         /** Counterparty */
         Counterparty: {
@@ -776,7 +812,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                contractId: components["schemas"]["Id"];
+                contractId: string;
             };
             cookie?: never;
         };
@@ -791,6 +827,195 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Contract"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Enabled shared PostgreSQL product quota exhausted (rate_limited), or generic injected application HTTP429 (internal_error). Quota is disabled by default. */
+            429: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listContractObjects: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                pageSize?: number;
+            };
+            header?: never;
+            path: {
+                contractId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractObjects"];
                 };
             };
             /** @description Bad Request */
@@ -1152,7 +1377,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                counterpartyId: components["schemas"]["Id"];
+                counterpartyId: string;
             };
             cookie?: never;
         };
@@ -1528,7 +1753,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                docId: components["schemas"]["Id"];
+                docId: string;
             };
             cookie?: never;
         };
@@ -1714,8 +1939,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                docId: components["schemas"]["Id"];
-                versionId: components["schemas"]["Id"];
+                docId: string;
+                versionId: string;
             };
             cookie?: never;
         };
@@ -2093,7 +2318,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                equipmentId: components["schemas"]["Id"];
+                equipmentId: string;
             };
             cookie?: never;
         };
