@@ -141,8 +141,6 @@ Chromium suite проверяет AuthContext, не настоящий эксп�
 После переноса408588ab в общий кандидат02e6e963: transport/session/location
 151 PASS за4.513с, без SKIP; React/Chromium lifecycle15 PASS за12.729с.
 Оба TypeScript project checks (app/node) PASS с отдельными tsBuildInfoFile
-в root .artifacts, точечный ESLint и diff-check PASS. Первый вызов lint из
-Git-корня не нашёл конфигурацию; повтор выполнен из clearledger по проектной
-конфигурации. Неудачная подготовка пути лога не запускала тесты.
+в root .artifacts, точечный ESLint из clearledger и diff-check PASS.
 Это локальная приёмка общего состава, не full CI или browser download manager.
 Прямые fetch в других services/screens этим пакетом не переводились.

@@ -152,3 +152,15 @@ route classes и динамически возвращаемый SSE не гар
 Overlap-анализ не является полным решателем regex или доказательством ACL/доступности.
 CPython audit controls предназначены для этого offline импорта проверенных исходников;
 здесь не заявляется изоляция от произвольного вредоносного native extension.
+
+
+## Независимая проверка общего кандидата
+
+Координатор перенёс d10c921d как7896039f. Собственный static scanner получил
+1691 endpoint /557files /7diagnostics /8unattached, sourceRevision7896039f,
+server snapshot SHA2564ebd8d26e5394f9e1af5d35c0b64ee367af9c99b32fed08ed5afc8107d896f71.
+Полный opt-in набор **20PASS за22.742с**, без SKIP; два actual Core child
+экспорта повторно совпали byte-for-byte и сохранили12curated/1WS.
+Во время этой проверки менялись только документы; server source оставался
+тем же. Это registration proof выбранного состава, не приёмка запросов/ACL
+или развёрнутого пространства. Сеть и SQL для этого прогона не использовались.

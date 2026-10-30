@@ -1,7 +1,7 @@
 # Партнёрский API: интеграционный кандидат
 
 Состав исходников на 30.10.2026: ветка
-`MagLook/api-modernization-integration-20261029`, runtime pin `02e6e963`.
+`MagLook/api-modernization-integration-20261029`, runtime pin `02e6e963`; инвентаризация Core на `7896039f`.
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
 
@@ -80,6 +80,12 @@ Purpose-built local HTTPS fixture не заменяет full production main/ngi
 GitHub workflow `.github/workflows/checks.yml` имеет состояние
 `disabled_manually`; его не включали. Отсутствие checks не означает PASS CI.
 Все SQL-проверки используют отдельную синтетическую PostgreSQL, не рабочую БД.
+
+Инструмент guarded runtime inventory прошёл root20PASS22.742с с двумя
+byte-identical actual Core экспортами. Он видит1703операции, включая12curated
+и1WS; exact duplicates и unresolved0. 109literal/parameter overlap candidates
+требуют ручного разбора. Паспорта44special+31integration операций привязаны
+к75registry keys и62source hashes; это source review, не общий ACL acceptance.
 
 ## Что остаётся
 
