@@ -90,6 +90,15 @@ pytest fd capture попытался создать временный файл 
 этого отказа сохранены координатором в `.artifacts/root-objectid-schema-review-20261030`.
 Для следующей попытки capture отключён, tempfile.tempdir направлен в уже
 проверенный evidence; запреты записи и сети не ослаблялись. Повторная фактическая
-old/new матрица ожидает запуска ROOT после новой заморозки;
+old/new попытка v2 (1.5712869465/1.4284316627 с) также остановилась до сбора
+тестов: pytest FileHandler пытался открыть `/dev/null` на запись. Доказательства:
+`.artifacts/root-objectid-schema-review-v2-20261030`, old/new `run.log`.
+Для v3 явно задан `--log-file=<evidence>/pytest.log`. Исходники и новые тесты
+продукта после de255800 не менялись. Статически просмотрены startup writes
+встроенных pytest plugins: capture выключен, cacheprovider выключен,
+JUnit и logging направлены в evidence, tempfile тоже; faulthandler дублирует
+существующий stderr fd, assertion rewriting под `-B` не пишет pyc, tmpdir
+создаёт каталог только при запросе fixture, а выбранные тесты его не запрашивают.
+Повторная матрица v3 ожидает запуска ROOT после заморозки;
 общие 375 успешных runtime/access/library проверок повторно не запускались.
 Никаких изменений общих папок, старых доказательств, merge или выпуска нет.
