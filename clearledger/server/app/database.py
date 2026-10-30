@@ -2234,11 +2234,21 @@ async def create_all() -> None:
     from app import models_product_budget  # noqa: F401 — register before namespace guard/create_all
 
     async with engine.begin() as conn:
+        if settings.managed_core_budget_enabled:
+            from app.services.schema_version_gate import require_connection
+            await require_connection(conn, settings)
         await _assert_bootstrap_namespace(conn)
         # Функция — раньше таблиц: на ней стоят генерируемые колонки телефонов,
         # и в новой базе create_all заводит их сразу вместе с таблицей.
         await conn.execute(text(PHONE_FUNCTION_DDL))
-        await conn.run_sync(Base.metadata.create_all)
+        if settings.managed_core_budget_enabled:
+            # Keep the model registered for ORM/namespace checks. Only the
+            # exact versioned table is excluded from legacy DDL ownership.
+            budget_table = models_product_budget.ProductAPIBudget.__table__
+            tables = [table for table in Base.metadata.tables.values() if table is not budget_table]
+            await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+        else:
+            await conn.run_sync(Base.metadata.create_all)
 
     # Инкрементальные миграции для существующих таблиц
     async with engine.begin() as conn:
