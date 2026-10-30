@@ -2,9 +2,11 @@
 
 Дата: 30.10.2026. База: `1c9ea350fff4502c5e0abdcb4b8b0eef65cc0e38`.
 Ветка: `agent/api-contract-import-create-20261030`.
-Статус: runtime реализован; первый actual run ROOT на `d80b14cc` дал
-**68 PASS / 1 FAIL**. Исправлен только snapshot oracle нового теста;
-повтор **35 новых случаев ещё НЕ ЗАПУСКАЛСЯ**. Worker ни на одной стадии
+Статус: runtime реализован; ROOT подтвердил **35 PASS / 0 FAIL / 0 ERROR / 0 SKIP**
+на исправленном oracle коммита `9262091911ab1f3049932e65aec20980854e533e`.
+Отдельные 34 unchanged selected regressions прошли в первом actual run
+`d80b14cc`, который в целом дал **68 PASS / 1 FAIL** из-за дефекта snapshot.
+Это два прогона; единого результата «69 green» не заявляется. Worker ни на одной стадии
 не импортировал приложение/драйвер и не выполнял SQL/pytest/collection.
 Actual PostgreSQL-проверка остаётся только у ROOT на frozen составе и точной
 синтетической базе, описанных ниже.
@@ -52,8 +54,8 @@ company передаётся тем же выражением, index — пре�
 Это source proof границы diff, не результат исполнения ORM/SQL.
 Evidence: `.artifacts/contract-create/source-boundary.{py,json}`.
 
-Python 3.13 разобрал AST и выполнил compile в памяти для четырёх runtime-файлов,
-нового теста и runner. Ни один из них не импортировался и не исполнялся.
+В worker-подготовке Python 3.13 разобрал AST и выполнил compile в памяти для
+четырёх runtime-файлов, нового теста и runner. Worker не импортировал и не исполнял их.
 Число параметризованных случаев получено чистым AST-подсчётом без pytest collect.
 `git diff --check` выполнен; старые тесты/модели/DDL/native/1С/store/CP commands/
 ContractIndex/настройки/STATUS/inventory не менялись.
@@ -91,9 +93,10 @@ test package initializer, pytest.ini, requirements и три выбранных 
 сохранено отдельно как `proposal.json`. Сырые данные, credentials и среда
 процесса в публичный отчёт не включаются.
 
-## Подготовленные meaningful actual checks
+## Meaningful actual checks
 
-Новый opt-in модуль содержит **35 запланированных случаев**, ещё не collected:
+Новый opt-in модуль содержит **35 случаев**, фактически проверенных ROOT после
+исправления oracle:
 
 | Сценарий | Число |
 |---|---:|
@@ -166,7 +169,7 @@ Helper и все три runtime producer побайтово остались п�
 для `api_contract_create_test_20261030`, обычный DROP DATABASE и прежний
 max_locks_per_transaction=64. Worker этих подключений не выполнял.
 
-## Предлагаемый повтор только affected 35
+## Actual повтор только affected 35
 
 Первоначальный runner в d80b14cc выбирал **69 случаев**:
 
@@ -178,6 +181,17 @@ max_locks_per_transaction=64. Worker этих подключений не вып
 После исправления oracle ROOT запросил повтор только всех **35 новых случаев**.
 Текущий frozen `SELECTION` содержит единственный новый test module; 34 unchanged
 existing cases уже прошли в первом actual run и повторно не включены.
+На точном frozen `92620919` ROOT получил **35 PASS**, 0 FAIL/ERROR/SKIP,
+pytest **18.27 с**, outer **29.532726496458054 с**; child reaped, **EXIT 0**.
+Actual replay, fresh-session golden, real constraints, две SQL-сессии и
+pg_locks controls прошли в этом наборе. По сообщению ROOT после закрытия
+test engine свежий контроль точной `api_contract_create_test_20261030` подтвердил
+relations=0/connections=0, обычный DROP DATABASE, existsAfter=0,
+max_locks_per_transaction=64. Private evidence ROOT:
+`.artifacts/root-contract-create-review-v2-20261030/{cleanup.log,summary.json}`.
+ROOT также независимо подтвердил complete-module AST parity трёх producers
+и неизменность adapted expressions; worker сохраняет свой source proof отдельно.
+
 Полный прежний 117
 набор native PATCH/1С не включён: его paths не менялись. Новые тесты helper
 не предлагаются как baseline failure на базе, где helper ещё отсутствует.
@@ -218,12 +232,16 @@ CONTRACT_CREATE_EMPTY_CWD/CONTRACT_CREATE_EVIDENCE_DIR задаёт ROOT; runner
 Контроль client connections, фактического числа PASS/FAIL/SKIP, cleanup/обычного
 DROP DATABASE и освобождение SQL-окна выполняет ROOT отдельно.
 
-## Что ещё требуется
+## Итог и ограничения
 
-Нужны actual evidence ROOT для исправленного oracle и окончательная приёмка
-этого среза. Статус повторного 35-case run остаётся NOT RUN; worker не завершает
-Dispatch как будто runtime уже принят. При новом finding или изменении
-frozen source требуется отдельное решение ROOT; baseline bugs в этот diff не правятся.
+Bounded extraction реализована и проверена ROOT указанными двумя actual-прогонами.
+После финального source/report review frozen app/test/runner bytes остаются
+неизменными; этот последний follow-up меняет только отчёт. Новых запусков,
+дополнительной SQL-проверки или исправлений runtime не выполняется.
+Дефект snapshot первого прогона и его evidence сохранены; ложного утверждения
+о baseline vulnerability либо едином зелёном 69-case прогоне нет.
+При новом finding или изменении frozen source требуется отдельное решение ROOT;
+baseline bugs в этот diff не правились.
 
 Остальные Contract writer families, native/1С/store commands, delete/scope/link
 policy, внешние системы, полный CI/security scan и закрытие M06 вне этого патча.
