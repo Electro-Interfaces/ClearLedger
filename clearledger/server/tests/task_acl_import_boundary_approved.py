@@ -13,28 +13,17 @@ from urllib.parse import urlsplit
 SERVER = Path(__file__).resolve().parents[1]
 BASE_COMMIT = "cf209237bf495e7b5fa981976fac20959c88d5db"
 APP_DIGEST = '1360e0813ed1206204183ceb4f66a9cff00090cfc83204e6aca1f5f1f532792b'
-TESTS_DIGEST = 'e25fcb26b624cb1060aebb922239896a0e49f4e1649d0f9947acc0cc1bbf9e5c'
+TESTS_DIGEST = 'be918799bba483d2ba71b4950f617a518d1bd6c2bf039f3a7da1ba8394faab8b'
 SCHEMA_DIGEST = '51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d'
 APP_COUNT = 492
 TESTS_COUNT_WITHOUT_SELF = 340
 SCHEMA_COUNT = 16
 SUPPORT_FILES = {'requirements.txt': 'f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0', 'pytest.ini': 'bbae173f083b3636872d1311ed8e247e51e7149de4aa752189a2f7bb2511c601'}
 SELECTION = [
-    "tests/test_task_acl_import_boundary.py::test_management_native_acl_and_read_only",
     "tests/test_task_acl_import_boundary.py::test_work_union_and_single_read_preserve_task_doc_acl",
-    "tests/test_task_acl_import_boundary.py::test_readable_task_retains_edit_actor_guard",
-    "tests/test_task_acl_import_boundary.py::test_owner_identity_old_reexports_and_live_lexical_bindings",
-    "tests/test_management_api.py::test_local_task_acl_and_company_scope",
-    "tests/test_management_api.py::test_product_grants_and_disabled_app",
-    "tests/test_management_api.py::test_calendar_acl_day_bounds_and_no_task_deadlines",
-    "tests/test_management_api.py::test_chat_participation_history_and_read_only",
-    "tests/test_management_runtime_compat.py::test_chat_scope_uses_original_router_acl",
-    "tests/test_management_runtime_compat.py::test_missing_or_denied_chat_acl_never_opens_rooms",
-    "tests/test_task_projection_access.py::test_wrong_company_closes_all_three_projections",
-    "tests/test_task_projection_access.py::test_code_refs_aliases_preserve_acl_and_empty_result",
 ]
-EXPECTED_COUNTS = [3, 11, 1, 1, 1, 1, 1, 1, 1, 2, 1, 14]
-EXPECTED_CASES = 38
+EXPECTED_COUNTS = [11]
+EXPECTED_CASES = 11
 MAX_FILES = 4000
 MAX_BLOB = 8 * 1024 * 1024
 MAX_TREE = 64 * 1024 * 1024
@@ -219,7 +208,7 @@ def main():
                 actual[key] = actual.get(key, 0) + 1
             if (not self.installed or actual != dict(zip(SELECTION, EXPECTED_COUNTS))
                     or len(items) != EXPECTED_CASES or len({item.nodeid for item in items}) != len(items)):
-                raise pytest.UsageError("exact 38 focused task ACL cases and delivery stubs required")
+                raise pytest.UsageError("exact 11 corrected union cases and delivery stubs required")
             self.collected = [item.nodeid for item in items]
 
         def pytest_runtest_setup(self, item):

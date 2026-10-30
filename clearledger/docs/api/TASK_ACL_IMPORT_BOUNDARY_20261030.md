@@ -93,15 +93,45 @@ symlink components запрещены. Cwd изолирует чтение `.env
 Локальный socketpair asyncio остаётся возможным. До initial conftest и setup
 устанавливаются captures email/chat/SMTP/notify/task-mail/push/WS;
 в capture сохраняются только названия отправителей без адресатов и содержимого.
-38 случаев, отсутствие skips, setup/call/teardown outcomes и блокированных
+Точное число случаев, отсутствие skips, setup/call/teardown outcomes и блокированных
 попыток проверяются runner. Предел исполнения 600 секунд, capture 4000 событий,
 JSON evidence 1 MiB. JUnit и JSON сохраняются только в evidence directory.
 
 Worker не запускал runner, приложение, pytest collection, SQL, venv/install,
 Docker/build или deploy. Requirements, Dockerfile, Compose, features, CI
-и рабочие данные не менялись. Нет merge или выкладки. После независимого ROOT
-review/execution ожидаются actual evidence и report-only finalization.
+и рабочие данные не менялись. Нет merge или выкладки. Первый ROOT прогон описан
+ниже; повтор исправленных случаев ожидает отдельного ROOT review/execution.
 
 Откат: целиком собственный runtime/tests/runner commit; схемы и данные
 не меняются. Частичная доставка этих двух runtime-файлов не считается
 подтверждением совместимости старых раздельно обновляемых runtimes.
+
+## Первый ROOT прогон и исправление fixture
+
+Frozen commit первого прогона: `0053a9c2e578a4a574017f470ba39261a359efbe`.
+SHA-256 runner: `ac66a613b6d6ec24e1d0565960142e6bb67df92e42d296838efdba1b9ee293df`.
+ROOT независимо подтвердил полный AST двух модулей после обратной подстановки
+пяти bindings. Первый настоящий прогон: **27 PASS / 11 FAIL**, pytest 23.39 с,
+весь дочерний процесс 35.53102453239262 с, процесс завершён и reaped.
+
+Все 11 отказов произошли до ACL assertions: новая fixture создавала два документа
+с одинаковым `(company_id, subject_ref)`, что нарушило существующее ограничение
+`uq_doc_cards_subject`. Это ошибка тестовых данных; runtime не менялся.
+Сообщение ROOT: `msg_cd3b04a72a66`; исходные failure evidence сохранены в
+ROOT `.artifacts/root-task-acl-boundary-review-20261030/`: `summary.json`,
+`test-process.json`, `test.log`, JUnit и boundary JSON. ROOT сообщил успешный
+обычный DROP disposable БД, до очистки fresh relations 0 / connections 0,
+после DROP exists 0, `max_locks_per_transaction=64`.
+
+По отдельному указанию ROOT исправлена только новая fixture: strict документ
+получает другой subject_ref; union без ref по-прежнему проверяет его отдельный
+ACL, а дополнительный same-ref запрос ожидает только public документ и доступную
+задачу. Прежние ожидания task 404 / doc 403 и полные snapshots сохранены.
+
+Текущий runner с теми же границами сужен до единственного точного selector
+`tests/test_task_acl_import_boundary.py::test_work_union_and_single_read_preserve_task_doc_acl`
+и **11 параметризованных случаев**. Tests tree hash обновлён, app/schema hashes
+сохранены. Исходный runner для 38 случаев сохранён в первом коммите и приватной
+копии `.artifacts/task-acl-import-boundary/initial-38-runner.py`.
+Предыдущие 27 зелёных случаев ROOT поручил сохранить и не повторять.
+Исправленный прогон выполняет только ROOT; worker ожидает actual evidence.
