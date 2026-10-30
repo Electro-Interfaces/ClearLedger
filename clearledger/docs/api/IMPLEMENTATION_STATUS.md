@@ -501,3 +501,17 @@ Source1cd272c6→integration8e784fb3, finalreport16227d60→60d419b3. Root
 Повторов SQL после PASS нет. Native User и прежний admission до lock сохранены;
 нового partner write API и закрытия всего M06 нет.
 [Native CREATE](NATIVE_CONTRACT_CREATE_20261030.md).
+
+
+DEP upgrade plan принят: source8af728e3→integration5a67955b. Root независимо
+сверил336metadata hashes/170input pairs/порядок и145FastAPI release declarations.
+Два prerelease unknown ограниченного evaluator дополнены отдельной проверкой
+packaging26.3; история unknown и три range-source расхождения сохранены.
+Предложены PyJWT2.15.0,pypdf6.21.2,dotenv1.2.2,multipart0.0.31,
+Starlette1.3.1+FastAPI0.133.0 и потенциальный annotated-doc0.0.2.
+Отдельный ROOT OSV batch шести candidate версий:0matches, без pagination.
+Это metadata/declaration plan, не проверка исполнения или exploitability.
+Major pypdf5→6 иStarlette0→1 требуют отдельных regressions. Новый Task готовит
+семь артефактов, candidate input/constraints и ROOT-only execution proposal;
+старые locks/requirements/Dockerfile и runtime settings не переключены.
+[План обновления](BACKEND_DEPENDENCY_UPGRADE_PLAN_20261030.md).
