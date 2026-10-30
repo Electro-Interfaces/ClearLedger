@@ -338,3 +338,13 @@ Scoped identity/docs security review: 10 primary файлов, 0 findings, parti
 coverage app envelope, sequential fallback; host context подтверждён root.
 Это source review в указанных границах, не приёмка всего API или рабочего
 окружения. [Отчёт](PARTNER_IDENTITY_SECURITY_REVIEW_20261030.md).
+
+
+Два оставшихся входа в видеосвязь, startMeeting/startTicketMeeting, используют
+существующий context guard. Поздний ответ прежней сессии/компании/организации
+не открывает URL и не возвращает старый результат; протоколы, demo, текущие
+ошибки и синхронное открытие blank сохранены. Baseline19PASS/98FAIL; root394
+PASS75,607с, app/node TypeScript и предметный lint PASS. Семь нецелевых AST
+statements и шесть старых модулей неизменны. Это synthetic client proof,
+без actual browser/server/Jitsi, отмены серверных действий и гарантий после
+возврата функции. [Отчёт](MEETING_START_CONTEXT_20261030.md).
