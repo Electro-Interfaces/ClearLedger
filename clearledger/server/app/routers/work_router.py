@@ -50,7 +50,7 @@ from app.models import (
 from sqlalchemy import true as _sa_true
 
 from app.config import settings
-from app.services import (calendar_series, jitsi, oversight, placement, space_time, work_query,
+from app.services import (calendar_queries, calendar_series, jitsi, oversight, placement, space_time, work_query,
                           work_state)
 
 log = logging.getLogger(__name__)
@@ -1110,19 +1110,8 @@ async def _attendees(db: AsyncSession, event_ids: list[uuid.UUID]) -> dict[uuid.
 
 
 def _my_events_clause(user_id: uuid.UUID):
-    """Мои встречи: те, что я собрал, и те, куда меня позвали.
-
-    Общий календарь компании сюда не входит намеренно: «все встречи всех» —
-    другой экран с другим вопросом, и подмешивать его значит утопить свои три
-    встречи в сотне чужих.
-    """
-    from app.models import CalendarAttendee, CalendarEvent
-
-    return or_(
-        CalendarEvent.organizer_id == user_id,
-        CalendarEvent.id.in_(select(CalendarAttendee.event_id).where(
-            CalendarAttendee.user_id == user_id)),
-    )
+    """Совместимый sync вход для native callers календаря."""
+    return calendar_queries.my_events_clause(user_id)
 
 
 @router.get("/calendar")
@@ -1431,7 +1420,7 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
     Окно ограничено: год назад и год вперёд. Полная история пухла бы без предела
     и загружалась бы каждым клиентом при каждом обновлении подписки.
     """
-    from app.models import CalendarAttendee, CalendarEvent
+    from app.models import CalendarEvent
     from app.services import ics as ics_service
 
     if not token or len(token) < 20:
@@ -1446,9 +1435,7 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
         select(CalendarEvent)
         .where(CalendarEvent.starts_at >= now - timedelta(days=365),
                CalendarEvent.starts_at <= now + timedelta(days=365),
-               or_(CalendarEvent.organizer_id == хозяин.id,
-                   CalendarEvent.id.in_(select(CalendarAttendee.event_id).where(
-                       CalendarAttendee.user_id == хозяин.id))))
+               _my_events_clause(хозяин.id))
         .order_by(CalendarEvent.starts_at))).scalars().all()
 
     база = settings.app_public_url.rstrip("/")
