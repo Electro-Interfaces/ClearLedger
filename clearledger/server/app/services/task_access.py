@@ -84,3 +84,18 @@ async def authorize_task_file_download(db: AsyncSession, user: User, file_id: uu
         await assert_company_product(str(cid), user, db, "docs")
     except HTTPException:
         await assert_company_product(str(cid), user, db, "plan")
+
+
+async def assert_work(company_ref: str, user: User, db: AsyncSession, *, product_gate=None) -> uuid.UUID:
+    """Право на работу компании: «Трек» либо, для старых пространств, «Задачи».
+
+    Поручения переехали в «Трек» (решение МАГа 16.08.2026), и продукт `plan` с
+    лаунчера снят. Но ручки остались теми же: их зовёт и карточка документа, и
+    экран поручений внутри «Трека». Гейт проверяет сначала новый продукт, потом
+    старый — иначе после переименования у людей закрылась бы их же работа.
+    """
+    product_gate = product_gate if product_gate is not None else assert_company_product
+    try:
+        return await product_gate(company_ref, user, db, "docs")
+    except HTTPException:
+        return await product_gate(company_ref, user, db, "plan")

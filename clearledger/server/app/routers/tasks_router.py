@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_product, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.services.service_accounts import not_service
+from app.services.task_routes import DEFAULT_ROUTE
 from app.services.task_access import (
     is_admin as _is_admin, visible_to as _visible_to, can_view_task as _can_view_task,
     assert_view_task as _assert_view_task, authorize_task_file_download,
@@ -48,23 +49,14 @@ from app.models import (
 )
 from app.services import (
     notify, partner_bridge, placement, process_templates, space_connectors, task_mail, task_assignments,
-    task_scheduler, work_query, work_state,
+    task_scheduler, work_query, work_state, task_access, task_queries, task_routes,
 )
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
 async def _assert_work(company_ref: str, user: User, db: AsyncSession) -> uuid.UUID:
-    """Право на работу компании: «Трек» либо, для старых пространств, «Задачи».
-
-    Поручения переехали в «Трек» (решение МАГа 16.08.2026), и продукт `plan` с
-    лаунчера снят. Но ручки остались теми же: их зовёт и карточка документа, и
-    экран поручений внутри «Трека». Гейт проверяет сначала новый продукт, потом
-    старый — иначе после переименования у людей закрылась бы их же работа.
-    """
-    try:
-        return await assert_company_product(company_ref, user, db, "docs")
-    except HTTPException:
-        return await assert_company_product(company_ref, user, db, "plan")
+    """Native adapter с прежним late-bound product gate."""
+    return await task_access.assert_work(company_ref, user, db, product_gate=assert_company_product)
 
 
 
@@ -81,11 +73,7 @@ _PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 # Маршрут задачи без типа — обычное поручение. Держим в коде, а не в справочнике:
 # иначе продукт не работает до заведения первого типа, а первое, что делает человек
 # в новом продукте, — ставит задачу, а не настраивает справочники.
-DEFAULT_ROUTE: list[dict] = [
-    {"code": "new", "name": "Постановка"},
-    {"code": "in_progress", "name": "В работе"},
-    {"code": "review", "name": "Проверка"},
-]
+
 
 # Заготовки типов: то, что встречается в любой компании. Заводятся кнопкой из
 # раздела «Типы» — руками, а не молча при первом запросе: справочник компании
@@ -298,11 +286,8 @@ def _uuid_or_400(v: str, what: str) -> uuid.UUID:
 
 
 def _route_of(t: TaskType | None) -> list[dict]:
-    """Маршрут типа; у задачи без типа — маршрут поручения."""
-    if t is None or not t.route:
-        return DEFAULT_ROUTE
-    stages = [s for s in t.route if isinstance(s, dict) and s.get("code")]
-    return stages or DEFAULT_ROUTE
+    """Native adapter: текущий router DEFAULT_ROUTE сохраняет late replacement."""
+    return task_routes.route_of(t, default_route=DEFAULT_ROUTE)
 
 
 def _stage_name(route: list[dict], code: str | None) -> str | None:
@@ -387,38 +372,8 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
 
 
 async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[str, str | None]]:
-    """Имена типов, людей и объектов пачкой: список задач не должен ходить в базу
-    построчно."""
-    type_ids = {t.type_id for t in tasks if t.type_id}
-    user_ids = {i for t in tasks for i in (t.assignee_id, t.author_id) if i}
-    obj_ids = {t.object_id for t in tasks if t.object_id}
-    prj_ids = {t.project_id for t in tasks if t.project_id}
-    ver_ids = {i for t in tasks for i in (t.fix_version_id, t.found_version_id) if i}
-    spr_ids = {t.sprint_id for t in tasks if t.sprint_id}
-    prjs = {r.id: r for r in (await db.execute(
-        select(TaskProject).where(TaskProject.id.in_(prj_ids)))).scalars()} if prj_ids else {}
-    vers = {r.id: r.name for r in (await db.execute(
-        select(TaskVersion).where(TaskVersion.id.in_(ver_ids)))).scalars()} if ver_ids else {}
-    sprs = {r.id: r.name for r in (await db.execute(
-        select(TaskSprint).where(TaskSprint.id.in_(spr_ids)))).scalars()} if spr_ids else {}
-    types = {r.id: r for r in (await db.execute(
-        select(TaskType).where(TaskType.id.in_(type_ids)))).scalars()} if type_ids else {}
-    users = {r.id: r.name for r in (await db.execute(
-        select(User).where(User.id.in_(user_ids)))).scalars()} if user_ids else {}
-    objs = {r.id: r.name for r in (await db.execute(
-        select(ServiceLocation).where(ServiceLocation.id.in_(obj_ids)))).scalars()} if obj_ids else {}
-    return {t.id: {
-        "type": types[t.type_id].name if t.type_id in types else None,
-        "route": _route_of(types.get(t.type_id)),
-        "assignee": users.get(t.assignee_id),
-        "author": users.get(t.author_id),
-        "object": objs.get(t.object_id),
-        "project": prjs[t.project_id].name if t.project_id in prjs else None,
-        "project_code": prjs[t.project_id].code if t.project_id in prjs else None,
-        "fix_version": vers.get(t.fix_version_id),
-        "found_version": vers.get(t.found_version_id),
-        "sprint": sprs.get(t.sprint_id),
-    } for t in tasks}
+    """Native adapter с текущим router route hook."""
+    return await task_queries.names(db, tasks, route_resolver=_route_of)
 
 
 async def _extras(db: AsyncSession, tasks: list[Task], cid: uuid.UUID, user: User, *,
@@ -527,14 +482,8 @@ NOTE_REV_MINUTES = 10
 
 
 def _not_personal():
-    """Отбор для общих списков: личные записи в работу компании не входят.
-
-    Права и отбор — разные вещи. Автор своё личное видеть вправе (`_visible_to`),
-    но в ленте компании, на доске и в счётчиках ему это не нужно: там он смотрит
-    на работу, а не на свою записную книжку. Без этого условия личные заметки
-    тихо затопили бы общие списки — это главный способ провалить личный раздел.
-    """
-    return Task.visibility != "personal"
+    """Native adapter отбора общей популяции, не ACL."""
+    return task_queries.not_personal()
 
 
 # Разрезы, куда своя ДАТИРОВАННАЯ запись входит по определению. Общий отсев
