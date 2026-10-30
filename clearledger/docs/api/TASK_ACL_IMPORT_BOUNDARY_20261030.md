@@ -99,8 +99,8 @@ JSON evidence 1 MiB. JUnit и JSON сохраняются только в eviden
 
 Worker не запускал runner, приложение, pytest collection, SQL, venv/install,
 Docker/build или deploy. Requirements, Dockerfile, Compose, features, CI
-и рабочие данные не менялись. Нет merge или выкладки. Первый ROOT прогон описан
-ниже; повтор исправленных случаев ожидает отдельного ROOT review/execution.
+и рабочие данные не менялись. Нет merge или выкладки. Оба ROOT прогона и очистка
+завершены; результаты и hashes приведены ниже.
 
 Откат: целиком собственный runtime/tests/runner commit; схемы и данные
 не меняются. Частичная доставка этих двух runtime-файлов не считается
@@ -134,4 +134,63 @@ ACL, а дополнительный same-ref запрос ожидает тол
 сохранены. Исходный runner для 38 случаев сохранён в первом коммите и приватной
 копии `.artifacts/task-acl-import-boundary/initial-38-runner.py`.
 Предыдущие 27 зелёных случаев ROOT поручил сохранить и не повторять.
-Исправленный прогон выполняет только ROOT; worker ожидает actual evidence.
+Исправленный прогон выполнен ROOT; worker проверил hashes переданных evidence
+чтением конкретных файлов, без запуска приложения, тестов или SQL.
+
+## Итог ROOT проверки
+
+Исправленный frozen commit: `0aa45f406c64bcb8a4e5d7c59cb62a70c958c6cf`.
+Runner SHA-256: `3bbcfe4797fdf0a1295524f5213a34a5f2dfa52d0afdb01a5fdae53d6929ed8f`.
+ROOT подтвердил **11/11 PASS**, pytest 17.33 с, дочерний процесс
+30.025600762106478 с, exit 0, child reaped. Нет failures/errors/skips;
+network attempts blocked 0, отправители перехвачены до conftest.
+В первом прогоне перехвачены 72 вызова email/notify/WS, во втором 11 WS;
+capture содержит только названия функций. Реальных внешних отправок нет.
+
+Получены **27 PASS первого прогона + 11 PASS исправленного прогона**.
+Это два отдельных прогона; единого зелёного прогона всех 38 не было.
+В обеих попытках ROOT подтвердил обычный DROP точной disposable БД,
+fresh relations 0 / connections 0 / exists after DROP 0, max locks 64.
+Сообщение ROOT с разрешением report-only finalization: `msg_5ba8c089a0bd`.
+После него runtime/tests/runner не менялись.
+
+Source-only proof подтвердил обратную подстановку import nodes для обоих
+полных модулей, точные lexical bindings и неизменные owner/reexports.
+Inventory на первом frozen runtime commit: **19 sites / 23 bindings**,
+ровно пять удалённых records, 23 оставшихся semantic records сохранены.
+14 raw records равны базе без IDs; у других девяти всего 81 проверенное
+provenance leaf difference только в двух разрешённых модулях.
+Исправленный коммит меняет только новую fixture/runner/отчёт: app digest прежний.
+
+| Источник | SHA-256 |
+|---|---|
+| `source-proof.json` | `05f2773ed9312018c34cd25a831c74b192358eb1b006f143b83a045ad078bece` |
+| frozen `inventory/public.json` | `a58d37ed722c37fc4b54513ce0d87c3600a9aaea6698eb048ce82856cf99ca85` |
+| app: 492 файла | `1360e0813ed1206204183ceb4f66a9cff00090cfc83204e6aca1f5f1f532792b` |
+| corrected tests без runner: 340 файлов | `be918799bba483d2ba71b4950f617a518d1bd6c2bf039f3a7da1ba8394faab8b` |
+| schema: 16 файлов | `51e2a65737f599b7a2b2ceabfeb0b6e054046e64bbce8765ecb1e333b451e79d` |
+
+Корень evidence ROOT:
+`/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/`.
+Первая попытка: `root-task-acl-boundary-review-20261030/` (A);
+исправленный повтор: `root-task-acl-boundary-review-v2-20261030/` (B).
+Все десять hashes ниже проверены worker read-only; подробный приватный manifest:
+`.artifacts/task-acl-import-boundary/root-evidence-references.json`.
+
+| Попытка / файл | SHA-256 |
+|---|---|
+| A / `summary.json` | `b03323266897877c9ab6e072426a26abd8aebea36c81e4eb30f6782b178aa67d` |
+| A / `test-process.json` | `5d66bcef5793350341fbba0f723ce13b9a81cf23eaf39edbf75a81c1e1ddac99` |
+| A / `cleanup-observed.json` | `f85c218fde90aedc66ba8c2eab48add7b441394910945cb2a56f737d6cbbc09b` |
+| A / `evidence-test/task-acl.xml` | `8683af6f794fd5fde4508dd6994d1b7b225677407915a62405a262b95070fbcc` |
+| A / `evidence-test/task-acl-boundary.json` | `9051213370aa7bc0ac72f96bbb1ee52fe989bd1bb6517b3c745a38d51259f75c` |
+| B / `summary.json` | `1950e9426de0eb79b2fa6391f0fafd70bde243c66abdf4732b263eef67abca8d` |
+| B / `test-process.json` | `1f8e02dda0c46660627a7b6581466f23d71ae67328a1b1917a5a1ee453f6e621` |
+| B / `cleanup-observed.json` | `f85c218fde90aedc66ba8c2eab48add7b441394910945cb2a56f737d6cbbc09b` |
+| B / `evidence-test/task-acl.xml` | `33119420231e1a06d30e248d80bfd30af198e32665f0d46f43eaf87006e70568` |
+| B / `evidence-test/task-acl-boundary.json` | `3ee8e255a3d5a113ff4af380ca122e94f8816a0d4b6cc9c7900d713f8138eefe` |
+
+Ограничения: проверен baseline environment, не candidate dependency environment;
+проверены выбранные native PostgreSQL/ASGI случаи, не все API-тесты проекта.
+Рабочие контуры не затрагивались; merge/deploy не выполнялись.
+Worker выполнял только stdlib AST/compile-in-memory/Git и чтение ROOT evidence.
