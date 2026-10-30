@@ -169,8 +169,20 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
         return (await query.project("counterparties", [await query.detail("counterparties", counterpartyId)]))[0]
 
     @operation("/contracts", "contracts", "listContracts", dto.Page[dto.Contract])
-    async def contracts(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
+    async def contracts(params: Annotated[dto.ContractListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("contracts", params)
+
+    @operation("/contract-types", "contracts", "getContractTypeMetadata", dto.ContractTypeMetadata,
+               summary="Read classifier metadata for an independently visible contract code",
+               description="Exact source code. A currently visible contract is required before global catalog lookup. "
+                   "Unknown catalog codes retain nullable metadata; inactive historical labels remain readable. "
+                   "Does not enumerate global or hidden contract types.")
+    async def contract_type_metadata(params: Annotated[dto.ContractTypeMetadataQuery, QueryParams()],
+                                     request: Request, query: Query = Depends(query_dependency)):
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(422, "Request body is not accepted")
+        return await query.contract_type_metadata(params)
 
     @operation("/contracts/{contractId}", "contracts", "getContract", dto.Contract)
     async def contract_detail(contractId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):

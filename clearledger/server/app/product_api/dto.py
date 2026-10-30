@@ -54,6 +54,25 @@ class ListQuery(BaseModel):
         return self
 
 
+class ContractListQuery(ListQuery):
+    typeCode: str | None = Field(default=None, min_length=1, max_length=256, pattern=r"^[^\x00]+$",
+        description="Exact source classifier code; case and whitespace are significant. No global enum.")
+
+
+class ContractTypeMetadataQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    typeCode: str = Field(min_length=1, max_length=256, pattern=r"^[^\x00]+$",
+        description="Exact code from an independently visible contract; not a global catalog selector.")
+
+
+class ContractTypeMetadata(DTO):
+    type_code: str
+    label: str | None
+    gk_basis: str | None
+    direction: str | None
+    is_active: bool | None
+
+
 class EmptyQuery(DTO):
     pass
 
@@ -181,6 +200,9 @@ class Counterparty(DTO):
 
 
 class Contract(DTO):
+    type_code: str | None = Field(description="Source Contract.type_code, including unknown or empty codes. No legal inference.")
+    valid_until: str | None = Field(max_length=20,
+        description="Exact native validity value. Nullable source string, not a validated ISO date; null is unknown, not perpetual.")
     id: Id
     number: str
     date: date | None

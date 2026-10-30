@@ -108,6 +108,13 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                     raise state["failure"]
                 return dict(contract_id=identifier, items=[], total=0, next_cursor=None)
 
+            async def contract_type_metadata(inner, params):
+                state["domain"].append(("contract-type-metadata", params.typeCode))
+                if state["failure"]:
+                    raise state["failure"]
+                return dto.ContractTypeMetadata(type_code=params.typeCode, label=None, gk_basis=None,
+                                                direction=None, is_active=None)
+
             async def detail(inner, resource, identifier):
                 state["domain"].append(("detail", resource))
                 if state["failure"]:
@@ -121,7 +128,7 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                     "equipment": dict(id=str(FILE), vendor=None, model=None, serial_number=None, power_kw=None,
                                       state="in_operation", object_id=None),
                     "counterparties": dict(id=str(FILE), name="Synthetic", inn=None, kpp=None),
-                    "contracts": dict(id=str(FILE), number="S", date=None, title=None, is_closed=False,
+                    "contracts": dict(type_code=None, valid_until=None, id=str(FILE), number="S", date=None, title=None, is_closed=False,
                                       scope_type="company", counterparty_id=None),
                     "documents": dict(id=str(DOC), title="Synthetic", status="draft", registration_number=None,
                                       registration_date=None, current_revision=1, object_id=None, counterparty_id=None),
@@ -142,6 +149,8 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         headers = kwargs.pop("headers", {})
         if token is not None:
             headers["Authorization"] = "Bearer " + token
+        if path == "/contract-types" and "params" not in kwargs:
+            kwargs["params"] = {"typeCode": "synthetic"}
         return await self.client.request(method, path, headers=headers, **kwargs)
 
     def problem(self, response, status):
@@ -233,8 +242,8 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         OpenAPIV31SpecValidator(schema).validate()
         entries = policy_registry(self.app)
         registry = export_runtime_registry(self.app)
-        self.assertEqual(len(entries), 14)
-        self.assertEqual(len({v["operationId"] for v in registry["operations"]}), 14)
+        self.assertEqual(len(entries), 15)
+        self.assertEqual(len({v["operationId"] for v in registry["operations"]}), 15)
         for entry in entries:
             with self.subTest(path=entry["path"]):
                 operation = schema["paths"][entry["path"]]["get"]
@@ -286,7 +295,7 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(set(schema["paths"][entry["path"]]["get"]["responses"]["200"]["content"]),
                                      {"application/json"})
                     checked.append(entry["operationId"])
-        self.assertEqual(len(checked), 13)
+        self.assertEqual(len(checked), 14)
 
     async def test_binary_representation_and_range_ignore_are_explicit(self):
         version = SimpleNamespace(file_id=FILE, file_name="../Скан 1.pdf")

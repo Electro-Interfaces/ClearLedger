@@ -44,10 +44,10 @@ class ProductServiceSchema(unittest.TestCase):
                     self.assertEqual(entry["owner"], "documents")
                 self.assertEqual(operation["security"], expected)
                 self.assertEqual(operation["x-access-policy"]["securityScheme"], "ProductOAuth")
-        self.assertEqual((machine, user_only), (10, 4))
+        self.assertEqual((machine, user_only), (11, 4))
         self.assertEqual(policy_registry(self.app), self.registry)
         self.assertEqual(len(self.schema["tags"]), 6)
-        self.assertEqual(len(self.schema["paths"]), 14)
+        self.assertEqual(len(self.schema["paths"]), 15)
         self.assertEqual(curated_openapi(self.app), self.schema)
 
     def test_machine_profile_standard_flow_and_explicit_nonstandard_form_extension(self):

@@ -3,8 +3,28 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: 8d3b8412730a26afdbaa50efda6d1c78d17f1b76ec460a3e2e3e2b72fa2023aa
+// openapi-typescript 7.10.1; curated schema sha256: 0003dfb460e9fecafb455c0ae5f66cb678015b7b1976eeb275597ed124ee18a9
 export interface paths {
+    "/contract-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read classifier metadata for an independently visible contract code
+         * @description Exact source code. A currently visible contract is required before global catalog lookup. Unknown catalog codes retain nullable metadata; inactive historical labels remain readable. Does not enumerate global or hidden contract types.
+         */
+        get: operations["getContractTypeMetadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/contracts": {
         parameters: {
             query?: never;
@@ -270,6 +290,16 @@ export interface components {
             scopeType: string;
             /** Title */
             title: string | null;
+            /**
+             * Typecode
+             * @description Source Contract.type_code, including unknown or empty codes. No legal inference.
+             */
+            typeCode: string | null;
+            /**
+             * Validuntil
+             * @description Exact native validity value. Nullable source string, not a validated ISO date; null is unknown, not perpetual.
+             */
+            validUntil: string | null;
         };
         /** ContractDocument */
         ContractDocument: {
@@ -300,6 +330,19 @@ export interface components {
             scopeType: string;
             /** Total */
             total: number;
+        };
+        /** ContractTypeMetadata */
+        ContractTypeMetadata: {
+            /** Direction */
+            direction: string | null;
+            /** Gkbasis */
+            gkBasis: string | null;
+            /** Isactive */
+            isActive: boolean | null;
+            /** Label */
+            label: string | null;
+            /** Typecode */
+            typeCode: string;
         };
         /** Counterparty */
         Counterparty: {
@@ -651,6 +694,193 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getContractTypeMetadata: {
+        parameters: {
+            query: {
+                /** @description Exact code from an independently visible contract; not a global catalog selector. */
+                typeCode: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractTypeMetadata"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Enabled shared PostgreSQL product quota exhausted (rate_limited), or generic injected application HTTP429 (internal_error). Quota is disabled by default. */
+            429: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     listContracts: {
         parameters: {
             query?: {
@@ -659,6 +889,8 @@ export interface operations {
                 dateTo?: string | null;
                 pageSize?: number;
                 q?: string | null;
+                /** @description Exact source classifier code; case and whitespace are significant. No global enum. */
+                typeCode?: string | null;
             };
             header?: never;
             path?: never;
