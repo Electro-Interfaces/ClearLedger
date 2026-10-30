@@ -328,8 +328,8 @@ SQL-shape parity с независимым baseline и cleanup; повторно
 до marker/DDL/seed, сохраняет данные при повторном запуске и отказывает при
 повреждениях каталога/журнала. Проверены fresh/repeat legacy public/Core,
 managed adoption, native readiness и copied-runtime import. Тестовые БД
-штатно удалены. Actual Docker build, полный lifespan, рабочий restore и
-остальные владельцы DDL не проверены; режим выключен, M16 остаётся открытой.
+штатно удалены. В этом пакете actual Docker build, полный lifespan, рабочий
+restore и остальные владельцы DDL не проверялись; режим выключен, M16 остаётся открытой.
 [Runner](SCHEMA_MIGRATION_RUNNER_20261030.md),
 [Cutover](SCHEMA_MIGRATION_CUTOVER_20261030.md),
 [независимый source review](SCHEMA_GATE_REVIEW_20261030.md).
@@ -360,7 +360,33 @@ readonly runner, повтор marker/readiness, ORM rollback, checksum negative 
 20 positive/38 negative/37 raw-unknown controls и всеми50 парами. Четыре
 исторические ошибки тестов/сравнения не переписаны в PASS. Обе БД штатно
 удалены. Код приложения и frozen verifier неизменны; рабочий restore, actual
-Docker build/full lifespan и выпуск не подтверждены.
+Docker build/full lifespan и выпуск этим пакетом не подтверждены.
 [Финальная проверка](SCHEMA_RESTORE_PROOF_20261030.md),
 [семантический review](SCHEMA_RESTORE_CAST_REVIEW_20261030.md),
 [review реализации c79](SCHEMA_RESTORE_CANONICALIZER_REVIEW_20261030.md).
+
+M16: исходный backend Dockerfile собран из immutable Git context на88fdef78.
+ROOT build/export EXIT0 за144,035с; архив370388992байт, распакованные слои
+1051445760байт. Digest и содержимое слоёв проверены до отдельной загрузки.
+В настоящем образе Python3.13.18 прошёл изолированный import/packaging probe
+за13,642с: все489файлов app и16файлов миграций совпали с Git, настоящий
+offline CLI plan и4локальных Swagger assets проверены. Пять новых флагов
+выключены, попыток защищённых побочных действий0, один поток; SQL и lifespan
+не запускались. Контейнер проверки работал без сети, с read-only rootfs,
+непривилегированным пользователем и отдельным tmpfs.
+
+Удалены только собственные builder, container, tmpfs state, helper reference
+и тестовый образ. Прежние Python image и PostgreSQL container сохранены;
+архив остался приватным доказательством. Сборка фиксирует фактические60Python
+distributions на этот момент; mutable base/apt и незакреплённые transitive
+dependencies пока не обеспечивают повторяемую release-сборку. Полный HTTP/
+lifespan, старые binaries, рабочая резервная копия, CI и выпуск остаются открыты.
+[Проверка образа](BACKEND_IMAGE_PACKAGING_20261030.md).
+
+План фиксации зависимостей принят как source/receipt analysis:22прямых требования
+(18точных,4нижние границы,3extras),37дополнительных distributions иpip сверены
+с actual image receipt. Подтверждена сборка http-ece из sdist. Выбраны отдельные
+hashed runtime/bootstrap/tooling locks, сохранённые wheels и проверяемый base/APT
+contract; установки и resolver в этой задаче не запускались. Следующая отдельная
+задача готовит входные файлы и проверку артефактов, сохраняя текущий Dockerfile
+и requirements. [План](BACKEND_DEPENDENCY_REPRODUCIBILITY_20261030.md).
