@@ -18,8 +18,8 @@ export interface MeetingUrls {
 }
 
 /** Создать конференцию: случайная комната + ссылки организатора и гостя. */
-export async function createMeeting(): Promise<MeetingUrls> {
-  return post<MeetingUrls>('/api/meetings')
+export async function createMeeting(contextGuard?: () => void): Promise<MeetingUrls> {
+  return post<MeetingUrls>('/api/meetings', undefined, { contextGuard })
 }
 
 /**
@@ -32,15 +32,18 @@ export async function createMeeting(): Promise<MeetingUrls> {
  */
 export async function startMeeting(): Promise<MeetingUrls> {
   if (isDemoMode()) return createMeeting()
+  const проверитьКонтекст = captureApiContextGuard()
   const вкладка = window.open('about:blank', '_blank')
   if (вкладка) вкладка.opener = null      // как noopener: чужая страница не дотянется до нашей
   try {
-    const m = await createMeeting()
+    const m = await createMeeting(проверитьКонтекст)
+    проверитьКонтекст()
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer') // попапы запрещены — пусть браузер спросит
+    проверитьКонтекст()
     return m
   } catch (e) {
-    вкладка?.close()
+    try { if (вкладка?.location.href === 'about:blank') вкладка.close() } catch { /* чужой origin */ }
     throw e
   }
 }
@@ -100,11 +103,18 @@ export async function startEventMeeting(companyId: string, eventId: string): Pro
 
 /** Видеосвязь заявки: актуальный ticket ACL; только личный короткий вход, без гостевой ссылки. */
 export async function startTicketMeeting(ticketId: string): Promise<void> {
+  const проверитьКонтекст = captureApiContextGuard()
   const tab = window.open('about:blank', '_blank')
   if (tab) tab.opener = null
   try {
-    const result = await post<{ joinUrl: string }>(`/api/chat/tickets/${encodeURIComponent(ticketId)}/video`, {})
+    const result = await post<{ joinUrl: string }>(`/api/chat/tickets/${encodeURIComponent(ticketId)}/video`, {},
+      { contextGuard: проверитьКонтекст })
+    проверитьКонтекст()
     if (tab) tab.location.replace(result.joinUrl)
     else window.open(result.joinUrl, '_blank', 'noopener,noreferrer')
-  } catch (error) { tab?.close(); throw error }
+    проверитьКонтекст()
+  } catch (error) {
+    try { if (tab?.location.href === 'about:blank') tab.close() } catch { /* чужой origin */ }
+    throw error
+  }
 }
