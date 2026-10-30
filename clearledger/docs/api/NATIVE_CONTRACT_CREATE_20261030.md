@@ -2,7 +2,8 @@
 
 Дата: 30.10.2026. База: `8197c96b52aa6a1aeed23252f8cbcf585ea28731`.
 Собственная ветка: `agent/api-native-contract-create-20261030`.
-Статус: **реализовано и frozen source проверен; actual SQL ещё НЕ ЗАПУСКАЛСЯ**.
+Статус: **реализовано; независимый ROOT actual run подтвердил 59 PASS,
+0 FAIL/ERROR/SKIP** на frozen `1cd272c6d3df6b45112d0f86e02e9b485d204a4a`.
 Worker не импортирует app/драйверы и не выполняет pytest collect/gate/SQL.
 
 ## Цель и граница
@@ -147,8 +148,8 @@ Expected golden определён из полного литерального 
 Contract-теста `test_reference_identity_api.py` (duplicate, parties CREATE/PATCH,
 changed-fields PATCH) без полного 117/allContract/allCP набора.
 
-AST-подсчёт без pytest collect: **55 новых + 4 прежних = 59 proposed cases**.
-Это план количества, actual результат ещё отсутствует:
+Первоначальный AST-подсчёт без worker pytest collect: **55 новых + 4 прежних = 59**.
+ROOT затем фактически выполнил весь этот набор одним успешным прогоном:
 
 | Группа новых случаев | Количество |
 |---|---:|
@@ -202,9 +203,10 @@ ROOT-only pre-import gate предназначен только для ново�
 передаёт ROOT. Guard проверяет полный app, tests и schema_migrations;
 для self-referencing runner его SHA256 фиксируется отдельно и передаётся ROOT,
 остальной tests tree — immutable digest. Все manifest/raw evidence private.
-Worker выполняет только AST/compile/diff и ожидает ROOT actual result/cleanup.
+До получения actual evidence worker выполнял только AST/compile/diff;
+прогон и проверку очистки выполнил ROOT.
 
-ROOT создаёт точную отдельную БД, передаёт matching TEST_DATABASE_URL/DATABASE_URL
+При повторении ROOT создаёт точную отдельную БД и передаёт matching TEST_DATABASE_URL/DATABASE_URL
 без query/fragment, numeric loopback 127.0.0.1 и approved port в
 `NATIVE_CONTRACT_PG_PORT`. Нужны flags `ROOT_APPROVED_NATIVE_CONTRACT_CREATE_TESTS=1`,
 `RUN_NATIVE_CONTRACT_CREATE_TESTS=1`, PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 и
@@ -231,7 +233,33 @@ ROOT должен хранить отдельно от проверяемого 
 ROOT подтверждает actual counts, child exit/reap, fresh relations/connections,
 обычный DROP без FORCE/terminate, прежнюю lock quota и освобождение SQL slot.
 
-## Ограничения до ROOT actual run
+## Независимая actual проверка ROOT
+
+Один запуск точного frozen `1cd272c6` дал **59 PASS** — 55 новых и 4 выбранных
+прежних; **0 FAIL / 0 ERROR / 0 SKIP**, pytest **24.31 с**.
+Внешний процесс: **36.5280256383121 с**, **EXIT 0**, child reaped,
+watchdog не сработал. Результат относится к одному общему 59-case run;
+после SQL-прогона oracle и исходники не менялись.
+
+ROOT независимо проверил пять exact helper AST, перенесённое тело CREATE
+с заменой только return на ORM, остальной router/PATCH/serializer,
+lexical globals и private aliases. 489 прежних app-файлов вне router совпали
+с base. Хеши всего app492/tests336+runner/schema16 сверены до первого
+импорта приложения/драйвера и до SQL. Worker на всех стадиях ограничивался
+source AST/compile/diff и не исполнял gate, collect, приложение или SQL.
+
+По сообщению ROOT свежий контроль точной
+`api_native_contract_create_test_20261030` подтвердил **relations=0, connections=0**,
+после обычного **DROP DATABASE** — **existsAfter=0**;
+`max_locks_per_transaction=64` не изменялся. Private evidence ROOT:
+`.artifacts/root-native-contract-create-review-20261030/`:
+`summary.json`, `cleanup.log`, `source-proof.json`, `root-source-boundary.json`,
+`test-process.json` и JUnit. Сырые логи и credentials в публичный отчёт не включены.
+
+Финальный follow-up меняет только этот отчёт. Проверенные app/test/runner/schema
+bytes не изменяются, дополнительных тестов либо подключений worker не делает.
+
+## Ограничения результата
 
 Native use case сохраняет прежний допуск до lock; новая проверка admission после
 ожидания не добавлена. Object/org/null-intent policy не расширена. Partner write
@@ -240,4 +268,9 @@ Native use case сохраняет прежний допуск до lock; нов
 их результаты не регенерируются и не выдаются за проверку нового app.
 Полный CI, все contracts/CP, 117-suite, VM/реальные API/источники/данные,
 сборка/выкатка/активация и закрытие M06 не входят в результат этого среза.
-До ROOT actual evidence Dispatch не завершается как runtime принятый.
+Это characterisation существующего native порта и выделение общего use case,
+не новый внешний write API и не устранение подтверждённой уязвимости.
+Identity dependency в новых HTTP-тестах синтетическая и выдаёт настоящего User;
+native company/party/type/lock/transaction policy и SQL настоящие. Набор
+не является полным OAuth/session E2E или полным CI всех references routes.
+Commit/push не означает merge, deploy или глобальное завершение M06.
