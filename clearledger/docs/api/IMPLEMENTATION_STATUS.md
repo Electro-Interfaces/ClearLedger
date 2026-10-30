@@ -150,3 +150,13 @@ unknown-INN карточки; root79PASS24.70с без SKIP подтвердил
 omitted и explicitNone, прежние три raw формы не расширены. Схема и старые
 данные не переписывались; Contract/phone/matcher/locks/callercommit сохранены.
 [Доказательства](corporate-counterparty-commands-20261030.md).
+
+
+Company-wide occupancy теперь не сужается пользовательским ORM listener:
+Core columns с явным tenant predicate проверяют скрытые current/history aliases
+без hidden entities и без расширения обычного чтения. Hidden existing upsert
+снова даёт404, новый scoped create403. Root224PASS37.58с;
+[отчёт](location-number-scope-collision-20261030.md). Разбор109route candidates
+также независимо повторён: каждый literal выигрывает firstFULL,0shadows,
+124endpoint refs; это match-only proof, не HTTP/ACL acceptance.
+[Отчёт](ROUTE_OVERLAP_TRIAGE_20261030.md).

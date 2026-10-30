@@ -368,3 +368,17 @@ CPython audit guards не заявляются песочницей против
 - `clearledger/docs/api/ROUTE_OVERLAP_TRIAGE_20261030.json`: SHA256 `f9555b8a8bb467f5674e05ad57971474e62b5fb888f52226b4321d219dd4fd27`.
 - `clearledger/scripts/triage-route-overlaps.py`: SHA256 `f29e6c4212c986e102ed1adf2140e93276aecda31ecfd4a97da3e6a551e0fd6d`.
 - `clearledger/scripts/tests/test_route_overlap_triage.py`: SHA256 `0db21184b3f338c2b54d4af6d21698111409ee5e600129b5fa2773f80175aa84`.
+
+
+## Независимая проверка координатора
+
+Исходный821f377981f928244ecf13e9297f79edbd75ff81 перенесён как18fd90cf.
+Координатор выполнил7pure controls (PASS,0.003с) и отдельный actual guarded
+triage на общем исходнике18fd90cf46b98c8e0b74c8f9a5711f69e0aa0768:109/109
+literal-precedes-parameter,124source endpoints,0guard denials,EXIT0/reaped.
+Этот состав также содержит исправления company-wide occupancy; actual registry
+parity с исходным артефактом сохранилась. Pairs/sourceEndpoints/counts root вывода
+полностью совпали с committed companion; SHA boundedJSON и12файлов
+исходников на его immutableffab2a10 дополнительно подтверждены через Git blobs.
+Локальный root evidence: `.artifacts/root-route-overlap-triage.json`.
+Новых endpoint requests, SQL, lifespan и проверки ACL не было.

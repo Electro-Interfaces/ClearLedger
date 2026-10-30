@@ -152,3 +152,18 @@ max_locks_per_transaction=64 сохранён. SQL_SLOT_RELEASED передан 
 | Private regressions.xml | `95871c5437a181562db253509187c933f0f36926569e7bcc7a09bae6a8c321d6` |
 | Private cleanup.log | `4945b2cf80e81e217d31995f0646278ab7c50d02563579d4558781baa5853bb5` |
 | Private runner.py | `ff1e311b5afdb460e20e8fab3cea536e2a696e98ba99772ae775a1f1efbae1d5` |
+
+
+## Независимая проверка координатора
+
+Исходник5c0deb220ab328eacad6c098121a46c8fcfb94ad перенесён как461c9ed4.
+Root повторил ровно34new+43history+147old с четырьмя явными opt-in flags и
+настоящим listener в одном процессе: **224PASS37.58с**, без FAIL/ERROR/SKIP
+и DESELECTED. Тест5751c084 и runtime8287fcac сохранились без изменения.
+Параллельный read-only route triage не менял runtime; тестовый source pin461c9ed4.
+Процесс5576 EXIT0/reaped; отдельная собственная syntheticDB после закрытия
+engine имела public/edge tables0/conns0, затем удалена обычным DROP без FORCE
+или terminate. Новый контроль подтвердил dbexists0/maxlocks64; probes закрыты.
+Evidence: `.artifacts/root-location-number-scope-final.log`.
+Code-vs-number domain separation по-прежнему отдельная незавершённая задача;
+224PASS не доказывают отсутствие её архитектурной ошибки.
