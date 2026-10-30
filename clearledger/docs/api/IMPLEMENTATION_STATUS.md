@@ -170,3 +170,19 @@ Core columns с явным tenant predicate проверяют скрытые cu
 также независимо повторён: каждый literal выигрывает firstFULL,0shadows,
 124endpoint refs; это match-only proof, не HTTP/ACL acceptance.
 [Отчёт](ROUTE_OVERLAP_TRIAGE_20261030.md).
+
+
+M05-B: принят [план импортных adapters](M05_IMPORT_ADAPTER_DESIGN_20261030.md)
+(source11c5a291→e0c30702). Root подтвердил29immutable source blobs, paired
+Markdown SHA и26source fact refs;14SQL сценариев пока только запланированы.
+Рекомендуется полный sorted-ID set до company barrier с root-T capability
+и запретом late extension. Unit/document/session/book writers — обязательные
+prerequisites, а не предположения. Реализация foundation начата отдельно,
+импорты ещё не подключены. Partial/reconciliation должен доходить до UI
+без ложного success toast; текущий UI исправляется отдельным ограниченным пакетом.
+
+
+M17: два consumer фоновой загрузки показывают partial через warning вместо
+success. Root TypeScript app/node PASS; ESLint baseline и candidate совпадают
+(7прежнихerrors/3warnings,0новых), полный lint остаётся FAIL. Browser/HTTP
+E2E не выполнялся. [Отчёт](channel-partial-notifications-20261030.md).

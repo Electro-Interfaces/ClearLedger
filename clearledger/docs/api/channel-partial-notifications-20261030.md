@@ -61,3 +61,17 @@ running polling, progress, refresh, return/finally и cache invalidation.
 повторяющие простое ветвление, не добавлялись. Layout и оформление сохранены.
 Реальные env, auth, API, SSH, SQL, merge и deploy не использовались;
 приёмка на рабочем пространстве и полный CI этим отчётом не подтверждаются.
+
+
+## Независимая проверка координатора
+
+Исходник5d6a56ce1557c00bde3082af7c866899059caa71 перенесён какcefd8797.
+Координатор повторил TypeScript app и node с собственными incremental caches:
+оба EXIT0, диагностик нет. ESLint.lintText на source e0c30702 и кандидате с
+одинаковым filePath подтвердил те же7errors/3warnings; совпали rule, severity,
+message и column/endColumn с учётом сдвига строк. Сам ESLint остаётся FAIL
+из-за прежних замечаний, ноль новых диагностик не называется общим lint PASS.
+Runtime diff проверен: только два else-if для partial→warning; прежние error,
+success, polling и cache calls не изменены. Browser/HTTP E2E не проводился.
+Локальные evidence: `.artifacts/root-channel-partial-app.log`,
+`root-channel-partial-node.log`, `root-channel-partial-eslint.json`.
