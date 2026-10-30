@@ -194,3 +194,11 @@ Foundation M05-B принят: acquire_location_set/LockedLocationSet и admitte
 Late extension и потеря dirty target блокируются до SQL. Крупные sets и
 подключение import/unit/FK writers остаются gated.
 [Отчёт](location-lock-sets-20261030.md).
+
+
+Scoped Codex Security Standard завершён для трёх файлов api_contracts на
+310b31afb263d0ece311094f32e13a8b0cf0383e: findings0/deferred0, canonical sealed
+readback PASS у владельца continuation claim. Проверка последовательная без
+независимого baseline-агента; supporting auth/product/identity trace-only.
+Это не полный аудит API/production/OAuth и не разрешение выпуска.
+[Сводка](API_CONTRACTS_SECURITY_REVIEW_20261030.md).
