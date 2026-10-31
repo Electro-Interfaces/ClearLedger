@@ -168,7 +168,10 @@ async def test_versioned_core_and_startup_boundary(core,monkeypatch,mode):
             from app.services.schema_version_gate import require_connection as budget_guard
             settings=Settings(_env_file=None,database_url=target_url(),SECRET_KEY='c2-synthetic-guard-test-only-long-key',managed_core_budget_enabled=True,managed_core_budget_expected_database=migration_config().database,managed_core_budget_expected_user='clearledger')
             async with core.connect() as conn:
-                with pytest.raises(RuntimeError,match='Managed Core budget schema'):await budget_guard(conn,settings)
+                receipt=await budget_guard(conn,settings)
+                assert receipt.driver_in_transaction and not receipt.read_only
+                assert receipt.isolation=='read committed'
+                assert await conn.scalar(text('SELECT count(*) FROM core.core_schema_versions'))==3
     finally:event.remove(core.sync_engine,'before_cursor_execute',record)
 
 
