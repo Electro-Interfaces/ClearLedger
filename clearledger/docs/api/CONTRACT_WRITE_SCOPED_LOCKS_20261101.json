@@ -1,0 +1,1197 @@
+{
+  "protocol": "contract-write-scoped-locks-v1",
+  "status": "SOURCE_B1_FOLLOWUP_AUTHORED_RUNTIME_NOTRUN",
+  "date": "2026-11-01",
+  "exact_base": "d71e4f3754efce7c911cc95cb46eb22707e8efbc",
+  "root_authority": "msg_b211505b113a",
+  "ownership_exact5": [
+    "clearledger/server/app/services/contract_write_locks.py",
+    "clearledger/server/tests/test_contract_write_locks.py",
+    "clearledger/server/tests/test_contract_write_locks_pg.py",
+    "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+    "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.json"
+  ],
+  "api": {
+    "types": [
+      "LockMode.SHARED=1",
+      "LockMode.EXCLUSIVE=2",
+      "LockRequest(key: ScopedKey, mode: LockMode)",
+      "LockPlan(requests: tuple[LockRequest, ...])",
+      "ActualLock(namespace: int, key: int, mode: LockMode)",
+      "ScopedLockCapability(plan: LockPlan)"
+    ],
+    "functions": [
+      "encode_key(key: ScopedKey) -> bytes",
+      "advisory_key(key: ScopedKey) -> tuple[int, int]",
+      "acquire_scoped_locks(session: Session, plan: LockPlan) -> ScopedLockCapability",
+      "async acquire_scoped_locks_async(session: AsyncSession, plan: LockPlan) -> ScopedLockCapability",
+      "require_scoped_locks(session: Session, capability: ScopedLockCapability, required: tuple[LockRequest, ...]) -> None"
+    ],
+    "async_protocol": "run_sync(acquire_scoped_locks, plan), actual AsyncSession.sync_session; validator is IO-free with sync_session",
+    "type_errors": "exact key/UUID/str/LockMode/Request/Plan boundaries; no bool, coercion or subclasses",
+    "lifetime_error": "ScopedLockError; caller rollback entire root",
+    "reentry": "one attempt per actual (Connection, RootTransaction), across Sessions/ORM roots; subset reuse via validator; no late extension/upgrade/retry"
+  },
+  "encoding": {
+    "version": 1,
+    "schema": {
+      "v": 1,
+      "key": "kind literal",
+      "parts": "object of exact named UUID/text fields"
+    },
+    "uuid": "exact uuid.UUID -> lowercase hyphenated str(UUID)",
+    "strings": "exact nonempty str; no trim/casefold/normalization/coercion; whitespace preserved",
+    "json": {
+      "sort_keys": true,
+      "ensure_ascii": true,
+      "separators": [
+        ",",
+        ":"
+      ],
+      "allow_nan": false
+    },
+    "bytes": "UTF-8; resulting ASCII, no BOM/newline",
+    "digest": "SHA256",
+    "key": "first 4 digest bytes, big-endian signed int32",
+    "namespace_in_payload": false
+  },
+  "namespaces": [
+    {
+      "constructor": "AppKey",
+      "kind": "app",
+      "namespace": 1346568208,
+      "hex": "0x50430010",
+      "parts": [
+        "app_id"
+      ]
+    },
+    {
+      "constructor": "ClientKey",
+      "kind": "client",
+      "namespace": 1346568224,
+      "hex": "0x50430020",
+      "parts": [
+        "client_id"
+      ]
+    },
+    {
+      "constructor": "UserKey",
+      "kind": "user",
+      "namespace": 1346568240,
+      "hex": "0x50430030",
+      "parts": [
+        "user_id"
+      ]
+    },
+    {
+      "constructor": "CompanyKey",
+      "kind": "company",
+      "namespace": 1346568256,
+      "hex": "0x50430040",
+      "parts": [
+        "company_id"
+      ]
+    },
+    {
+      "constructor": "InstallationKey",
+      "kind": "installation",
+      "namespace": 1346568272,
+      "hex": "0x50430050",
+      "parts": [
+        "installation_id"
+      ]
+    },
+    {
+      "constructor": "CreateProfileKey",
+      "kind": "create_profile",
+      "namespace": 1346568288,
+      "hex": "0x50430060",
+      "parts": [
+        "profile_id"
+      ]
+    },
+    {
+      "constructor": "RoleKey",
+      "kind": "role",
+      "namespace": 1346568304,
+      "hex": "0x50430070",
+      "parts": [
+        "company_id",
+        "role_id"
+      ]
+    },
+    {
+      "constructor": "MemberKey",
+      "kind": "member",
+      "namespace": 1346568320,
+      "hex": "0x50430080",
+      "parts": [
+        "company_id",
+        "user_id"
+      ]
+    },
+    {
+      "constructor": "RefCompositeKey",
+      "kind": "ref_composite",
+      "namespace": 1346568336,
+      "hex": "0x50430090",
+      "parts": [
+        "company_id"
+      ]
+    },
+    {
+      "constructor": "TypeCatalogKey",
+      "kind": "type_catalog",
+      "namespace": 1346568341,
+      "hex": "0x50430095",
+      "parts": [
+        "type_code"
+      ]
+    }
+  ],
+  "golden_provenance": "Independent stdlib SHA256 over literal bytes; production encoder and all helper/test functions NOT executed",
+  "golden_vectors": [
+    {
+      "constructor": "AppKey",
+      "namespace": 1346568208,
+      "kind": "app",
+      "parts": {
+        "app_id": "00000000-0000-0000-0000-000000000001"
+      },
+      "payload_ascii": "{\"key\":\"app\",\"parts\":{\"app_id\":\"00000000-0000-0000-0000-000000000001\"},\"v\":1}",
+      "sha256": "ecf05944133da2dd9cac8e935ee13a319819715aa0b76855571084d6514d6f88",
+      "signed32": -319792828
+    },
+    {
+      "constructor": "ClientKey",
+      "namespace": 1346568224,
+      "kind": "client",
+      "parts": {
+        "client_id": "client-A"
+      },
+      "payload_ascii": "{\"key\":\"client\",\"parts\":{\"client_id\":\"client-A\"},\"v\":1}",
+      "sha256": "69630af0726cee7674ef25bafbbfbd4b3618b154c08f668bc34a3b16815a3e56",
+      "signed32": 1768098544
+    },
+    {
+      "constructor": "UserKey",
+      "namespace": 1346568240,
+      "kind": "user",
+      "parts": {
+        "user_id": "00000000-0000-0000-0000-000000000002"
+      },
+      "payload_ascii": "{\"key\":\"user\",\"parts\":{\"user_id\":\"00000000-0000-0000-0000-000000000002\"},\"v\":1}",
+      "sha256": "cc2cc6c2e0b77ec39351f43b338e271d17dffb1ed5ec2314b67bff2518b6c55c",
+      "signed32": -869480766
+    },
+    {
+      "constructor": "CompanyKey",
+      "namespace": 1346568256,
+      "kind": "company",
+      "parts": {
+        "company_id": "00000000-0000-0000-0000-000000000003"
+      },
+      "payload_ascii": "{\"key\":\"company\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\"},\"v\":1}",
+      "sha256": "cdd56396e65159d2b8f0fa18690157d4e95da67403546e3da07234757ef220a8",
+      "signed32": -841653354
+    },
+    {
+      "constructor": "InstallationKey",
+      "namespace": 1346568272,
+      "kind": "installation",
+      "parts": {
+        "installation_id": "00000000-0000-0000-0000-000000000004"
+      },
+      "payload_ascii": "{\"key\":\"installation\",\"parts\":{\"installation_id\":\"00000000-0000-0000-0000-000000000004\"},\"v\":1}",
+      "sha256": "602de6a432251500136e9b8dcb84428be0c3dd7b5ad061e02a6c1a4a021e837a",
+      "signed32": 1613620900
+    },
+    {
+      "constructor": "CreateProfileKey",
+      "namespace": 1346568288,
+      "kind": "create_profile",
+      "parts": {
+        "profile_id": "00000000-0000-0000-0000-000000000005"
+      },
+      "payload_ascii": "{\"key\":\"create_profile\",\"parts\":{\"profile_id\":\"00000000-0000-0000-0000-000000000005\"},\"v\":1}",
+      "sha256": "52697f44fd26ac7eda36b01c82a61444a81f23398e9aab5b7673c3839fc6ee25",
+      "signed32": 1382645572
+    },
+    {
+      "constructor": "RoleKey",
+      "namespace": 1346568304,
+      "kind": "role",
+      "parts": {
+        "company_id": "00000000-0000-0000-0000-000000000003",
+        "role_id": "00000000-0000-0000-0000-000000000006"
+      },
+      "payload_ascii": "{\"key\":\"role\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\",\"role_id\":\"00000000-0000-0000-0000-000000000006\"},\"v\":1}",
+      "sha256": "0343196270bdf3cad67c3ddb6b2592c0402f08164f19a16da56ccb6c8247e712",
+      "signed32": 54729058
+    },
+    {
+      "constructor": "MemberKey",
+      "namespace": 1346568320,
+      "kind": "member",
+      "parts": {
+        "company_id": "00000000-0000-0000-0000-000000000003",
+        "user_id": "00000000-0000-0000-0000-000000000002"
+      },
+      "payload_ascii": "{\"key\":\"member\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\",\"user_id\":\"00000000-0000-0000-0000-000000000002\"},\"v\":1}",
+      "sha256": "69b929ee74b36386ddc397f86f012bbeb809b9358d50c5049f312bb1d1cfaa48",
+      "signed32": 1773742574
+    },
+    {
+      "constructor": "RefCompositeKey",
+      "namespace": 1346568336,
+      "kind": "ref_composite",
+      "parts": {
+        "company_id": "00000000-0000-0000-0000-000000000003"
+      },
+      "payload_ascii": "{\"key\":\"ref_composite\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\"},\"v\":1}",
+      "sha256": "5ed08e6466353575a9fbfceabb5b153f81d6a9a641c211a1febb947be53dd79c",
+      "signed32": 1590726244
+    },
+    {
+      "constructor": "TypeCatalogKey",
+      "namespace": 1346568341,
+      "kind": "type_catalog",
+      "parts": {
+        "type_code": "Договор A "
+      },
+      "payload_ascii": "{\"key\":\"type_catalog\",\"parts\":{\"type_code\":\"\\u0414\\u043e\\u0433\\u043e\\u0432\\u043e\\u0440 A \"},\"v\":1}",
+      "sha256": "25102e3a65e56f60f92a3e7f4c1b15e41456c374cdf65eded642e1336a3a95d7",
+      "signed32": 621817402
+    }
+  ],
+  "ordering": {
+    "sort": "numeric actual (namespace, signed32key) ascending",
+    "merge": "duplicate actual key or hash-prefix collision -> one SQL acquire, strongest mode known before first acquire",
+    "logical_coverage": "original exact typed keys/modes retained in plan.requests; collisions grant neither identity nor permission/upgrade"
+  },
+  "real_collision": {
+    "constructor": "ClientKey",
+    "values": [
+      "collision-12634",
+      "collision-44041"
+    ],
+    "namespace": 1346568224,
+    "prefix_hex": "c1aec7ae",
+    "signed32": -1045510226,
+    "provenance": "Independent stdlib literal-byte analysis only"
+  },
+  "sql": {
+    "shared": "SELECT pg_advisory_xact_lock_shared(CAST(:namespace AS INTEGER), CAST(:key AS INTEGER))",
+    "exclusive": "SELECT pg_advisory_xact_lock(CAST(:namespace AS INTEGER), CAST(:key AS INTEGER))",
+    "binds": {
+      "namespace": "Integer",
+      "key": "Integer"
+    },
+    "session_level": false,
+    "single_bigint": false,
+    "execution": "NOTRUN"
+  },
+  "entrance": [
+    "real Session.new/dirty/deleted empty",
+    "Session active; root may autobegin or contain clean read-only discovery",
+    "no active/inactive nested Session or Connection object; no twophase/AUTOCOMMIT",
+    "single PostgreSQL Connection and exact RootTransaction; verify actual root._connections records",
+    "discovery only read-only MVCC under no_autoflush; caller excludes earlier row/FK/advisory writes"
+  ],
+  "capability": {
+    "frozen": true,
+    "bearer": false,
+    "issuance": "private WeakKeyDictionary by actual issuing sync Session; exact registered capability instance",
+    "bindings": [
+      "actual issuing sync Session identity",
+      "weakref actual SessionTransaction root object",
+      "actual Connection object",
+      "actual DB RootTransaction object + root enlistment transaction identity"
+    ],
+    "copy_forge_foreign": "reject",
+    "validation_with_pending_authorized_writes": "allowed; no clean-state check in validator",
+    "session_events": [
+      "after_transaction_create: nested -> permanent poison",
+      "after_transaction_end: issuing root or nested -> permanent poison",
+      "after_begin: another connection or nested -> poison"
+    ],
+    "connection_instance_events": [
+      "commit",
+      "rollback",
+      "savepoint",
+      "rollback_savepoint",
+      "release_savepoint"
+    ],
+    "flush_children": "nested=False internal child is not a savepoint; normal flush remains valid",
+    "acquisition_BaseException": "poison; no partial cap; DB-root attempt marker survives ORM-root replacement and rollback_only commit/close; caller rollback actual entire DB root",
+    "new_root": "old cap invalid; new discovery + full plan + new cap only after real DB-root completion and new DB transaction with a suitable fresh ORM root",
+    "attempt_registry": {
+      "key": "actual RootTransaction weak key",
+      "value": "weakref to actual Connection only; no Session/ORM root/_Entrance strong value",
+      "reserve": "before first advisory SQL, independent of issuance; reserve remains on success/BaseException",
+      "reset": "never removed by Session events/commit/close; old weak key may remain until GC, fresh DB-root object has a different identity",
+      "second_acquire": "reject before any further advisory SQL in active DB root; different Session rejection leaves original active issuer capability usable",
+      "validation": "_live checks attempt Connection identity along with existing exact issuance/root/enlistment checks"
+    }
+  },
+  "managed_lifetime_boundary": {
+    "proof": "SQLAlchemy-managed object identities, liveness, enlistment and API event history; NOT a backend transaction receipt",
+    "caller_forbids": [
+      "raw SQL COMMIT/ROLLBACK/SAVEPOINT/RELEASE",
+      "direct DBAPI transaction control",
+      "unobserved earlier incompatible row/FK/advisory locks"
+    ],
+    "not_detected": "arbitrary prior SQL locks or raw transaction control; no generic SQL parser or backend transaction-ID framework",
+    "root_acceptance": "msg_c15b81d3670a; SQLAlchemy-managed APIs only; raw transaction SQL/direct driver forbidden by participating callers; B1 addressed within managed boundary"
+  },
+  "adapter_handoff": {
+    "users_membership": "User SHARED, old+new Role SHARED, Member EXCLUSIVE declared before first acquisition; eventual User deletion -> User EXCLUSIVE from start",
+    "roles": "Role EXCLUSIVE before holder probe/mutation; company-qualified role",
+    "scope": "only helper frozen; adapters next independent author stage; no existing writer guards installed"
+  },
+  "source": {
+    "sqlalchemy_version": "2.0.36",
+    "installed_primary_readonly": [
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py",
+        "bytes": 195979,
+        "sha256": "09925343ec0fc08cb473700c1718099c181a7ede9e11fe09cdc08b71a6824a38",
+        "read_only": true,
+        "relevant_symbols": [
+          {
+            "symbol": "SessionTransaction.__init__",
+            "start": 925,
+            "end": 966
+          },
+          {
+            "symbol": "SessionTransaction._take_snapshot",
+            "start": 1074,
+            "end": 1094
+          },
+          {
+            "symbol": "SessionTransaction._connection_for_bind",
+            "start": 1155,
+            "end": 1261
+          },
+          {
+            "symbol": "SessionTransaction.commit",
+            "start": 1310,
+            "end": 1331
+          },
+          {
+            "symbol": "SessionTransaction.close",
+            "start": 1405,
+            "end": 1434
+          },
+          {
+            "symbol": "Session.in_nested_transaction",
+            "start": 1828,
+            "end": 1835
+          },
+          {
+            "symbol": "Session.get_transaction",
+            "start": 1837,
+            "end": 1846
+          },
+          {
+            "symbol": "Session.get_nested_transaction",
+            "start": 1848,
+            "end": 1855
+          },
+          {
+            "symbol": "Session.begin_nested",
+            "start": 1945,
+            "end": 1969
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/orm/events.py",
+        "bytes": 127777,
+        "sha256": "d4f8864fb24c5164c301bdd7d53efd3f4d813150e67161296adcf5170a4baa80",
+        "read_only": true,
+        "relevant_symbols": [
+          {
+            "symbol": "SessionEvents.after_transaction_create",
+            "start": 1757,
+            "end": 1799
+          },
+          {
+            "symbol": "SessionEvents.after_transaction_end",
+            "start": 1801,
+            "end": 1840
+          },
+          {
+            "symbol": "SessionEvents.after_begin",
+            "start": 2036,
+            "end": 2066
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py",
+        "bytes": 122958,
+        "sha256": "7eb592326b777657a7b581f840d3777228dd1b3a7c35bba70a89546705ac5a02",
+        "read_only": true,
+        "relevant_symbols": [
+          {
+            "symbol": "Connection._is_autocommit_isolation",
+            "start": 1049,
+            "end": 1058
+          },
+          {
+            "symbol": "Connection.get_transaction",
+            "start": 1074,
+            "end": 1081
+          },
+          {
+            "symbol": "Connection.get_nested_transaction",
+            "start": 1083,
+            "end": 1089
+          },
+          {
+            "symbol": "Connection._rollback_impl",
+            "start": 1113,
+            "end": 1129
+          },
+          {
+            "symbol": "Connection._commit_impl",
+            "start": 1131,
+            "end": 1146
+          },
+          {
+            "symbol": "Connection._savepoint_impl",
+            "start": 1148,
+            "end": 1156
+          },
+          {
+            "symbol": "Connection._rollback_to_savepoint_impl",
+            "start": 1158,
+            "end": 1163
+          },
+          {
+            "symbol": "Connection._release_savepoint_impl",
+            "start": 1165,
+            "end": 1169
+          },
+          {
+            "symbol": "RootTransaction.__init__",
+            "start": 2678,
+            "end": 2686
+          },
+          {
+            "symbol": "RootTransaction._close_impl",
+            "start": 2709,
+            "end": 2723
+          },
+          {
+            "symbol": "RootTransaction._do_commit",
+            "start": 2731,
+            "end": 2757
+          },
+          {
+            "symbol": "Transaction inherits TransactionalContext",
+            "start": 2509,
+            "end": 2509
+          },
+          {
+            "symbol": "RootTransaction inherits Transaction; __slots__",
+            "start": 2652,
+            "end": 2676
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/engine/events.py",
+        "bytes": 37381,
+        "sha256": "734ba73451621f34c0be452d5e825ac73305303c2eac19078a2521b8df2a96e7",
+        "read_only": true,
+        "relevant_symbols": [
+          {
+            "symbol": "ConnectionEvents.rollback",
+            "start": 510,
+            "end": 526
+          },
+          {
+            "symbol": "ConnectionEvents.commit",
+            "start": 528,
+            "end": 538
+          },
+          {
+            "symbol": "ConnectionEvents.savepoint",
+            "start": 540,
+            "end": 546
+          },
+          {
+            "symbol": "ConnectionEvents.rollback_savepoint",
+            "start": 548,
+            "end": 557
+          },
+          {
+            "symbol": "ConnectionEvents.release_savepoint",
+            "start": 560,
+            "end": 569
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/engine/util.py",
+        "bytes": 5682,
+        "sha256": "6cd8ab3bc9354bcc8e5bad6e347f9af50ad6b4027d5461606e2474964d655105",
+        "read_only": true,
+        "relevant_symbols": [
+          {
+            "symbol": "TransactionalContext.__slots__ with __weakref__",
+            "start": 59,
+            "end": 67
+          }
+        ]
+      }
+    ],
+    "private_integration": [
+      "SessionTransaction._connections",
+      "Connection._is_autocommit_isolation"
+    ],
+    "parent_raw_pins_preserved": [
+      {
+        "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md",
+        "bytes": 64172,
+        "sha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.json",
+        "bytes": 8104372,
+        "sha256": "fa777bb9d4d1b73945448003825958f0394aaab6fe3edd03e89d96ffb508065e"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_ADMISSION_20261031.json",
+        "bytes": 1069594,
+        "sha256": "a7e47dc13d10fe2221a65f722b13806d786df1b0695465476c6a4258686dff02"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITER_INVENTORY_20261030.json",
+        "bytes": 112741,
+        "sha256": "a98d12d0ec5461434a726ae1e65e0895bb294da8f636889cb1e69fd2fa760f39"
+      },
+      {
+        "path": "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.json",
+        "bytes": 84855,
+        "sha256": "32ac9a146bb6b107d8db76177d944dd319b5c2744fcfdd8edafc9301caffaffb"
+      }
+    ],
+    "pattern_only": [
+      {
+        "path": "clearledger/server/app/services/location_commands.py",
+        "bytes": 37793,
+        "sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836"
+      },
+      {
+        "path": "clearledger/server/app/services/reference_identity.py",
+        "bytes": 8885,
+        "sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97"
+      }
+    ],
+    "targeted_existing_two_int_comparison": [
+      {
+        "path": "clearledger/server/app/database.py",
+        "bytes": 387732,
+        "sha256": "556154faef73b11ca6efbfbe581a098d32a159d8b7f3e8ae2f862e0853014628",
+        "namespace": 434532,
+        "hex": "0x6a164",
+        "symbol": "database_startup_lock",
+        "lines": [
+          47,
+          58
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/chat_ws.py",
+        "bytes": 41510,
+        "sha256": "10c5eda594e500d1978681a31b2a48bd609f57c2cd730076436867d600a8c213",
+        "namespace": 434532,
+        "hex": "0x6a164",
+        "symbol": "_ensure_presence_table",
+        "lines": [
+          219,
+          225
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/intake_watch.py",
+        "bytes": 13531,
+        "sha256": "7844ab64ca25171ddd9ca504720caa5c2d9e910d7e322e290648eda034b13975",
+        "namespace": 4711,
+        "hex": "0x1267",
+        "symbol": "_LOCK_NS; session-level legacy only",
+        "lines": [
+          48,
+          48
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/space_projection_scheduler.py",
+        "bytes": 4966,
+        "sha256": "69fbf2cbbfcd724d2862951d7a499ddc6e63de055c6eb9f663779e9c04855215",
+        "namespace": 4711,
+        "hex": "0x1267",
+        "symbol": "_LOCK_NS",
+        "lines": [
+          38,
+          49
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/mail_intake.py",
+        "bytes": 49994,
+        "sha256": "b707cb8f23b1124316b74f768a09a4e0350f6a3a2711a806b94e16379e9c9ed2",
+        "namespace": 4711,
+        "hex": "0x1267",
+        "symbol": "poll_account / POLL_LOCK_NS",
+        "lines": [
+          373,
+          376
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/doc_exchange.py",
+        "bytes": 18187,
+        "sha256": "578b1fb5faafdc92f35ba6ba75b679dc4ecf5c2d75ab140f0ebba33aa33b38b7",
+        "namespace": 970770,
+        "hex": "0xed012",
+        "symbol": "SCAN_LOCK_NAMESPACE / collect_inbox",
+        "lines": [
+          345,
+          349
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/channel_scheduler.py",
+        "bytes": 8262,
+        "sha256": "928a25170d6306e416c726a99cde1dc0feecbc79fe6e2a0f6944e88115116d21",
+        "namespace": 32349714,
+        "hex": "0x1ed9e12",
+        "symbol": "LOCK_NAMESPACE",
+        "lines": [
+          150,
+          152
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/store_price_scheduler.py",
+        "bytes": 3826,
+        "sha256": "3d161385e1af142d4fa859071ae9b6f1e435d8062e193c048682f4c443fbe4fb",
+        "namespace": 10231013,
+        "hex": "0x9c1ce5",
+        "symbol": "LOCK_NAMESPACE",
+        "lines": [
+          38,
+          40
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/task_scheduler.py",
+        "bytes": 53764,
+        "sha256": "11391185dc12e641208c7d01458cc6ae5bb8d6873631efa7809e0e63be03c2d8",
+        "namespace": 27641325,
+        "hex": "0x1a5c5ed",
+        "symbol": "LOCK_NAMESPACE",
+        "lines": [
+          214,
+          215
+        ]
+      },
+      {
+        "path": "clearledger/server/app/services/item_draft_auto.py",
+        "bytes": 17684,
+        "sha256": "391382b9ed2fdb2790397ec42e52cd490aeb5477a868f73295ac0856d744f05c",
+        "namespace": 120736,
+        "hex": "0x1d7a0",
+        "symbol": "LOCK_NAMESPACE; session-level legacy only",
+        "lines": [
+          247,
+          248
+        ]
+      }
+    ],
+    "legacy_bigint": "location blake2b signed64/reference SHA256 signed64 unchanged; different PostgreSQL keyspace",
+    "outside_repo_namespace_writer_closure": "UNKNOWN"
+  },
+  "validation": {
+    "performed": [
+      "filesystem/source reading",
+      "stdlib literal SHA256 and JSON analysis",
+      "AST parse and in-memory compile without exec"
+    ],
+    "not_performed": [
+      "project/helper/validator imports or function execution",
+      "tests/import/collection",
+      "SQL/DB/PoC/network/browser/SSH/Docker/Node/install/build/CI"
+    ],
+    "test_modules": [
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks.py",
+        "status": "NOTRUN",
+        "imports": "NOTRUN",
+        "collection": "NOTRUN",
+        "tests": [
+          {
+            "name": "test_independent_literal_goldens",
+            "line": 63,
+            "end_line": 66,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_uuid_parts_require_exact_uuid",
+            "line": 85,
+            "end_line": 87,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_both_composite_parts_are_exact_uuid",
+            "line": 92,
+            "end_line": 96,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_exact_nonempty_text",
+            "line": 101,
+            "end_line": 103,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_no_normalization_or_uuid_string_coercion",
+            "line": 106,
+            "end_line": 115,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_full_numeric_order_and_strongest_duplicate_merge",
+            "line": 118,
+            "end_line": 139,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_real_sha_prefix_collision_is_serialization_only",
+            "line": 142,
+            "end_line": 150,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_explicit_two_integer_sql_shape",
+            "line": 157,
+            "end_line": 162,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_forged_and_copied_caps_have_no_issuance",
+            "line": 165,
+            "end_line": 171,
+            "status": "NOTRUN"
+          }
+        ],
+        "top_level_test_function_count": 9,
+        "parameterized_case_count": "UNKNOWN: no collection"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks_pg.py",
+        "status": "NOTRUN",
+        "imports": "NOTRUN",
+        "collection": "NOTRUN",
+        "tests": [
+          {
+            "name": "test_shared_coexists_and_exclusive_waits_on_actual_two_int_lock",
+            "line": 118,
+            "end_line": 136,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_disjoint_company_exclusive_keys_do_not_block",
+            "line": 139,
+            "end_line": 149,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_real_collision_waits_but_does_not_grant_another_logical_identity",
+            "line": 152,
+            "end_line": 169,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_colliding_plan_executes_once_with_strongest_mode_and_original_coverage",
+            "line": 172,
+            "end_line": 189,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_session_end_invalidates_and_new_root_can_acquire",
+            "line": 193,
+            "end_line": 202,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_direct_connection_end_invalidates_even_with_live_session_root",
+            "line": 206,
+            "end_line": 216,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_savepoint_history_invalidates_after_nested_object_disappears",
+            "line": 221,
+            "end_line": 235,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_nested_entry_is_rejected_before_lock_sql",
+            "line": 239,
+            "end_line": 244,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_foreign_copied_and_forged_capability_rejected_on_real_sessions",
+            "line": 247,
+            "end_line": 260,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_actual_sqlalchemy_pending_state_sets_reject_entry",
+            "line": 290,
+            "end_line": 302,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_authorized_dirty_validation_and_normal_flush_child_remain_valid",
+            "line": 305,
+            "end_line": 314,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_baseexception_after_partial_acquisition_poisons_until_outer_rollback",
+            "line": 317,
+            "end_line": 343,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_inactive_session_entry_rejected",
+            "line": 346,
+            "end_line": 354,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_connection_invalidation_rejects_live_root_capability",
+            "line": 357,
+            "end_line": 363,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_multiple_enlisted_connections_rejected",
+            "line": 366,
+            "end_line": 371,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_async_uses_actual_sync_session_and_same_capability_protocol",
+            "line": 374,
+            "end_line": 392,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan",
+            "line": 411,
+            "end_line": 440,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_rollback_only_commit_keeps_attempt_across_orm_roots",
+            "line": 444,
+            "end_line": 468,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_rollback_only_close_keeps_attempt_across_orm_roots",
+            "line": 472,
+            "end_line": 496,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_partial_attempt_survives_rollback_only_orm_root_replacement",
+            "line": 501,
+            "end_line": 546,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_actual_outer_rollback_allows_new_db_root_on_same_connection",
+            "line": 550,
+            "end_line": 602,
+            "status": "NOTRUN"
+          }
+        ],
+        "top_level_test_function_count": 21,
+        "parameterized_case_count": "UNKNOWN: no collection"
+      }
+    ],
+    "runtime_measurements": "UNKNOWN"
+  },
+  "future_pg_target_guard": {
+    "url_env": "CONTRACT_SCOPED_LOCKS_PG_URL",
+    "approved_exact_url_env": "CONTRACT_SCOPED_LOCKS_PG_ROOT_APPROVED_URL",
+    "marker_env": "CONTRACT_SCOPED_LOCKS_PG_APPROVAL",
+    "marker": "ROOT-approved-synthetic-contract-scoped-locks-v1",
+    "scheme": "postgresql+psycopg",
+    "database": "contract_scoped_locks_synthetic_<nonempty suffix>",
+    "query_fragment": "forbidden",
+    "fallback": "none",
+    "placement": "before app/SQLAlchemy/driver imports in PG module",
+    "limits_target_execution_owner": "ROOT future freeze",
+    "conftest_safety": "NOT promised; repository conftest can run first; ordinary pytest is not declared safe"
+  },
+  "schema_status": {
+    "root_update": "msg_cbf16474f85b supersedes historical unreserved ordinal4",
+    "source_reserved": "0004_partner_contract_create",
+    "parent": "0003",
+    "owner": "separate schema author",
+    "acceptance_activation": "PENDING; this helper does not touch schema"
+  },
+  "routes": {
+    "CREATE": "OFF",
+    "OAuth_changes": "OFF",
+    "schema_activation": "OFF"
+  },
+  "limits": [
+    "No full B or parent-writer closure claim",
+    "No policy/admission/actor decision",
+    "No business identity equality from advisory hash",
+    "No backend transaction receipt",
+    "No runtime driver/lock/latency/pool acceptance",
+    "Existing reports unchanged; full preserved audit not superseded"
+  ],
+  "b1_followup": {
+    "finding": "B1",
+    "severity": "P1",
+    "exact_base": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+    "task_id": "task_09b1f4ffb939",
+    "dispatch_id": "ctx_b6b4e8de03a7",
+    "ownership_exact4": [
+      "clearledger/server/app/services/contract_write_locks.py",
+      "clearledger/server/tests/test_contract_write_locks_pg.py",
+      "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+      "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.json"
+    ],
+    "review": {
+      "task_id": "task_6281b7f6ab2b",
+      "dispatch_id": "ctx_c6ca2db07081",
+      "worker_done": "msg_c6583890f657",
+      "frozen_head": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "artifacts": [
+        {
+          "path": "/srv/projects/preview/contract-scoped-locks-review-20261101/review.md",
+          "bytes": 8285,
+          "sha256": "4cb6cccdfa7fe37fb19c77db7ab5b1d010a43df8bc251ccf4ba34fdf3e08c89e"
+        },
+        {
+          "path": "/srv/projects/preview/contract-scoped-locks-review-20261101/review.json",
+          "bytes": 27255,
+          "sha256": "7471abd58c541e36e7a27426f8c3017eb8bd527933885432c3e3db4377ed32e0"
+        }
+      ]
+    },
+    "disposition": "SOURCE_PATH_ADDRESSED_BY_NEW_FOLLOWUP; runtime closure and independent follow-up review NOTRUN",
+    "cause": "c9 _ENTRANCES Session key + SessionTransaction identity forgot attempts when rollback_only kept the external actual DB root alive across different Sessions or ORM roots",
+    "managed_api_only": true,
+    "raw_control_acceptance_claim": false,
+    "source_trace": [
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 201,
+        "end": 208,
+        "meaning": "weak DB-root attempt key; weak Connection value cannot retain key through value"
+      },
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 334,
+        "end": 339,
+        "meaning": "active exact DB-root check; prior attempt rejects; reserve actual pair before first lock SQL"
+      },
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 269,
+        "end": 283,
+        "meaning": "live exact pair plus unchanged issuance/root/liveness/enlistment constraints"
+      },
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 294,
+        "end": 357,
+        "meaning": "BaseException poisons receipt; no attempt deletion on success/failure; new ORM root cannot erase DB-root marker"
+      },
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 369,
+        "end": 393,
+        "meaning": "foreign/copy/forged cap and logical coverage checks preserved byte-exact"
+      }
+    ],
+    "sqlalchemy_managed_join_spans": [
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py",
+        "start": 1205,
+        "end": 1258
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py",
+        "start": 1310,
+        "end": 1328
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/orm/session.py",
+        "start": 1405,
+        "end": 1434
+      }
+    ],
+    "weakref_evidence": "SOURCE only: engine/util.py:59-67 __weakref__; engine/base.py:2509 Transaction ancestry, 2652-2676 RootTransaction ancestry/slots; no SQLAlchemy import or runtime weakref probe",
+    "baseline_raw_pins": [
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "bytes": 14099,
+        "sha256": "ef05d3134ef8b99601d0d38f051d13c731a0256138d37d0500c70275d434c78d"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks.py",
+        "bytes": 8044,
+        "sha256": "9933f98fdda703815e289daffe9ecc80656e87da15ea4569a0b370c8eeb2d1a1"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks_pg.py",
+        "bytes": 17474,
+        "sha256": "54c76f8c601be0df5de5b2811cd8f00648872d2a93b0109016aba76707447ee1"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+        "bytes": 12118,
+        "sha256": "a40cef439732a922b74f7e6d92f1fd93e1c3e0b685727ff9857041c7fcf51a26"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.json",
+        "bytes": 28467,
+        "sha256": "4565bbdf82fa871e1f5f35c5d62d7ac7e7ae95b857fb8a7cd872937df89c5a89"
+      }
+    ],
+    "current_raw_pins": [
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "bytes": 15023,
+        "sha256": "9c3a820c3f93c479aca1c0cab2f00cef8be5fda63b5fe688a104142ea3f6c8ae"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks.py",
+        "bytes": 8044,
+        "sha256": "9933f98fdda703815e289daffe9ecc80656e87da15ea4569a0b370c8eeb2d1a1"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks_pg.py",
+        "bytes": 28899,
+        "sha256": "1512c541b93294a7b84f3f49902f2914c5f7b83768f83a419063bbcdaf9cb133"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+        "bytes": 16588,
+        "sha256": "14c9fd2da37e9015fcb7a433edb9f9cf4bd526a5a6544a585f3bf5bb83c7e58c"
+      }
+    ],
+    "self_hash_policy": "JSON raw SHA256 and final four-file freeze SHA256 delivered through Orca; no recursive JSON self hash",
+    "preserved": {
+      "public_api_signatures": "AST identical to c9",
+      "helper_symbols_byte_exact_except": [
+        "_live",
+        "acquire_scoped_locks"
+      ],
+      "unit_module_byte_exact": true,
+      "pg_c9_prefix_and_all_original_definitions_byte_exact": true,
+      "c9_unit_test_functions": 9,
+      "c9_pg_test_functions": 16,
+      "new_pg_test_functions": 5,
+      "unit_test_functions": 9,
+      "pg_test_functions": 21,
+      "total_test_functions": 30,
+      "parameterized_case_count": "UNKNOWN: no collection",
+      "encoder_namespaces_goldens_order_collision_sql_logical_coverage": "byte/AST unchanged",
+      "parent_report_pins": "five exact preserved; M00-M19/11 not reopened or reduced",
+      "outside_repo_closure": "UNKNOWN"
+    },
+    "authored_pg_specs": [
+      {
+        "name": "test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan",
+        "start": 411,
+        "end": 440,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_rollback_only_commit_keeps_attempt_across_orm_roots",
+        "start": 444,
+        "end": 468,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_rollback_only_close_keeps_attempt_across_orm_roots",
+        "start": 472,
+        "end": 496,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_partial_attempt_survives_rollback_only_orm_root_replacement",
+        "start": 501,
+        "end": 546,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_actual_outer_rollback_allows_new_db_root_on_same_connection",
+        "start": 550,
+        "end": 602,
+        "status": "NOTRUN"
+      }
+    ],
+    "authored_oracles": [
+      "actual shared Connection + same active outer RootTransaction identity",
+      "two Session/ORM-root identities remain distinct",
+      "every denied second acquire leaves all captured cursor SQL unchanged",
+      "real pg_locks shows retained first ShareLock and absence of second ExclusiveLock/partial second key",
+      "original issuer capability stays usable after another Session rejection; foreign require still rejects",
+      "rollback_only commit AND close with same/new Session preserve attempt and invalidate ended issuer receipt",
+      "BaseException after first real lock preserves attempt across ORM-root replacement",
+      "actual outer rollback releases observed locks; fresh RootTransaction on same Connection accepts full plan"
+    ],
+    "verification": {
+      "performed": [
+        "filesystem/source/Git reads",
+        "stdlib AST and source-segment comparison",
+        "stdlib raw SHA256 and JSON pin checks",
+        "in-memory compile without exec"
+      ],
+      "not_performed": [
+        "app/helper/pure function execution or imports",
+        "SQLAlchemy import or weakref runtime probe",
+        "test imports/collection/execution",
+        "SQL/DB/Node/SSH/Docker/network HTTP/browser/install/build/CI/runner"
+      ],
+      "runtime": "NOTRUN",
+      "independent_followup_review": "NOTRUN"
+    },
+    "gates": {
+      "schema": "SOURCE reserved ordinal4 0004_partner_contract_create parent0003; separate owner; acceptance/activation pending",
+      "CREATE": "OFF",
+      "outside_repo_writer_closure": "UNKNOWN",
+      "M00-M19/11": "preserved; no acceptance claim"
+    },
+    "root_followup_authority": {
+      "root_message": "msg_5e53b6a0849a",
+      "coordinator_delivery_message": "msg_b7d21c4aea80",
+      "requirement": "actual (Connection, DB RootTransaction) marker before first lock SQL through actual DB-root end, independently of ORM commit/close/rollback_only",
+      "c9_status": "not PASS; public API freeze retained",
+      "scope": "narrow SOURCE fix only; no full closure acceptance",
+      "parallel_users_roles_owner": {
+        "task_id": "task_fdb8ae27074c",
+        "dispatch_id": "ctx_2691863683f8",
+        "paths": "outside this helper follow-up ownership; untouched"
+      }
+    }
+  }
+}
