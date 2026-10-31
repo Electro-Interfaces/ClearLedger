@@ -10752,7 +10752,15 @@
     "mid_wholefile_same": 58,
     "mid_wholefile_drift": 17,
     "direct_special_function_candidates": 106,
-    "route_decorator_candidates": 1702
+    "route_decorator_candidates": 1702,
+    "function_comparison_denominator": "75 operation-source fact rows; repeated console function counted once per method",
+    "unique_endpoint_functions": 71,
+    "unique_function_ast_same": 67,
+    "unique_function_ast_drift": 4,
+    "unique_reviewed_source_files": 62,
+    "unique_reviewed_source_files_same": 45,
+    "unique_reviewed_source_files_drift": 17,
+    "unique_source_file_denominator": "62 reviewed sourceHashes entries, including helpers/frontend/dependencies; not endpoint operations"
   },
   "source_hash_comparison": {
     "clearledger/server/app/api_access_logging.py": {
@@ -36061,7 +36069,9 @@
     "task": "task_0d21a4bffc7a",
     "dispatch": "ctx_d5aef2b7352e",
     "scope_approval": "msg_0d2996eec015",
-    "xlsx_scope_pre_read": "msg_9341f295a37a"
+    "xlsx_scope_pre_read": "msg_9341f295a37a",
+    "source_acceptance": "msg_867d3fbaa9ca",
+    "denominator_clarification": "msg_a776de7fbe89"
   },
   "registered_operation_identity": "logical authority+protocol+method+path; old order/generated IDs are provenance only",
   "immutable_broad_registries": {
