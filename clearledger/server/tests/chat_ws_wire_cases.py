@@ -125,6 +125,122 @@ async def identity(connection):
     return row
 
 
+async def fixture_namespace(fetch):
+    """Read the current connection, never repair its role/path or trust a boolean."""
+    context = await fetch("""SELECT session_user::text AS session_role,
+      pg_catalog.current_schema()::text AS effective_schema,
+      pg_catalog.current_setting('search_path') AS search_path,
+      pg_catalog.current_schemas(false)::text[] AS explicit_schemas,
+      pg_catalog.current_schemas(true)::text[] AS effective_schemas,
+      pg_catalog.pg_my_temp_schema()::bigint AS temp_schema_oid""")
+    require(len(context) == 1 and dict(context[0]) == {
+        'session_role': 'clearledger', 'effective_schema': 'public',
+        'search_path': '"$user", public', 'explicit_schemas': ['public'],
+        'effective_schemas': ['pg_catalog', 'public'], 'temp_schema_oid': 0},
+        'prestate_effective_namespace')
+    rows = await fetch(DB_ID_SQL)
+    require(len(rows) == 1, 'prestate_database_row')
+    ident = dict(rows[0])
+    require(ident['name'] == DB_NAME and ident['db_user'] == 'clearledger'
+            and ident['oid'] == int(os.environ['CHAT_WS_WIRE_DB_OID'])
+            and ident['owner_oid'] == ident['session_user_oid']
+            and ident['version'] == 160015, 'prestate_database_identity')
+    namespaces = await fetch("""SELECT n.nspname::text AS name, r.rolname::text AS owner
+      FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles r ON r.oid=n.nspowner
+      ORDER BY n.nspname""")
+    owners = {row['name']: row['owner'] for row in namespaces}
+    expected = {'pg_catalog': 'clearledger', 'information_schema': 'clearledger',
+                'pg_toast': 'clearledger', 'public': 'pg_database_owner'}
+    # Only the exact service namespace may be added by our fixed control DDL.
+    if 'service_fixture' in owners:
+        expected['service_fixture'] = 'clearledger'
+    require(owners == expected and len(namespaces) == len(expected), 'prestate_namespace_inventory')
+    return ident, owners
+
+
+async def prestate_admission(fetch):
+    """ROOT PG16.15/template0 contract, before any DDL on this same connection.
+
+    Only default plpgsql1.0/pg_catalog is allowed, with its four exact direct
+    members. It has no public types/internal closure: no pg_depend recursion or
+    blanket internal-dependency exemption is needed or permitted here.
+    """
+    ident, owners = await fixture_namespace(fetch)
+    require('service_fixture' not in owners, 'prestate_service_namespace')
+    extensions = await fetch("""SELECT e.extname::text AS name, e.extversion::text AS version,
+      n.nspname::text AS namespace, r.rolname::text AS owner, e.extrelocatable AS relocatable,
+      e.extconfig IS NULL AS no_config, e.extcondition IS NULL AS no_condition
+      FROM pg_catalog.pg_extension e
+      JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace
+      JOIN pg_catalog.pg_roles r ON r.oid=e.extowner ORDER BY e.extname""")
+    require([dict(row) for row in extensions] == [{
+        'name': 'plpgsql', 'version': '1.0', 'namespace': 'pg_catalog',
+        'owner': 'clearledger', 'relocatable': False, 'no_config': True,
+        'no_condition': True}], 'prestate_extensions')
+    members = await fetch("""SELECT d.classid::pg_catalog.regclass::text AS catalog,
+      d.objsubid AS subid, p.proname::text AS routine, n.nspname::text AS namespace,
+      p.pronargs AS nargs, p.prokind::text AS kind, l.lanname::text AS language,
+      r.rolname::text AS owner
+      FROM pg_catalog.pg_depend d JOIN pg_catalog.pg_extension e ON e.oid=d.refobjid
+      LEFT JOIN pg_catalog.pg_proc p ON d.classid='pg_catalog.pg_proc'::pg_catalog.regclass AND p.oid=d.objid
+      LEFT JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+      LEFT JOIN pg_catalog.pg_language l ON d.classid='pg_catalog.pg_language'::pg_catalog.regclass AND l.oid=d.objid
+      LEFT JOIN pg_catalog.pg_roles r ON r.oid=COALESCE(p.proowner,l.lanowner)
+      WHERE d.refclassid='pg_catalog.pg_extension'::pg_catalog.regclass AND d.deptype='e'
+      ORDER BY catalog,routine,language""")
+    expected_members = [{
+        'catalog': 'pg_language', 'subid': 0, 'routine': None, 'namespace': None,
+        'nargs': None, 'kind': None, 'language': 'plpgsql', 'owner': 'clearledger'}, *({
+        'catalog': 'pg_proc', 'subid': 0, 'routine': name, 'namespace': 'pg_catalog',
+        'nargs': nargs, 'kind': 'f',
+        'language': None, 'owner': 'clearledger'} for name, nargs in
+        (('plpgsql_call_handler', 0), ('plpgsql_inline_handler', 1), ('plpgsql_validator', 1)))]
+    require([dict(row) for row in members] == expected_members, 'prestate_extension_members')
+    unexpected = await fetch("""WITH scoped(classid,objid,objsubid) AS (
+      SELECT 'pg_catalog.pg_class'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_class WHERE relnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_proc'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_proc WHERE pronamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_type'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_type WHERE typnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_constraint'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_constraint WHERE connamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_operator'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_operator WHERE oprnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_opclass'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_opclass WHERE opcnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_opfamily'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_opfamily WHERE opfnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_collation'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_collation WHERE collnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_conversion'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_conversion WHERE connamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_ts_config'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_ts_config WHERE cfgnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_ts_dict'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_ts_dict WHERE dictnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_ts_parser'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_ts_parser WHERE prsnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_ts_template'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_ts_template WHERE tmplnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_statistic_ext'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_statistic_ext WHERE stxnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT 'pg_catalog.pg_default_acl'::pg_catalog.regclass,oid,0 FROM pg_catalog.pg_default_acl WHERE defaclnamespace IN (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname IN ('public','service_fixture'))
+      UNION SELECT d.classid,d.objid,d.objsubid FROM pg_catalog.pg_depend d
+        JOIN pg_catalog.pg_namespace n ON n.oid=d.refobjid
+        WHERE d.refclassid='pg_catalog.pg_namespace'::pg_catalog.regclass
+          AND n.nspname IN ('public','service_fixture')
+      ) SELECT EXISTS(SELECT 1 FROM scoped) AS unexpected""")
+    # All four allowed plpgsql members are in pg_catalog (or namespace-less).
+    # No valid extension member is in this scoped set; nothing is excluded by deptype.
+    require(len(unexpected) == 1 and unexpected[0]['unexpected'] is False, 'prestate_namespace_objects')
+    return ident
+
+
+async def prepared_placement(fetch):
+    """Independent reviewed names/owners/placement, not a full catalog oracle."""
+    ident, owners = await fixture_namespace(fetch)
+    require(owners.get('service_fixture') == 'clearledger', 'prepared_service_namespace')
+    rows = await fetch("""SELECT n.nspname::text AS namespace,c.relname::text AS name,
+      c.relkind::text AS kind,c.relpersistence::text AS persistence,c.relowner::bigint AS owner_oid
+      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname IN ('public','service_fixture') AND c.relkind IN ('r','p','v','m','f')
+      ORDER BY n.nspname,c.relname""")
+    expected = [('public', name, 'r', 'p', ident['owner_oid']) for name in TABLES]
+    expected.append(('public', 'chat_ws_presence', 'r', 'u', ident['owner_oid']))
+    expected.extend(('service_fixture', name, 'r', 'p', ident['owner_oid'])
+                    for name in ('wire_control', 'wire_lease'))
+    require([tuple(row[key] for key in ('namespace','name','kind','persistence','owner_oid'))
+             for row in rows] == sorted(expected), 'prepared_table_placement')
+    return ident
+
+
 async def schema_snapshot(connection):
     rows = [dict(row) for row in await connection.fetch(SCHEMA_SQL)]
     functions = [dict(row) for row in await connection.fetch("""SELECT n.nspname,p.proname,
@@ -208,18 +324,24 @@ async def prepare(evidence, recipe):
     raw = None
     try:
         raw = await connect_raw()
-        ident = await identity(raw)
-        count = await raw.fetchval("""SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-          WHERE n.nspname IN ('public','service_fixture') AND c.relkind IN ('r','p','v','m','S','f')""")
-        require(count == 0 and not await raw.fetchval("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='service_fixture')"), 'nonempty_fixture_database')
+        ident = await prestate_admission(raw.fetch)
         async with engine.begin() as conn:
+            async def ddl_fetch(query):
+                return (await conn.execute(text(query))).mappings().all()
+            await prestate_admission(ddl_fetch)
             for statement in recipe['canonical']:
                 await conn.execute(text(statement))
+        # Recheck the control-DDL connection identity; never SET search_path.
+        await fixture_namespace(raw.fetch)
         await raw.execute(recipe['control'])
+        await prepared_placement(raw.fetch)
         ids = {key: str(correlation('fixture:' + key)) for key in ('company_a','company_b','user_a','user_b','room_a','room_b')}
         from sqlalchemy.ext.asyncio import async_sessionmaker
         factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as db:
+            async def session_fetch(query):
+                return (await db.execute(text(query))).mappings().all()
+            await prepared_placement(session_fetch)
             companies = [models.Company(id=uuid.UUID(ids['company_' + k]), name='Synthetic wire ' + k,
                           slug='wire-' + lease().hex + '-' + k, profile_id='energy') for k in ('a','b')]
             db.add_all(companies)
@@ -237,6 +359,7 @@ async def prepare(evidence, recipe):
             for k in ('a','b'):
                 db.add(models.ChatParticipant(room_id=uuid.UUID(ids['room_' + k]), user_id=uuid.UUID(ids['user_' + k]), role='member'))
             await db.commit()
+        await prepared_placement(raw.fetch)
         snapshot = await schema_snapshot(raw)
         receipt = {'version': 1, 'lease': str(lease()), 'stage': stage(), 'database': ident,
                    'control_ddl_sha256': hashlib.sha256(CONTROL_DDL.encode()).hexdigest(),

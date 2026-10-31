@@ -1,10 +1,117 @@
 # CP-01: native WebSocket TCP/PG wire, source freeze 31.10.2026
 
-Подготовлены четыре новых файла. Статус: SOURCE_FREEZE_PENDING_ROOT_REVIEW. Worker runtime=0: выполнены чтение, Git, stdlib AST/hash и компиляция в памяти; helper, приложение, framework, controls, SQL, TCP и контейнеры не запускались.
+## Prestate admission: source finding и контракт до DDL
+
+Работа ведётся source-only от exact base `e325ca4495ac88c19e89a81bc2e783c391362b11`,
+ROOT Run `run_19ce21b41b2c`, task `task_f9722222c537`, dispatch `ctx_67a8437d0e9d`.
+Исторические F1/F2 доказательства ниже описывают прежний снимок; текущая правка
+не является новым runtime receipt. Worker runtime=0; новые controls NOT_RUN.
+
+Подтверждённая ROOT source finding: прежний prepare проверял только часть
+`pg_class`, пропуская отдельную public-функцию. Первый canonical statement,
+`CREATE OR REPLACE phone_to_e164`, мог заменить её, а посторонняя функция могла
+остаться. При пустой схеме `clearledger` default search_path мог также направить
+unqualified DDL вне public, тогда как snapshot смотрел public/service_fixture.
+Подтверждение здесь только по исходнику; SQL/PoC не выполнялись.
+
+Контракт допуска: до первого DDL проверять actual exact leased DB/OID, роль и
+владельца, полный разрешённый inventory namespaces, effective public namespace
+и search_path на raw и на самом DDL-engine соединении. На fixture-session
+проверять ту же идентичность перед записью. `service_fixture` до DDL отсутствует.
+Непредусмотренный объект отвергается; GRANT/DROP/SET/нормализации/починки нет.
+Состав разрешённых extensions задаётся только явными ROOT fixture literals,
+не внешним boolean и не произвольным именем роли, схемы или extension.
+
+Catalog classes контракта: `pg_class` (все relkind, включая indexes, composite
+relations, sequences, views), `pg_proc` (functions/procedures/aggregates),
+`pg_type` (base/array/composite/domain/enum/range/multirange), `pg_constraint`,
+`pg_operator`, `pg_opclass`, `pg_opfamily`, `pg_collation`, `pg_conversion`,
+`pg_ts_config`, `pg_ts_dict`, `pg_ts_parser`, `pg_ts_template`,
+`pg_statistic_ext`, `pg_default_acl`; дополнительно прямые зависимости любых
+catalog addresses от public/service_fixture в `pg_depend` отвергаются по
+умолчанию. Extension-members учитываются только относительно exact allowlist.
+Широкое исключение internal dependencies запрещено.
+
+Postprepare обязан сверить reviewed source `TABLES` (20 domain tables) и native
+presence именно в public, две control tables именно в service_fixture, их
+владельцев. Это отдельный placement oracle; hash собственного snapshot после
+DDL не доказывает полный канонический catalog contract. ROOT по-прежнему
+отвечает за независимый DDL compiler/seal, private lease и отсутствие concurrent
+writers, внешнюю изоляцию PG/namespace/network, 3 PID supervision и cleanup.
+Native wire, DDL compiler и supervisor здесь не исполнялись; Python audit не
+является OS sandbox. OLD report12, production/real data и 20M+11 неизменны.
+
+ROOT source-GO задал будущую fixture, ещё не измеренную: image
+`721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea`,
+PostgreSQL 16.15 (`160015`), bootstrap `POSTGRES_USER=clearledger`, новая DB из
+template0 с owner clearledger. Единственный extension: plpgsql 1.0, pg_catalog,
+owner clearledger, nonrelocatable, без config/condition. Его direct member
+inventory: язык plpgsql и pg_catalog routines plpgsql_call_handler(0 args),
+plpgsql_inline_handler(1), plpgsql_validator(1), owner clearledger. Определения
+системных функций остаются prerequisite доверенного ROOT image; inventory не
+доказывает побайтовую каноничность их тел.
+
+Владельцы namespaces: public = pg_database_owner;
+pg_catalog/information_schema/pg_toast = clearledger; service_fixture после
+нашего DDL = clearledger. Точный search_path: `"$user", public`, без backslash;
+current_schema = public; current_schemas(false) = [public], с implicit schemas
+= [pg_catalog, public]; temp schema OID = 0. Любая дополнительная схема, включая
+пустую clearledger или чужую pg_temp_*, отвергается. Lease/OID/CID ROOT выдаст
+отдельно перед своим запуском; источник не придумывает OID и не подменяет lease.
+
+Coverage ограничен namespace-классами выше и прямыми namespace dependency
+addresses. Отдельный произвольный cast/transform/event trigger/publication,
+database/role grants, ACL/system catalogs/functions/objects вне public и
+service_fixture, серверные настройки и concurrent mutation не образуют здесь
+full-cluster admission contract. Эти состояния не допускаются по внешнему
+ROOT prerequisite свежей template0 fixture и закрытой lease; они не объявлены
+проверенными source checker. Неизвестный объект с namespace dependency внутри
+периметра отвергается. Новые расширения и internal extension-type closure не
+поддерживаются: текущий plpgsql не имеет public types и не требует исключений.
+
+Future prestate controls (все **NOT_RUN**, отдельно от прежних 13 controls и
+шести wire cases):
+
+- P01: чистая exact fixture проходит оба pre-DDL checker; verify no extra DDL.
+- P02: одна public.phone_to_e164 с sentinel definition; отказ до DDL, definition
+  и весь исходный catalog неизменны. P03: отдельная чужая public function,
+  overload, procedure или aggregate также отвергаются.
+- P04: domain/enum/base/array/composite/range/multirange type; P05: table,
+  standalone index, partitioned index/table, sequence, view, matview, foreign
+  table и composite relation. Каждый объект в отдельной fresh leased fixture:
+  отказ без DROP/GRANT/repair и без canonical[0].
+- P06: constraint/operator/opclass/opfamily/collation/conversion, каждая text
+  search class, extended statistics, schema default ACL; P07: дополнительный
+  namespace dependency address вне явного class list. Отказ, объект сохранён.
+- P08: лишний/неверный/missing extension, версия/схема/owner/member drift,
+  public-объект, присоединённый к plpgsql; отказ, auto-install отсутствует.
+- P09: уже существующая service_fixture, пустая clearledger или temp schema,
+  лишняя/недостающая схема или неверный schema owner; отказ до DDL.
+- P10: exact default path с effective clearledger, изменённый literal path,
+  implicit/explicit namespace drift, temp namespace; отказ на actual connection.
+- P11: неправильные DB name/OID/version/owner/current_user/session_user; отказ
+  до DDL. Повторить отдельно для raw и фактического DDL-engine connection.
+- P12: ошибочный fixture-session context отвергается перед первой ORM-записью;
+  public TABLES20/presence и service_fixture control2 сверяются по reviewed
+  names/kind/persistence/owner, включая missing/extra/wrong-placement варианты.
+- P13: вне helper ROOT independently проверяет lease/OID/CID/image/template0,
+  отсутствие writers, namespace/network rights, native SUT hashes, DDL seal,
+  budgets и положительные exits/cleanup; worker не запускал этот контроль.
+
+ROOT уточнил в msg_a7cfe1634a13: каждое фактическое raw/DDL-engine/session
+соединение проверяется перед собственной первой DDL/DML; общий connection
+удерживать не нужно. Session ещё пуста и не autoflush-ит до guard.
+
+Source proof текущей правки хранится в JSON `prestate_revision`: полный
+обновлённый manifest, AST/compile-in-memory, reverse AST к exact base, code diff,
+immutable guards и список этих future controls. Executable hashes в таблице
+ниже обновлены; прочие F1/F2 runtime-ожидания и source ranges ниже исторические.
+
+Текущий prestate source-кандидат меняет ровно четыре существующих файла. Статус: PRESTATE_SOURCE_PENDING_ROOT_REVIEW. Worker runtime=0: выполнены чтение, Git, stdlib AST/hash и компиляция в памяти; helper, приложение, framework, controls, SQL, TCP и контейнеры не запускались.
 
 База и origin: `7c49296663e23f6ba1b38d9a069e3295d1cbe0b0`, ветка `agent/api-chat-ws-backend-implementation-20261031`. Все 12 файлов принятого backend commit сохранены byte-exact и AST-exact; reverse diff пуст. Результаты ROOT backend150 и legacy90 относятся к прежним сериям и не доказывают wire. Все исходные design106, включая frontend24, сохранены в прежних отчётах; новые шесть не заявлены покрытием всех106. Curated15 GET=11dual+4user-only/OFF неизменён. Native WS не становится OAuth machine API.
 
-## F2: ограничение всего poll
+## Историческая F2: ограничение всего poll
 
 ROOT разрешил единственную code-коррекцию msg_e8ae52f9071d. В `until` весь poll, включая зависший await check(), окружён asyncio.timeout(seconds). Собственный timeout выдаёт прежний fixed safe failure code; посторонний TimeoutError из check не подавляется, если scope не expired. Detached tasks не создаются. C20/5, шесть case IDs и golden assertions не менялись.
 
@@ -14,10 +121,10 @@ F1 exact4 сохранён в `.artifacts/chat-ws-wire-20261031/freeze1` (0700, 
 
 | Новый source | SHA256 |
 |---|---|
-| `clearledger/server/tests/chat_ws_wire_approved.py` | `cb495088965fce9ce513bb0254f63b866747487ecae26d2c6c7c7f9bd37f55e1` |
-| `clearledger/server/tests/chat_ws_wire_cases.py` | `434a81267a9786ea00650b9bebb9547c31e44be0d2d464b1b28f7dc3767b423f` |
+| `clearledger/server/tests/chat_ws_wire_approved.py` | `d3d8d3d2c00fa1b375d055a35515366c585bc15b5da80c39d50d6f0c7e954b57` |
+| `clearledger/server/tests/chat_ws_wire_cases.py` | `37a2e4549a296482d3fb0b550e63c0e3ef849684fe051a63d5375d9643c3615a` |
 
-Полный selected manifest: 2278 файлов, SHA256 `f63d1d99ee29203197e08bbb83025f70824d86d5dc04a42fa30ec895e6bdb394`; AST/compile 999 Python sources, импортов при проверке 0. В JSON есть все пути/размеры/SHA, 2053 function/class AST evidence с диапазонами, exact124 app import allowlist, runtime929 source pins, полный dependency4201 manifest и15 wire-library pins. `mail_secrets.py` включён как исходник, не исключён по имени. Старые ignored proofs/history сохранены. Новые отчёты исключены из собственного manifest, их внешние SHA передаются ROOT отдельно.
+Полный selected manifest: 2278 файлов, SHA256 `8e0ee74c2c8e4284bfc7188b295230f755a60c8224b0e46fca28df0b74f70ad1`; AST/compile 999 Python sources, импортов при проверке 0. В JSON есть все пути/размеры/SHA, 2099 function/class AST evidence с диапазонами, exact124 app import allowlist, runtime929 source pins, полный dependency4201 manifest и15 wire-library pins. `mail_secrets.py` включён как исходник, не исключён по имени. Старые ignored proofs/history сохранены. Новые отчёты исключены из собственного manifest, их внешние SHA передаются ROOT отдельно.
 
 ## Три ROOT-owned invocation и два app-процесса
 
@@ -69,7 +176,7 @@ Presence кадры принимаются только как известны�
 - Domain fixture10строк:2companies/2users/2memberships/2rooms/2participants. Presence peak1→0; service1lease+4control. Initial source estimate1–16MiB DB/catalog и1–32MiB WAL, не measured upper bound. Final source checkpoints отвергают приростDB>64MiB или own-cluster WALdelta>128MiB. ROOT измерит настоящий рост/LSN/RSS и отдельно подтвердит закрытую собственную PG среду.
 - Каждая capture<=1MiB, private root checkpoint<=128MiB/4096entries, compact handoff20k/result2KiB/capture512. Это source bounds/checkpoints, не kernel disk quota. Root memory2GiB/PIDs64 лишь исходный внешний envelope для review.
 
-13 metadata predicate controls выделены отдельно, также PROSPECTIVE_NOT_RUN; их нельзя складывать с6wire/150backend/90legacy/106design. Python audit guards не являются native syscall sandbox; ROOT отдельно доказывает OS restrictions, inherited-FD отсутствие, положительные PID/cgroup exits и cleanup. Нормальный результат требует receipts обоих app PID1, ровно6unique case IDs, source/77deps/catalog intact, own PG clients/locks/listeners/presence0 и независимые outside absence facts. Неуспех/таймаут/незавершённый task никогда не становятся green. Helper не удаляет чужие файлы, не посылает kill и не drop-ает DB.
+13 исходных metadata predicate controls выделены отдельно, также PROSPECTIVE_NOT_RUN; их нельзя складывать с6wire/150backend/90legacy/106design. Python audit guards не являются native syscall sandbox; ROOT отдельно доказывает OS restrictions, inherited-FD отсутствие, положительные PID/cgroup exits и cleanup. Нормальный результат требует receipts обоих app PID1, ровно6unique case IDs, source/77deps/catalog intact, own PG clients/locks/listeners/presence0 и независимые outside absence facts. Неуспех/таймаут/незавершённый task никогда не становятся green. Helper не удаляет чужие файлы, не посылает kill и не drop-ает DB.
 
 ## Следующий ROOT gate
 
