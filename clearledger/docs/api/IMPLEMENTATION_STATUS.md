@@ -1,5 +1,24 @@
 # Партнёрский API: интеграционный кандидат
 
+## Связи договоров и текущая параллельная работа · 31.10.2026, ROOT
+
+PR86 HEAD21f33b0f перенесён как eca5791c/ab30202e/6e893817; exact6files совпали.
+Совместный клиентский состав с ROOT synthetic registration230b508e прошёл
+16unit PASS (7guards+9relations) и TypeScript. Это pure mocks и проверка типов;
+OAuth/HTTP/SQL/три настоящих пилота не запускались. Связь с документом сама
+по себе не даёт доступа к его содержимому. Штатная unit-команда пока не включает
+новый файл; владельцу поручена отдельная правка.
+
+PR84: независимое SOURCE ревью подтвердило файловые пробелы, неполный deadline
+и слабую идентификацию JUnit. Владелец исправляет их двумя исполнителями в новом
+Run1e661957d431, старый freeze сохранён. PR85 имеет отдельное исправление PR87
+HEAD1bf25045, которое проверяет ROOT D (task_bd1fda29e979/ctx_441029a431de).
+Обе оснастки остаются NOTRUN до отдельного допуска. Support PR26 HEADd16172c0
+содержит source characterization и девять нерешённых политик; production lifecycle
+не менялся. ROOT B держит WS wire F2, C — LIFE команды SOURCE HOLD.
+Core остаётся39/57 в34сериях,18сценариев впереди; все20M+11gates открыты.
+
+
 Состав исходников на 30.10.2026: ветка
 `MagLook/api-modernization-integration-20261029`, runtime пакеты: WS `e6659c6e`, mapping `45a03b51`, Contract refresh `efd06570`;
 Core export consumers `bc24daca`, corporate CP `ffab2a10`,
