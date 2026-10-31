@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "namespace": "core",
+  "table": "pulse_view_role_grants",
+  "columns": [
+    {"name": "view_id", "type": "uuid", "typmod": -1, "not_null": true, "default": null},
+    {"name": "role_id", "type": "uuid", "typmod": -1, "not_null": true, "default": null}
+  ],
+  "primary": ["view_id", "role_id"],
+  "foreign_keys": [
+    {"column": "view_id", "table": "pulse_views", "target": "id"},
+    {"column": "role_id", "table": "company_roles", "target": "id"}
+  ]
+}

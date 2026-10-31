@@ -43,3 +43,8 @@ async def verify_calendar_cutover(conn, contract, acknowledgement):
 async def verify_calendar_preserved(before, after):
     from schema_migrations.revisions.catalog_v2 import verify_preserved
     await verify_preserved(before, after)
+
+
+async def inspect_pulse(conn, contract, owner):
+    from schema_migrations.revisions.catalog_pulse_view_role_grants_v1 import inspect_pulse as pulse
+    return await pulse(conn, contract, owner)

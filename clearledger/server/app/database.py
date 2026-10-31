@@ -2203,15 +2203,18 @@ TASK_ASSIGNMENT_MIGRATION_DDL = (
 )
 
 
-async def _assert_bootstrap_namespace(conn) -> None:
+async def _assert_bootstrap_namespace(conn) -> str:
     """Refuse search_path fallback to another application's table namespace.
 
     Unqualified metadata belongs to current_schema(), including standalone public.
     Explicitly qualified tables retain their own namespace (for example edge).
     checkfirst alone tests visibility, which does not establish this ownership.
     """
-    namespace = await conn.scalar(text("SELECT pg_catalog.current_schema()"))
-    if namespace is None:
+    from app.services.pulse_view_role_schema import namespace_path_is_explicit
+    probe = (await conn.execute(text("SELECT pg_catalog.current_schema() AS namespace, "
+        "pg_catalog.current_setting('search_path') AS configured_path"))).mappings().one()
+    namespace = probe["namespace"]
+    if not namespace_path_is_explicit(namespace, probe["configured_path"]):
         raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
     names = sorted({table.name for table in Base.metadata.tables.values() if table.schema is None})
     # Те же table-like relkind, что у PostgreSQL has_table в SQLAlchemy; не индексы/последовательности.
@@ -2227,6 +2230,8 @@ async def _assert_bootstrap_namespace(conn) -> None:
         # Provisioning failure, not a data migration; do not expose catalog names.
         raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
 
+    return namespace
+
 
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
@@ -2237,18 +2242,22 @@ async def create_all() -> None:
         if settings.managed_core_budget_enabled:
             from app.services.schema_version_gate import require_connection
             await require_connection(conn, settings)
-        await _assert_bootstrap_namespace(conn)
-        # Функция — раньше таблиц: на ней стоят генерируемые колонки телефонов,
-        # и в новой базе create_all заводит их сразу вместе с таблицей.
+        namespace = await _assert_bootstrap_namespace(conn)
+        from app.models import PulseViewRoleGrant
+        from app.services.pulse_view_role_schema import require_connection as require_pulse_schema
+        if namespace == "core":
+            # Managed Core audience DDL belongs only to explicit revision0003.
+            # Fail before legacy DDL/seed/jobs; fresh provisioning is separate.
+            await require_pulse_schema(conn)
         await conn.execute(text(PHONE_FUNCTION_DDL))
+        excluded = {PulseViewRoleGrant.__table__} if namespace == "core" else set()
         if settings.managed_core_budget_enabled:
-            # Keep the model registered for ORM/namespace checks. Only the
-            # exact versioned table is excluded from legacy DDL ownership.
-            budget_table = models_product_budget.ProductAPIBudget.__table__
-            tables = [table for table in Base.metadata.tables.values() if table is not budget_table]
-            await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
-        else:
-            await conn.run_sync(Base.metadata.create_all)
+            excluded.add(models_product_budget.ProductAPIBudget.__table__)
+        tables = [table for table in Base.metadata.tables.values() if table not in excluded]
+        await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+        if namespace == "public":
+            # Legacy fresh public keeps ORM provisioning, verified before commit.
+            await require_pulse_schema(conn)
 
     # Инкрементальные миграции для существующих таблиц
     async with engine.begin() as conn:
