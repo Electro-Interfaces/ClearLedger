@@ -6,7 +6,7 @@
 #define DX_KERNEL_LAUNCHER_PROTOCOL_H
 #include <stdint.h>
 #define DX_MAGIC "DXK1"
-#define DX_VERSION 1U
+#define DX_VERSION 2U
 #define DX_HEADER_BYTES 16U
 #define DX_CONFIG_FIELDS 25U
 #define DX_FRAME_MAX (2U * 1024U * 1024U)
@@ -27,9 +27,31 @@
 #define DX_GAP_MS 1500ULL
 #define DX_EXEC_FD 96
 #define DX_BOOT_FD 97
+/* Outside broker only. Child close_range closes these before mount/drop/filter.
+ * Its distinct parent-liveness FD98 remains unchanged. */
+#define DX_OWNER_CGROUP_FD 100
+#define DX_OWNER_PARENT_FD 101
+#define DX_OWNER_FIELDS 6U
 enum dx_opcode { DX_CONFIG=1, DX_READY=2, DX_SEAL=3, DX_EXEC=4,
  DX_STDOUT=5, DX_STDERR=6, DX_EXIT=7, DX_ERROR=8, DX_CANCEL=9,
- DX_FINALIZE=10, DX_FINAL=11 };
+ DX_FINALIZE=10, DX_FINAL=11, DX_OWNER=12 };
+/* Wire v2 fails closed against v1 peers. CONFIG (unchanged 25 LPs) then OWNER:
+ * u32=6, LP exclusive name "dx-"+nonce, LP nonce (64 lowercase hex), then
+ * LP canonical decimals parent st_dev, parent st_ino, scope st_dev, scope st_ino.
+ * Controller has exclusively created and retained these BEFORE spawning broker.
+ * Only FD100/101 plus stdio may be inherited; broker validates cgroup2, named
+ * and held inode identities, root/private ownership and initially empty scope.
+ * clone3 INTO_CGROUP and live cgroup.procs bind the candidate to that handle.
+ * Broker never creates/removes scope. It closes handles and exits; live external
+ * controller positively waits broker, kills group if needed, observes populated0
+ * AND pids.current0 AND empty procs, then checks rmdir+held inode unlink+absence.
+ * Native FINAL remains provisional until that external cleanup succeeds; A/F
+ * grammar is unchanged. Cleanup receipt is bound in the external manifest.
+ * SIGNAL_SENT/ESRCH/error never means TERMINATED. Native rejection captures
+ * pidfd_send_signal return/errno; external wait/empty evidence is independent.
+ * Controller SIGKILL/host loss is outside this live-owner guarantee: ROOT must
+ * recover exact identity; no wildcard/prefix-scan recovery is implemented.
+ */
 /* CONFIG: u32 count then count LP strings, LP = u32 length + ASCII bytes.
  * No NUL/empty/unknown/trailing fields. Max string length 4095.
  * Rootfs is independently prepared and pinned, never built by this program.

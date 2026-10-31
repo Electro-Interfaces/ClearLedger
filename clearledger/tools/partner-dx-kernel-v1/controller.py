@@ -604,7 +604,9 @@ HEADER = struct.Struct("<4sHHII")
 FRAME_LIMIT = 2 * MIB
 META_LIMIT = 4 * MIB
 CONFIG, READY, SEAL, EXEC, STDOUT, STDERR, EXIT, ERROR, CANCEL = range(1, 10)
-FINALIZE, FINAL = 10, 11
+FINALIZE, FINAL, OWNER = 10, 11, 12
+WIRE_VERSION = 2
+OWNER_CGROUP_FD, OWNER_PARENT_FD = 100, 101
 RESERVATION_BYTES = OUTPUT_LIMIT + META_LIMIT + 2 * JSON_LIMIT
 
 
@@ -644,11 +646,239 @@ def seal_bytes(raw, env):
             + b"".join(lp(key) + lp(env[key]) for key in sorted(env)))
 
 
+def kernel_read(parent, name, maximum=4096):
+    """Bounded pseudo-file read; proc/cgroup st_size is not a byte count."""
+    fd = os.open(name, OPEN_FILE, dir_fd=parent)
+    try:
+        chunks, total = [], 0
+        while True:
+            block = os.read(fd, min(4096, maximum + 1 - total))
+            if not block:
+                return b"".join(chunks)
+            chunks.append(block)
+            total += len(block)
+            require(total <= maximum, "kernel observation byte bound")
+    finally:
+        os.close(fd)
+
+
+def signalling_authority():
+    # This isolated controller has one thread and is the sole waiter. Reset the
+    # disposition through signal.signal (fresh sigaction, no SA_NOCLDWAIT), so
+    # inherited SIG_IGN cannot silently auto-reap a broker before our wait.
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+    require(signal.getsignal(signal.SIGCHLD) == signal.SIG_DFL, "retain direct-child wait ownership")
+    proc = open_directory("/proc/" + str(os.getpid()))
+    try:
+        rows = kernel_read(proc, "status", PROC_LIMIT).decode("ascii").splitlines()
+        task = os.open("task", OPEN_DIR, dir_fd=proc)
+        try:
+            with os.scandir(task) as entries:
+                require([entry.name for entry in entries] == [str(os.getpid())],
+                        "one trusted controller thread/sole waiter required")
+        finally:
+            os.close(task)
+    finally:
+        os.close(proc)
+    caps = [row.split()[1] for row in rows if row.startswith("CapEff:")]
+    require(len(caps) == 1 and re.fullmatch(r"[0-9a-f]{16}", caps[0])
+            and int(caps[0], 16) & (1 << 5), "external reaper requires effective CAP_KILL")
+    require(hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
+            "external pidfd signalling primitives unavailable")
+
+
+class CgroupOwner:
+    """Live external owner, created before ANY broker code can run.
+
+    Trusted root owns the parent exclusively; hostile external root mutation is
+    outside the TCB. No discovery scans, adoption, guessed PID names or recovery
+    from ENOENT. This live owner survives broker death, not death of all trusted
+    owners: controller SIGKILL/host loss still requires ROOT recovery.
+    """
+    def __init__(self, parent, nonce):
+        self.path, self.nonce, self.name = parent, nonce, "dx-" + nonce
+        self.parent = self.scope = self.kill_fd = None
+        self.parent_identity = self.identity = None
+        self.created = self.removed = False
+        self.spawn_authorized = False
+        self.cleanup = None
+
+    @staticmethod
+    def inode(info):
+        return info.st_dev, info.st_ino
+
+    def create(self):
+        # The object/name and parent FD exist before mkdir. Broker spawn is
+        # strictly later than exclusive creation AND complete inode retention.
+        signalling_authority()
+        self.parent = open_directory(self.path)
+        info = os.fstat(self.parent)
+        require(info.st_uid == 0 and not info.st_mode & 0o022, "trusted cgroup parent ownership")
+        self.parent_identity = self.inode(info)
+        proc = open_directory("/proc/" + str(os.getpid()))
+        try:
+            mounts = mountinfo(kernel_read(proc, "mountinfo", PROC_LIMIT).decode("ascii"))
+            fdinfo = kernel_read(proc, "fdinfo/" + str(self.parent)).decode("ascii").splitlines()
+        finally:
+            os.close(proc)
+        ids = [int(row.split()[1]) for row in fdinfo if row.startswith("mnt_id:")]
+        require(len(ids) == 1 and ids[0] in mounts, "actual cgroup parent mount identity")
+        actual = mounts[ids[0]]
+        require(actual["fs_type"] == "cgroup2" and not actual["read_only"]
+                and (actual["major"], actual["minor"]) == (os.major(info.st_dev), os.minor(info.st_dev)),
+                "actual writable cgroup v2 parent")
+        enabled = kernel_read(self.parent, "cgroup.subtree_control").decode("ascii").split()
+        require({"pids", "memory"}.issubset(enabled)
+                and kernel_read(self.parent, "cgroup.type") == b"domain\n",
+                "required parent controllers/domain must exist before mkdir")
+        probe = os.open("cgroup.kill", os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        dir_fd=self.parent)
+        os.close(probe)  # Open only; never write/kill the parent or foreign group.
+        # Defer catchable interruption only across mkdir->bookkeeping, then
+        # restore the caller's exact mask. A pending SIGINT is delivered with
+        # created=True and the retained exclusive witness available to finally.
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK,
+                                              {signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT})
+        try:
+            try:
+                os.mkdir(self.name, 0o700, dir_fd=self.parent)
+            except FileExistsError as error:
+                raise Rejected("foreign existing cgroup; never adopt or remove") from error
+            self.created = True
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        self.retain_created()
+        # Some cgroupfs versions choose a kernel mode independent of mkdir's
+        # mode argument. Change only our exclusively-created retained inode.
+        os.fchmod(self.scope, 0o700)
+        require(stat.S_IMODE(os.fstat(self.scope).st_mode) == 0o700,
+                "private cgroup mode must be positively applied")
+        self.verify()
+        require(self.empty(), "new cgroup must be positively empty")
+        # Required before broker/candidate window, not discovered after death.
+        self.kill_fd = os.open("cgroup.kill", os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                               dir_fd=self.scope)
+
+    def retain_created(self):
+        # Handles a primitive failure immediately after mkdir, before the
+        # first stat/open. Successful exclusive mkdir + retained trusted parent
+        # + nonce/name are a creation witness, not adoption of an existing name.
+        # No broker may have run before this witness is converted to a pinned
+        # inode. Retry in reap is bounded to one call; recurring read/open failure
+        # remains unknown and cannot be reported as successful cleanup.
+        require(self.created and not self.spawn_authorized,
+                "ROOT needed: no pre-spawn exclusive creation witness")
+        require(self.inode(os.fstat(self.parent)) == self.parent_identity,
+                "ROOT needed: creation parent identity changed")
+        if self.scope is None:
+            self.scope = os.open(self.name, OPEN_DIR, dir_fd=self.parent)
+        made = os.fstat(self.scope)
+        require(stat.S_ISDIR(made.st_mode) and made.st_uid == 0 and not made.st_mode & 0o022,
+                "ROOT needed: exclusive creation ownership unknown")
+        actual = self.inode(made)
+        require(self.identity is None or self.identity == actual,
+                "ROOT needed: exclusive creation inode changed")
+        self.identity = actual
+        self.verify()
+
+    def verify(self):
+        require(self.created and self.identity is not None and self.parent is not None,
+                "ROOT needed: unknown cgroup creation identity")
+        require(self.inode(os.fstat(self.parent)) == self.parent_identity,
+                "ROOT needed: cgroup parent identity changed")
+        named = os.stat(self.name, dir_fd=self.parent, follow_symlinks=False)
+        require(stat.S_ISDIR(named.st_mode) and self.inode(named) == self.identity
+                and named.st_uid == 0 and not named.st_mode & 0o022,
+                "ROOT needed: foreign/replaced cgroup identity")
+        if self.scope is None:
+            self.scope = os.open(self.name, OPEN_DIR, dir_fd=self.parent)
+        require(self.inode(os.fstat(self.scope)) == self.identity,
+                "ROOT needed: retained cgroup handle mismatch")
+
+    def empty(self):
+        self.verify()
+        events = kernel_read(self.scope, "cgroup.events").decode("ascii").splitlines()
+        populated = [row.split() for row in events if row.startswith("populated ")]
+        require(len(populated) == 1 and populated[0] in (["populated", "0"], ["populated", "1"]),
+                "ROOT needed: unknown kernel cgroup population")
+        pids = kernel_read(self.scope, "pids.current")
+        require(re.fullmatch(rb"(?:0|[1-9][0-9]*)\n", pids), "ROOT needed: unknown kernel task count")
+        procs = kernel_read(self.scope, "cgroup.procs")
+        return populated[0][1] == "0" and pids == b"0\n" and procs == b""
+
+    def owner_bytes(self):
+        self.verify()
+        fields = (self.name, self.nonce, *(str(v) for v in (*self.parent_identity, *self.identity)))
+        return struct.pack("<I", len(fields)) + b"".join(lp(value) for value in fields)
+
+    def reap(self, broker):
+        if self.removed:
+            return self.cleanup
+        if not self.created:
+            return None  # mkdir failed/foreign existing: no authority to remove.
+        # Broker must be positively waited before any group kill/removal; it
+        # otherwise still has clone3 authority. A pidfd signal is not a wait.
+        require(broker is None or broker.no_spawn() or broker.stopped(),
+                "ROOT needed: broker termination unconfirmed")
+        if self.identity is None:
+            self.retain_created()
+        self.verify()
+        kill = "NOT_NEEDED_EMPTY"
+        if not self.empty():
+            require(self.kill_fd is not None, "ROOT needed: missing retained group kill capability")
+            require(os.write(self.kill_fd, b"1") == 1, "ROOT needed: cgroup.kill short write")
+            kill = "SIGNAL_REQUESTED"  # Never equated with TERMINATED.
+        deadline = time.monotonic_ns() + 5_000_000_000
+        while not self.empty():
+            require(time.monotonic_ns() < deadline, "ROOT needed: cgroup termination/empty deadline")
+            time.sleep(0.01)
+        self.verify()
+        os.rmdir(self.name, dir_fd=self.parent)  # ENOENT is an error, not success.
+        require(os.fstat(self.scope).st_nlink == 0, "ROOT needed: removed handle still linked")
+        try:
+            os.stat(self.name, dir_fd=self.parent, follow_symlinks=False)
+        except FileNotFoundError:
+            pass  # Positive checked rmdir + held unlinked inode, not mere absence.
+        else:
+            raise Rejected("ROOT needed: cgroup name exists after own removal")
+        self.removed = True
+        self.cleanup = {"format": "elsy.partner-dx.cgroup-cleanup.v1", "nonce": self.nonce,
+                        "status": "REMOVED",
+                        "name": self.name, "parent_device": self.parent_identity[0],
+                        "parent_inode": self.parent_identity[1], "device": self.identity[0],
+                        "inode": self.identity[1], "broker_waited": broker is not None and broker.stopped(),
+                        "broker_stop": "NOT_SPAWNED" if broker is None or broker.no_spawn() else "WAITED",
+                        "kill_request": kill, "populated": 0, "pids_current": 0,
+                        "procs_empty": True, "rmdir_succeeded": True, "held_inode_unlinked": True,
+                        "broker_wait_status": None if broker is None else broker.status,
+                        "broker_signal": None if broker is None else broker.kill_observation}
+        return self.cleanup
+
+    def observation(self):
+        if self.cleanup is not None:
+            return self.cleanup
+        return {"format": "elsy.partner-dx.cgroup-cleanup.v1", "nonce": self.nonce,
+                "name": self.name, "created": self.created,
+                "status": "CLEANUP_UNCONFIRMED" if self.created else "NOT_CREATED",
+                "parent_identity": None if self.parent_identity is None else list(self.parent_identity),
+                "identity": None if self.identity is None else list(self.identity),
+                "rmdir_succeeded": False}
+
+    def close(self):
+        for fd in (self.kill_fd, self.scope, self.parent):
+            if fd is not None:
+                os.close(fd)
+        self.kill_fd = self.scope = self.parent = None
+
+
 class Broker:
     """Bounded transport; only native events authorize state transitions."""
-    def __init__(self, config):
+    def __init__(self, owner):
         self.pid = None
+        self.spawn_state = "NOT_ATTEMPTED"
         self.status = None
+        self.pidfd = None
+        self.owner = owner
         self.tx = self.rx = 0
         self.buffer = bytearray()
         self.metadata = self.output_bytes = 0
@@ -656,8 +886,11 @@ class Broker:
         self.transcript_hash = hashlib.sha256()
         self.err = bytearray()
         self.eof = False
+        self.kill_observation = None
         self.selector = selectors.DefaultSelector()
         self.write_fd = self.read_fd = self.error_fd = None
+
+    def start(self, config):
         fds = []
         try:
             for _ in range(3):
@@ -680,13 +913,32 @@ class Broker:
                     hasher.update(block)
                 require(hasher.hexdigest() == config["pins"]["launcher_sha256"]
                         and stable(info) == stable(os.fstat(executable)), "pinned spawn executable bytes")
+                owner = self.owner
+                owner.verify()
+                require(all(2 < fd < OWNER_CGROUP_FD for fd in
+                            (*fds, executable, owner.scope, owner.parent)), "spawn FD collision bound")
+                require(owner.identity is not None and owner.kill_fd is not None,
+                        "complete owner identity and kill handle before broker spawn")
+                owner.spawn_authorized = True
                 actions = [(os.POSIX_SPAWN_DUP2, child_in, 0), (os.POSIX_SPAWN_DUP2, child_out, 1),
-                           (os.POSIX_SPAWN_DUP2, child_error, 2)]
+                           (os.POSIX_SPAWN_DUP2, child_error, 2),
+                           (os.POSIX_SPAWN_DUP2, owner.scope, OWNER_CGROUP_FD),
+                           (os.POSIX_SPAWN_DUP2, owner.parent, OWNER_PARENT_FD)]
                 actions.extend((os.POSIX_SPAWN_CLOSE, fd) for fd in fds if fd > 2)
-                self.pid = os.posix_spawn("/proc/self/fd/" + str(executable),
-                                         [config["launcher"], "--broker-v1"], {}, file_actions=actions,
-                                         setsid=True, setsigmask=(),
-                                         setsigdef=(signal.SIGPIPE, signal.SIGTERM, signal.SIGINT))
+                self.spawn_state = "IN_PROGRESS"
+                try:
+                    self.pid = os.posix_spawn("/proc/self/fd/" + str(executable),
+                                             [config["launcher"], "--broker-v1"], {}, file_actions=actions,
+                                             setsid=True, setsigmask=(),
+                                             setsigdef=(signal.SIGPIPE, signal.SIGTERM, signal.SIGINT))
+                except OSError:
+                    # A reported posix_spawn failure is not a returned child.
+                    # An asynchronous/unknown exception is deliberately left
+                    # IN_PROGRESS and cannot authorize cleanup via pid=None.
+                    self.spawn_state = "FAILED_NO_CHILD"
+                    raise
+                self.spawn_state = "SPAWNED"
+                self.pidfd = os.pidfd_open(self.pid, 0)
             finally:
                 os.close(executable)
             self.write_fd, self.read_fd, self.error_fd = parent_write, parent_read, parent_error
@@ -704,13 +956,14 @@ class Broker:
                 except OSError:
                     pass
             self.kill()
+            self.close()
             raise
 
     def send(self, opcode, payload):
-        require(opcode in {CONFIG, SEAL, CANCEL, FINALIZE} and len(payload) <= FRAME_LIMIT, "outbound frame")
+        require(opcode in {CONFIG, OWNER, SEAL, CANCEL, FINALIZE} and len(payload) <= FRAME_LIMIT, "outbound frame")
         self.tx += 1
         require(self.tx < 2 ** 32, "outbound sequence overflow")
-        raw = HEADER.pack(b"DXK1", 1, opcode, len(payload), self.tx) + payload
+        raw = HEADER.pack(b"DXK1", WIRE_VERSION, opcode, len(payload), self.tx) + payload
         deadline = time.monotonic_ns() + 5_000_000_000
         offset = 0
         while offset < len(raw):
@@ -746,7 +999,7 @@ class Broker:
         while True:
             if len(self.buffer) >= HEADER.size:
                 magic, version, opcode, length, sequence = HEADER.unpack_from(self.buffer)
-                require(magic == b"DXK1" and version == 1 and opcode in {READY, EXEC, STDOUT, STDERR, EXIT, ERROR, FINAL}
+                require(magic == b"DXK1" and version == WIRE_VERSION and opcode in {READY, EXEC, STDOUT, STDERR, EXIT, ERROR, FINAL}
                         and length <= FRAME_LIMIT and sequence == self.rx + 1, "closed native frame header/sequence")
                 if len(self.buffer) >= HEADER.size + length:
                     raw = bytes(self.buffer[:HEADER.size + length])
@@ -784,29 +1037,49 @@ class Broker:
 
     def kill(self):
         if self.pid is not None and self.status is None:
+            result, signal_errno = "NO_PIDFD_NO_SIGNAL", 0
             try:
-                os.killpg(self.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+                if self.pidfd is not None:
+                    signal.pidfd_send_signal(self.pidfd, signal.SIGKILL, None, 0)
+                    result = "SIGNAL_SENT"
+                # No numeric PID/PGID fallback. If pidfd_open failed at start,
+                # start's exception path has closed all command pipes, before
+                # CONFIG was sent; wait for actual EOF rejection/exit instead.
+            except OSError as error:
+                signal_errno = error.errno
+                result = "ESRCH_UNCONFIRMED" if isinstance(error, ProcessLookupError) else "SIGNAL_FAILED"
+            self.kill_observation = {"result": result, "errno": signal_errno, "waited": False}
             deadline = time.monotonic_ns() + 5_000_000_000
             while time.monotonic_ns() < deadline:
                 try:
                     pid, status_value = os.waitpid(self.pid, os.WNOHANG)
-                except ChildProcessError:
-                    break
+                except ChildProcessError as error:
+                    raise Rejected("ROOT needed: broker wait ownership unknown") from error
                 if pid:
                     self.status = status_value
                     break
                 time.sleep(0.01)
+            require(self.stopped(), "ROOT needed: broker stop unconfirmed; signal result is not termination")
+            self.kill_observation["waited"] = True
+            # Even if a later wait proves exit, a signalling permission/error
+            # observation cannot be converted into an accepted run.
+            require(result != "SIGNAL_FAILED", "ROOT needed: broker signalling failed errno=" + str(signal_errno))
+
+    def stopped(self):
+        return (self.status is not None and (os.WIFEXITED(self.status) or os.WIFSIGNALED(self.status)))
+
+    def no_spawn(self):
+        return self.pid is None and self.spawn_state in {"NOT_ATTEMPTED", "FAILED_NO_CHILD"}
 
     def close(self):
         self.selector.close()
-        for fd in (self.write_fd, self.read_fd, self.error_fd):
+        for fd in (self.write_fd, self.read_fd, self.error_fd, self.pidfd):
             if fd is not None:
                 try:
                     os.close(fd)
                 except OSError:
                     pass
+        self.write_fd = self.read_fd = self.error_fd = self.pidfd = None
 
 
 def mountinfo(raw):
@@ -1148,7 +1421,10 @@ def artifact_bundle(config, a, broker, execution, terminal):
                 "output_sha256": broker.output_hash.hexdigest(), "execution": execution,
                 "rows": bundle["rows"], "count": entries, "bytes": bundle["bytes"],
                 "nonce_journal_sha256": digest(journal_raw), "nonce_journal_bytes": len(journal_raw),
-                "external_bookkeeping_count": 3, "external_bookkeeping_reserve_bytes": 2 * JSON_LIMIT + len(journal_raw)}
+                "external_bookkeeping_count": 3, "external_bookkeeping_reserve_bytes": 2 * JSON_LIMIT + len(journal_raw),
+                "cgroup_cleanup": broker.owner.cleanup}
+    require(broker.owner.removed and broker.owner.cleanup is not None,
+            "positive external cleanup required before manifest/F")
     raw = canonical(manifest)
     require(len(raw) <= JSON_LIMIT, "external artifact manifest64KiB")
     return raw, {**bundle, "bytes": bundle["bytes"] + len(journal_raw)}
@@ -1182,10 +1458,15 @@ def run(config):
     nonce = claim_nonce(config["nonce_dir"])
     admission_placeholder(config)
     broker = None
+    owner = CgroupOwner(config["native"]["cgroup_parent"], nonce)
     published = False
+    failure = None
     try:
-        broker = Broker(config)
+        owner.create()
+        broker = Broker(owner)
+        broker.start(config)
         broker.send(CONFIG, config_bytes(config["native"]))
+        broker.send(OWNER, owner.owner_bytes())
         startup = time.monotonic_ns() // 1_000_000 + 30000
         opcode, payload = broker.next(startup)
         require(opcode == READY, "native READY must be first")
@@ -1226,6 +1507,8 @@ def run(config):
             "finalization preserves actual workload outcome")
         terminal = finalized
         broker.finish()
+        owner.reap(broker)
+        require(owner.removed, "positive exact-scope cleanup required before accepted F")
         manifest_raw, bundle = artifact_bundle(config, admission, broker, execution, terminal)
         final_raw = final_receipt(config, admission, admission_raw, before, after, terminal, manifest_raw, literals)
         require(bundle["bytes"] + len(manifest_raw) + len(final_raw) <= POOL_LIMIT, "actual aggregate persisted bytes")
@@ -1236,23 +1519,43 @@ def run(config):
         published = True
         return {"decision": "SAFETY_ACCEPTED", "nonce": nonce, "final_sha256": digest(final_raw),
                 "final_path": config["final_dir"] + "/final.json"}
+    except BaseException as error:
+        failure = error
+        raise
     finally:
-        if broker is not None:
-            broker.kill()
-            broker.close()
-        if not published:
-            # Only this invocation's exclusively-created final can exist in the
-            # initially-empty private final directory. A failed post-save floor
-            # observation must not leave an accepted-looking F behind.
-            directory = open_directory(config["final_dir"])
+        try:
             try:
-                try:
-                    os.unlink("final.json", dir_fd=directory)
-                    os.fsync(directory)
-                except FileNotFoundError:
-                    pass
+                if broker is not None:
+                    broker.kill()
             finally:
-                os.close(directory)
+                # Runs even after native _exit/SIGKILL and transport/startup
+                # failures. Unknown stop/identity/empty/removal always raises.
+                owner.reap(broker)
+        except BaseException as error:
+            error.cgroup_cleanup = owner.observation()
+            raise
+        finally:
+            if failure is not None:
+                # Negative-control diagnostics carry actual cleanup facts too;
+                # a workload failure and successful removal are distinct facts.
+                failure.cgroup_cleanup = owner.observation()
+            try:
+                if broker is not None:
+                    broker.close()
+                owner.close()
+            finally:
+                if not published or not owner.removed:
+                    # A failure cannot leave an accepted-looking F. Cleanup
+                    # errors must never skip this publication rollback.
+                    directory = open_directory(config["final_dir"])
+                    try:
+                        try:
+                            os.unlink("final.json", dir_fd=directory)
+                            os.fsync(directory)
+                        except FileNotFoundError:
+                            pass
+                    finally:
+                        os.close(directory)
 
 
 def main():
@@ -1276,7 +1579,11 @@ if __name__ == "__main__":
     except BaseException as error:
         # No fabricated schema-complete F on missing observations. This bounded
         # diagnostic is explicitly a rejection, not an admission/final receipt.
-        failure = {"decision": "REJECTED", "error_type": type(error).__name__}
+        reason = str(error).encode("ascii", "backslashreplace").decode("ascii")[:1024]
+        cleanup = getattr(error, "cgroup_cleanup", None)
+        failure = {"decision": "REJECTED", "error_type": type(error).__name__,
+                   "reason": reason, "cgroup_cleanup": cleanup,
+                   "root_recovery_may_be_needed": cleanup is None or cleanup["status"] == "CLEANUP_UNCONFIRMED"}
         sys.stderr.buffer.write(canonical(failure))
         status = 1
     raise SystemExit(status)
