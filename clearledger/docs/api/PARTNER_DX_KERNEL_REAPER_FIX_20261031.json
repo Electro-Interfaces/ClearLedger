@@ -1,0 +1,1671 @@
+{
+  "format": "elsy.partner-dx.kernel-reaper-source-review.v1",
+  "status": "SOURCE_FROZEN_LOCAL_INDEPENDENT_REVIEW_COMPLETE_MAIN_REVIEW_PENDING",
+  "repository": "Electro-Interfaces/ClearLedger",
+  "base": "4e1a00692930d20934bd883365241602467879b4",
+  "basePR": 92,
+  "branch": "MagLook/partner-dx-cgroup-reaper-fix-20261031",
+  "runId": "run_1e4d8306c273",
+  "authority": {
+    "message": "msg_b722dcc067d9",
+    "scope": "separate source-only correction and own draft PR; no new approval gate"
+  },
+  "scope": [
+    "clearledger/tools/partner-dx-kernel-v1/controller.py",
+    "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+    "clearledger/tools/partner-dx-kernel-v1/launcher_protocol.h",
+    "clearledger/docs/api/PARTNER_DX_KERNEL_REAPER_FIX_20261031.md",
+    "clearledger/docs/api/PARTNER_DX_KERNEL_REAPER_FIX_20261031.json"
+  ],
+  "runtimeExecutions": 0,
+  "nativeCompilation": "NOTRUN",
+  "runtimeAcceptance": "NOT_AUTHORIZED",
+  "sourceAcceptance": "READY_FOR_MAIN_INDEPENDENT_SOURCE_REVIEW",
+  "sourceFiles": [
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "696bd654a0632973765cf23da32b499d982c771b",
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "bytes": 85244,
+      "lines": 1589,
+      "sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+      "git_blob_equal": true,
+      "author_bytes_equal": true
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "696bd654a0632973765cf23da32b499d982c771b",
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "bytes": 71255,
+      "lines": 902,
+      "sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+      "git_blob_equal": true,
+      "author_bytes_equal": true
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "696bd654a0632973765cf23da32b499d982c771b",
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher_protocol.h",
+      "bytes": 5037,
+      "lines": 90,
+      "sha256": "c923ed750b39011172deeb6a32330a0215478834a53e2b4f819b3328052861cd",
+      "git_blob_equal": true,
+      "author_bytes_equal": true
+    }
+  ],
+  "sourcePlaces": [
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "signalling_authority",
+      "lineStart": 665,
+      "lineEnd": 687,
+      "rawSpanSha256": "74eedb8834cfa094c5428a5e69211942c533566b05c4e899748dd96cf51a574b",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner",
+      "lineStart": 690,
+      "lineEnd": 871,
+      "rawSpanSha256": "31b302128a46ad8e54e6cae6cb562f76baa68e3f6129e19b6de9919aba2d2d2b",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.__init__",
+      "lineStart": 698,
+      "lineEnd": 704,
+      "rawSpanSha256": "1bee6dd7ec0bb8e9e5e6fc56447579906e0df8ed76965d39a19f7365b161742e",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.inode",
+      "lineStart": 707,
+      "lineEnd": 708,
+      "rawSpanSha256": "16e479fb757c426798b437072e49046c2f6efc4510cc192b5538e711d30db4c2",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.create",
+      "lineStart": 710,
+      "lineEnd": 760,
+      "rawSpanSha256": "cc49813f24e5b692d87b865120fce7a319b74026f281c3f688c6b45a0bf13afc",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.retain_created",
+      "lineStart": 762,
+      "lineEnd": 782,
+      "rawSpanSha256": "144c5c297ce57375953dc5d6319337a98c63bac16af94fc83a357078723e4605",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.verify",
+      "lineStart": 784,
+      "lineEnd": 796,
+      "rawSpanSha256": "83b52c1886d4e013433d7a912e9eb0b016603ff18c49e4d793c5f04198b7f049",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.empty",
+      "lineStart": 798,
+      "lineEnd": 807,
+      "rawSpanSha256": "330cb5321daf0876f1625de8673e451663eaf4437d7f2450f00d1c2ee5feb9f8",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.owner_bytes",
+      "lineStart": 809,
+      "lineEnd": 812,
+      "rawSpanSha256": "bbad199e5b8bbfab593589f9846ac29821e1121cb6062bdaf80dbe9a53be202c",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.reap",
+      "lineStart": 814,
+      "lineEnd": 855,
+      "rawSpanSha256": "5b751233c170555ebf22fa32cb6d14a8877dca4fc2ab20f201eee081fca1e0fe",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.observation",
+      "lineStart": 857,
+      "lineEnd": 865,
+      "rawSpanSha256": "88c3bfd6d8c956bbf88c1abc3b97d1383590f3fb54e47323b430ca523900cf32",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "CgroupOwner.close",
+      "lineStart": 867,
+      "lineEnd": 871,
+      "rawSpanSha256": "b4c8a96aadc0c7017240ad7961ee36fafed9f782f956987cd2adbdcc85e6235c",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker",
+      "lineStart": 874,
+      "lineEnd": 1082,
+      "rawSpanSha256": "73c07e6c791fb71d7eeeb54c0450117831765a644a2b6ee7705e9a19ce857808",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.__init__",
+      "lineStart": 876,
+      "lineEnd": 891,
+      "rawSpanSha256": "3c8d44e06713b918fe9ad9667cd389ad9e64e95d7c0d966564c0c553d3ea9efb",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.start",
+      "lineStart": 893,
+      "lineEnd": 960,
+      "rawSpanSha256": "912f7ee786b52fb798383b04ca4928a8ba815cce4afd61261bd8ea6281a2720e",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.send",
+      "lineStart": 962,
+      "lineEnd": 977,
+      "rawSpanSha256": "220b427c86c7655041a12f181016b63d62850194160e710df359482a16b343ad",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.drain",
+      "lineStart": 979,
+      "lineEnd": 996,
+      "rawSpanSha256": "173fa770a5d9df6920ba00a1f6de23115d3a2bce1e693e64f55305be56d72025",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.next",
+      "lineStart": 998,
+      "lineEnd": 1021,
+      "rawSpanSha256": "df54e35c39713147b8e2c4fbe3f111c18a20041526fdc1c23530c02a937157d0",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.finish",
+      "lineStart": 1023,
+      "lineEnd": 1036,
+      "rawSpanSha256": "f3d525a5c67863413531d526a11ec6dab93e2554c54685efbfe84510bcd2d814",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.kill",
+      "lineStart": 1038,
+      "lineEnd": 1066,
+      "rawSpanSha256": "50a2945b06311ad16abe9e6f06521313b62240890a7566f70ade7ca80ed1108e",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.stopped",
+      "lineStart": 1068,
+      "lineEnd": 1069,
+      "rawSpanSha256": "db48e54b0037609338aedf0198ae2ff76661e85dad133d54d8e86ec62b426471",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.no_spawn",
+      "lineStart": 1071,
+      "lineEnd": 1072,
+      "rawSpanSha256": "279688bb94c85d0eead3358a4c5a649a1c7465adcbe7b67b17186159d9bf7f8c",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "Broker.close",
+      "lineStart": 1074,
+      "lineEnd": 1082,
+      "rawSpanSha256": "e6f9d1b8c76c3b76c1d2b7c87f20eef221efbca94fd5336d740211d2ac0d594f",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "artifact_bundle",
+      "lineStart": 1323,
+      "lineEnd": 1430,
+      "rawSpanSha256": "a8bc86f79aa4d94f1bdebe5a3337d3e748a9621b77b5267879a3d75c7a50a772",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "final_receipt",
+      "lineStart": 1433,
+      "lineEnd": 1452,
+      "rawSpanSha256": "aacb4ddf66616bfd77af73e76dc4d2dcec17a7603c67f65ddcbea4902724bd24",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "run",
+      "lineStart": 1455,
+      "lineEnd": 1558,
+      "rawSpanSha256": "1516de93d88e134e4dff712827c39b79919ecced55bca0b7c9eab2dae0761d05",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+      "symbol": "main",
+      "lineStart": 1561,
+      "lineEnd": 1573,
+      "rawSpanSha256": "cf303ec89da94a476953e07b3a642e98cfdaf89e2f358a5663a1c943755894d3",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "killreject",
+      "lineStart": 93,
+      "lineEnd": 103,
+      "rawSpanSha256": "d91d931ce74da28e61ecceeb54f71bb8e85dde203a1070a45dedda38fec52d2f",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "kill_diagnostic",
+      "lineStart": 104,
+      "lineEnd": 118,
+      "rawSpanSha256": "3e6e0522d79f715f85e6018eef0abf76fc6edc65af3c179681837b91d3d1db29",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "fatal",
+      "lineStart": 119,
+      "lineEnd": 125,
+      "rawSpanSha256": "273f3b7cb3e7fda66eca7f2b74cd0cdda006e54c533a616331a588c897aaa636",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "cgroup_owner_verify",
+      "lineStart": 580,
+      "lineEnd": 585,
+      "rawSpanSha256": "86d3ade1b502cd88c12bd021508be89869a3bc795730b3cc467f2ad26547bbdb",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "cgroup_procs",
+      "lineStart": 586,
+      "lineEnd": 592,
+      "rawSpanSha256": "ceb19653c02b2e2c926ec3ede0d474048d2b134c45f9ea430af08a6af354ff23",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "cgroup_setup",
+      "lineStart": 593,
+      "lineEnd": 610,
+      "rawSpanSha256": "b0fc0c3b648ab272623358abce6e81db23a5ec4ff014bfde085c36837b345aeb",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "cgroup_verify_live",
+      "lineStart": 611,
+      "lineEnd": 619,
+      "rawSpanSha256": "1024a37fe9c5d9af1d21391e150b79d730fd97a26f0b3e4d6aec8f5466bd3104",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "inspect_initial",
+      "lineStart": 636,
+      "lineEnd": 657,
+      "rawSpanSha256": "3a12c0102a12a1d78729166b4ed03a20aaf8a38f749a5ae22ab56b19eb16cc97",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "broker_preflight",
+      "lineStart": 791,
+      "lineEnd": 819,
+      "rawSpanSha256": "0481adc59384e907b65ee3ebb07902f6931f0cab2e3e8a6db92ca15629a33a70",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+      "symbol": "broker_success_provisional_final",
+      "lineStart": 882,
+      "lineEnd": 902,
+      "rawSpanSha256": "bfd32c8e110858fc53771d1e40137606fc9c9290be902d77e332b4818d98c861",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/launcher_protocol.h",
+      "symbol": "wire_v2_owner",
+      "lineStart": 1,
+      "lineEnd": 90,
+      "rawSpanSha256": "c923ed750b39011172deeb6a32330a0215478834a53e2b4f819b3328052861cd",
+      "classification": "подтверждено исходниками"
+    }
+  ],
+  "futureControls": [
+    {
+      "id": "R00",
+      "scenario": "Positive lifecycle",
+      "trigger": "Успешный workload с достаточными actual observations",
+      "acceptance": "Positive broker wait; exact own populated0/pids.current0/procs-empty; checked rmdir+held inode unlinked+absence; cleanup receipt bound by manifest before F; baseline census restored",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R01",
+      "scenario": "Immediately after mkdir",
+      "trigger": "Одиночный отказ stat/open до сохранения scope handle, broker ещё не запущен",
+      "acceptance": "Повторное удержание только exact exclusive creation witness; пустота/удаление; чужой scope untouched; no accepted F; baseline census restored",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R02",
+      "scenario": "Missing late primitive",
+      "trigger": "После exclusive scope creation отказ clone3/USER_NOTIF/O_TMPFILE/прочего обязательного primitive",
+      "acceptance": "Broker positively stopped/waited; exact scope killed if populated, positively empty and removed; no F; census restored",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R03",
+      "scenario": "Candidate nonzero",
+      "trigger": "Наблюдаемый workload exit !=0 или signal",
+      "acceptance": "Rejected diagnostic, no accepted F; actual wait and exact scope removal; baseline census restored",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R04",
+      "scenario": "Subsequent exec",
+      "trigger": "Повторный exec, включая absolute-path execveat при закрытом96",
+      "acceptance": "No second CONTINUE; rejection checked separately from actual stop; cleanup+baseline census",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R05",
+      "scenario": "Output overflow",
+      "trigger": "Combined stdout/stderr >8MiB",
+      "acceptance": "Bounded refusal, no F; independent stop+positive own scope cleanup+census",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R06",
+      "scenario": "Watchdog",
+      "trigger": "Wall/CPU/floor<8GiB/gap>1500ms",
+      "acceptance": "Native fatal/_exit cannot bypass external reap; actual outcome/empty/removal+census, no F",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R07",
+      "scenario": "Forced broker death",
+      "trigger": "SIGKILL native broker после создания scope, до handshake и после candidate clone/exec",
+      "acceptance": "Live external controller positively waits broker, cgroup.kill if necessary then positive empty/removal; no F; census restored",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R08",
+      "scenario": "Signal authority",
+      "trigger": "CAP_KILL отсутствует либо signal0/native pidfd_send_signal даёт EPERM",
+      "acceptance": "CAP_KILL missing или pre-exec signal0 EPERM: отказ до untrusted execution. Поздний non-ESRCH SIGKILL error: сохранить errno и rejected; separate actual wait/positive empty/removal mandatory; permission != termination, no accepted F.",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R09",
+      "scenario": "ESRCH",
+      "trigger": "pidfd_send_signal returns ESRCH during rejection/exit race",
+      "acceptance": "ESRCH is not termination proof; separate actual wait/positive empty/removal mandatory; no fabricated success",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R10",
+      "scenario": "Unknown broker wait",
+      "trigger": "ECHILD/timeout or otherwise unconfirmed wait ownership",
+      "acceptance": "Reject, no accepted F; never remove potentially clone-capable live broker scope or claim baseline restoration; ROOT recovery required",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R11",
+      "scenario": "Foreign/replaced scope",
+      "trigger": "Name collision EEXIST or altered held/named parent/scope dev+ino",
+      "acceptance": "Never adopt/delete foreign cgroup; reject without prefix scans; own unresolved identity recorded as unknown",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R12",
+      "scenario": "Cleanup failure",
+      "trigger": "cgroup.kill/write/read/empty deadline/rmdir/unlinked/absence verification failure",
+      "acceptance": "Reject and no accepted-looking F even on later publication/finally failure; unknown cleanup remains unknown; actual residual evidence retained",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R13",
+      "scenario": "Wire/FD mismatch",
+      "trigger": "Wrong OWNER nonce/devino/name/FD/protocol version or unexpected inherited descriptor",
+      "acceptance": "Fail closed; candidate cannot retain FD100/101; external cleanup restores baseline; no F",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R14",
+      "scenario": "Scope membership",
+      "trigger": "cgroup.procs differs from actual candidate PID or pids.current!=1",
+      "acceptance": "No permission based on claimed scope; native reject, external actual cleanup and census",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R15",
+      "scenario": "Controller/host loss boundary",
+      "trigger": "SIGKILL всего external controller либо host loss",
+      "acceptance": "Outside live-owner guarantee; do not assert automatic cleanup/accepted F; independent ROOT recovery contract and durable identity evidence required before any stronger claim",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R16",
+      "scenario": "No-spawn cleanup",
+      "trigger": "После owner.create Broker.start: pipe/open/pin/FD bounds/known posix_spawn failure до фактического broker",
+      "acceptance": "Явное положительное NO_SPAWN разрешает уборку exact own empty scope; ambiguous spawn отдельно unknown; no F; baseline census restored",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R17",
+      "scenario": "Kernel mode / fchmod failure",
+      "trigger": "cgroupfs default mode игнорирует mkdir0700 либо own fchmod/readback fails до spawn",
+      "acceptance": "При kernel default0755 explicit own fchmod0700/readback допускает дальнейший reviewed path; default mode сам по себе не отказ. При actual fchmod/readback failure до spawn — no F и positive empty/removal только собственного exclusive root-owned nonwritable scope; baseline census restored при наблюдённых cleanup facts.",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R18",
+      "scenario": "SIGINT creation bookkeeping",
+      "trigger": "SIGINT между mkdir success и записью exclusive creation witness",
+      "acceptance": "Прерывание отложено на минимальное creation/bookkeeping окно, затем доставлено; живая finally cleanup знает own scope; no F, census restored; смерть всех trusted owners вне гарантии",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    },
+    {
+      "id": "R19",
+      "scenario": "Inherited SIGCHLD and pidfd open failure",
+      "trigger": "Controller inherited SIGCHLD=SIG_IGN/auto-reap, broker exits around spawn/pidfd_open; отдельный pidfd_open failure",
+      "acceptance": "До mkdir/spawn явно нормализован SIGCHLD и проверен единственный trusted waiter; native проверяет DFL/no-SA_NOCLDWAIT; numeric PID kill fallback отсутствует. Failed pidfd_open до CONFIG закрывает pipe и требует actual bounded wait/EOF refusal; unknown не cleanup success; foreign signal запрещён.",
+      "status": "NOTRUN",
+      "executed": false,
+      "classification": "предложение"
+    }
+  ],
+  "original_program": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "original_program_source_pin": {
+    "path": "/home/mag/orca/workspaces/ecosystem-deploy/parallel-ownership-audit-20261031/docs/api/execution-20261029/parallel-ownership-audit-20261031/support-f07-pg-acceptance/ORIGINAL-PROGRAM.json",
+    "bytes": 11555,
+    "sha256": "84f8dd31e6e047bf6fc647f4e601c1c89783dc8ebbeb4fe324814d51a7fb2ba1"
+  },
+  "original_program_semantic_equal": true,
+  "global_completion_asserted": false,
+  "limitations": [
+    "Source-only correction; no application/helper/controller/launcher/validator imports or execution, tests/PoC/kernel controls/BPF evaluation, C compiler/preprocessor/formatter, Node/SQL/SSH/Docker/browser/network/build/install. Git/Orca/own draft PR publication are review preparation.",
+    "Live controller outside broker is the resource owner. Any loss/death of the trusted controller, host loss, repeated interruption of cleanup, hostile external root mutation are outside the implemented guarantee; no autonomous guardian/durable cleanup recovery.",
+    "Persistent primitive/identity/read/removal failure and ambiguous spawn/wait remain UNKNOWN/CLEANUP_UNCONFIRMED, never pretend resource cleanup or accepted F. Source deadlines do not prove real syscall/scheduler latency.",
+    "PR91/PR92 old refs/trees/helper/schema/policy/tests/reports remain unchanged; source Head requirement remains exact PR91 parent, not current whole-final source repin.",
+    "Original26 cases/78 phases NOTRUN, M00–M19/11 and actual API/SDK/real partner integration unproven."
+  ],
+  "preservedFiles": [
+    {
+      "path": "clearledger/tools/partner-dx-kernel-v1/seccomp-policy.json",
+      "bytes": 1802,
+      "sha256": "330fb9a4353ea0f922664858c12b4b6d4aae602e5ebc4835e294e658c1f3822f",
+      "unchangedFromPR92": true
+    },
+    {
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "bytes": 116310,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "unchangedFromPR92": true
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_KERNEL_ADMISSION_V1.schema.json",
+      "bytes": 27254,
+      "sha256": "3653efd446bc3f743f29eb85650cf78d4ed871d5cfc25827780a21adf8ac09ed",
+      "unchangedFromPR92": true
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_KERNEL_CONTROLLER_20261031.md",
+      "bytes": 26231,
+      "sha256": "a03962bcda92c3263941dfcc97cff3939791336a9850e2ece38d3dddd5e68063",
+      "unchangedFromPR92": true
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_KERNEL_CONTROLLER_20261031.json",
+      "bytes": 88879,
+      "sha256": "4944416919171a592f9bee49eebd4f0129b5408eac1c34efdc85c52da8f0d45b",
+      "unchangedFromPR92": true
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_dx_metadata_20261031.py",
+      "bytes": 8248,
+      "sha256": "70d9d6bdaaeb0d7ef2d8fdfe88dc8016e603715307cbe6ef190ec682dea60463",
+      "unchangedFromPR92": true
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_dx_examples_20261031.py",
+      "bytes": 11549,
+      "sha256": "ed7caa5eeeb38d4ce4cde41557bda5216224fe12217f3e9b366d2f40bd039019",
+      "unchangedFromPR92": true
+    }
+  ],
+  "sourceFreeze": {
+    "authorCommit": "1fa494079529286ae1f3ea2144773826c43a2ab9",
+    "integrationCodeCommit": "696bd654a0632973765cf23da32b499d982c771b",
+    "base": "4e1a00692930d20934bd883365241602467879b4",
+    "exactChangedCodePaths": 3,
+    "selfHashPolicy": "Commit and SHA of this report are external receipts; no self-referential SHA or invented future HEAD."
+  },
+  "staticChecks": {
+    "pythonAST": "PASS_WITHOUT_EXEC",
+    "pythonCompileInMemory": "PASS_WITHOUT_EXEC",
+    "stdlibOnly": true,
+    "imports": [
+      "__future__",
+      "ast",
+      "base64",
+      "hashlib",
+      "json",
+      "os",
+      "posixpath",
+      "re",
+      "selectors",
+      "signal",
+      "stat",
+      "struct",
+      "sys",
+      "time"
+    ],
+    "numericPIDKillCalls": 0,
+    "nativeCgroupMkdirUnlinkCalls": 0,
+    "unchangedSecurityFunctions": {
+      "filter_install": {
+        "unchangedFromPR92": true,
+        "sha256": "b519d4c440636ed5676bc223b4454a3e7742f7f2c9a21a584f3af0cbde103cdb"
+      },
+      "limits_and_identity": {
+        "unchangedFromPR92": true,
+        "sha256": "8412153e65be36043394e34575605a61bb31ccb2b92f291919c324ac2850cf13"
+      },
+      "mount_setup": {
+        "unchangedFromPR92": true,
+        "sha256": "2b4986253023f2b24972964f272cdf945c681596fef22c1750416d863306e6ef"
+      },
+      "child_run": {
+        "unchangedFromPR92": true,
+        "sha256": "7b77d5b2ffc955dc1aec9b43a921c6b91e32f4f084442a465e26264813d31b85"
+      },
+      "notification_once": {
+        "unchangedFromPR92": true,
+        "sha256": "b977425871311207b3d48c5d50ae61958e76f3e15fa3e0c501d11c0c6b393929"
+      }
+    },
+    "originalProgramRawPinVerified": true
+  },
+  "findings": [
+    {
+      "id": "PR92-A-001",
+      "classification": "подтверждено исходниками",
+      "before": "В frozen PR92 mkdir launcher.c:551; fatal/_exit:91–96 и watchdog:462–467; единственный rmdir:841 после FINAL. Controller finally:1239–1255 не владеет cgroup.",
+      "beforeCommit": "4e1a00692930d20934bd883365241602467879b4",
+      "sourceStatus": "CORRECTED_IN_NEW_SOURCE_PENDING_MAIN_REVIEW",
+      "after": "CgroupOwner до broker spawn; retained exact parent/name/nonce/dev+ino; all normal broker rejection/death paths go to external finally reap. Positive own empty/removal mandatory before F.",
+      "places": [
+        "CgroupOwner.create",
+        "CgroupOwner.retain_created",
+        "CgroupOwner.reap",
+        "Broker.start",
+        "run"
+      ],
+      "runtimeStatus": "NOTRUN",
+      "acceptance": "ROOT actual negative outcomes + exact own removal + restored independently measured baseline census"
+    },
+    {
+      "id": "PR92-A-O01",
+      "classification": "подтверждено исходниками",
+      "before": "Frozen killreject:90 ignored pidfd_send_signal return; required_caps lacked CAP_KILL. Escape/false F was not established.",
+      "beforeCommit": "4e1a00692930d20934bd883365241602467879b4",
+      "sourceStatus": "CORRECTED_IN_NEW_SOURCE_PENDING_MAIN_REVIEW",
+      "after": "Effective CAP_KILL checks, pre-CONTINUE pidfd signal0 probe after UID drop; return/errno retained, ESRCH and SIGNAL_SENT never termination; independent actual wait/empty plus unchanged PDEATHSIG.",
+      "places": [
+        "signalling_authority",
+        "killreject",
+        "kill_diagnostic",
+        "inspect_initial",
+        "broker_preflight",
+        "Broker.kill",
+        "CgroupOwner.reap"
+      ],
+      "runtimeStatus": "NOTRUN",
+      "acceptance": "Actual permission/late errno/ESRCH and termination controls, no partial final acceptance"
+    },
+    {
+      "id": "REAPER-REVIEW-NO-SPAWN",
+      "classification": "подтверждено исходниками",
+      "before": "WIP broker object existed although start failed before spawn; stopped() false incorrectly blocked reap.",
+      "sourceStatus": "CORRECTED_BEFORE_FREEZE",
+      "after": "Explicit NOT_ATTEMPTED/FAILED_NO_CHILD permit positive no-spawn cleanup; IN_PROGRESS remains unknown, pid=None is not termination.",
+      "places": [
+        "Broker.start",
+        "Broker.no_spawn",
+        "CgroupOwner.reap"
+      ],
+      "runtimeStatus": "NOTRUN"
+    },
+    {
+      "id": "REAPER-REVIEW-PID-REUSE",
+      "classification": "подтверждено исходниками",
+      "before": "WIP numeric PID kill fallback assumed retained child without normalizing inherited SIGCHLD auto-reap.",
+      "sourceStatus": "CORRECTED_BEFORE_FREEZE",
+      "after": "SIGCHLD DFL/sole-thread waiter before mkdir/spawn; native DFL/no-SA_NOCLDWAIT; numeric PID/PGID signal fallback removed entirely. Failed pidfd_open before CONFIG closes pipes and waits actual broker exit.",
+      "places": [
+        "signalling_authority",
+        "Broker.start",
+        "Broker.kill",
+        "broker_preflight"
+      ],
+      "runtimeStatus": "NOTRUN"
+    },
+    {
+      "id": "REAPER-CREATION-WINDOW",
+      "classification": "подтверждено исходниками",
+      "before": "WIP failed first postmkdir open/stat and kernel default mode could block own cleanup; SIGINT between mkdir return and created bookkeeping could hide successful creation.",
+      "sourceStatus": "CORRECTED_BEFORE_FREEZE",
+      "after": "Held trusted parent/name/nonce precede mkdir; scoped mask until created witness; bounded exact retain retry; explicit fchmod0700/readback; recurring failure remains unconfirmed.",
+      "places": [
+        "CgroupOwner.create",
+        "CgroupOwner.retain_created",
+        "CgroupOwner.reap"
+      ],
+      "runtimeStatus": "NOTRUN"
+    }
+  ],
+  "authorControlInventory": [
+    {
+      "id": "NC01",
+      "trigger": "Первая os.open scope сразу после успешного mkdir отказывает, до inode retention/READY",
+      "expected": "create witness остаётся; finally retain_created повторяет точное открытие один раз; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC02",
+      "trigger": "Первый fstat/stat сразу после mkdir отказывает, до handshake",
+      "expected": "Удержанный scope FD либо exclusive witness позволяют один повтор; persistent failure => CLEANUP_UNCONFIRMED, no pretend remove; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC03",
+      "trigger": "clone3/CLONE_INTO_CGROUP или поздний setup primitive unsupported",
+      "expected": "native fatal/_exit; live owner вне broker удерживает identity; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC04",
+      "trigger": "Candidate actual nonzero/signal exit",
+      "expected": "Native NEED rejects actual outcome; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC05",
+      "trigger": "Последующий execve/execveat, включая absolute path или иной FD",
+      "expected": "USER_NOTIF не получает повторного CONTINUE, fatal/reap; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC06",
+      "trigger": "Combined stdout/stderr превышает 8MiB",
+      "expected": "output_read rejects before over-budget frame; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC07",
+      "trigger": "180s wall watchdog срабатывает",
+      "expected": "Independent native monotonic safety timer kills/rejects/exits; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC08",
+      "trigger": "Physical monitor gap >1500ms/floor breach/ошибка sample",
+      "expected": "Независимые physical/watchdog paths reject; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC09",
+      "trigger": "Forced broker SIGKILL до READY, в том числе до cgroup_setup/OWNER read",
+      "expected": "Создание scope было ДО broker launch; sole resource owner остаётся в controller; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC10",
+      "trigger": "Forced broker SIGKILL после UID drop/до CONTINUE/после CONTINUE",
+      "expected": "PDEATHSIG + parent pidfd fallback сохранены; external group kill/positive empty независимы; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC11",
+      "trigger": "EEXIST по exact nonce/name до own mkdir",
+      "expected": "NOT_CREATED, never adopt/chmod/kill/rmdir foreign scope; foreign baseline unchanged; no F.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC12",
+      "trigger": "Parent FD/dev+ino или named scope dev+ino заменён/foreign",
+      "expected": "CLEANUP_UNCONFIRMED, no foreign kill/remove, explicit ROOT diagnostic, no F; hostile external root mutation outside TCB.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC13",
+      "trigger": "ENOENT после own creation или rmdir/verification failure",
+      "expected": "Absence alone never success; CLEANUP_UNCONFIRMED, no F; ROOT investigation.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC14",
+      "trigger": "Effective CAP_KILL отсутствует у controller/native",
+      "expected": "Reject before candidate window; UID0 недостаточен; no F; no created resource if controller preflight fails.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC15",
+      "trigger": "pidfd_send_signal возвращает EPERM/ESRCH/иной errno",
+      "expected": "Exact return/errno retained, SIGNAL_SENT != TERMINATED, ESRCH != wait; positive wait/empty remains mandatory; permission failure never accepted; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC16",
+      "trigger": "cgroup.kill write denied/short или group stays populated/read fails",
+      "expected": "CLEANUP_UNCONFIRMED/no accepted F; bounded loop deadline5s, kernel/scheduler latency not proven; no guessed remove.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC17",
+      "trigger": "Native FINAL + broker exit0, external cleanup не подтверждён",
+      "expected": "External manifest/F barrier rejects; publication rollback not bypassed by cleanup exception; final.json absent.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC18",
+      "trigger": "До posix_spawn: pipe/open/pin/FD bound fail; posix_spawn returns OSError",
+      "expected": "NOT_ATTEMPTED/FAILED_NO_CHILD явно разрешают reap без fake wait; IN_PROGRESS/unknown не разрешает; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC19",
+      "trigger": "Kernel mkdir default0755 или explicit fchmod/readback отказывает",
+      "expected": "Own held inode explicit fchmod0700; failed setup aborts, pre-spawn root/no-write identity допускает safe cleanup; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC20",
+      "trigger": "Pending SIGINT точно между mkdir success и bookkeeping",
+      "expected": "Scoped mask defers delivery until created=True; caller mask restored; KeyboardInterrupt flows to finally with witness; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC21",
+      "trigger": "Inherited SIGCHLD=SIG_IGN и failed pidfd_open",
+      "expected": "Controller normalizes DFL/sole waiter before spawn, native checks actual no-SA_NOCLDWAIT. Numeric os.kill/killpg absent; failed pidfd_open closes protocol before CONFIG, only bounded actual EOF/exit wait; unknown refuses cleanup; При живом trusted controller: REJECTED/nonzero, accepted F отсутствует; exact exclusive parentFD/name/nonce/dev+ino; broker WAITED либо положительно NOT_SPAWNED; actual populated0 AND pids.current0 AND procs-empty; checked own rmdir, held inode nlink0, exact-name absence; независимый ROOT baseline census restored. Это ожидаемые факты будущего контроля, не результаты исполнения.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    },
+    {
+      "id": "NC22",
+      "trigger": "SIGKILL controller/host loss/death всех trusted owners",
+      "expected": "Declared TCB limit: no autonomous guardian/journal recovery implemented, no cleanup guarantee claimed; ROOT must establish exact identity independently; no prefix scan/delete.",
+      "status": "SOURCE_AUTHORED_NOTRUN",
+      "executed": false
+    }
+  ],
+  "authorInventoryInterpretation": {
+    "classification": "предложение",
+    "executed": false,
+    "overlap": "NC01–NC22 and R00–R19 overlap; not 42 independently executed cases. Original PR92 30 future controls preserved in unchanged old report.",
+    "corrections": [
+      "NC02 single transient observation failure: retry may recover; persistent failure remains CLEANUP_UNCONFIRMED, baseline restoration not asserted.",
+      "NC15 pre-exec signal0 error versus later SIGKILL errno follow clarified R08; neither syscall result proves termination.",
+      "NC19 kernel default0755 with successful explicit fchmod is a setup compatibility case, not automatically a rejected run; actual chmod/readback failure requires refusal and own cleanup.",
+      "NC22/R15 any trusted controller death, host loss or repeated interruption of cleanup is outside live-owner guarantee; no durable guardian/journal recovery implementation."
+    ]
+  },
+  "ownership": {
+    "author": {
+      "task": "task_6f7d3e6e4623",
+      "dispatch": "ctx_7f85b0b1a765",
+      "done": "msg_104d06775a35",
+      "outcome": "succeeded",
+      "resource": "released",
+      "files": [
+        "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "clearledger/tools/partner-dx-kernel-v1/launcher_protocol.h"
+      ]
+    },
+    "independentReviewer": {
+      "task": "task_e501e99ae316",
+      "dispatch": "ctx_3004c5944dff",
+      "outcome": "succeeded",
+      "ownership": "read-only source; private MD/JSON only",
+      "done": "msg_62a1393edc28",
+      "resource": "released"
+    },
+    "coordinator": "two NEW docs, integration/PR/preview and main handoff"
+  },
+  "receipts": {
+    "author": [
+      {
+        "path": "/srv/projects/preview/partner-dx-cgroup-reaper-author-20261031/author-source.md",
+        "bytes": 17335,
+        "sha256": "d2b8d1d7bc3cf0312889e72859682cef7ce705fe80022315e515a7e0ebc5c4bc"
+      },
+      {
+        "path": "/srv/projects/preview/partner-dx-cgroup-reaper-author-20261031/author-source.json",
+        "bytes": 20668,
+        "sha256": "03dde05e6c29bba226da0cdb55d1924ad4785e6fd19d527eced217c23a194a34"
+      }
+    ],
+    "coordinatorValidation": {
+      "path": "/srv/projects/preview/partner-dx-cgroup-reaper-fix-20261031/coordinator-validation.json",
+      "sha256": "f9720b180b226994117d9688426e659d1ce8e393ff49cdbddf3e8fced006c338"
+    },
+    "independent": [
+      {
+        "path": "/srv/projects/preview/partner-dx-cgroup-reaper-fix-20261031/independent-review.md",
+        "bytes": 23109,
+        "sha256": "b12b4c57d30ed70a72151d57d1f819e0e93ca929db7f60372b3824b7b827ab1a"
+      },
+      {
+        "path": "/srv/projects/preview/partner-dx-cgroup-reaper-fix-20261031/independent-review.json",
+        "bytes": 45423,
+        "sha256": "a82f4a54f1aa64225545a93402ce735cd206300763e49f48855aea67ea8f6e7b"
+      }
+    ]
+  },
+  "failurePaths": [
+    {
+      "trigger": "First postmkdir open/stat/chmod fail before broker",
+      "sourceTrace": "run finally -> CgroupOwner.reap -> exact retain_created witness -> empty -> own checked removal",
+      "requiredOutcome": "Transient failure may recover; persistent identity/read failure unconfirmed; no F.",
+      "classification": "подтверждено исходниками",
+      "runtime": "NOTRUN"
+    },
+    {
+      "trigger": "Before spawn / known posix_spawn failure",
+      "sourceTrace": "Broker NOT_ATTEMPTED/FAILED_NO_CHILD -> no_spawn -> own reap",
+      "requiredOutcome": "No fabricated wait; only known no-child allows cleanup.",
+      "classification": "подтверждено исходниками",
+      "runtime": "NOTRUN"
+    },
+    {
+      "trigger": "Ambiguous spawn interruption",
+      "sourceTrace": "Broker IN_PROGRESS without PID -> no_spawn false -> reap rejects",
+      "requiredOutcome": "No unknown-as-termination; explicit ROOT recovery, no accepted F.",
+      "classification": "подтверждено исходниками",
+      "runtime": "NOTRUN"
+    },
+    {
+      "trigger": "fatal/_exit, candidate nonzero/laterexec/overflow, native watchdog, forced broker death",
+      "sourceTrace": "Broker transport refusal -> finally Broker.kill actual wait -> CgroupOwner.reap cgroup.kill if needed -> triple empty -> rmdir/held unlink/absence",
+      "requiredOutcome": "Reject+no accepted F, actual removal and baseline census remain future ROOT evidence.",
+      "classification": "подтверждено исходниками",
+      "runtime": "NOTRUN"
+    },
+    {
+      "trigger": "Native successful FINAL/exit0",
+      "sourceTrace": "Broker.finish positive wait -> owner.reap -> artifact manifest cleanup binding -> unchanged F -> controller exit0",
+      "requiredOutcome": "F barrier includes cleanup, actual mandatory facts and independent successful controller exit.",
+      "classification": "подтверждено исходниками",
+      "runtime": "NOTRUN"
+    },
+    {
+      "trigger": "Cleanup/signal/wait/identity/empty/removal failure",
+      "sourceTrace": "finally observation CLEANUP_UNCONFIRMED -> failure diagnostic; rollback final if publication incomplete or owner not removed",
+      "requiredOutcome": "No accepted F on unknown; no foreign scope removal; no automatic recovery claim.",
+      "classification": "подтверждено исходниками",
+      "runtime": "NOTRUN"
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "U01",
+      "status": "NOTRUN",
+      "requirement": "C compilation/headers/ABI/actual source-to-binary identity and Linux kernel primitive behavior.",
+      "classification": "неизвестно"
+    },
+    {
+      "id": "U02",
+      "status": "NOTRUN",
+      "requirement": "Positive/negative actual cgroup empty/remove and independent before/after census, real pidfd permission/ESRCH/wait behavior.",
+      "classification": "неизвестно"
+    },
+    {
+      "id": "U03",
+      "status": "NOT_IMPLEMENTED",
+      "requirement": "Recovery if trusted controller dies, all owners lost, host loss, repeated cleanup interruption or hostile external root parent mutation; no independent guardian/durable identity journal.",
+      "classification": "неизвестно"
+    },
+    {
+      "id": "U04",
+      "status": "UNKNOWN",
+      "requirement": "Persistent kernel observation/removal failure and ambiguous spawn state cannot establish cleanup; requires ROOT investigation without broad prefix deletion.",
+      "classification": "неизвестно"
+    },
+    {
+      "id": "U05",
+      "status": "NOTRUN",
+      "requirement": "Whole-final source composition repin, original26/78, actual API/SDK/partner onboarding; old frozen checks are not final composition acceptance.",
+      "classification": "неизвестно"
+    }
+  ],
+  "plan": [
+    {
+      "priority": "P0",
+      "owner": "ROOT source review",
+      "kind": "contract/source",
+      "work": "Review exact5path diff against frozen PR92, wire v2/controller+launcher pairing, closed A/F unchanged and TCB qualifications; independently accept or return concrete findings."
+    },
+    {
+      "priority": "P0",
+      "owner": "ROOT toolchain/kernel acceptance",
+      "kind": "future verification",
+      "work": "Separately authorize and establish immutable native binary/config/rootfs identity; actual isolation/kill/wait/cgroup positive and negative controls, baseline census, output/physical limits. Nothing executed here."
+    },
+    {
+      "priority": "P1",
+      "owner": "ROOT persistence/recovery design",
+      "kind": "future implementation",
+      "work": "Decide requirement for controller-death recovery/independent guardian with exact durable identity; current live-owner boundary cannot be promoted to all-owner-death guarantee."
+    },
+    {
+      "priority": "P1",
+      "owner": "ROOT final composition",
+      "kind": "contract/verification",
+      "work": "Review chosen whole-final repin separately, then only authorized metadata26/78 and actual final consumer validation."
+    },
+    {
+      "priority": "P2",
+      "owner": "API docs/Identity/SDK owners",
+      "kind": "documentation/contract",
+      "work": "Return validated observations to original PR58/PR82 developer gaps and partner pilot; no claim of full API readiness from this harness fix."
+    }
+  ],
+  "independentSourceReview": {
+    "task": "task_e501e99ae316",
+    "dispatch": "ctx_3004c5944dff",
+    "done": "msg_62a1393edc28",
+    "outcome": "succeeded",
+    "resource": "released",
+    "verdict": {
+      "review": "COMPLETED",
+      "open_material_findings": [],
+      "source": "NO_OPEN_MATERIAL_FINDING_IN_SCOPED_FROZEN_PATCH",
+      "runtime": "NOTRUN",
+      "runtime_safety": "UNKNOWN",
+      "runtime_go": false,
+      "whole_api_ready": false,
+      "original_26_cases_78_phases": "NOTRUN",
+      "M00_M19_and_11_gates": "NOT_CLOSED_NOT_REDUCED"
+    },
+    "validatedRawSpans": 26,
+    "evidence": [
+      {
+        "id": "E01",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 649,
+        "end_line": 687,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "9fb568a906fc176141f41dcaccbdccc0311e44d1b0becab9adb310a1e8c45ef7",
+        "claim": "Bounded kernel reads; SIGCHLD reset, sole controller thread, effective CAP_KILL and pidfd API preconditions",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E02",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 690,
+        "end_line": 760,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "07569bcd54132684b199b8f9c86ec8956c3414b56e48ff545eba0fd7a2c6e9c7",
+        "claim": "Owner before broker; retained root parent/mount/controllers; exclusive mkdir, scoped interruption mask, fchmod0700 readback, kill handle",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E03",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 762,
+        "end_line": 807,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "1226d4db24fe7041e56f97b8c6fe2b0ad52a8759ab6e22a10947bc4196cc5069",
+        "claim": "Exclusive creation witness recovery only before spawn; held/named devino identity; populated0 AND pids.current0 AND empty procs",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E04",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 809,
+        "end_line": 865,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "a36fb163034fcbb04838582ed969fc4db49660cfab1b94e22d759f617767046f",
+        "claim": "Wire owner tuple; no-spawn/wait requirement before cgroup.kill; checked rmdir+held nlink0+absence; cleanup/unknown observations",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E05",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 874,
+        "end_line": 960,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "14ad3ded580b1dd0692aa399d341aa7f5764f350a7cc6224629f33d16f5f3083",
+        "claim": "Explicit spawn state; pin and FD bounds; FD100/101; pidfd_open before any CONFIG; exception closes pipes",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E06",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 962,
+        "end_line": 1036,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "d849b2eb0ee197c4099a5e93232b7ad01535918e6bcfbed54d96d378b45de831",
+        "claim": "Closed wire v2, sequence/frame/output/metadata bounds; positive exit0 wait",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E07",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 1038,
+        "end_line": 1082,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "f082d48a1109f8811122e0c063ec4db3b18d63dcfe37ba264d526ba6c07cde35",
+        "claim": "No numeric PID/PGID signal fallback; checked signal/ESRCH/error; independent actual wait; explicit no_spawn",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E08",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 1323,
+        "end_line": 1452,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "0d2e3d842c563786062bf4d8f9c0d8677bcd65493d6be13fbd82d8b397804c7e",
+        "claim": "Output accounting and artifact provenance; cleanup bound in manifest; unchanged F shape",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E09",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 1455,
+        "end_line": 1558,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "1516de93d88e134e4dff712827c39b79919ecced55bca0b7c9eab2dae0761d05",
+        "claim": "Owner creation before startup; final reap before F; nested finally cleanup and rollback; failure receipt attributes",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E10",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 1561,
+        "end_line": 1589,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "bb10143ea0f9772776db4ecc774ab954a70d24717201df589cecc13c6a20c78c",
+        "claim": "Explicit isolated opt-in; successful controller exit requirement; REJECTED diagnostic distinct from A/F",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E11",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 262,
+        "end_line": 338,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "ba9ec3cee7b7cc562d70855233dd36826fc623e13cc4fa863248cb99ce91330f",
+        "claim": "Immutable helper literal grammar and source manifests, no helper imports",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E12",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 407,
+        "end_line": 600,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "66403ef6c74efd45a590fa7eafda7e7390a52d78f243af6782232a3e657052f4",
+        "claim": "Unchanged config/root/candidate identity, independent inputs, source/runtime/cache/rootfs pins and guards",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E13",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 603,
+        "end_line": 646,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "5d8a6aa3be1ee6c4a084d3ecc7957e12f42a37b63145eefb74bc2f4f51a0f168",
+        "claim": "Wire version and FD constants; unchanged exact clean environment and SEAL",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E14",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 1110,
+        "end_line": 1221,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "f551e0cd69abaceefbff2a0d01788cf9e87a881882d0f2dcd7713b777e94d472",
+        "claim": "Unchanged A provenance/clock/namespaces/mounts/quota/limits/physical floor validations",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E15",
+        "file": "clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/controller.py",
+        "start_line": 1224,
+        "end_line": 1320,
+        "file_sha256": "086121d9b3c2aa06a112d72f5533047faee2bbb883b003360d234780341f99fb",
+        "span_sha256": "9b1a2667e1871479bf4aab9f28c5cc5a8c49baef8c7410e6d2cf665f489eadbe",
+        "claim": "Nonce claim, exclusive final persistence, admission and actual EXEC/EXIT validation",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E16",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 72,
+        "end_line": 133,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "e77c5c838a023383fcd883555fceacdfc48faa7282d0e872c79b08af4dca1baa",
+        "claim": "Lock-free checked pidfd kill diagnostics; fatal _exit; closed v2 framing",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E17",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 176,
+        "end_line": 236,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "6ac736b6c53f866ff640fe4a9ccf77f90c777dff312571405f0dc8b73f0bf554",
+        "claim": "Preserved private propagation, RO inputs, finite tmpfs, UID/GID/caps/NNP and hard limits",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E18",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 238,
+        "end_line": 337,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "a2af3bae0bd1be3797bc70877f1bfe13d8572eee8c44f1cd39242ef78b331266",
+        "claim": "Unchanged BPF construction and policy digest; both exec syscalls notify, no widening",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E19",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 394,
+        "end_line": 435,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "a72f97fcd0907800eb427ff860aeba4df60bc2e6fd7cc1d96eb750c619f91eee",
+        "claim": "Preserved A observations and clean environment; nonce additionally bound to owner",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E20",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 438,
+        "end_line": 468,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "44ec1d5406c02f2f92f31a9485aa5002739d48b15233b651d1fbd2dbc53139f4",
+        "claim": "FD100/101 close_range before mounts/drop/filter; FD96/97 CLOEXEC; rearmed PDEATHSIG and FD98 liveness",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E21",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 486,
+        "end_line": 562,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "00864539d8ee764225109ee313416944512e0890b7ea6e1562248873594c68ea",
+        "claim": "Preserved independent monotonic timer and physical watchdog; checked rejection kill path",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E22",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 564,
+        "end_line": 619,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "15954f5c6e6be4b7c559ad8cc5e1e0da53c9fd1ab187d5a7c5a201cf14846142",
+        "claim": "Exact inherited cgroup2 handles+wire tuple+configured parent; initial/live membership and hard limits",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E23",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 636,
+        "end_line": 697,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "778fe9e5e31b903fe3db98672b319c6d78853a6bf4874ac8011c3bfa3a7ef773",
+        "claim": "Actual candidate identity/pidfd signal0 before sole CONTINUE; pinned successful exec observation",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E24",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 791,
+        "end_line": 847,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "f1be631eeb1fc7dad06eb88364044d40675cb73133cd5a291984f431214cb93c",
+        "claim": "Actual SIGCHLD DFL/noSA_NOCLDWAIT, required CAP_KILL, nonblocking diagnostics, inherited FD census, exact clone3",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E25",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher.c",
+        "start_line": 848,
+        "end_line": 902,
+        "file_sha256": "a47809b7413974a7380e4a8e410560dfbdd23bc426c033ea5846b8480b791599",
+        "span_sha256": "bd3e6e983b428b803c86389dbccea7d26dde0117b8e88cf5ffaf7bed3ae4f08a",
+        "claim": "Watchdog after clone; nonzero/subsequent-exec/overflow rejection; candidate wait; provisional FINAL; broker never removes cgroup",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      },
+      {
+        "id": "E26",
+        "file": "clearledger/tools/partner-dx-kernel-v1/launcher_protocol.h",
+        "absolute_path": "/home/mag/orca/workspaces/ledger-app/partner-dx-cgroup-reaper-author-20261031/clearledger/tools/partner-dx-kernel-v1/launcher_protocol.h",
+        "start_line": 1,
+        "end_line": 90,
+        "file_sha256": "c923ed750b39011172deeb6a32330a0215478834a53e2b4f819b3328052861cd",
+        "span_sha256": "c923ed750b39011172deeb6a32330a0215478834a53e2b4f819b3328052861cd",
+        "claim": "Wire v2 OWNER and FD100/101 contract; unchanged numeric resource limits and A/F grammar",
+        "source_status": "TRACED",
+        "runtime_status": "NOTRUN"
+      }
+    ],
+    "candidateHistory": [
+      {
+        "id": "IR01",
+        "priority": "P2",
+        "title": "Pre-spawn startup error blocked cleanup of own empty scope",
+        "reported_message": "msg_c663656c9b5c",
+        "status": "RESOLVED_IN_FROZEN_SOURCE",
+        "original_trace": "WIP controller owner.create -> Broker object -> start exception before PID -> stopped false -> reap rejection",
+        "final_evidence": [
+          "E04",
+          "E05",
+          "E07"
+        ],
+        "resolution": "Explicit NOT_ATTEMPTED/FAILED_NO_CHILD permit no_spawn; IN_PROGRESS remains unknown, not no-spawn."
+      },
+      {
+        "id": "IR02",
+        "priority": "P2_SOURCE_CANDIDATE",
+        "title": "Inherited auto-reap could invalidate PID identity before pidfd open or numeric fallback",
+        "reported_messages": [
+          "msg_82d583111020",
+          "msg_3b887133cc04"
+        ],
+        "status": "RESOLVED_IN_FROZEN_SOURCE",
+        "final_evidence": [
+          "E01",
+          "E05",
+          "E07",
+          "E24"
+        ],
+        "resolution": "SIGCHLD normalized before mkdir/spawn; one controller thread/sole waiter; native actual DFL/noSA_NOCLDWAIT; numeric PID/PGID kill removed; no-pidfd startup uses closed-pipe EOF and actual wait or explicit unknown."
+      },
+      {
+        "id": "IR03",
+        "priority": "SOURCE_BOUNDARY_CANDIDATE",
+        "title": "SIGINT at mkdir success -> created assignment",
+        "reported_message": "msg_88212056e959",
+        "status": "RESOLVED_FOR_CATCHABLE_SIGINT_IN_FROZEN_SOURCE",
+        "final_evidence": [
+          "E02",
+          "E03",
+          "E09"
+        ],
+        "resolution": "Scoped mask defers SIGINT/TERM/HUP/QUIT only over creation bookkeeping and restores exact previous mask; actual death of the controller remains outside guarantee."
+      },
+      {
+        "id": "IR04",
+        "priority": "COORDINATOR_CANDIDATE_INDEPENDENTLY_CHECKED",
+        "title": "cgroupfs default mode may ignore requested mkdir0700",
+        "status": "STRUCTURALLY_ADDRESSED",
+        "final_evidence": [
+          "E02",
+          "E03",
+          "E22"
+        ],
+        "resolution": "Explicit own retained-inode fchmod0700 and readback precede spawn; pre-spawn failure can remove own empty root-owned nonwritable object; runtime mode support NOTRUN."
+      }
+    ],
+    "inventoryReviewedSnapshotSha256": "ea6c2398633ec40c767beb5853170d85f3a7a6d6f538a71c791181a1c053c99e",
+    "inventoryEditorialChangesAfterSnapshot": [
+      "R17"
+    ],
+    "editorialChangeExplanation": "R17 explicitly distinguishes kernel default0755 with successful own fchmod from actual chmod/readback failure; this is a documentary interpretation already supported by frozen source, not a new control result. Report envelope/receipts changed after snapshot; whole final JSON was not independently re-reviewed."
+  },
+  "workerCleanup": {
+    "author": "released",
+    "independentReviewer": "released",
+    "reclaimableExpected": 0
+  },
+  "markdown": {
+    "path": "clearledger/docs/api/PARTNER_DX_KERNEL_REAPER_FIX_20261031.md",
+    "bytes": 32195,
+    "sha256": "3b88dbabcd71112b0dbfab6f2202f2ec8ed1a316d3c8ca378c01886b4bf0adc9"
+  }
+}
