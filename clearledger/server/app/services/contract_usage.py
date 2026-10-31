@@ -88,6 +88,80 @@ _SOURCES: list[tuple[str, str, str]] = [
 ]
 
 
+async def _service_contract_alias(db: AsyncSession) -> str | None:
+    """Только доказанный полный alias другой service_contracts; UNKNOWN → None.
+
+    Зависимость сама по себе не доказывает равенство строк. Принимаем ровно
+    deparse полной прямой проекции, построенной из каталога физической таблицы.
+    Любая другая форма, RLS или options сохраняют прежний отдельный источник.
+    """
+    rows = (await db.execute(text("""
+        SELECT nv.nspname || '.' || v.relname AS alias,
+               pg_catalog.pg_get_viewdef(v.oid, false) AS definition,
+               'SELECT ' || (
+                   SELECT string_agg('service_contracts.' || pg_catalog.quote_ident(a.attname),
+                                     ', ' ORDER BY a.attnum)
+                   FROM pg_catalog.pg_attribute a
+                   WHERE a.attrelid = b.oid AND a.attnum > 0 AND NOT a.attisdropped
+               ) || ' FROM ' || CASE WHEN pg_catalog.pg_table_is_visible(b.oid)
+                   THEN 'service_contracts' ELSE nb.nspname || '.service_contracts'
+               END || ';' AS expected
+        FROM pg_catalog.pg_class v
+        JOIN pg_catalog.pg_namespace nv ON nv.oid = v.relnamespace
+        JOIN pg_catalog.pg_class b ON b.oid = pg_catalog.to_regclass(
+            CASE nv.nspname WHEN 'core' THEN 'public.service_contracts'
+                            WHEN 'public' THEN 'core.service_contracts' END)
+        JOIN pg_catalog.pg_namespace nb ON nb.oid = b.relnamespace
+        JOIN pg_catalog.pg_rewrite r ON r.ev_class = v.oid
+            AND r.rulename = '_RETURN' AND r.ev_type = '1' AND r.is_instead
+        WHERE v.relname = 'service_contracts' AND nv.nspname IN ('core', 'public')
+          AND v.relkind = 'v' AND b.relkind IN ('r', 'p')
+          AND NOT b.relrowsecurity AND NOT b.relforcerowsecurity
+          AND NOT v.relrowsecurity AND NOT v.relforcerowsecurity
+          AND COALESCE(cardinality(v.reloptions), 0) = 0
+          AND COALESCE(cardinality(b.reloptions), 0) = 0
+          AND EXISTS (
+              SELECT 1 FROM pg_catalog.pg_depend d
+              WHERE d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
+                AND d.objid = r.oid AND d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                AND d.refobjid = b.oid
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_catalog.pg_depend d
+              WHERE d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
+                AND d.objid = r.oid AND d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                AND d.refobjid NOT IN (v.oid, b.oid)
+          )
+          AND EXISTS (
+              SELECT 1 FROM pg_catalog.pg_attribute a
+              WHERE a.attrelid = b.oid AND a.attname = 'id'
+                AND a.attnum > 0 AND NOT a.attisdropped
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_catalog.pg_attribute a
+              WHERE a.attrelid = b.oid AND a.attnum > 0 AND NOT a.attisdropped
+                AND a.attname !~ '^[a-z_][a-z0-9_]*$'
+          )
+          AND ARRAY(SELECT a.attname FROM pg_catalog.pg_attribute a
+                    WHERE a.attrelid = v.oid AND a.attnum > 0 AND NOT a.attisdropped
+                    ORDER BY a.attnum)
+            = ARRAY(SELECT a.attname FROM pg_catalog.pg_attribute a
+                    WHERE a.attrelid = b.oid AND a.attnum > 0 AND NOT a.attisdropped
+                    ORDER BY a.attnum)
+    """))).mappings().all()
+    if len(rows) == 1:
+        row = rows[0]
+        if row["definition"] and row["expected"]:
+            # Две точные формы одного списка колонок: deparser может опустить
+            # префикс единственной таблицы. Меняем только сгенерированный эталон;
+            # SQL view не переписываем. Имена колонок выше ограничены ASCII.
+            expected = row["expected"]
+            bare = expected.replace("service_contracts.", "")
+            if " ".join(row["definition"].split()) in (expected, bare):
+                return row["alias"]
+    return None
+
+
 async def _sources(db: AsyncSession) -> list[tuple[str, str, str]]:
     sources = list(_SOURCES)
     # В одной БД могут остаться обе поставки. Миграция116 добавляет ссылку
@@ -95,6 +169,7 @@ async def _sources(db: AsyncSession) -> list[tuple[str, str, str]]:
     # без contract_id. Такая таблица не является источником UUID-связей.
     # Проверяем колонку до запроса, не прерывая транзакцию и не подбирая договор
     # по строковому номеру. Имена схем остаются явными и при проверке, и при чтении.
+    support_tables = []
     for table in ("core.service_contracts", "public.service_contracts"):
         if await db.scalar(text("""
             SELECT EXISTS (
@@ -103,6 +178,10 @@ async def _sources(db: AsyncSession) -> list[tuple[str, str, str]]:
                   AND attnum > 0 AND NOT attisdropped
             )
         """), {"table": table}):
+            support_tables.append(table)
+    alias = await _service_contract_alias(db) if len(support_tables) == 2 else None
+    for table in support_tables:
+        if table != alias:
             sources.append(("support", "Сервисные договоры «Поддержки»", _col(table)))
     return sources
 
