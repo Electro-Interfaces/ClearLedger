@@ -8,6 +8,30 @@ company-wide occupancy `461c9ed4`, typed history `1f0cf49a`, route triage `18fd9
 Изменения находятся в draft PR78. Merge и выпуска на РусГидро нет;
 программа M00–M19 продолжается.
 
+## Параллельные исходные пакеты · 31.10.2026
+
+МАГ разрешил обоим дополнительным оркестраторам код, тесты и документацию
+в отдельных ветках/draft PR. Прежний запрет на код снят; их runtime, merge
+и выпуск не разрешены. ROOT сохраняет отдельную ответственность за приёмку.
+
+[Draft PR82](https://github.com/Electro-Interfaces/ClearLedger/pull/82),
+HEAD725bee17:8страниц руководства, metadata111полей/aliases и15GET,14JSON200+binary,
+два новых тестовых файла. ROOT сверил exact18paths/hashes/diffcheck и выполнил
+два stdlib source checker:15операций,8страниц,97ссылок,34JSON. Это source-only;
+12test definitions написаны, не запущены, OpenAPI export/SDK freshness не приняты.
+PR81 — отдельный docs-only снимок, повторно интегрировать его не требуется.
+
+[Draft PR83](https://github.com/Electro-Interfaces/ClearLedger/pull/83),
+HEAD3ffe5ba2:4production paths общего владельца ServiceLocation,1новый тест
+и2отчёта. Legacy warehouse initialization ограничена session/root/instance
+и двумя фазами, существующий object ceiling проверяется явно; same-company
+ObjectLink parent/child point_of_service блокирует удаление даже для закрытой
+связи. ROOT подтвердил exact7hashes/21dependency hashes/23selectedAST/105прежних
+определений и разрешённую дельту. Приёмка source-only; runtime ещё впереди.
+25функций/80статических вариантов — NOTRUN. Политика new-create, no-reuse,
+другие soft-history категории и гонки остаются открыты. Оба пакета ещё не входят
+в интеграционную ветку ROOT и не закрывают20разделов или11общих gates.
+
 ## Проверенные пакеты и текущая работа · 31.10.2026
 
 В Auditor принят пакет `f266b6a`: выделена фабрика native HTTP приложения.
@@ -49,7 +73,18 @@ MigrationError code4/phase pulse_parent из проверенных исходн
 все процессы завершены, контейнер удалён, исходники сохранены. Это0 основных
 сценариев, не проверка миграций.
 
-**Corebootstrap:31из57 сценариев приняты в26отдельных сериях.**
+**Corebootstrap:33из57 сценариев приняты в28отдельных сериях.**
+
+Следующие два CFG сценария приняты отдельными ROOT запусками: CFG-identity
+(31.76с native supervision/43.97с полный) и CFG-url-options (30.62с/44.21с).
+Первый подтвердил отказ неверного expected DB через RuntimeError с точной причиной
+MigrationError3/target; второй — отказ неподдерживаемых URL options через два
+RuntimeError require_engine/_config. До/после состояние совпало, write_attempts0;
+Context setup использует собственную БД, это не zero-SQL всего процесса.
+Исходники15851/77deps, classifier13/metadata16, два PID1 census, отсутствие трёх
+процессов, ordinary ownCID cleanup и PG clients/locks0 подтверждены;189/183CLI
+завершены. Всего33разных ID в28сериях,24ещё открыты. FactsOnly5 остаётся
+историческим отчётом30/25, а не текущим33.
 
 Принята одна полная серия6 проверок прежнего поведения Core: native207.81с,
 полный прогон221.24с, все процессы завершились успешно. Проверены два строгих
@@ -179,10 +214,24 @@ forcedTERM записан, итоговый native2/точный refusal/0app/0p
 27CLI/source928+15851/77same/независимое отсутствие двух процессов/PG0/0 и
 обычное удаление своего контейнера подтверждены. Ошибка первой recoveryпроверки
 (ожидали отсутствие forcedTERM) сохранена; она была доSQL/rm, recovery-v2 завершена.
-Контроль не принят, legacy90 повторно не допущен. Исполнитель готовит только
-диагностику V4 с сохранением текущих условий допуска.
-Приложение/тесты/строгийзапретсимлинков не менялись. RealTCP,
-полный PGwire профиль/frontend/autoRefresh остаются следующими фазами.
+На том срезе V3 контроль не был принят и legacy90 ещё не допускался.
+V4 диагностика затем обнаружила initial state D при совпадающих PID/start/UID/ns;
+это не удовлетворяло прежнему R/S guard. V4 NOTPASS сохранён. В отдельном V5
+только такой initial D пропускается как неположительная проба в прежнем
+5с/5000 цикле; финальный R/S guard не менялся. C0 V5 принят отдельно с0app/0primary:
+12EPERM/7positive, filters1→2, два текущих R/R witness, normal cleanup.
+Review4e1aacd6/ae545f63 согласован с raw; авторство runner раскрыто.
+
+Legacy90 V5 принят ОДНОЙ отдельной серией:90уникальных тестов,270фаз
+setup/call/teardown PASS, JUnit90/0FAIL/ERROR/SKIP,46.212с JUnit/82.56с полный.
+34исходных selection stems и их counts сверены; boundary и JUnit содержат
+одинаковые90ID. Source928+shared15851/77deps и23env сохранились,355CLI завершены,
+16metadata controls отдельно, forbidden0. Kernel witness R/R/filters2 получен,
+ownCID удалён обычным rm, независимое отсутствие native/controller и PG0/0
+на OID25354 подтверждено. Ошибка первого ROOT reader (files вместо entries)
+исправлена в отдельном локальном acceptor на том же capture, тесты не повторялись.
+Прерванный legacy137/60частичных строк остаётся непринятым;150backend и90legacy —
+две разные серии. RealTCP/полный PGwire/frontend/autoRefresh и общий CI открыты.
 [Анализ WebSocket](http://10.10.70.56:8000/api-platform-20261029/chat-ws-lifetime.html).
 
 Защита журналов460offline и231nginx+9 прежних групп принята отдельными сериями.
