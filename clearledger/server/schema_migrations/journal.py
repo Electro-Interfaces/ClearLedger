@@ -6,13 +6,13 @@ from schema_migrations.manifest import FILES
 def validate_history(rows, package, owner):
     e = package.entry
     if package.parent is not None:
-        if not rows or len(rows) > 2:
+        if len(rows) < e["ordinal"] - 1 or len(rows) > e["ordinal"]:
             raise MigrationError(4, "parent_history")
-        validate_history(rows[:1], package.parent, owner)
-        if len(rows) == 1:
+        validate_history(rows[:e["ordinal"] - 1], package.parent, owner)
+        if len(rows) == e["ordinal"] - 1:
             return False
-        row = rows[1]
-        if (row["ordinal"] != 2 or row["revision"] != e["id"] or row["parent_revision"] != package.parent.entry["id"]
+        row = rows[e["ordinal"] - 1]
+        if (row["ordinal"] != e["ordinal"] or row["revision"] != e["id"] or row["parent_revision"] != package.parent.entry["id"]
                 or row["artifact_sha256"] != e["artifact_sha256"]
                 or row["contract_sha256"] != e["files"][package.contract_file]
                 or row["predecessor_sha256"] != package.parent.entry["artifact_sha256"]
@@ -37,7 +37,7 @@ async def read_verified_history(conn, package, owner, exists):
     if not exists:
         return False
     # Bounded: any second row is already an unknown/newer/history mismatch.
-    limit = 3 if package.parent is not None else 2
+    limit = package.entry["ordinal"] + 1
     rows = await conn.fetch("""SELECT revision, ordinal, parent_revision, artifact_sha256,
         contract_sha256, predecessor_sha256, action, applied_by, app_commit, runner_format
         FROM core.core_schema_versions ORDER BY ordinal LIMIT $1""", limit)

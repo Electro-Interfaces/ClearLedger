@@ -12528,6 +12528,18 @@ class PulseViewGrant(Base):
     )
 
 
+class PulseViewRoleGrant(Base):
+    """Назначение витрины именованной роли; не самостоятельное право на компанию."""
+    __tablename__ = "pulse_view_role_grants"
+
+    view_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pulse_views.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_roles.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 # Настройки «Периметра» на компанию.
 #
 # Продукт закрывает разные по чувствительности вещи: арендованный склад на 001 — обычный

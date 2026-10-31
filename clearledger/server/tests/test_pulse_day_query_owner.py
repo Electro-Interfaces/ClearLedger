@@ -78,13 +78,6 @@ async def world(db,tickets_contract,monkeypatch,request):
                 ['pulse:today','pulse:business.sales','pulse:business.summary'],party_type='internal'))
     db.add(UserCompany(user_id=UIDS['outsider'],company_id=other,role='user',modules=['pulse']))
     await db.commit()
-    # Inferred EMPTY read projection from native reader/writer UUID casts.
-    # Not a canonical schema, constraint or role-ACL acceptance fixture.
-    view_roles_owned=request.node.originalname=='test_native_business_export_and_existing_view_null_anchor'
-    if view_roles_owned:
-        assert await db.scalar(text("select to_regclass('public.pulse_view_role_grants')")) is None
-        await db.execute(text('CREATE TABLE public.pulse_view_role_grants(view_id UUID,role_id UUID)'))
-        await db.commit()
     tax_owned=False; legal_form_owned=False
     if request.node.originalname=='test_fixed_profile_day_native_direct_and_desk' and request.node.callspec.params['mode']=='office-books':
         for name in ('tax_regimes','organization_tax_regimes'):
@@ -103,7 +96,6 @@ async def world(db,tickets_contract,monkeypatch,request):
     await db.execute(delete(UserCompany).where(UserCompany.company_id.in_([cid,other])))
     await db.execute(delete(User).where(User.id.in_(UIDS.values())))
     await db.execute(delete(CompanyRole).where(CompanyRole.id==ROLE_ID))
-    if view_roles_owned:await db.execute(text('DROP TABLE public.pulse_view_role_grants'))
     if tax_owned:
         await db.execute(text('DROP TABLE public.organization_tax_regimes'))
         await db.execute(text('DROP TABLE public.tax_regimes'))
