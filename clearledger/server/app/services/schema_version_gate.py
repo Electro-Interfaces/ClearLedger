@@ -38,11 +38,11 @@ async def require_connection(connection, settings):
     try:
         async with asyncio.timeout(10):
             from sqlalchemy import text
-            from schema_migrations.manifest import load
-            from schema_migrations.runner import state
+            from schema_migrations.manifest import ID, load_known_head
+            from schema_migrations.runner import require_applied_prefix
 
             config = _config(settings)
-            package = load()  # Verify frozen artifacts before executing their verifier.
+            package = load_known_head()  # Verify all known artifacts before their verifier runs.
             # SQLAlchemy's begin object is lazy. Execute through its adapter
             # first so the raw driver participates in the actual caller PG txn.
             probe = (await connection.execute(text("""SELECT
@@ -57,9 +57,7 @@ async def require_connection(connection, settings):
             driver = raw.driver_connection
             if not driver.is_in_transaction():
                 raise RuntimeError("Managed application transaction missing")
-            *_, complete = await state(driver, config, package)
-            if not complete:
-                raise RuntimeError("Managed schema revision is unapplied")
+            await require_applied_prefix(driver, config, package, required_revision=ID)
             return GateReceipt(probe["read_only"] == "on", probe["isolation"], True)
     except Exception:
         # Never expose DSN, catalog contents, driver SQL or tenant identifiers.
@@ -72,6 +70,12 @@ async def require_engine(engine, settings):
         return None
     try:
         async with asyncio.timeout(15):
+            from schema_migrations.manifest import load_known_head
+
+            # Refuse unsupported Config/source before checking out a connection.
+            # The borrowed entry point independently verifies the same inputs.
+            _config(settings)
+            load_known_head()
             async with engine.connect() as connection:
                 connection = await connection.execution_options(
                     isolation_level="REPEATABLE READ", postgresql_readonly=True)
