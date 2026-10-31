@@ -59,13 +59,11 @@ git diff --check cec2c9845431a0bc07e4b4f115eb21eed8d5caa9 HEAD
 ```diff
 --- a/clearledger/docs/PARTNER_QUICKSTART.md
 +++ b/clearledger/docs/PARTNER_QUICKSTART.md
-@@ -1,3 +1,6 @@
+@@ -1 +1,4 @@
  # Подключение внешнего приложения: кандидат API
- 
++
 +Текущая инструкция: [подключение партнёра](partner/onboarding.md).
 +В ней 15 GET: 11 user/service и 4 user-only; candidate/default-off, source-only.
-+
- M06-R3 добавляет required nullable `typeCode` и `validUntil` в Contract list/detail.
 ```
 
 C1 metadata и будущая генерация schema/types остаются отдельным пакетом после явного разрешения пользователя. Для будущей ROOT-приёмки предусмотрены сравнение двух защищённых schema и generated types, настоящие framework/schema tests, сохранение denial/policies и первый read walkthrough без исходников на согласованной песочнице. Это план проверки, не требование продолжать за данного исполнителя и не заявление о выполнении.

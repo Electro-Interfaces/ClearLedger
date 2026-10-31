@@ -787,7 +787,7 @@
     },
     {
       "path": "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.md",
-      "sha256": "7abc8d616186df8b00df2429f211f76e12b595427a3fce6cab2efcbe06412489"
+      "sha256": "d6663a77cb046d326155f73f86e66884888cb7504a0a08c1ab84b8f53b846e4a"
     }
   ],
   "selfHashNote": "JSON report excluded from own hash list; final Git commit identifies it.",
