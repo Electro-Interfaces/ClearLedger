@@ -65,15 +65,16 @@ class ProjectsContext:
         context = await self.resolve(db, cid, user, key)
         if body.action not in {action["code"] for action in context["actions"]}:
             raise HTTPException(403, "Действие отключено в сценарии приложения")
-        from app.routers import project_workspace_router as projects
+        from app.services import project_workspace_commands as commands
+        from app.schemas_project_workspace import FileBody, DecisionBody, LinkBody
         sid = uuid.UUID(key)
         if body.action == "file":
-            return await projects.attach_file(sid, projects.FileBody(message_id=body.message_id), str(cid), user, db)
+            return await commands.attach_message_file(db, str(cid), user, sid, FileBody(message_id=body.message_id))
         if body.action == "decision":
             if len((body.text or "").strip()) < 3:
                 raise HTTPException(400, "Сформулируйте решение")
-            return await projects.decision(sid, projects.DecisionBody(text=body.text, source_message_id=body.message_id), str(cid), user, db)
-        return await projects.link(sid, projects.LinkBody(kind="message", id=body.message_id), str(cid), user, db)
+            return await commands.record_decision(db, str(cid), user, sid, DecisionBody(text=body.text, source_message_id=body.message_id))
+        return await commands.link_work(db, str(cid), user, sid, LinkBody(kind="message", id=body.message_id))
 
     async def result(self, db, cid, key, work_ref, outcome, result_key):
         sid = uuid.UUID(key)
