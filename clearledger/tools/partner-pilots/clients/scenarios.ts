@@ -10,6 +10,17 @@ export type DocumentWire = operations["getDocument"]["responses"][200]["content"
 export type ContractTypeWire = operations["getContractTypeMetadata"]["responses"][200]["content"]["application/json"];
 export type ContractObjectsWire = operations["listContractObjects"]["responses"][200]["content"]["application/json"];
 export type ContractDocumentsWire = operations["listContractDocuments"]["responses"][200]["content"]["application/json"];
+// Scenario expectations only: wire projections come from generated operations.
+export type RelationVector = { contractId: string; allowed: string[]; hidden: string[] };
+export type RentalRelations = {
+  contracts: { expected: ContractWire; metadata: ContractTypeWire | null;
+    objects: RelationVector & { scopeType: string } }[];
+  hiddenParents: string[]; foreignParents: string[];
+};
+export type DocumentRelations = { contracts: RelationVector[]; hiddenParents: string[]; foreignParents: string[] };
+export type RelationAuthority = { scopes: string[];
+  resourceScopes?: Partial<Record<Resource, { mode?: string; ids?: string[] }>> };
+export type FilteredContractsWire = operations["listContracts"]["responses"][200]["content"]["application/json"];
 export type Vector = { mode: "ALL" | "SET"; allowed: string[]; foreign: string[]; ungranted: string[] };
 export type Vectors = Partial<Record<Resource, Vector>>;
 export type Result = { case: string; passed: boolean; details?: Record<string, string | number | boolean> };
@@ -113,27 +124,38 @@ export class ReadApplication {
   async contractTypeMetadata(typeCode: string): Promise<ContractTypeWire> {
     const response = await this.get("/api/v1/contract-types?" + new URLSearchParams({ typeCode }));
     contract(response.status === 200, "AUTHORIZED_CONTRACT_TYPE_FAILED");
+    contract(response.headers.get("cache-control")?.includes("no-store"), "NO_STORE_REQUIRED");
     const value = await response.json() as ContractTypeWire;
     contract(value.typeCode === typeCode, "CONTRACT_TYPE_SOURCE_CODE_MISMATCH");
     return value;
   }
-  async contractObjects(contractId: string, cursor?: string): Promise<ContractObjectsWire> {
-    const query = new URLSearchParams({ pageSize: "1" });
+  async contractObjects(contractId: string, cursor?: string, pageSize = 1): Promise<ContractObjectsWire> {
+    const query = new URLSearchParams({ pageSize: String(pageSize) });
     if (cursor !== undefined) query.set("cursor", cursor);
     const response = await this.get(`/api/v1/contracts/${encodeURIComponent(contractId)}/objects?${query}`);
     contract(response.status === 200, "AUTHORIZED_CONTRACT_OBJECTS_FAILED");
+    contract(response.headers.get("cache-control")?.includes("no-store"), "NO_STORE_REQUIRED");
     const value = await response.json() as ContractObjectsWire;
     contract(value.contractId === contractId && Array.isArray(value.items), "CONTRACT_OBJECT_LINK_SHAPE_MISMATCH");
     return value;
   }
-  async contractDocuments(contractId: string, cursor?: string): Promise<ContractDocumentsWire> {
-    const query = new URLSearchParams({ pageSize: "1" });
+  async contractDocuments(contractId: string, cursor?: string, pageSize = 1): Promise<ContractDocumentsWire> {
+    const query = new URLSearchParams({ pageSize: String(pageSize) });
     if (cursor !== undefined) query.set("cursor", cursor);
     const response = await this.get(`/api/v1/contracts/${encodeURIComponent(contractId)}/documents?${query}`);
     contract(response.status === 200, "AUTHORIZED_CONTRACT_DOCUMENTS_FAILED");
+    contract(response.headers.get("cache-control")?.includes("no-store"), "NO_STORE_REQUIRED");
     const value = await response.json() as ContractDocumentsWire;
     contract(value.contractId === contractId && Array.isArray(value.items), "CONTRACT_DOCUMENT_LINK_SHAPE_MISMATCH");
     return value;
+  }
+  async filteredContracts(typeCode: string, cursor?: string): Promise<FilteredContractsWire> {
+    const query = new URLSearchParams({ pageSize: "1", typeCode });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const response = await this.get("/api/v1/contracts?" + query);
+    contract(response.status === 200, "AUTHORIZED_FILTERED_CONTRACTS_FAILED");
+    contract(response.headers.get("cache-control")?.includes("no-store"), "NO_STORE_REQUIRED");
+    return await response.json() as FilteredContractsWire;
   }
   async document(id: string): Promise<DocumentWire> {
     const response = await this.get("/api/v1/documents/" + encodeURIComponent(id));
@@ -150,7 +172,7 @@ export class ReadApplication {
   }
 }
 
-export async function rentalScenario(app: ReadApplication, vectors: Vectors): Promise<void> {
+export async function rentalScenario(app: ReadApplication, vectors: Vectors, relations: RentalRelations): Promise<void> {
   let contracts: Record<string, unknown>[] = [];
   for (const resource of ["objects", "counterparties", "contracts"] as const) {
     contract(vectors[resource], "RENTAL_FIXTURE_VECTOR_REQUIRED");
@@ -160,6 +182,11 @@ export async function rentalScenario(app: ReadApplication, vectors: Vectors): Pr
   contract(contracts.every(row => row.counterpartyId === null || vectors.counterparties!.allowed.includes(String(row.counterpartyId))),
     "UNGRANTED_COUNTERPARTY_LINK_DISCLOSURE");
   await app.denied("/api/v1/documents", 403); // Machine identity is not a docs user.
+  contract(relations.contracts.length === contracts.length && relations.contracts.every(({ expected }) => {
+    const row = contracts.find(value => value.id === expected.id);
+    return row && Object.entries(expected).every(([key, value]) => JSON.stringify(row[key]) === JSON.stringify(value));
+  }), "RAW_CONTRACT_LIST_EXPECTATION_MISMATCH");
+  await rentalRelationsScenario(app, relations);
 }
 
 export async function operationsScenario(app: ReadApplication, vectors: Vectors): Promise<void> {
@@ -174,4 +201,130 @@ export async function operationsScenario(app: ReadApplication, vectors: Vectors)
     await app.denied(`/api/v1/objects/${encodeURIComponent(id)}/monitoring?days=90`, 404);
   }
   await app.denied("/api/v1/documents", 403);
+}
+
+/** No implicit permission: this checks the assigned profile, never issues scopes/grants. */
+export function requireDocumentRelationAuthority(authority: RelationAuthority): void {
+  const usable = (resource: "contracts" | "documents") => {
+    const grant = authority.resourceScopes?.[resource];
+    return grant?.mode === "ALL" || (grant?.mode === "SET" && Array.isArray(grant.ids) && grant.ids.length > 0);
+  };
+  contract(authority.scopes.includes("contracts:read") && authority.scopes.includes("documents:read") &&
+    usable("contracts") && usable("documents"), "DOCUMENT_RELATIONS_BLOCKED_BY_PROFILE");
+}
+
+/** Exact effective IDs, supplied by the synthetic manifest, not native inventories. */
+export async function relationPages<Page extends ContractObjectsWire | ContractDocumentsWire>(
+  read: (cursor?: string) => Promise<Page>, vector: RelationVector,
+  idsOf: (page: Page) => string[], validate: (page: Page) => void = () => {},
+): Promise<string | null> {
+  contract(new Set(vector.allowed).size === vector.allowed.length &&
+    vector.hidden.every(id => !vector.allowed.includes(id)), "INVALID_RELATION_EXPECTATION");
+  const ids = new Set<string>(), cursors = new Set<string>();
+  let cursor: string | undefined, first: string | null = null;
+  for (let count = 0; count < 100; count++) {
+    const page = await read(cursor);
+    contract(page.contractId === vector.contractId && Array.isArray(page.items), "RELATION_PARENT_MISMATCH");
+    contract(page.total === vector.allowed.length && page.items.length <= 1 &&
+      (page.nextCursor === null || (typeof page.nextCursor === "string" && page.nextCursor.length > 0)),
+      "RELATION_PAGE_SHAPE_OR_VISIBLE_TOTAL_MISMATCH");
+    validate(page);
+    const batch = idsOf(page);
+    contract(batch.length === page.items.length, "RELATION_ITEM_PROJECTION_MISMATCH");
+    for (const id of batch) {
+      contract(typeof id === "string" && vector.allowed.includes(id) && !vector.hidden.includes(id),
+        "INDEPENDENTLY_HIDDEN_RELATION_DISCLOSED");
+      contract(!ids.has(id), "DUPLICATE_RELATION_ACROSS_PAGES");
+      ids.add(id);
+    }
+    if (page.nextCursor === null) {
+      contract(ids.size === vector.allowed.length && vector.allowed.every(id => ids.has(id)), "RELATION_SET_MISMATCH");
+      return first;
+    }
+    contract(batch.length > 0 && !cursors.has(page.nextCursor), "RELATION_CURSOR_REPEATED_OR_EMPTY_PAGE");
+    if (first === null) first = page.nextCursor;
+    cursors.add(page.nextCursor); cursor = page.nextCursor;
+  }
+  throw new Error("RELATION_PAGE_CAP_EXCEEDED");
+}
+
+function relationPath(contractId: string, resource: "objects" | "documents", query: Record<string, string> = {}): string {
+  return `/api/v1/contracts/${encodeURIComponent(contractId)}/${resource}?` + new URLSearchParams({ pageSize: "1", ...query });
+}
+
+async function cursorBoundaries(app: ReadApplication, resource: "objects" | "documents", vector: RelationVector,
+  others: RelationVector[], cursor: string | null): Promise<void> {
+  // Relation routes accept only pageSize/cursor, never list filters.
+  await app.denied(relationPath(vector.contractId, resource, { q: "synthetic" }), 422);
+  if (cursor === null) return;
+  await app.denied(relationPath(vector.contractId, resource, { cursor, pageSize: "2" }), 400);
+  const other = others.find(value => value.contractId !== vector.contractId);
+  contract(other, "SECOND_VISIBLE_RELATION_PARENT_REQUIRED");
+  await app.denied(relationPath(other.contractId, resource, { cursor }), 400);
+}
+
+export async function rentalRelationsScenario(app: ReadApplication, relations: RentalRelations): Promise<void> {
+  contract(relations.contracts.length >= 2 && relations.hiddenParents.length > 0 && relations.foreignParents.length > 0 &&
+    relations.contracts.some(value => value.objects.allowed.length >= 2 && value.objects.hidden.length > 0),
+    "RENTAL_RELATION_FIXTURE_REQUIRED");
+  for (const { expected, metadata, objects } of relations.contracts) {
+    contract(objects.contractId === expected.id && objects.scopeType === expected.scopeType, "RELATION_EXPECTED_PARENT_MISMATCH");
+    const actual = await app.detail("contracts", expected.id);
+    contract(Object.entries(expected).every(([key, value]) => JSON.stringify(actual[key]) === JSON.stringify(value)),
+      "RAW_CONTRACT_DETAIL_EXPECTATION_MISMATCH");
+    // Keep raw typeCode, whitespace/case and raw validUntil; no enum/date conversion.
+    if (expected.typeCode !== null && expected.typeCode.length > 0) {
+      contract(metadata && metadata.typeCode === expected.typeCode, "EXACT_RAW_TYPE_METADATA_EXPECTATION_REQUIRED");
+      const value = await app.contractTypeMetadata(expected.typeCode);
+      contract(Object.entries(metadata).every(([key, field]) => value[key as keyof ContractTypeWire] === field),
+        "RAW_TYPE_METADATA_MISMATCH");
+      const matching = relations.contracts.filter(row => row.expected.typeCode === expected.typeCode).map(row => row.expected.id);
+      const ids = new Set<string>(), cursors = new Set<string>();
+      let cursor: string | undefined, complete = false;
+      for (let count = 0; count < 100; count++) {
+        const page = await app.filteredContracts(expected.typeCode, cursor);
+        contract(Array.isArray(page.items) && page.total === matching.length && page.items.length <= 1 &&
+          (page.nextCursor === null || (typeof page.nextCursor === "string" && page.nextCursor.length > 0)), "FILTERED_CONTRACT_PAGE_MISMATCH");
+        for (const row of page.items) {
+          contract(row.typeCode === expected.typeCode && matching.includes(row.id) && !ids.has(row.id), "EXACT_TYPE_FILTER_OR_DUPLICATE_MISMATCH");
+          ids.add(row.id);
+        }
+        if (page.nextCursor === null) {
+          contract(ids.size === matching.length, "FILTERED_CONTRACT_SET_MISMATCH"); complete = true; break;
+        }
+        contract(page.items.length > 0 && !cursors.has(page.nextCursor), "FILTERED_CONTRACT_CURSOR_REPEATED");
+        cursors.add(page.nextCursor); cursor = page.nextCursor;
+      }
+      contract(complete, "FILTERED_CONTRACT_PAGE_CAP_EXCEEDED");
+    } else contract(metadata === null, "EMPTY_RAW_TYPE_MUST_NOT_QUERY_METADATA");
+    const first = await relationPages(cursor => app.contractObjects(expected.id, cursor), objects,
+      page => page.items.map(item => item.objectId), page => {
+        contract(page.scopeType === objects.scopeType, "EXACT_NATIVE_SCOPE_TYPE_REQUIRED");
+        if (page.scopeType !== "locations") contract(page.items.length === 0 && page.total === 0, "NO_COMPANY_SCOPE_EXPANSION");
+      });
+    await cursorBoundaries(app, "objects", objects, relations.contracts.map(value => value.objects), first);
+    await app.denied(relationPath(expected.id, "documents"), 403); // service is denied before parent visibility.
+  }
+  for (const id of [...relations.hiddenParents, ...relations.foreignParents]) {
+    await app.denied(relationPath(id, "objects"), 404);
+    await app.denied(relationPath(id, "documents"), 403);
+  }
+  const cursor = await app.firstCursor("contracts");
+  await app.denied("/api/v1/contracts?" + new URLSearchParams({ pageSize: "1", cursor, typeCode: "different synthetic type" }), 400);
+  await app.denied("/api/v1/contracts?" + new URLSearchParams({ pageSize: "1", cursor, q: "changed synthetic filter" }), 400);
+}
+
+/** Positive traversal requires separately approved delegated scopes and grants. */
+export async function documentRelationsScenario(app: ReadApplication, relations: DocumentRelations): Promise<void> {
+  contract(relations.contracts.length >= 2 && relations.hiddenParents.length > 0 && relations.foreignParents.length > 0 &&
+    relations.contracts.some(value => value.allowed.length >= 2 && value.hidden.length > 0), "DOCUMENT_RELATION_FIXTURE_REQUIRED");
+  for (const vector of relations.contracts) {
+    const first = await relationPages(cursor => app.contractDocuments(vector.contractId, cursor), vector,
+      page => page.items.map(item => item.documentId));
+    await cursorBoundaries(app, "documents", vector, relations.contracts, first);
+    // IDs are metadata only. Existing exact-version content/denials remain in run.ts.
+  }
+  for (const id of [...relations.hiddenParents, ...relations.foreignParents]) {
+    await app.denied(relationPath(id, "documents"), 404);
+  }
 }
