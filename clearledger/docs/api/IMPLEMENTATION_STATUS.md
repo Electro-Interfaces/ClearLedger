@@ -83,7 +83,27 @@ MigrationError code4/phase pulse_parent из проверенных исходн
 все процессы завершены, контейнер удалён, исходники сохранены. Это0 основных
 сценариев, не проверка миграций.
 
-**Corebootstrap:36из57 сценариев приняты в31отдельной серии.**
+**Corebootstrap:39из57 сценариев приняты в34отдельных сериях.**
+
+Три TX сценария также приняты раздельно: readwrite32.81с native/44.75с полный,
+readonly33.63с/45.84с, owner-contention35.53с/47.55с. Реальный INSERT в borrowed
+транзакции откатил caller, независимый SELECT подтвердил отсутствие sentinel.
+В readonly RR/on/core PostgreSQL дал настоящий25006 с exact DBAPIError→adapter
+Error→ReadOnlySQLTransactionError и четырьмя исходными library bindings.
+Конкурирующий session advisory lock дал точный MigrationError5/owner_lock→
+TimeoutError→CancelledError; отказное окно сохранило44relations/3rows/write0.
+33raw/596CLI, исходники15851/77deps, два PID1 census, отсутствие трёх процессов,
+ordinaryownCID removal и PG0/0 проверены. Теперь39primary/34серии,18remaining:
+LIFE6/REC4/OLDUP8. Это не единый39green и не полный startup/restore/CI.
+
+Новые оснастки переданы отдельными draft PR84 (warehouse selected21/schema/80)
+иPR85 (pureOpenAPI26). Они не запускались и не интегрированы. В source review
+PR85 найдены три конкретных ограничения: fd-relative open, поглощение wall
+timeout в postcheck и сравнение metadata вместо identity кода Git bridge.
+Owner исправляет их в отдельной ветке; это замечания к тестовой оснастке,
+не доказанные уязвимости productionAPI. Родительские freeze сохранены.
+Два оркестратора ведут следующую волну: relation GET в внешних read пилотах
+и characterization отмены Support tickets при retirement объекта.
 
 Приняты и последние три CFG сценария отдельными запусками: no-port
 (32.72с native supervision/45.56с полный), real-path (32.99с/45.76с),
@@ -96,7 +116,7 @@ RuntimeError preflight43→MigrationError3/target; это не whole-lifespan/pr
 и не zero-SQL всего процесса. Во всех трёх сохранены15851inputs/77deps, два
 PID1 census, отсутствие трёх процессов, own ordinarycleanup и PG0/0;
 195/195/186CLI завершены. Все6CFG приняты шестью отдельными сериями.
-Текущее36разных primary в31серии,21remaining:TX3/LIFE6/REC4/OLDUP8.
+После CFG6 охват составлял36primary/31серия; TX3 увеличили его до39/34.
 
 Следующие два CFG сценария приняты отдельными ROOT запусками: CFG-identity
 (31.76с native supervision/43.97с полный) и CFG-url-options (30.62с/44.21с).
