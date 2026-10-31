@@ -63,14 +63,16 @@
     },
     {
       "repository": "Electro-Interfaces/ClearLedger",
-      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "commit": null,
       "path": "clearledger/server/tests/test_native_user_role_locks.py",
       "range": [
         1,
-        126
+        127
       ],
-      "bytes": 6594,
-      "raw_sha256": "8e1eab2290701ed75428fdbd12c308882028d468bc123d8edb8e1780c3c714fd"
+      "bytes": 6747,
+      "raw_sha256": "7f10c2876687d2a32504d90e2a3e181b6c7e1c85f4e3b75b3e4304df4fa45759",
+      "git_blob_oid": "e7b7e0a9b8f30fb1caffd46439cfdce1b3e526f7",
+      "revision": "AST oracle fix: containing successor commit of d73d46fcdcb902d09e0a1aee12676296efbcfd8b; exact content pinned by raw_sha256 and git_blob_oid (avoids self-referential commit hash)"
     },
     {
       "repository": "Electro-Interfaces/ClearLedger",
@@ -766,7 +768,7 @@
     }
   ],
   "tests": {
-    "status": "AUTHORED_NOTRUN; collection NOTRUN",
+    "status": "AFTER_AST_ORACLE_FIX_NOTRUN (collection and runtime); historical ROOT native result 18 FAIL / 9 PASS belongs only to composition 326457edd0b8029b2739cf5563c492f4f8169a10",
     "unit_test_functions": 6,
     "synthetic_pg_test_functions": 13,
     "meaningful_cases": [
@@ -792,7 +794,8 @@
       "before_app_imports": true,
       "conftest_limit": "repository conftest is earlier and destructive; module guard is NOT a runner, ROOT must isolate collection before any execution"
     },
-    "real_pg_evidence": "PROPOSAL authored only: controlled async Sessions + ordinary pool + finite harness deadlines + pg_locks and pg_blocking_pids; no NullPool/sleep-race evidence; cleanup releases owner root and cancels/reaps pending task; synthetic unique schema dropped after sessions close"
+    "real_pg_evidence": "PROPOSAL authored only: controlled async Sessions + ordinary pool + finite harness deadlines + pg_locks and pg_blocking_pids; no NullPool/sleep-race evidence; cleanup releases owner root and cancels/reaps pending task; synthetic unique schema dropped after sessions close",
+    "historical_authored_status": "AUTHORED_NOTRUN; collection NOTRUN at original cdef933bd6b42ffbcb7336516ff7aa698538af66 handoff"
   },
   "verification": {
     "label": "SOURCECONFIRMED",
@@ -811,7 +814,8 @@
     "node_codegen_build_ci": 0,
     "ssh_docker": 0,
     "credentials_read": false,
-    "push_pr_merge_deploy": false
+    "push_pr_merge_deploy": false,
+    "scope": "Historical original cdef933bd6b42ffbcb7336516ff7aa698538af66 AUTHOR0 verification; current followup checks are separately recorded in ast_oracle_followup"
   },
   "raw_parent_original_20M11_pins": [
     {
@@ -845,5 +849,257 @@
       "role": "READ_ONLY_RAW_PARENT_ORIGINAL_20_SECTIONS_11_REQUIREMENTS_REFERENCE; no rewrite or acceptance update"
     }
   ],
-  "acceptance": "No full writer closure, full B acceptance, M00-M19 closure, eleven cross-cutting requirement closure, helper PASS, working runtime or deployment claimed. Parent original rules/pins remain unchanged."
+  "acceptance": "No full writer closure, full B acceptance, M00-M19 closure, eleven cross-cutting requirement closure, helper PASS, working runtime or deployment claimed. Parent original rules/pins remain unchanged.",
+  "ast_oracle_followup": {
+    "label": "SOURCECONFIRMED AST-only fix; runtime AFTERFIX NOTRUN; closure OPEN",
+    "source_base": "d73d46fcdcb902d09e0a1aee12676296efbcfd8b",
+    "source_base_role": "exact reviewed combined parent; no pull/rebase/reset or remote operation",
+    "fix_provenance": {
+      "authority": "msg_8d9ef1e3552f",
+      "task": "task_b6ec9d1d13f3",
+      "dispatch": "ctx_572bde69059a",
+      "branch": "MagLook/native-role-ast-oracle-author-20261101",
+      "commit_reference": "containing commit; successor content pinned by source_manifest raw SHA-256 / Git blob, no circular self-commit pin"
+    },
+    "ownership_exact3": [
+      "clearledger/server/tests/test_native_user_role_locks.py",
+      "clearledger/docs/api/NATIVE_USER_ROLE_SCOPED_LOCKS_20261101.md",
+      "clearledger/docs/api/NATIVE_USER_ROLE_SCOPED_LOCKS_20261101.json"
+    ],
+    "change": "Only non-test calls() helper traverses ast.Module(body=node.body, type_ignores=[]); own decorators, annotations and defaults are outside the region; docstrings have no Call nodes. Name/attribute method-call matching and every test assertion/parameterization are retained.",
+    "historical_unit_test_pin": {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "path": "clearledger/server/tests/test_native_user_role_locks.py",
+      "range": [
+        1,
+        126
+      ],
+      "bytes": 6594,
+      "raw_sha256": "8e1eab2290701ed75428fdbd12c308882028d468bc123d8edb8e1780c3c714fd"
+    },
+    "historical_app_lineage_preserved": {
+      "source_base": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "source_commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "roots_before_after_traces_unchanged": true
+    },
+    "current_code_test_manifest": [
+      {
+        "path": "clearledger/server/app/routers/users_router.py",
+        "bytes": 45729,
+        "range": [
+          1,
+          867
+        ],
+        "raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "git_blob_oid": "1ea23a37c4efbc6ad39f41ad1d12ea31d4e362bc",
+        "byte_equal_reviewed_base": true
+      },
+      {
+        "path": "clearledger/server/app/routers/roles_router.py",
+        "bytes": 7678,
+        "range": [
+          1,
+          153
+        ],
+        "raw_sha256": "b6c02422f40990e406886bbf22fcc96abd7e4cb298aa9bf8aa87ebdfc3c9ded7",
+        "git_blob_oid": "9905e9f0f3d7f710cb75fdf029891c1f6f788ae7",
+        "byte_equal_reviewed_base": true
+      },
+      {
+        "path": "clearledger/server/app/services/native_user_role_locks.py",
+        "bytes": 9038,
+        "range": [
+          1,
+          180
+        ],
+        "raw_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+        "git_blob_oid": "2b6439f6ddd89cbf05216310bed0a844ccd5d43c",
+        "byte_equal_reviewed_base": true
+      },
+      {
+        "path": "clearledger/server/tests/test_native_user_role_locks.py",
+        "bytes": 6747,
+        "range": [
+          1,
+          127
+        ],
+        "raw_sha256": "7f10c2876687d2a32504d90e2a3e181b6c7e1c85f4e3b75b3e4304df4fa45759",
+        "git_blob_oid": "e7b7e0a9b8f30fb1caffd46439cfdce1b3e526f7",
+        "byte_equal_reviewed_base": false
+      },
+      {
+        "path": "clearledger/server/tests/test_native_user_role_locks_pg.py",
+        "bytes": 23002,
+        "range": [
+          1,
+          467
+        ],
+        "raw_sha256": "b88919030e0395c6742e87decb26235492273179ad55cead310832090e9661ab",
+        "git_blob_oid": "93b1652cbd0ff63a5b1dd469b9ec468e92fd922c",
+        "byte_equal_reviewed_base": true
+      }
+    ],
+    "frozen_test_definitions": {
+      "clearledger/server/tests/test_native_user_role_locks.py": {
+        "functions": 6,
+        "names": [
+          "test_actual_writer_roots_enter_before_mutation_and_keep_commit_ownership",
+          "test_complete_old_new_role_plan_and_absent_member",
+          "test_account_and_self_actor_modes_merge_upfront",
+          "test_dirty_entry_refuses_even_read_discovery",
+          "test_remove_and_role_delete_source_schedule",
+          "test_actual_route_dirty_preflight_cannot_autoflush"
+        ],
+        "decorated_definition_bytes_equal": true,
+        "ast_equal_without_locations": true
+      },
+      "clearledger/server/tests/test_native_user_role_locks_pg.py": {
+        "functions": 13,
+        "names": [
+          "test_actual_role_move_waits_for_old_and_new_parents",
+          "test_absent_grant_uses_same_member_guard",
+          "test_actual_account_reset_takes_user_exclusive",
+          "test_wait_revalidates_pointer_acl_and_session",
+          "test_remove_has_user_row_before_member_delete_and_no_late_user_upgrade",
+          "test_delete_role_holders_wait_behind_role_exclusive",
+          "test_preserved_admin_malformed_role_and_system_role_branches",
+          "test_update_global_name_empty_value_and_role_scope_error",
+          "test_create_user_full_plan_precedes_user_or_membership_flush",
+          "test_cross_company_legacy_role_pointer_and_holder_fail_closed",
+          "test_role_update_preserves_omitted_chat_scope_and_audit_commit",
+          "test_access_legacy_error_order",
+          "test_access_rechecks_target_superadmin_between_preflight_and_discovery"
+        ],
+        "decorated_definition_bytes_equal": true,
+        "ast_equal_without_locations": true
+      }
+    },
+    "independent_source_body_call_proof": [
+      {
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "remove_user",
+        "whole_function_delete_lines_before": [
+          778,
+          805,
+          816
+        ],
+        "body_delete_lines_after": [
+          805,
+          816
+        ],
+        "body_delete_callees": [
+          "db.delete",
+          "db.delete"
+        ],
+        "body_prepare_lines": [
+          795
+        ],
+        "body_commit_lines": [],
+        "body_rollback_lines": [],
+        "excluded_own_decorator_call_lines": [
+          778
+        ],
+        "excluded_own_arguments_call_count": 3,
+        "own_annotation_call_count": 0,
+        "docstring_call_count": 0
+      },
+      {
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "revoke_company",
+        "whole_function_delete_lines_before": [
+          843,
+          865
+        ],
+        "body_delete_lines_after": [
+          865
+        ],
+        "body_delete_callees": [
+          "db.delete"
+        ],
+        "body_prepare_lines": [
+          857
+        ],
+        "body_commit_lines": [],
+        "body_rollback_lines": [],
+        "excluded_own_decorator_call_lines": [
+          843
+        ],
+        "excluded_own_arguments_call_count": 2,
+        "own_annotation_call_count": 0,
+        "docstring_call_count": 0
+      },
+      {
+        "path": "clearledger/server/app/routers/roles_router.py",
+        "symbol": "delete_role",
+        "whole_function_delete_lines_before": [
+          116,
+          152
+        ],
+        "body_delete_lines_after": [
+          152
+        ],
+        "body_delete_callees": [
+          "db.delete"
+        ],
+        "body_prepare_lines": [
+          126
+        ],
+        "body_commit_lines": [
+          153
+        ],
+        "body_rollback_lines": [],
+        "excluded_own_decorator_call_lines": [
+          116
+        ],
+        "excluded_own_arguments_call_count": 3,
+        "own_annotation_call_count": 0,
+        "docstring_call_count": 0
+      }
+    ],
+    "commit_ownership_oracle": "test_actual_writer_roots_enter_before_mutation_and_keep_commit_ownership decorated definition byte/AST unchanged, including exact handler commit set, roles commit count and no-rollback assertions; only calls() source region corrected",
+    "historical_root_result": {
+      "authority": "msg_8d9ef1e3552f",
+      "composition_commit": "326457edd0b8029b2739cf5563c492f4f8169a10",
+      "cases": 27,
+      "failed": 18,
+      "passed": 9,
+      "ast_oracle_failures": 2,
+      "separate_helper_failures": 16,
+      "scope": "ROOT-reported actual-native run only; neither reread from credential-bearing Root artifacts nor reproduced here; immutable raw reports/commits untouched"
+    },
+    "separate_helper_owner": {
+      "dispatch": "ctx_c0ef2f5caaa8",
+      "issue": "SQLAlchemy OptionEngine; outside this task",
+      "minimal_helper_99_pass_is_native_pass": false,
+      "closure": "OPEN; models/schema and runtime are outside task"
+    },
+    "verification": {
+      "stdlib_ast_and_in_memory_compile": "PASS for 5 code/test files; compiled code NOT executed",
+      "independent_source_counts": "PASS; no test/helper function called",
+      "frozen_test_definitions": "6 unit + 13 PG decorated definitions byte/AST equal reviewed base; cases/parameterizations/assertions unchanged",
+      "pg_file_byte_equal_base": true,
+      "all_tracked_app_files_byte_equal_base": true,
+      "project_imports": 0,
+      "app_or_helper_or_testhelper_execution": 0,
+      "test_collection": 0,
+      "tests_executed": 0,
+      "sql_or_db": 0,
+      "network_http": 0,
+      "node_build_ci": 0,
+      "ssh_docker": 0,
+      "root_credential_artifacts_read": false,
+      "push_pr_merge_deploy": false,
+      "git_diff_check": "PASS",
+      "bounded_diff": "exactly ownership_exact3; no app or PG file change",
+      "static_case_counts": {
+        "unit_source": 9,
+        "synthetic_pg": 18,
+        "total": 27,
+        "method": "stdlib AST decorator list cardinality only; no collection/import/execution"
+      }
+    },
+    "runtime_after_fix": "NOTRUN; ROOT-only final composition execution remains required",
+    "acceptance": "AST region fix only, no skip/xfail/waiver/dropped assertion/fixture or production change; parent M00–M19/11 pins unchanged; no native PASS, writer closure, schema acceptance or deploy claim"
+  }
 }
