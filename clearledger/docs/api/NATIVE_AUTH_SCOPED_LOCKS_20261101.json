@@ -1,0 +1,562 @@
+{
+  "format": "native-auth-scoped-locks-source-v1",
+  "date": "2026-11-01",
+  "source_base": "d73d46fcdcb902d09e0a1aee12676296efbcfd8b",
+  "source_commit": "38da559d7bd6636f1b6d2c44075452bc1958abce",
+  "final_head": "Reported separately by worker_done; subsequent docs-only commit pins this immutable source commit",
+  "branch": "MagLook/contract-auth-locks-author-20261101",
+  "authority": {
+    "root": "msg_27e89f33c930",
+    "task": "task_9e0015aef9b0",
+    "dispatch": "ctx_334699a136d8",
+    "privacy_mapping": "Coordinator exact confirmation to worker technical ask: pre-mutation AuthIdentityChanged only, full-root rollback, always200; normal ownership unchanged",
+    "invitation_accept": "ROOT msg_052795a1b0b2 to msg_8aebdab42ae1, relayed msg_0fc66fafd5eb: seventh path accept_invite only plus minimal imports; no other invitation refactor"
+  },
+  "labels": {
+    "implementation": "SOURCECONFIRMED only",
+    "runtime": "UNKNOWN; all imports/collection/tests NOTRUN",
+    "execution": "PROPOSAL only; actual_target UNSUPPLIED; execution_approval NOT_GRANTED"
+  },
+  "ast_serialization": {
+    "python": "3.11.2",
+    "algorithm": "sha256(ast.dump(node, include_attributes=False).encode(UTF-8)); raw function segment excludes decorators; AST includes decorators; do not compare across Python versions"
+  },
+  "base_router": {
+    "commit": "d73d46fcdcb902d09e0a1aee12676296efbcfd8b",
+    "path": "clearledger/server/app/routers/auth_router.py",
+    "bytes": 39944,
+    "lines": 775,
+    "raw_sha256": "8fb6150f37ade973a4e0322539da709152e979238c7bf8fdb699156b5c28cc0c",
+    "module_ast_sha256": "3b2f48f1e18254e0b79158b25fc2ee243ea727ee54a146c08ad27a1db7f1cfeb"
+  },
+  "source_manifest": [
+    {
+      "commit": "38da559d7bd6636f1b6d2c44075452bc1958abce",
+      "path": "clearledger/server/app/routers/auth_router.py",
+      "bytes": 45500,
+      "lines": 878,
+      "raw_sha256": "69fe112463052c83c50a880ddd7f126cf10546ef4074bf2226ba1d01b62da7f8",
+      "module_ast_sha256": "f3c4323122e3735accee5f66e57787247efccd32ba0d52214be6dedf02ff9e17"
+    },
+    {
+      "commit": "38da559d7bd6636f1b6d2c44075452bc1958abce",
+      "path": "clearledger/server/app/routers/invitations_router.py",
+      "bytes": 23650,
+      "lines": 445,
+      "raw_sha256": "fb0cc5a28ec8152feba12ae742c06b1f98182315eed8c05db2fc57d6e1a39e4c",
+      "module_ast_sha256": "dd6ddec937c6de63c7a9937aa1c181d10e798d6a8d1d69e0f944f467fd9cb9ad"
+    },
+    {
+      "commit": "38da559d7bd6636f1b6d2c44075452bc1958abce",
+      "path": "clearledger/server/app/services/native_auth_locks.py",
+      "bytes": 10560,
+      "lines": 220,
+      "raw_sha256": "a2bba3c428020d0507d4a0f9213953ee01f74573894612a9c30f42fd9a89c403",
+      "module_ast_sha256": "156dee38a0f8f27fdecef845b5446d1574f1b87773e1a3b786dfd1051a79c3db"
+    },
+    {
+      "commit": "38da559d7bd6636f1b6d2c44075452bc1958abce",
+      "path": "clearledger/server/tests/test_native_auth_locks.py",
+      "bytes": 11712,
+      "lines": 217,
+      "raw_sha256": "2eab3332a36a1ad42bee3ea4d0f6d9e7fa0ca14dfb743b2965417cbc85224d9b",
+      "module_ast_sha256": "cdcb64ee142492838937151d371d13b938f7c03b93e3a844b0bbd5d014e3835e"
+    },
+    {
+      "commit": "38da559d7bd6636f1b6d2c44075452bc1958abce",
+      "path": "clearledger/server/tests/test_native_auth_locks_pg.py",
+      "bytes": 56467,
+      "lines": 1085,
+      "raw_sha256": "46a95f8db97ada01ea12f5d66a7a9686e3970ae1dacbf7bcc62564acd58e17b0",
+      "module_ast_sha256": "0966fda8bc2951d287328433705b6391b177885dea92bdfd817c31ecdea12794"
+    }
+  ],
+  "api": {
+    "entrance": "assert_auth_clean before any autoflush-capable preflight; prepare_auth_write(db, *, target_id, actor=None, companies=(), new_user=False, member_company=None, email_pointer=None, expected_pointer=None) -> AuthWrite",
+    "plan": "target User EXCLUSIVE; actor User SHARED if verified native actor; full old/target Company SHARED; register absent Member EXCLUSIVE; no Role key for unchanged default NULL role_id; no Invitation namespace/global lock",
+    "lower": "exact typed LockRequest/LockPlan full originals; ONE acquire_scoped_locks_async per actual mutation DB root; require_scoped_locks uses same db.sync_session and permits authorized dirty state; no retries/extension/reentry/capability across commits",
+    "rows": "all advisory keys in frozen numeric signed32 order/strong merge; then Company SHARE sorted UUID -> User SHARE/UPDATE sorted UUID -> CompanyRole SHARE sorted UUID, tenant predicate -> UserCompany UPDATE sorted composite PK, tenant predicate -> Invitation UPDATE, tenant predicate -> original writes",
+    "fresh": "no_autoflush MVCC discovery; expire_all/populate_existing after wait; revalidate email/default-company/id, same native claims/session/visit; login/reset/password/TOTP policy uses fresh locked User, clocks after wait with original > and < comparisons; accept repeats existing _valid_invite after final Invitation row wait and _accept_targets after wait, then checks immutable invitation fields/observed target set/email pointer before mutations",
+    "conflicts": "AuthIdentityChanged only before mutation/email; ordinary routes409 via get_db rollback; forgot-password exact catch rolls back full handler root and returns200; ScopedLockError/DB/other HTTP errors are not masked",
+    "lifetime": "managed SQLAlchemy 2.0.36 only, private helper actual DB-root tracking frozen in base; raw transaction SQL and direct-driver transaction control forbidden in participating roots; not an all-writer closure exception",
+    "invite_entrance": "prepare_invite_write(db, *, user_id, new_user, email, companies, targets, expected_pointer=None) -> AuthWrite; admission/target helpers stay in router, no router imports or HTTP callbacks in adapter",
+    "invite_plan": "all observed targets and actual User default parent + invitation Company S; existing User S/new UUID User X; every target Member X including absent; old named Role S with actual same-company FK owner validation; new native role string preserves NULL role_id (no new named Role UUID)",
+    "phantoms": "Observed dynamic target-set/email checks are not universal registry/email phantom fences; a changed plan aborts409 and get_db rolls back, no retry or late earlier key; concurrent absent-email INSERT ultimately retains actual unique constraint"
+  },
+  "roots": [
+    {
+      "function": "login",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          123,
+          213
+        ],
+        "raw_sha256": "f2ce729e484bbd642fdc50168a59f621b1166ebc1efd96f265973978cd4b11d0",
+        "function_ast_sha256": "6b03bc1e30fb39010a9c5ec5916a052945f721dc3131a09ee4ffaadafcacc1c7"
+      },
+      "after": {
+        "range": [
+          128,
+          226
+        ],
+        "raw_sha256": "0a12f84723f693eb7199eecc3052714c69cc6c634ce8bcf9ae58ede5b4c78914",
+        "function_ast_sha256": "b10db72eee48989350b0bc6f645f5f7a4b19ce552a0fa8a4729a1019474bd29b"
+      },
+      "before_trace": "email discovery -> invitation/mail_only -> lockout/password/TOTP -> failed count/optional lock + commit -> audit + commit, OR presence/counters/audit/optional notice reset link + commit",
+      "after_trace": "clean -> MVCC email -> complete Company S/User X -> fresh Company SHARE/User UPDATE -> email/default-parent revalidation -> unchanged mail_only/now/lockout/password/TOTP -> original branches",
+      "transaction": "failure nonlocked existing: User commit then separate audit-only commit; locked existing: audit-only commit in current root; success: one handler commit; error get_db rollback",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "demo_session",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          228,
+          254
+        ],
+        "raw_sha256": "cd07b25aaaf0b5cadc9ae5b9b3180a577a7148219de64ba93eadeceefe9ff03d",
+        "function_ast_sha256": "9f0b8b041a28c3921faebd24e07f174e43678c21fabcb676b9878da9cf8f0665"
+      },
+      "after": {
+        "range": [
+          241,
+          277
+        ],
+        "raw_sha256": "8d5e73557164c4563860b2b89f3b3cbf55f9879e81a16aec482c2972e0f48f6b",
+        "function_ast_sha256": "051d8bb2889660a721c1c7a4cf1b5135601722da1ef72f3ffeaaff4551648b4c"
+      },
+      "before_trace": "environment/header/optional constant-time secret -> lower(email) lookup -> presence -> commit/token",
+      "after_trace": "clean -> same edge prechecks -> lower(email) MVCC -> Company S/User X -> fresh SQL lower(email) selector -> presence -> original commit/token",
+      "transaction": "one handler commit",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "forgot_password",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          268,
+          310
+        ],
+        "raw_sha256": "39ba8eb5fdbefe5237dd04a1504c47534ab44e53f5caf693482319267f7b873d",
+        "function_ast_sha256": "640f8e000f47e4bb5492d2ce47be3ee94595c377ec6dfb74b0741117e684a58c"
+      },
+      "after": {
+        "range": [
+          291,
+          371
+        ],
+        "raw_sha256": "6164fe1b33976db41999e55ac1465f2aabbec93a92663c8566507c119ba4e0a3",
+        "function_ast_sha256": "617455106121eca8389aa332dd0f5c144161c88ffe7bbf74577a7ba371c8c1d0"
+      },
+      "before_trace": "exact email -> mail_only return; User reset hash/TTL+flush+email; absent User -> latest pending live Invitation -> rotate hash/TTL+flush+email; always200",
+      "after_trace": "clean -> User branch Company S/User X + fresh email/parent/mail_only; invitation branch Company S then tenant-filtered Invitation UPDATE + email/token/status/expiry/latest/absent-User checks; exact AuthIdentityChanged -> full-root rollback + always200, no retry/write/mail",
+      "transaction": "normal: get_db commit, zero handler commits; privacy drift abort: one explicit whole-root rollback, then return200; lock/driver/other HTTP errors propagate",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "reset_password",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          338,
+          355
+        ],
+        "raw_sha256": "05b064b9870d010a3847c83723afcaa3a6a336a6d7ad592804680fd44b88f22a",
+        "function_ast_sha256": "f9d419e970cd8ebc7ce5fc6eff02a64df30c0535523f09ec6c021b9a3a597222"
+      },
+      "after": {
+        "range": [
+          399,
+          430
+        ],
+        "raw_sha256": "831aa689a417ceae1903288010eccb905801faf5370ba82acec05841da71b0b6",
+        "function_ast_sha256": "566af7082ce42363c48248f1df9118d22ade4716c021e869af3d94fedac49598"
+      },
+      "before_trace": "reset hash lookup/strict expiry -> password/reset/counters/token_version -> audit -> flush",
+      "after_trace": "clean -> MVCC hash discovery -> Company S/User X -> fresh User UPDATE -> compare current hash + strict expiry AFTER wait -> identical writes/audit/flush",
+      "transaction": "get_db commit; invalid token404 before mutation",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "change_password",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          451,
+          485
+        ],
+        "raw_sha256": "878317fec8881a705896475bf1ac1ab7f33151d66f1dd4c07dcb6bd4026d07d9",
+        "function_ast_sha256": "60cdb8c5e8f9b06ccac33766e92dff5eee42bb42d39151122f51b826cb599807"
+      },
+      "after": {
+        "range": [
+          526,
+          563
+        ],
+        "raw_sha256": "db24085f1ae3f5539859cdbafd9491e15d447e7be5dd0f8f46079155fa600b9a",
+        "function_ast_sha256": "b29081fcb100533b9ce3f5d34beed521069abfa405b9020fb35bfb92746925d6"
+      },
+      "before_trace": "dependency current_user -> mail_only/hash -> current password -> new!=old -> password/reset/counters/token_version -> audit -> commit/new token",
+      "after_trace": "clean handler root -> Company S/User X -> fresh User UPDATE -> same native session/visit from verified claims -> original ordered password checks -> original mutation/audit/commit/token",
+      "transaction": "one handler commit; new token retains original fresh auth-time/expiry policy",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "register",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          493,
+          534
+        ],
+        "raw_sha256": "c8c296be3638e01b53523bf6db363613b55bf25337d34eb79df5e577e276408f",
+        "function_ast_sha256": "45456f99d9569eb91e865e4716132972ef0b42b946cd6ba129a7fd790df6097a"
+      },
+      "after": {
+        "range": [
+          571,
+          625
+        ],
+        "raw_sha256": "9001c61911233fb4af2b40f9ac8e8f8e9a8273e4f4d1013743a4f585958bf181",
+        "function_ast_sha256": "c06b35cc26cf04eef08702b1ff70b5d8f2bc51800d2043c8ca34e68c35964a61"
+      },
+      "before_trace": "superadmin -> duplicate email -> resolve company -> new User+flush -> default Member+flush -> token",
+      "after_trace": "clean -> same legacy preflight precedence -> server uuid4 -> Company S including actor default + actor User S + new User X + absent Member X -> canonical rows + same claims/session/visit + fresh superadmin -> repeat company resolution -> original INSERTs/token",
+      "transaction": "get_db commit; no handler commit; default User.role=user/UserCompany.role and NULL role_id unchanged",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "logout_all",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          588,
+          596
+        ],
+        "raw_sha256": "3a3c44870740fcd33c9c7849df365b7f60a00fe999e4b226d992b1c4732c36aa",
+        "function_ast_sha256": "ef814a8adc639f19c58180c31dbc949a29ee33838c619155a569cf2ec6d21e2a"
+      },
+      "after": {
+        "range": [
+          679,
+          690
+        ],
+        "raw_sha256": "ee708df41cf36d10bf9dd7d9c2ae40c7a9c5e9a51f92d4d0e8d644563c63faa4",
+        "function_ast_sha256": "2d5fe4fdae8b57ce662c9f8667711199adf745ddcdf4ec0c9c373343afc61cd3"
+      },
+      "before_trace": "clear gate cookie -> token_version increment -> audit -> commit",
+      "after_trace": "clean handler root -> Company S/User X -> fresh native session/visit -> original cookie/version/audit/commit",
+      "transaction": "one handler commit",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "twofa_setup",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          610,
+          619
+        ],
+        "raw_sha256": "5b243fdd06da8087799e0f01048a652c9e1527db92231e80b81ac6b16752bee1",
+        "function_ast_sha256": "4b2872484a842b543d3848f43eb2c94d63ae74962786b03c40506093349e9bfd"
+      },
+      "after": {
+        "range": [
+          704,
+          716
+        ],
+        "raw_sha256": "bd6d110684c438770f66350d81dfc6e6dff792b17bac5b12ae9baacdbf956c12",
+        "function_ast_sha256": "b7bd336fa2a1760bf58b4eeed8fa78df3fbe8b9c2bce81759d480b99772cbe78"
+      },
+      "before_trace": "enabled409 -> new secret/seal -> commit -> issuer/uri",
+      "after_trace": "clean handler root -> Company S/User X -> fresh native session/visit and current enabled -> original secret/commit/uri",
+      "transaction": "one handler commit; no new token_version/password policy",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "twofa_enable",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          623,
+          632
+        ],
+        "raw_sha256": "7d2f8a5e07cda9f8c2c76129620a58bb589cfdbbb9fda7064b4d5ee1d12a812f",
+        "function_ast_sha256": "7bffe3d6be5f1b145721c43b2abce443ba7da61aad1b4cdc3bd560587e8fefc5"
+      },
+      "after": {
+        "range": [
+          720,
+          732
+        ],
+        "raw_sha256": "f56e92774cbf9c39af2d0af2585407e704842e80c62ab11e7a7c14b97170fb6a",
+        "function_ast_sha256": "60f450e357248a35b6acd3d67c3b407ec6543e2607e66b37c2a9ab79d55aefdd"
+      },
+      "before_trace": "current secret/unseal/TOTP or400 -> enabled=True -> audit -> commit",
+      "after_trace": "clean handler root -> Company S/User X -> fresh native session/visit, current secret/TOTP -> original writes/audit/commit",
+      "transaction": "one handler commit; no new token_version/password policy",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "twofa_disable",
+      "classification": "ACTUAL_USER_WRITER_ROOT",
+      "before": {
+        "range": [
+          636,
+          647
+        ],
+        "raw_sha256": "c46cf2006fa7b879f9edb67318607956d0c1e5180f55bb5732d1c2be8fd41974",
+        "function_ast_sha256": "683a147ec938d0e609b042cab9df8d14e4a5b3de64cf28d5ca5a06b85c969d60"
+      },
+      "after": {
+        "range": [
+          736,
+          750
+        ],
+        "raw_sha256": "417297c8b0c74cd9fe601c38f6614fd2686be351b3c70ecd011e0449dd6bbcb9",
+        "function_ast_sha256": "84207d467641b6c653e59cff2464bfb9c1f74a91d8b2a8d40b97ba6832eb6d6d"
+      },
+      "before_trace": "enabled and current secret/TOTP or400 -> enabled=False/secret=None -> audit -> commit",
+      "after_trace": "clean handler root -> Company S/User X -> fresh native session/visit, current enabled/secret/TOTP -> original writes/audit/commit",
+      "transaction": "one handler commit; no new token_version/password policy",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "_notify_new_login",
+      "classification": "INTERNAL_WRITER",
+      "before": {
+        "range": [
+          99,
+          119
+        ],
+        "raw_sha256": "dd7f8cbd5946bec5650a60a3865db429e9e6e9ff97494bbb431f2d2893eb99f4",
+        "function_ast_sha256": "c75d997436454fdb9dee80ce58eb10b4a269fd796664f8aff4a455c661c392b5"
+      },
+      "after": {
+        "range": [
+          102,
+          124
+        ],
+        "raw_sha256": "39ff10fa8191b0419e5959f61ef760fa576cc2c285ee0989aca00e93da8c487f",
+        "function_ast_sha256": "a9418e36efc1ea71da2e1b13f71aa86d24c932fb0b771569767f38f3d45cac7c"
+      },
+      "before_trace": "caller login dirty User -> reset hash/24h TTL -> email notice",
+      "after_trace": "login capability require (no I/O, dirty allowed); no second acquire -> same reset fields/24h TTL/notice",
+      "transaction": "internal login writer, not a separate DB root; before success commit",
+      "path": "clearledger/server/app/routers/auth_router.py"
+    },
+    {
+      "function": "accept_invite",
+      "path": "clearledger/server/app/routers/invitations_router.py",
+      "classification": "ACTUAL_INVITATION_ACCEPT_ROOT; new User X/account INSERT, existing User S/membership only",
+      "before": {
+        "range": [
+          357,
+          414
+        ],
+        "raw_sha256": "3d712217f2c4f374eb103952b3576439ed70c2370d7e36f5fe4e30b09d99c0f5",
+        "function_ast_sha256": "57de2a39bfc07786c86f9645da069a57feb2d089565c271912539a7df388d281"
+      },
+      "after": {
+        "range": [
+          358,
+          445
+        ],
+        "raw_sha256": "364d71f8f5362dc67a6f58edf77d0a9e22e7e48bbb03aa5f32bcb32b95179654",
+        "function_ast_sha256": "d394b37e6aa42a109aec9b6bfb642b2ca95e4f40859ada1192d26bc8c5cdad1c"
+      },
+      "before_trace": "_valid_invite -> position -> _accept_targets(company/space) -> email lookup -> existing: absent Member INSERTs + Invitation accepted/flush; new: name/password400 then User INSERT/flush + Member INSERTs + accepted/flush/token",
+      "after_trace": "clean/no_autoflush -> original public admission + observed all targets/email; server UUID for new User -> complete Company S/User S or new X/old named Role S/all Member X plan -> Company/User/Role/Member rows -> tenant-filtered Invitation UPDATE -> repeat original public token/status/expiry admission + invitation/email/target-set checks -> original branches/payloads",
+      "transaction": "zero handler commits/rollbacks; get_db owns success commit and error whole-root rollback; no native actor/admin requirement"
+    }
+  ],
+  "non_user_roots": {
+    "invitation_resend": "actual Invitation-only mutation branch within forgot_password; Company S and narrow tenant-filtered row guard; changed token/status/email/company/expiry/latest or appeared User -> privacy whole-root abort",
+    "revoke_device": "ChatPushSubscription DELETE with user predicate, NOT User/account authority mutation; unchanged",
+    "unchanged_read_cookie_roots": [
+      "refresh_token",
+      "gate_issue",
+      "gate_check",
+      "logout",
+      "reset_password_preview",
+      "get_me",
+      "my_logins",
+      "my_devices",
+      "twofa_status",
+      "_valid_reset_user",
+      "_pending_invite",
+      "_is_new_place"
+    ]
+  },
+  "transaction_seams": [
+    "app.auth._touch_presence may commit before handler; frozen and excluded from this auth handler-root contract",
+    "login failure first User mutation root closes at original commit; later actual AuditEvent-only root remains caller-owned without User mutation or stale capability require/reacquire",
+    "log_audit remains real external function; notification dispatch separate Session/task; guard.record opens separate SecurityEvent Session with no User FK; external code unchanged"
+  ],
+  "remaining_owners": [
+    "other invitation/member writers, seed/CLI/import/SSO/partner/account writers and company lifecycle need own closure evidence",
+    "ROOT ordinal4/schema PG4 owner; models/schema/product/partner_admin/partner_oauth/partner_identity/app_registry/companies/config/CI flags unchanged",
+    "Invitation admin/resend/close_invites and other public writers outside this bounded closure; full company-registry/email phantom closure UNKNOWN"
+  ],
+  "tests": {
+    "status": "ALL AUTHORED NOTRUN including imports and collection",
+    "unit_source": {
+      "functions": 13,
+      "parameter_cases": 43
+    },
+    "synthetic_pg": {
+      "functions": 33,
+      "parameter_cases": 95
+    },
+    "coverage": "actual routes + real frozen helper; pg_locks/pg_blocking_pids waits; stale password/reset/hash/expiry/lockout/TOTP/native token-version; fresh superadmin/register UUID+Member before flush; User/Invitation drift privacy abort; exact normal payload/audit/token/commit counts; cap expiry; deterministic clock after wait; actual public accept company/space existing/new, all target Company/User/Role/Member waits before flush, final Invitation row wait token/revoke/expiry errors, changed target-set/email/Role pointer, duplicate one-use, name/password400 and unchanged responses without native admin",
+    "substitutions": "notification/email/guard delivery stubbed: never delivery proof; real AuditEvent rows/commits, password hashing/checks, TOTP verification (fixed clock wrapper), native session and locks retained; synthetic six-table subset including named Role FK with relevant FK/unique/defaults, not full app schema",
+    "guard": {
+      "actual_target": "UNSUPPLIED",
+      "execution_approval": "NOT_GRANTED",
+      "url": "NATIVE_AUTH_LOCKS_PG_URL == nonempty NATIVE_AUTH_LOCKS_PG_ROOT_APPROVED_URL",
+      "proposed_marker_env": "NATIVE_AUTH_LOCKS_PG_APPROVAL",
+      "proposed_marker": "ROOT-approved-synthetic-native-auth-v1",
+      "scheme": "postgresql+psycopg",
+      "database_prefix": "native_auth_synthetic_",
+      "query_fragment": "forbidden",
+      "fallback": "none",
+      "before_app_driver_imports": true,
+      "limitation": "parent conftest is earlier/destructive; module guard does not authorize ordinary pytest; ROOT must separately freeze target/approval/collection isolation/limits"
+    },
+    "count_method": "Static AST only: top-level test_ defs; product of literal pytest.mark.parametrize argument-list lengths (WRITERS resolved from literal module assignment), summed across functions; no decorators/tests/imports evaluated",
+    "collected_pytest_case_count": "UNKNOWN/NOTRUN"
+  },
+  "immutable_source_pins": [
+    {
+      "path": "clearledger/server/app/services/contract_write_locks.py",
+      "bytes": 15023,
+      "raw_sha256": "9c3a820c3f93c479aca1c0cab2f00cef8be5fda63b5fe688a104142ea3f6c8ae",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "clearledger/server/app/services/native_user_role_locks.py",
+      "bytes": 9038,
+      "raw_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "clearledger/server/app/routers/users_router.py",
+      "bytes": 45729,
+      "raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "clearledger/server/app/routers/roles_router.py",
+      "bytes": 7678,
+      "raw_sha256": "b6c02422f40990e406886bbf22fcc96abd7e4cb298aa9bf8aa87ebdfc3c9ded7",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "clearledger/server/app/auth.py",
+      "bytes": 38400,
+      "raw_sha256": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889",
+      "unchanged_from_base": true
+    }
+  ],
+  "parent_original_20M11_pins": [
+    {
+      "path": "/srv/projects/preview/api-platform-20261029/API-MODERNIZATION-PLAN.md",
+      "bytes": 29956,
+      "range": [
+        1,
+        238
+      ],
+      "raw_sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "role": "READ_ONLY original M00-M19 / eleven cross-cutting requirements; no closure update"
+    },
+    {
+      "path": "/srv/projects/preview/api-platform-20261029/completion-matrix.html",
+      "bytes": 31088,
+      "range": [
+        1,
+        245
+      ],
+      "raw_sha256": "0365af358af9a46c9a4e5c69ac82746efb00c5425aea0c3191e01d1a407c01a2",
+      "role": "READ_ONLY original M00-M19 / eleven cross-cutting requirements; no closure update"
+    },
+    {
+      "path": "/srv/projects/preview/external-developer-experience-20261031/inputs/API-MODERNIZATION-PLAN.md",
+      "bytes": 29956,
+      "range": [
+        1,
+        238
+      ],
+      "raw_sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "role": "READ_ONLY original M00-M19 / eleven cross-cutting requirements; no closure update"
+    }
+  ],
+  "verification": {
+    "stdlib_ast_memory_compile": "PASS without exec, 5 code/test files",
+    "git_diff_check": "PASS",
+    "changed_router_functions": {
+      "auth_router": [
+        "login",
+        "demo_session",
+        "forgot_password",
+        "reset_password",
+        "change_password",
+        "register",
+        "logout_all",
+        "twofa_setup",
+        "twofa_enable",
+        "twofa_disable",
+        "_notify_new_login"
+      ],
+      "invitations_router": [
+        "accept_invite"
+      ]
+    },
+    "project_imports": 0,
+    "app_helper_validator_execution": 0,
+    "test_collection": 0,
+    "tests_executed": 0,
+    "sql_db_network_http_ssh_docker_node_build_ci": 0,
+    "push_pr_merge_deploy": false
+  },
+  "acceptance": "No full B/all-writer closure/app accepted/M00-M19 or eleven-condition closure. PR98/99 SOURCE only and their49 tests NOTRUN; no runtime pass inheritance. ROOT Support2/Core alias16/23 OFFLINEPASS on other composition does not cover this wave or schema PG4.",
+  "immutable_lineage": [
+    "6f87bdfb8c4d9a3753741f78e7a1a617ba444b59",
+    "38da559d7bd6636f1b6d2c44075452bc1958abce"
+  ],
+  "ownership_exact7": [
+    "clearledger/server/app/routers/auth_router.py",
+    "clearledger/server/app/routers/invitations_router.py",
+    "clearledger/server/app/services/native_auth_locks.py",
+    "clearledger/server/tests/test_native_auth_locks.py",
+    "clearledger/server/tests/test_native_auth_locks_pg.py",
+    "clearledger/docs/api/NATIVE_AUTH_SCOPED_LOCKS_20261101.md",
+    "clearledger/docs/api/NATIVE_AUTH_SCOPED_LOCKS_20261101.json"
+  ],
+  "base_invitations_router": {
+    "commit": "d73d46fcdcb902d09e0a1aee12676296efbcfd8b",
+    "path": "clearledger/server/app/routers/invitations_router.py",
+    "bytes": 21722,
+    "lines": 414,
+    "raw_sha256": "a0b58cd46babb657e7cece860e158b8f7ef4f45b60dd7e0f34556aaca101d691",
+    "module_ast_sha256": "adf6fc78bd30c300a629be6861b572c4dc7ffd9ba024bc8d6f1eb2fe2e886d4f"
+  },
+  "preserved_invitation_functions_byte_and_ast": [
+    "_hash",
+    "_resp",
+    "_accept_targets",
+    "_org_name",
+    "_company",
+    "_send",
+    "create_invitation",
+    "list_invitations",
+    "_owned_invite",
+    "revoke_invitation",
+    "resend_invitation",
+    "_valid_invite",
+    "preview_invite",
+    "close_invites_for"
+  ]
+}

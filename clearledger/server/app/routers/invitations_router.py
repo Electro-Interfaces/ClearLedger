@@ -21,6 +21,7 @@ from app.database import get_db
 from app.models import Company, Counterparty, Invitation, User, UserCompany
 from app.routers.users_router import require_company_admin, _is_member
 from app.services import email_service
+from app.services.native_auth_locks import assert_auth_clean, auth_conflict, prepare_invite_write
 from app.utils import resolve_org_id
 from app.schemas import (
     AcceptInvite,
@@ -359,20 +360,49 @@ async def accept_invite(
     payload: AcceptInvite,
     db: AsyncSession = Depends(get_db),
 ):
+    assert_auth_clean(db)
+    with db.no_autoflush:
+        inv = await _valid_invite(token, db)
+        iid, cid, email = inv.id, inv.company_id, inv.email
+        # Include every invitation field used below, not just the token/parent.
+        pointer = (inv.email, inv.scope, inv.role, inv.position,
+                   inv.party_type, inv.organization_id)
+        targets = await _accept_targets(inv, db)
+        user = (await db.execute(select(User).where(User.email == email)
+            .execution_options(populate_existing=True))).scalar_one_or_none()
+        new_user = user is None
+        user_id = uuid.uuid4() if new_user else user.id
+        user_pointer = None if new_user else (user.email, user.company_id)
+    write = await prepare_invite_write(
+        db, user_id=user_id, new_user=new_user, email=email, companies=(cid,),
+        targets=tuple(targets), expected_pointer=user_pointer)
+    # Narrow invitation row guard follows ALL declared Company/User/Role/Member
+    # guards/rows. Repeat original public admission after this final wait.
+    inv = (await db.execute(select(Invitation).where(
+        Invitation.id == iid, Invitation.company_id == cid)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+    if inv is None:
+        auth_conflict()
     inv = await _valid_invite(token, db)
-    cid = inv.company_id
+    if inv.id != iid or (inv.email, inv.scope, inv.role, inv.position,
+                        inv.party_type, inv.organization_id) != pointer:
+        auth_conflict()
+    fresh_targets = await _accept_targets(inv, db)
+    if set(fresh_targets) != set(targets):
+        auth_conflict()
+    # User may have appeared while waiting on the invitation itself. No late
+    # acquisition/replan: abandon the whole request on email-pointer drift.
+    actual_id = (await db.execute(select(User.id).where(User.email == email))).scalar_one_or_none()
+    if actual_id != (None if new_user else user_id):
+        auth_conflict()
+    targets, user = fresh_targets, write.user
+    write.require(db)
     # Должность приглашённый может уточнить сам — админ при приглашении часто
     # пишет её наугад. Зафиксирован только email: он и есть приглашение.
     position = (payload.position or "").strip() or inv.position
     # Приглашение в ПРОСТРАНСТВО заводит членство во всех его организациях: доступ
     # ко всему пространству — это и есть «во все компании», а не «в одну, а дальше
     # как-нибудь». Организации, появившиеся позже, добавляются администратором.
-    targets = await _accept_targets(inv, db)
-
-    user = (
-        await db.execute(select(User).where(User.email == inv.email))
-    ).scalar_one_or_none()
-
     if user is not None:
         # Существующий — добавляем членство с ролью/должностью, без автологина.
         for target in targets:
@@ -390,6 +420,7 @@ async def accept_invite(
     if not payload.password or not payload.name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите имя и пароль")
     user = User(
+        id=user_id,
         email=inv.email, password_hash=hash_password(payload.password),
         name=payload.name, role=inv.role, company_id=cid, is_superadmin=False,
     )

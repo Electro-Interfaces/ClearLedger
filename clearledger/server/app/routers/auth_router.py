@@ -36,6 +36,9 @@ from app.services import oversight
 from app.models import Company, Counterparty, User, UserCompany
 from app.services import email_service
 from app.services import notify
+from app.services.native_auth_locks import (
+    AuthIdentityChanged, AuthWrite, assert_auth_clean, auth_conflict, prepare_auth_write,
+)
 from app.utils import resolve_company_id
 from app.schemas import (
     ChangePasswordRequest,
@@ -96,9 +99,11 @@ async def _is_new_place(db: AsyncSession, user: User, ip: str | None) -> bool:
     return not any((ip or "-") == d.split(" ", 1)[0] for d in seen)
 
 
-async def _notify_new_login(db: AsyncSession, user: User, ip: str | None, ua: str) -> None:
+async def _notify_new_login(db: AsyncSession, user: User, ip: str | None, ua: str,
+                            write: AuthWrite) -> None:
     """Письмо владельцу: вход с нового адреса. «Это не я» — ссылка смены пароля: новый
     пароль гасит все прежние входы (версия токена)."""
+    write.require(db)
     raw = secrets.token_urlsafe(32)
     user.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
     user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
@@ -122,8 +127,16 @@ async def _notify_new_login(db: AsyncSession, user: User, ip: str | None, ua: st
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль. Возвращает JWT."""
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    assert_auth_clean(db)
+    with db.no_autoflush:
+        result = await db.execute(select(User).where(User.email == body.email)
+                                  .execution_options(populate_existing=True))
+        user = result.scalar_one_or_none()
+    if user is not None:
+        write = await prepare_auth_write(
+            db, target_id=user.id, email_pointer=(body.email, user.id),
+            expected_pointer=(user.email, user.company_id))
+        user = write.user
 
     if user is None and await _pending_invite(body.email, db) is not None:
         raise HTTPException(
@@ -203,7 +216,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
                         action="auth.login_new_ip" if new_place else "auth.login",
                         target=отметка)
         if new_place:
-            await _notify_new_login(db, user, ip, request.headers.get("user-agent") or "")
+            await _notify_new_login(db, user, ip, request.headers.get("user-agent") or "", write)
     await db.commit()
 
     token = token_for(user)
@@ -230,6 +243,7 @@ async def demo_session(
     db: AsyncSession = Depends(get_db),
 ):
     """Сессия демо-пользователя для показа из кабинета сайта."""
+    assert_auth_clean(db)
     email = (os.environ.get("DEMO_SPACE_USER") or "").strip().lower()
     if not email:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-вход не включён")
@@ -241,11 +255,20 @@ async def demo_session(
     if secret and not secrets.compare_digest(request.headers.get("X-Demo-Secret") or "", secret):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Демо-вход — только из кабинета")
 
-    user = (await db.execute(select(User).where(
-        func.lower(User.email) == email))).scalar_one_or_none()
+    with db.no_autoflush:
+        user = (await db.execute(select(User).where(
+            func.lower(User.email) == email).execution_options(populate_existing=True))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-пользователь не заведён")
 
+    write = await prepare_auth_write(db, target_id=user.id,
+                                     expected_pointer=(user.email, user.company_id))
+    user = write.user
+    # Repeat the actual lower(email) selector, including case-sensitive legacy rows.
+    actual_id = (await db.execute(select(User.id).where(
+        func.lower(User.email) == email))).scalar_one_or_none()
+    if actual_id != user.id:
+        auth_conflict()
     user.last_seen_at = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
@@ -270,44 +293,82 @@ async def forgot_password(
 ):
     """Запрос восстановления пароля: письмо со ссылкой-токеном.
     Всегда возвращает 200 — не раскрываем, существует ли email."""
-    # email уже нормализован схемой (NormEmail: strip + lower)
-    user = (
-        await db.execute(select(User).where(User.email == body.email))
-    ).scalar_one_or_none()
-    # Почтовому участнику восстанавливать нечего: учётка держит его в составе
-    # чатов, но входа не даёт. Ссылка на смену пароля только запутала бы.
-    if user is not None and user.mail_only:
-        return {"ok": True}
-    if user is not None:
-        raw = secrets.token_urlsafe(32)
-        user.reset_token_hash = _hash_token(raw)
-        user.reset_token_expires = datetime.now(timezone.utc) + RESET_TTL
-        await db.flush()
-        try:
-            await email_service.send_password_reset(user.email, raw)
-        except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
-            _reset_log.error("send_password_reset failed: %s", exc)
+    assert_auth_clean(db)
+    try:
+        # email уже нормализован схемой (NormEmail: strip + lower)
+        with db.no_autoflush:
+            user = (
+                await db.execute(select(User).where(User.email == body.email)
+                                 .execution_options(populate_existing=True))
+            ).scalar_one_or_none()
+        if user is not None:
+            write = await prepare_auth_write(
+                db, target_id=user.id, email_pointer=(body.email, user.id),
+                expected_pointer=(user.email, user.company_id))
+            user = write.user
+        # Почтовому участнику восстанавливать нечего: учётка держит его в составе
+        # чатов, но входа не даёт. Ссылка на смену пароля только запутала бы.
+        if user is not None and user.mail_only:
+            return {"ok": True}
+        if user is not None:
+            raw = secrets.token_urlsafe(32)
+            user.reset_token_hash = _hash_token(raw)
+            user.reset_token_expires = datetime.now(timezone.utc) + RESET_TTL
+            await db.flush()
+            try:
+                await email_service.send_password_reset(user.email, raw)
+            except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
+                _reset_log.error("send_password_reset failed: %s", exc)
+            return {"ok": True}
+
+        # Пароля ещё нет, но человека звали — высылаем приглашение заново (с новым токеном:
+        # старая ссылка из письма могла потеряться или истечь). Так приглашённый выбирается
+        # из тупика сам, не дожидаясь администратора.
+        inv = await _pending_invite(body.email, db)
+        if inv is not None:
+            # No User mutation in this branch. Company S precedes the narrow
+            # Invitation row guard; no invented Invitation namespace/global fence.
+            from app.models import Invitation
+            iid, cid = inv.id, inv.company_id
+            pointer = (inv.email, inv.token_hash, inv.status, inv.expires_at)
+            write = await prepare_auth_write(db, target_id=None, companies=(cid,),
+                                             email_pointer=(body.email, None))
+            inv = (await db.execute(select(Invitation).where(
+                Invitation.id == iid, Invitation.company_id == cid,
+                Invitation.email == body.email, Invitation.status == "pending")
+                .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+            if inv is None or (inv.email, inv.token_hash, inv.status, inv.expires_at) != pointer:
+                auth_conflict()
+            # Freeze expiry after both waits, retaining the legacy strict '<'.
+            if inv.expires_at < datetime.now(timezone.utc):
+                auth_conflict()
+            latest = await _pending_invite(body.email, db)
+            if latest is None or latest.id != iid:
+                auth_conflict()
+            if (await db.execute(select(User.id).where(
+                    User.email == body.email))).scalar_one_or_none() is not None:
+                auth_conflict()
+            write.require(db)
+            from app.routers.invitations_router import INVITE_TTL  # ленивый: там свой импорт этого модуля
+            raw = secrets.token_urlsafe(32)
+            inv.token_hash = _hash_token(raw)
+            inv.expires_at = datetime.now(timezone.utc) + INVITE_TTL
+            await db.flush()
+            company = await db.get(Company, inv.company_id)
+            try:
+                await email_service.send_invite(
+                    inv.email, raw, company.name if company else "",
+                    None, inv.role, inv.expires_at,
+                )
+            except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
+                _reset_log.error("send_invite (forgot-password) failed: %s", exc)
         return {"ok": True}
 
-    # Пароля ещё нет, но человека звали — высылаем приглашение заново (с новым токеном:
-    # старая ссылка из письма могла потеряться или истечь). Так приглашённый выбирается
-    # из тупика сам, не дожидаясь администратора.
-    inv = await _pending_invite(body.email, db)
-    if inv is not None:
-        from app.routers.invitations_router import INVITE_TTL  # ленивый: там свой импорт этого модуля
-        raw = secrets.token_urlsafe(32)
-        inv.token_hash = _hash_token(raw)
-        inv.expires_at = datetime.now(timezone.utc) + INVITE_TTL
-        await db.flush()
-        company = await db.get(Company, inv.company_id)
-        try:
-            await email_service.send_invite(
-                inv.email, raw, company.name if company else "",
-                None, inv.role, inv.expires_at,
-            )
-        except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
-            _reset_log.error("send_invite (forgot-password) failed: %s", exc)
-    return {"ok": True}
+    except AuthIdentityChanged:
+        # Preserve the existing always-200 privacy response on discovery drift.
+        # No mutation/email precedes a domain conflict; abandon the whole root.
+        await db.rollback()
+        return {"ok": True}
 
 
 async def _valid_reset_user(token: str, db: AsyncSession) -> User:
@@ -339,7 +400,21 @@ async def reset_password(
     body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)
 ):
     """Установка нового пароля по токену из письма (токен одноразовый)."""
-    user = await _valid_reset_user(body.token, db)
+    assert_auth_clean(db)
+    with db.no_autoflush:
+        user = (await db.execute(select(User).where(
+            User.reset_token_hash == _hash_token(body.token))
+            .execution_options(populate_existing=True))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна или истекла")
+    write = await prepare_auth_write(db, target_id=user.id,
+                                     expected_pointer=(user.email, user.company_id))
+    user = write.user
+    # Mutable path consumes only the hash still current after User X/UPDATE wait.
+    if (user.reset_token_hash != _hash_token(body.token)
+            or user.reset_token_expires is None
+            or user.reset_token_expires < datetime.now(timezone.utc)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка недействительна или истекла")
     user.password_hash = hash_password(body.password)
     user.reset_token_hash = None
     user.reset_token_expires = None
@@ -463,6 +538,9 @@ async def change_password(
     (`token_version`), но текущему окну сразу выдаётся новый токен: человек
     меняет пароль у себя за столом и не должен после этого логиниться заново.
     """
+    assert_auth_clean(db)
+    write = await prepare_auth_write(db, target_id=current_user.id, actor=current_user)
+    current_user = write.user
     if current_user.mail_only or not current_user.password_hash:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "У этой учётной записи нет пароля")
@@ -497,13 +575,15 @@ async def register(
 ):
     """Регистрация нового пользователя — ТОЛЬКО суперадмин (саморегистрация
     закрыта; пользователей заводит админ компании через /api/users)."""
+    assert_auth_clean(db)
     if not current_user.is_superadmin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Регистрация доступна только суперадмину",
         )
     # Проверка дубликата email
-    existing = await db.execute(select(User).where(User.email == body.email))
+    with db.no_autoflush:
+        existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -511,9 +591,20 @@ async def register(
         )
 
     # Проверка компании (UUID или slug)
-    company_uuid = await resolve_company_id(body.company_id, db)
+    with db.no_autoflush:
+        company_uuid = await resolve_company_id(body.company_id, db)
+    user_id = uuid.uuid4()
+    write = await prepare_auth_write(
+        db, target_id=user_id, actor=current_user, new_user=True,
+        member_company=company_uuid, email_pointer=(body.email, None))
+    current_user = write.actor
+    if not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Регистрация доступна только суперадмину")
+    if await resolve_company_id(body.company_id, db) != company_uuid:
+        auth_conflict()
 
     user = User(
+        id=user_id,
         email=body.email,
         password_hash=hash_password(body.password),
         name=body.name,
@@ -588,6 +679,9 @@ async def logout(response: Response):
 async def logout_all(response: Response, current_user: User = Depends(get_current_user),
                      db: AsyncSession = Depends(get_db)):
     """Выйти со всех устройств: все выданные токены этой учётной записи гаснут."""
+    assert_auth_clean(db)
+    write = await prepare_auth_write(db, target_id=current_user.id, actor=current_user)
+    current_user = write.user
     clear_gate_cookie(response)
     current_user.token_version = (current_user.token_version or 0) + 1
     if current_user.company_id is not None:
@@ -609,6 +703,9 @@ async def twofa_status(current_user: User = Depends(get_current_user)):
 @router.post("/2fa/setup")
 async def twofa_setup(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Начать настройку: новый секрет. Включится только после подтверждения кодом."""
+    assert_auth_clean(db)
+    write = await prepare_auth_write(db, target_id=current_user.id, actor=current_user)
+    current_user = write.user
     if current_user.totp_enabled:
         raise HTTPException(409, "Второй фактор уже включён — сначала отключите его")
     secret = totp.new_secret()
@@ -623,6 +720,9 @@ async def twofa_setup(current_user: User = Depends(get_current_user), db: AsyncS
 async def twofa_enable(body: OtpCode, current_user: User = Depends(get_current_user),
                        db: AsyncSession = Depends(get_db)):
     """Подтвердить настройку кодом из приложения — с этого момента вход требует код."""
+    assert_auth_clean(db)
+    write = await prepare_auth_write(db, target_id=current_user.id, actor=current_user)
+    current_user = write.user
     if not current_user.totp_secret or not totp.verify(totp.unseal(current_user.totp_secret), body.code):
         raise HTTPException(400, "Код не подошёл — проверьте время на телефоне и введите свежий")
     current_user.totp_enabled = True
@@ -637,6 +737,9 @@ async def twofa_disable(body: OtpCode, current_user: User = Depends(get_current_
                         db: AsyncSession = Depends(get_db)):
     """Отключить второй фактор — только с действующим кодом: с одного украденного токена
     защиту не снять."""
+    assert_auth_clean(db)
+    write = await prepare_auth_write(db, target_id=current_user.id, actor=current_user)
+    current_user = write.user
     if not current_user.totp_enabled or not totp.verify(totp.unseal(current_user.totp_secret), body.code):
         raise HTTPException(400, "Код не подошёл")
     current_user.totp_enabled = False
