@@ -30,6 +30,21 @@
       "parent": "0001_product_api_budgets",
       "runner_format": 1,
       "source_commit": "ba9fc30be815a554cb0c646a6c75f59e17c19fb0"
+    },
+    {
+      "artifact_sha256": "c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d",
+      "files": {
+        "revisions/0003_pulse_view_role_grants.sql": "cc59ec7b281db6120a81fb01dd5b9b7f1ff44c259b6b8b94993f91dbbd1e583b",
+        "revisions/0003_pulse_view_role_grants_contract.json": "d7e78791a5792c606253f74ee15eca9b70a2baeff28aa56844759e548531846c",
+        "revisions/catalog_pulse_view_role_grants_v1.py": "6b291890dcd02a8ce019e7c1e85306b445b6a3ba0c20d4d05492c33e539b9540",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0003_pulse_view_role_grants",
+      "namespace": "core",
+      "ordinal": 3,
+      "parent": "0002_calendar_protocol_sequence",
+      "runner_format": 1,
+      "source_commit": "875929b3885d98ace8e370a72d62a825bf76960b"
     }
   ]
 }

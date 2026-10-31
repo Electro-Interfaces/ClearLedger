@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 from schema_migrations import catalog, journal
 from schema_migrations.errors import MigrationError
-from schema_migrations.manifest import CALENDAR_ID, ID, load
+from schema_migrations.manifest import CALENDAR_ID, ID, PULSE_ID, load
 
 LOCK = (434532, 1)
 
@@ -61,6 +61,21 @@ async def identity(conn, config):
 
 async def state(conn, config, package):
     await identity(conn, config)
+    if package.entry["id"] == PULSE_ID:
+        foundation = package.parent.parent
+        parent = await catalog.inspect_prerequisites(conn, foundation.contract, config.user)
+        budget = await catalog.verify_budget(conn, foundation.contract, config.user, parent)
+        ledger = await catalog.verify_journal(conn, foundation.contract, config.user)
+        if budget is None or ledger is None:
+            raise MigrationError(4, "parent_unapplied")
+        calendar = await catalog.inspect_calendar(conn, package.parent.contract, config.user)
+        if not calendar["present"]:
+            raise MigrationError(4, "parent_unapplied")
+        complete = await journal.read_verified_history(conn, package, config.user, True)
+        pulse = await catalog.inspect_pulse(conn, package.contract, config.user)
+        if complete and pulse is None:
+            raise MigrationError(4, "missing_applied_table")
+        return pulse, budget, ledger, complete
     if package.parent is not None:
         parent_package = package.parent
         parent = await catalog.inspect_prerequisites(conn, parent_package.contract, config.user)
@@ -83,15 +98,55 @@ async def state(conn, config, package):
     return parent, budget, ledger, complete
 
 
+async def require_applied_prefix(conn, config, known_head, *, required_revision=ID):
+    """Read-only borrowed connection API; caller owns snapshot and lifecycle.
+
+    Validate every applied known catalogue, never require an unapplied source
+    successor, and never accept unknown future history. No BEGIN/SET/lock/write.
+    """
+    from schema_migrations.manifest import load_known_head
+    head = load_known_head()
+    if known_head != head:
+        raise MigrationError(2, "known_head")
+    packages = {1: head.parent.parent, 2: head.parent, 3: head}
+    required = [p.entry["ordinal"] for p in packages.values() if p.entry["id"] == required_revision]
+    if len(required) != 1:
+        raise MigrationError(2, "required_revision")
+    config.validate()
+    await identity(conn, config)
+    foundation = packages[1]
+    ledger = await catalog.verify_journal(conn, foundation.contract, config.user)
+    if ledger is None:
+        raise MigrationError(4, "unapplied")
+    rows = await conn.fetch("""SELECT revision, ordinal, parent_revision, artifact_sha256,
+        contract_sha256, predecessor_sha256, action, applied_by, app_commit, runner_format
+        FROM core.core_schema_versions ORDER BY ordinal LIMIT 4""")
+    if not rows or len(rows) > 3:
+        raise MigrationError(4, "history")
+    journal.validate_history(rows, packages[len(rows)], config.user)
+    if required[0] > len(rows):
+        raise MigrationError(4, "unapplied")
+    parent = await catalog.inspect_prerequisites(conn, foundation.contract, config.user)
+    budget = await catalog.verify_budget(conn, foundation.contract, config.user, parent)
+    if budget is None:
+        raise MigrationError(4, "missing_applied_table")
+    if len(rows) >= 2:
+        calendar = await catalog.inspect_calendar(conn, packages[2].contract, config.user)
+        if not calendar["present"]:
+            raise MigrationError(4, "missing_applied_column")
+    if len(rows) == 3 and await catalog.inspect_pulse(conn, head.contract, config.user) is None:
+        raise MigrationError(4, "missing_applied_table")
+
+
 async def execute(config, mode, *, revision=ID, legacy_sent_before=None):
     """Return a safe receipt; never retries. check takes no advisory lock or write transaction."""
     package = load(revision=revision)
     if mode not in {"check", "apply"}:
         raise MigrationError(2, "mode")
     config.validate()
-    if legacy_sent_before is not None and (package.parent is None or mode != "apply"):
+    if legacy_sent_before is not None and (package.entry["id"] != CALENDAR_ID or mode != "apply"):
         raise MigrationError(2, "arguments")
-    if package.parent is not None and mode == "apply" and (
+    if package.entry["id"] == CALENDAR_ID and mode == "apply" and (
             type(legacy_sent_before) is not int or legacy_sent_before != package.contract["legacy_sent_before"]):
         raise MigrationError(2, "legacy_acknowledgement")
     # Import only after explicit invocation, offline integrity and target checks.
@@ -119,6 +174,21 @@ async def execute(config, mode, *, revision=ID, legacy_sent_before=None):
                 parent, budget, ledger, complete = await state(connection, config, package)
                 if complete:
                     return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+                if package.entry["id"] == PULSE_ID:
+                    await connection.execute("LOCK TABLE core.pulse_views, core.company_roles IN SHARE ROW EXCLUSIVE MODE")
+                    if parent is not None:
+                        await connection.execute("LOCK TABLE core.pulse_view_role_grants IN SHARE ROW EXCLUSIVE MODE")
+                    pulse, _, _, complete = await state(connection, config, package)
+                    if complete:
+                        return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+                    action = "adopted" if pulse is not None else "created"
+                    if pulse is None:
+                        await connection.execute(package.sql)
+                    if await catalog.inspect_pulse(connection, package.contract, config.user) is None:
+                        raise MigrationError(6, "postcondition")
+                    await journal.append_applied(connection, package, config.user, action)
+                    await journal.read_verified_history(connection, package, config.user, True)
+                    return {"ok": True, "action": action, "revision": package.entry["id"]}
                 if package.parent is not None:
                     # Application writers need not take the migration owner lock.
                     # Hold the relation lock through cutover, catalog checks and history.
@@ -176,7 +246,7 @@ def main(argv=None, environ=None):
         parser.add_argument("--database")
         parser.add_argument("--user")
         parser.add_argument("--namespace")
-        parser.add_argument("--revision", choices=(ID, CALENDAR_ID), default=ID)
+        parser.add_argument("--revision", choices=(ID, CALENDAR_ID, PULSE_ID), default=ID)
         parser.add_argument("--legacy-sent-before", type=int)
         args = parser.parse_args(argv)
         package = load(revision=args.revision)

@@ -680,6 +680,8 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
         if settings.managed_core_budget_enabled:
             from app.services.schema_version_gate import require_connection
             await require_connection(await db.connection(), settings)
+        from app.services.pulse_view_role_schema import require_connection as require_pulse_schema
+        await require_pulse_schema(await db.connection())
         schema_ready = await db.scalar(text("""
             SELECT count(*) = 20
               FROM pg_class AS c
