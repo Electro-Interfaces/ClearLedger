@@ -48,3 +48,13 @@ async def verify_calendar_preserved(before, after):
 async def inspect_pulse(conn, contract, owner):
     from schema_migrations.revisions.catalog_pulse_view_role_grants_v1 import inspect_pulse as pulse
     return await pulse(conn, contract, owner)
+
+
+async def inspect_contract_create(conn, contract, owner, *, applied):
+    from schema_migrations.revisions.catalog_partner_contract_create_v1 import inspect
+    return await inspect(conn, contract, owner, applied=applied)
+
+
+async def contract_create_prerequisites(conn, contract, owner):
+    from schema_migrations.revisions.catalog_partner_contract_create_v1 import prerequisites
+    return await prerequisites(conn, contract, owner)

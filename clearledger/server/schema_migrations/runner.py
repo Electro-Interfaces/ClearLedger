@@ -14,9 +14,18 @@ from urllib.parse import unquote, urlsplit
 
 from schema_migrations import catalog, journal
 from schema_migrations.errors import MigrationError
-from schema_migrations.manifest import CALENDAR_ID, ID, PULSE_ID, load
+from schema_migrations.manifest import CALENDAR_ID, CONTRACT_CREATE_ID, ID, PULSE_ID, load
 
 LOCK = (434532, 1)
+
+
+def _packages(head):
+    """Пройти frozen source chain; не достраивать историю и не stamp пробелы."""
+    packages = {}
+    while head is not None:
+        packages[head.entry['ordinal']] = head
+        head = head.parent
+    return packages
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,12 @@ async def identity(conn, config):
 
 async def state(conn, config, package):
     await identity(conn, config)
+    if package.entry["id"] == CONTRACT_CREATE_ID:
+        await require_applied_prefix(conn, config, package, required_revision=PULSE_ID)
+        complete = await journal.read_verified_history(conn, package, config.user, True)
+        await catalog.contract_create_prerequisites(conn, package.contract, config.user)
+        tables = await catalog.inspect_contract_create(conn, package.contract, config.user, applied=complete)
+        return tables, None, True, complete
     if package.entry["id"] == PULSE_ID:
         foundation = package.parent.parent
         parent = await catalog.inspect_prerequisites(conn, foundation.contract, config.user)
@@ -108,7 +123,7 @@ async def require_applied_prefix(conn, config, known_head, *, required_revision=
     head = load_known_head()
     if known_head != head:
         raise MigrationError(2, "known_head")
-    packages = {1: head.parent.parent, 2: head.parent, 3: head}
+    packages = _packages(head)
     required = [p.entry["ordinal"] for p in packages.values() if p.entry["id"] == required_revision]
     if len(required) != 1:
         raise MigrationError(2, "required_revision")
@@ -120,10 +135,12 @@ async def require_applied_prefix(conn, config, known_head, *, required_revision=
         raise MigrationError(4, "unapplied")
     rows = await conn.fetch("""SELECT revision, ordinal, parent_revision, artifact_sha256,
         contract_sha256, predecessor_sha256, action, applied_by, app_commit, runner_format
-        FROM core.core_schema_versions ORDER BY ordinal LIMIT 4""")
-    if not rows or len(rows) > 3:
+        FROM core.core_schema_versions ORDER BY ordinal LIMIT 5""")
+    if not rows or len(rows) > 4:
         raise MigrationError(4, "history")
     journal.validate_history(rows, packages[len(rows)], config.user)
+    if len(rows) == 4 and rows[3]['action'] != 'created':
+        raise MigrationError(4, 'history')
     if required[0] > len(rows):
         raise MigrationError(4, "unapplied")
     parent = await catalog.inspect_prerequisites(conn, foundation.contract, config.user)
@@ -134,8 +151,11 @@ async def require_applied_prefix(conn, config, known_head, *, required_revision=
         calendar = await catalog.inspect_calendar(conn, packages[2].contract, config.user)
         if not calendar["present"]:
             raise MigrationError(4, "missing_applied_column")
-    if len(rows) == 3 and await catalog.inspect_pulse(conn, head.contract, config.user) is None:
+    if len(rows) >= 3 and await catalog.inspect_pulse(conn, packages[3].contract, config.user) is None:
         raise MigrationError(4, "missing_applied_table")
+    # Прежние required revisions допускают prefixes1/2/3. Неучтённая
+    # relation/function0004 — дрейф, без неявного adoption.
+    await catalog.inspect_contract_create(conn, packages[4].contract, config.user, applied=len(rows) == 4)
 
 
 async def _apply_owned(connection, config, package, legacy_sent_before):
@@ -143,6 +163,20 @@ async def _apply_owned(connection, config, package, legacy_sent_before):
     parent, budget, ledger, complete = await state(connection, config, package)
     if complete:
         return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+    if package.entry["id"] == CONTRACT_CREATE_ID:
+        # Стабилизировать реальные prerequisites до creation/FK catalog checks.
+        # Идентификаторы только из проверенного frozen artifact, не от caller.
+        parents = sorted(package.contract['prerequisites'])
+        await connection.execute('LOCK TABLE ' + ', '.join('core.' + name for name in parents)
+                                 + ' IN SHARE ROW EXCLUSIVE MODE')
+        _, _, _, complete = await state(connection, config, package)
+        if complete:
+            return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+        await connection.execute(package.sql)
+        await catalog.inspect_contract_create(connection, package.contract, config.user, applied=True)
+        await journal.append_applied(connection, package, config.user, 'created')
+        await journal.read_verified_history(connection, package, config.user, True)
+        return {"ok": True, "action": "created", "revision": package.entry["id"]}
     if package.entry["id"] == PULSE_ID:
         await connection.execute("LOCK TABLE core.pulse_views, core.company_roles IN SHARE ROW EXCLUSIVE MODE")
         if parent is not None:
@@ -198,6 +232,11 @@ async def execute(config, mode, *, revision=ID, legacy_sent_before=None):
     if mode not in {"check", "apply"}:
         raise MigrationError(2, "mode")
     config.validate()
+    if package.entry['id'] == CONTRACT_CREATE_ID and mode == 'apply':
+        # Делегировать до открытия connection. Sequence владеет единственным
+        # owner connection/transaction для всех недостающих ancestors и0004.
+        return await execute_sequence(config, target_revision=CONTRACT_CREATE_ID,
+                                      legacy_sent_before=legacy_sent_before)
     if legacy_sent_before is not None and (package.entry["id"] != CALENDAR_ID or mode != "apply"):
         raise MigrationError(2, "arguments")
     if package.entry["id"] == CALENDAR_ID and mode == "apply" and (
@@ -309,10 +348,11 @@ def preflight_bootstrap_source():
 
 def _sequence_source(target_revision, fresh_prerequisites, legacy_sent_before, upgrade_prerequisites=None, predecessor_source=None):
     from schema_migrations.manifest import load_known_head
-    if target_revision!=PULSE_ID or fresh_prerequisites not in (None,'core_prerequisites_v1'):
+    if target_revision not in (PULSE_ID, CONTRACT_CREATE_ID) or fresh_prerequisites not in (None,'core_prerequisites_v1'):
         raise MigrationError(2,'explicit_target')
-    head=load_known_head()
-    if type(legacy_sent_before) is not int or legacy_sent_before!=head.parent.contract['legacy_sent_before']:
+    load_known_head()  # Integrity всего known source; explicit3 по-прежнему target3.
+    head=load(revision=target_revision)
+    if type(legacy_sent_before) is not int or legacy_sent_before!=_packages(head)[2].contract['legacy_sent_before']:
         raise MigrationError(2,'legacy_acknowledgement')
     source,verifier=_bootstrap_source()
     checked_partner=_partner_source()
@@ -331,36 +371,49 @@ def _sequence_source(target_revision, fresh_prerequisites, legacy_sent_before, u
 async def _sequence_catalogue(conn, config, head, source, verifier, fresh, partner=None, predecessor_source=None):
     await identity(conn,config)
     await verifier.prerequisites(conn,config.user)
+    packages=_packages(head)
+    if head.entry['id']==CONTRACT_CREATE_ID:
+        # Bootstrap десяти таблиц не является native four-domain baseline.
+        # Без native prerequisites отказ до bootstrap/ancestor DDL.
+        await catalog.contract_create_prerequisites(conn,head.contract,config.user)
     if await verifier.empty(conn):
         if not fresh:
             raise MigrationError(4,'bootstrap_unapplied')
         return 0,True,None,False
-    foundation=head.parent.parent
+    foundation=packages[1]
     ledger=await catalog.verify_journal(conn,foundation.contract,config.user)
     count=0
     if ledger is not None:
         rows=await conn.fetch('''SELECT revision,ordinal,parent_revision,artifact_sha256,
             contract_sha256,predecessor_sha256,action,applied_by,app_commit,runner_format
-            FROM core.core_schema_versions ORDER BY ordinal LIMIT 4''')
-        if len(rows)>3:
+            FROM core.core_schema_versions ORDER BY ordinal LIMIT 5''')
+        if len(rows)>4:
             raise MigrationError(4,'history')
         if rows:
-            await require_applied_prefix(conn,config,head,required_revision=ID)
+            from schema_migrations.manifest import load_known_head
+            await require_applied_prefix(conn,config,load_known_head(),required_revision=ID)
             count=len(rows)
-    if partner is not None and count!=3:
+    if head.entry['id']==CONTRACT_CREATE_ID:
+        await catalog.inspect_contract_create(conn,head.contract,config.user,applied=count==4)
+    if partner is not None and count<3:
         if count!=0:
             raise MigrationError(4,'partner_upgrade_history')
         old_profile=await verifier.old_partner_profile(conn,source,partner,config.user,predecessor_source)
         return 0,False,old_profile,True
-    if fresh and count!=3:
+    if fresh and count<3:
         # A previous atomic fresh attempt cannot leave a partial prefix behind.
         raise MigrationError(4,'bootstrap_not_empty')
-    calendar=await catalog.inspect_calendar(conn,head.parent.contract,config.user)
-    await catalog.inspect_pulse(conn,head.contract,config.user)
+    calendar=await catalog.inspect_calendar(conn,packages[2].contract,config.user)
+    await catalog.inspect_pulse(conn,packages[3].contract,config.user)
     parent=await catalog.inspect_prerequisites(conn,foundation.contract,config.user)
     budget=await catalog.verify_budget(conn,foundation.contract,config.user,parent)
     await catalog.verify_unoccupied_names(conn,budget,ledger)
-    profile=await verifier.profile(conn,source,config.user,calendar_present=calendar['present'])
+    if head.entry['id']==CONTRACT_CREATE_ID:
+        # Revision4 проверяет реальные native parents, не снимок всей бизнес-схемы
+        # десяти bootstrap relations. У ancestors свои проверки.
+        profile='contract_create_prerequisites_v1'
+    else:
+        profile=await verifier.profile(conn,source,config.user,calendar_present=calendar['present'])
     return count,False,profile,False
 
 
@@ -396,12 +449,17 @@ async def execute_sequence(config, *, target_revision, fresh_prerequisites=None,
                     await connection.execute(partner.sql)
                     await verifier.profile(connection,source,config.user,calendar_present=False)
                 actions=[]
-                for package in (head.parent.parent,head.parent,head):
+                for _,package in sorted(_packages(head).items()):
                     if package.entry['ordinal']>count:
                         actions.append(await _apply_owned(connection,config,package,legacy_sent_before))
-                await require_applied_prefix(connection,config,head,required_revision=PULSE_ID)
-                after=await verifier.profile(connection,source,config.user,calendar_present=True)
-                receipt={'ok':True,'revision':PULSE_ID,'prefix_before':count,'fresh_created':is_empty,
+                from schema_migrations.manifest import load_known_head
+                await require_applied_prefix(connection,config,load_known_head(),required_revision=target_revision)
+                if target_revision==CONTRACT_CREATE_ID:
+                    await catalog.contract_create_prerequisites(connection,head.contract,config.user)
+                    after='contract_create_prerequisites_v1'
+                else:
+                    after=await verifier.profile(connection,source,config.user,calendar_present=True)
+                receipt={'ok':True,'revision':target_revision,'prefix_before':count,'fresh_created':is_empty,
                     'profile_before':before,'profile_after':after,'actions':actions,
                     'partner_prerequisites_created':partner_pending,'predecessor_source':predecessor_source,
                     'partner_artifact_sha256':partner.digest if partner else None,
@@ -437,7 +495,7 @@ def main(argv=None, environ=None):
         parser.add_argument("--database")
         parser.add_argument("--user")
         parser.add_argument("--namespace")
-        parser.add_argument("--revision", choices=(ID, CALENDAR_ID, PULSE_ID), default=ID)
+        parser.add_argument("--revision", choices=(ID, CALENDAR_ID, PULSE_ID, CONTRACT_CREATE_ID), default=ID)
         parser.add_argument("--legacy-sent-before", type=int)
         parser.add_argument("--fresh-prerequisites", choices=("core_prerequisites_v1",))
         parser.add_argument('--upgrade-prerequisites', choices=('core_partner_prerequisites_v1',))
@@ -447,10 +505,10 @@ def main(argv=None, environ=None):
         if any((args.fresh_prerequisites,args.upgrade_prerequisites,args.predecessor_source)) and args.mode != 'bootstrap':
             raise MigrationError(2, 'arguments')
         if args.mode == 'bootstrap':
-            if args.revision != PULSE_ID:
+            if args.revision not in (PULSE_ID, CONTRACT_CREATE_ID):
                 raise MigrationError(2, 'explicit_target')
             _sequence_source(args.revision, args.fresh_prerequisites, args.legacy_sent_before, args.upgrade_prerequisites, args.predecessor_source)
-        if args.legacy_sent_before is not None and args.mode != 'bootstrap' and (args.revision != CALENDAR_ID or args.mode != "apply"):
+        if args.legacy_sent_before is not None and args.mode != 'bootstrap' and (args.revision not in (CALENDAR_ID, CONTRACT_CREATE_ID) or args.mode != "apply"):
             raise MigrationError(2, "arguments")
         if args.mode == "plan":
             if any((args.dsn_env, args.database, args.user, args.namespace, args.legacy_sent_before)):

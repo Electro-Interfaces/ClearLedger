@@ -11,13 +11,17 @@ ROOT = Path(__file__).resolve().parent
 ID = "0001_product_api_budgets"
 CALENDAR_ID = "0002_calendar_protocol_sequence"
 PULSE_ID = "0003_pulse_view_role_grants"
+CONTRACT_CREATE_ID = "0004_partner_contract_create"
 FILES = ("revisions/0001_product_api_budgets.sql", "revisions/journal_v1.sql",
     "revisions/0001_contract.json", "revisions/catalog_v1.py")
 CALENDAR_FILES = ("revisions/0002_calendar_protocol_sequence.sql", "revisions/journal_v1.sql",
     "revisions/0002_calendar_contract.json", "revisions/catalog_v2.py")
 PULSE_FILES = ("revisions/0003_pulse_view_role_grants.sql", "revisions/journal_v1.sql",
     "revisions/0003_pulse_view_role_grants_contract.json", "revisions/catalog_pulse_view_role_grants_v1.py")
-ALLOWLIST = ((ID, FILES, None), (CALENDAR_ID, CALENDAR_FILES, ID), (PULSE_ID, PULSE_FILES, CALENDAR_ID))
+CONTRACT_CREATE_FILES = ("revisions/0004_partner_contract_create.sql", "revisions/journal_v1.sql",
+    "revisions/0004_partner_contract_create_contract.json", "revisions/catalog_partner_contract_create_v1.py")
+ALLOWLIST = ((ID, FILES, None), (CALENDAR_ID, CALENDAR_FILES, ID), (PULSE_ID, PULSE_FILES, CALENDAR_ID),
+    (CONTRACT_CREATE_ID, CONTRACT_CREATE_FILES, PULSE_ID))
 V1_ARTIFACT = "301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1"
 
 
@@ -55,14 +59,16 @@ class Package:
 
     @property
     def contract_file(self):
-        return {ID: FILES[2], CALENDAR_ID: CALENDAR_FILES[2], PULSE_ID: PULSE_FILES[2]}[self.entry["id"]]
+        return {ID: FILES[2], CALENDAR_ID: CALENDAR_FILES[2], PULSE_ID: PULSE_FILES[2],
+            CONTRACT_CREATE_ID: CONTRACT_CREATE_FILES[2]}[self.entry["id"]]
 
 
 def load(root=ROOT, *, revision=ID):
     try:
         registry = decode((root / "manifest.json").read_bytes())
         if (set(registry) != {"format", "revisions"} or registry["format"] != 1
-                or len(registry["revisions"]) not in (1, 2, 3) or revision not in {ID, CALENDAR_ID, PULSE_ID}):
+                or len(registry["revisions"]) not in (1, 2, 3, 4)
+                or revision not in {ID, CALENDAR_ID, PULSE_ID, CONTRACT_CREATE_ID}):
             raise MigrationError(2, "manifest")
         expected_keys = {"id", "ordinal", "parent", "namespace", "runner_format", "source_commit", "files", "artifact_sha256"}
         packages = []
@@ -102,4 +108,4 @@ def load(root=ROOT, *, revision=ID):
 
 def load_known_head(root=ROOT):
     """Strictly frozen source head, independent of the database's applied prefix."""
-    return load(root, revision=PULSE_ID)
+    return load(root, revision=CONTRACT_CREATE_ID)
