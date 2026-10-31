@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.models import Company, Contract, Organization
+from app.models import Company, Contract, Counterparty, Organization
 from app.services.contract_write_locks import (
     CompanyKey, RefCompositeKey, LockMode, LockRequest, LockPlan,
     ScopedLockCapability, ScopedLockError, acquire_scoped_locks_async,
@@ -70,6 +70,16 @@ async def _prepare_store_contract_write(db, company_id):
     if company is None:
         raise HTTPException(404, "Организация не найдена")
     await _lock_store_references(db, company_id, prepared=prepared)
+    require_store_contract_write(db, company_id, prepared)
+    # Readonly discovery могло удержать старые ORM attrs во время ожидания.
+    # Только clean entry, после ВСЕХ барьеров и до первого ref write: later
+    # authorized CP/title/raw pending здесь ещё нет, их нельзя сбрасывать позже.
+    reject_store_pending_writes(db)
+    for row in tuple(db.sync_session.identity_map.values()):
+        if type(row) in (Contract, Counterparty, Organization):
+            # Полный expiry instance нужен для следующего async db.get:
+            # partial attrs expiry оставил бы identity-map fast path активным.
+            db.sync_session.expire(row)
     return prepared
 
 

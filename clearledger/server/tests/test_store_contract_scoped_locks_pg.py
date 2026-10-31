@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import Company, Contract, Counterparty, Organization, User, UserCompany
 from app.routers import store_router as router
+from app.routers import references_router as references
 from app.services import contract_write_locks as locks
 from app.services import store_contract_commands as commands
 
@@ -476,4 +477,205 @@ async def test_actual_router_keeps_network403_and_required400_before_plan(world,
         # Neither 400/403 attempted B: real helper can enter the same clean root.
         cap = await locks.acquire_scoped_locks_async(db, future_create_protocol(w))
         locks.require_scoped_locks(db.sync_session, cap, future_create_protocol(w).requests)
+        await db.rollback()
+
+
+async def seed_cards(w, *numbers):
+    """Real shared creator, one explicit preparation, caller-owned commit."""
+    async with w.factory() as db:
+        prepared = await commands.prepare_store_contract(db, w.cid, body(w))
+        ids = []
+        for number in numbers:
+            row = await commands.save_store_contract(db, w.cid, body(w, number=number), prepared=prepared)
+            ids.append(row.id)
+        await db.commit()
+        return ids
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+async def test_retained_candidate_after_actual_store_update_wait_requires_current409(world, operation):
+    w = world
+    candidate_id, target_id = await seed_cards(w, "retained-old", "retained-target")
+    held = {}
+    async with w.factory() as writer, w.factory() as observer:
+        prepared = await commands.prepare_store_contract(writer, w.cid, body(w))
+        await commands.save_store_contract(writer, w.cid, body(w, id=str(candidate_id),
+            number="retained-new"), prepared=prepared)
+        await writer.flush()
+        writer_pid = await pid(writer)
+
+        async def contender(db):
+            # Strong refs are retained across the real B wait on the same clean root.
+            with db.no_autoflush:
+                held["candidate"] = await db.get(Contract, candidate_id)
+                held["target"] = await db.get(Contract, target_id)
+                held["cp"] = await db.get(Counterparty, w.cp)
+                held["org"] = await db.get(Organization, w.org)
+            assert held["candidate"].number == "retained-old"
+            root = db.sync_session.get_transaction()
+            data = body(w, number="retained-new")
+            if operation == "update":
+                data["id"] = str(target_id)
+            statements = []
+            connection = (await db.connection()).sync_connection
+            def record(conn, cursor, statement, parameters, context, executemany):
+                statements.append(statement)
+            event.listen(connection, "before_cursor_execute", record)
+            try:
+                prepared = await commands.prepare_store_contract(db, w.cid, data)
+                assert db.sync_session.get_transaction() is root
+                with pytest.raises(HTTPException) as duplicate:
+                    await commands.save_store_contract(db, w.cid, data, prepared=prepared)
+                assert duplicate.value.status_code == 409
+                assert held["candidate"].number == "retained-new"
+                assert not db.new and not db.dirty and not db.deleted
+                assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for sql in statements)
+                commands.require_store_contract_write(db, w.cid, prepared)
+                return duplicate.value.status_code
+            finally:
+                event.remove(connection, "before_cursor_execute", record)
+
+        async with running(w.factory, contender) as (details, task):
+            await blocked(observer, details["pid"], writer_pid, locks.RefCompositeKey(w.cid), "ExclusiveLock")
+            assert held["candidate"].number == "retained-old" and not details["db"].dirty
+            await writer.commit()
+            assert await asyncio.wait_for(task, 10) == 409
+
+
+async def test_retained_update_target_reloaded_after_actual_store_update_wait(world, monkeypatch):
+    w = world
+    target_id, = await seed_cards(w, "target-old")
+    held = {}
+    validator = commands._validate_contract_parties
+    async with w.factory() as writer, w.factory() as observer:
+        prepared = await commands.prepare_store_contract(writer, w.cid, body(w))
+        await commands.save_store_contract(writer, w.cid, body(w, id=str(target_id),
+            number="target-current", title="Current title"), prepared=prepared)
+        await writer.flush()
+        writer_pid = await pid(writer)
+
+        async def contender(db):
+            with db.no_autoflush:
+                held["target"] = await db.get(Contract, target_id)
+                held["cp"] = await db.get(Counterparty, w.cp)
+                held["org"] = await db.get(Organization, w.org)
+            assert held["target"].number == "target-old"
+            root = db.sync_session.get_transaction()
+            data = body(w, id=str(target_id), number="target-current", title="Final title")
+            prepared = await commands.prepare_store_contract(db, w.cid, data)
+            async def fresh_parties(session, cid, cp, org):
+                # Spy delegates to the actual validator; target must be fresh BEFORE mutation.
+                assert held["target"].number == "target-current"
+                assert held["target"].title == "Current title"
+                return await validator(session, cid, cp, org)
+            with monkeypatch.context() as patch:
+                patch.setattr(commands, "_validate_contract_parties", fresh_parties)
+                row = await commands.save_store_contract(db, w.cid, data, prepared=prepared)
+            assert row is held["target"] and row.title == "Final title"
+            assert row.number == "target-current" and row.raw["source"] == "center_manual"
+            assert row.manual_overrides == []
+            assert db.sync_session.get_transaction() is root
+            # Authorized title/raw/CP writes after preparation are never expired again.
+            await db.flush()
+            commands.require_store_contract_write(db, w.cid, prepared)
+            await db.rollback()
+
+        async with running(w.factory, contender) as (details, task):
+            await blocked(observer, details["pid"], writer_pid, locks.RefCompositeKey(w.cid), "ExclusiveLock")
+            await writer.commit()
+            await asyncio.wait_for(task, 10)
+
+
+@pytest.mark.parametrize("entity", ["counterparty", "organization", "contract"])
+async def test_retained_unused_reference_deleted_during_actual_b_wait_returns_current_error(world, entity):
+    w = world
+    # Concrete prerequisite: NEW unused side/contract, no invented tenant-move API.
+    holder_id, unused_contract_id = await seed_cards(w, "holder", "unused-target")
+    async with w.factory() as seed:
+        unused_cp = Counterparty(id=uuid4(), company_id=w.cid, name="Unused synthetic CP", aliases=[])
+        unused_org = Organization(id=uuid4(), company_id=w.cid, name="Unused synthetic Org", inn="", prefix="U")
+        seed.add_all([unused_cp, unused_org])
+        await seed.commit()
+        cp_id, org_id = unused_cp.id, unused_org.id
+    model, uid, expected = {
+        "counterparty": (Counterparty, cp_id, 400),
+        "organization": (Organization, org_id, 400),
+        "contract": (Contract, unused_contract_id, 404),
+    }[entity]
+    held = {}
+    async with w.factory() as writer, w.factory() as observer:
+        prepared = await commands.prepare_store_contract(writer, w.cid, body(w))
+        await commands.save_store_contract(writer, w.cid, body(w, id=str(holder_id),
+            number="holder-current"), prepared=prepared)
+        await writer.flush()
+        writer_pid = await pid(writer)
+
+        async def contender(db):
+            with db.no_autoflush:
+                held["row"] = await db.get(model, uid)
+            assert held["row"] is not None
+            root = db.sync_session.get_transaction()
+            data = body(w, number="after-delete")
+            if entity == "counterparty":
+                data["counterparty_id"] = str(cp_id)
+            elif entity == "organization":
+                data["organization_id"] = str(org_id)
+            else:
+                data["id"] = str(unused_contract_id)
+            statements = []
+            connection = (await db.connection()).sync_connection
+            def record(conn, cursor, statement, parameters, context, executemany):
+                statements.append(statement)
+            event.listen(connection, "before_cursor_execute", record)
+            try:
+                prepared = await commands.prepare_store_contract(db, w.cid, data)
+                with pytest.raises(HTTPException) as missing:
+                    await commands.save_store_contract(db, w.cid, data, prepared=prepared)
+                assert missing.value.status_code == expected
+                assert db.sync_session.get_transaction() is root
+                assert not db.new and not db.dirty and not db.deleted
+                assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for sql in statements)
+                commands.require_store_contract_write(db, w.cid, prepared)
+                return missing.value.status_code
+            finally:
+                event.remove(connection, "before_cursor_execute", record)
+
+        async with running(w.factory, contender) as (details, task):
+            await blocked(observer, details["pid"], writer_pid, locks.RefCompositeKey(w.cid), "ExclusiveLock")
+            async with w.factory() as deleter:
+                admin = await deleter.get(User, w.uid)
+                # Existing native DELETE paths do not participate in B today.
+                # Their own actual usage/FK checks must permit these unused rows;
+                # this schedule makes no broader writer-closure claim.
+                delete = {"counterparty": references.delete_counterparty,
+                          "organization": references.delete_organization,
+                          "contract": references.delete_contract}[entity]
+                await delete(str(uid), deleter, admin)
+                await deleter.commit()
+            assert await observer.get(model, uid) is None
+            await writer.commit()
+            assert await asyncio.wait_for(task, 10) == expected
+
+
+@pytest.mark.parametrize("pending", ["new", "dirty", "deleted"])
+async def test_after_barriers_freshness_boundary_refuses_pending_without_expiring_it(world, monkeypatch, pending):
+    w = world
+    legacy = commands.lock_manual_creation
+    async with w.factory() as db:
+        cp = await db.get(Counterparty, w.cp)
+        async def inject(session, cid, entity):
+            await legacy(session, cid, entity)
+            if entity == "contract":
+                if pending == "new":
+                    db.add(Counterparty(company_id=w.cid, name="Authorized pending probe", aliases=[]))
+                elif pending == "dirty":
+                    cp.name = "Retained pending change"
+                else:
+                    await db.delete(cp)
+        monkeypatch.setattr(commands, "lock_manual_creation", inject)
+        with pytest.raises(locks.ScopedLockError, match="clean entry"):
+            await commands.prepare_store_contract(db, w.cid, body(w))
+        assert getattr(db, pending)
+        if pending == "dirty":
+            assert cp.name == "Retained pending change"
         await db.rollback()
