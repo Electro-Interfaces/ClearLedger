@@ -1,5 +1,11 @@
 # Партнёрский API: интеграционный кандидат
 
+Штатная команда клиента обновлена (source73b9be2d→ROOT621d1d53/c0bfc220): npm run test:unit выполняет guards.test.ts и relations.test.ts. ROOT подтвердил16PASS/0FAIL/0SKIP и npm run typecheck exit0 на совместном составе. Это повтор тех же16сценариев, не32различных; OAuth/HTTP/SQL остаются NOTRUN.
+
+Полный LIFE-full-prepare d9c778ca1859 выполнен отдельно: nativeготовность достигнута, но ROOT acceptorV1 отказал на подсчёте начальных статей/связей. В source-деривации пропущены два ARTICLES.extend (9статей/12связей); C исправляет только оснастку по полному AST, прежнийfreeze/raw сохраняется. До корректирующей проверки этот сценарий не принят, Core остаётся40/57; повторного запуска приложения не было.
+
+ROOT принял LIFE-rejected-no-seed отдельно: Core40/57 в35сериях,17осталось (LIFE5/REC4/OLDUP8). Exact RuntimeError→Migration4/pulse_parent, неизменные пустые каталоги/данные и write0 в участке отказа;11raw/189CLI/source15851+77same/обычная очистка/PG0/0. Native32.97с, whole44.62с. CASE_ONLY receipt6d7e59ee; ROOT отдельно пересчитал40различныхID по35receipt hashes. Full startup и вся программа не завершены.
+
 ## Связи договоров и текущая параллельная работа · 31.10.2026, ROOT
 
 PR86 HEAD21f33b0f перенесён как eca5791c/ab30202e/6e893817; exact6files совпали.
@@ -16,7 +22,7 @@ HEAD1bf25045, которое проверяет ROOT D (task_bd1fda29e979/ctx_44
 Обе оснастки остаются NOTRUN до отдельного допуска. Support PR26 HEADd16172c0
 содержит source characterization и девять нерешённых политик; production lifecycle
 не менялся. ROOT B держит WS wire F2, C — LIFE команды SOURCE HOLD.
-Core остаётся39/57 в34сериях,18сценариев впереди; все20M+11gates открыты.
+На предыдущем срезе Core был39/57 в34сериях; новый итог40/57 описан выше; все20M+11gates открыты.
 
 
 Состав исходников на 30.10.2026: ветка
