@@ -42830,7 +42830,7 @@
   },
   "sourceChecks": {
     "helperMatchesFrozenGitBlob": true,
-    "helperDeltaToBase": "exactly one NEW helper path",
+    "helperDeltaToBase": "Final B8 branch: exactly3 NEW paths (helper+2reports); initial A8c31: exactly1 NEW helper path",
     "helperUnmodifiedByReviewer": false,
     "originalTestsByteUnchanged": true,
     "sourceBindingsVerified": 22,
@@ -42843,7 +42843,26 @@
     "canonicalSiteManifestMatchesActualFilesystem": true,
     "helperSingleShaCorrectionVsA": true,
     "B8RuntimeExecution": 0,
-    "newFindingCount": 8
+    "newFindingCount": 8,
+    "initialACommitDeltaToBase": {
+      "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+      "newPaths": [
+        "clearledger/server/tests/partner_dx_metadata_approved.py"
+      ]
+    },
+    "finalB8BranchDeltaToBase": {
+      "newPaths": [
+        "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json"
+      ],
+      "count": 3,
+      "existingPathsChanged": 0
+    },
+    "B8CommitDeltaToParent": {
+      "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+      "scope": "FROZEN_SITE.sha256 literal only;1 insertion/1 deletion"
+    }
   },
   "finiteBounds": {
     "totalWallSeconds": 180,
@@ -42954,8 +42973,8 @@
     },
     {
       "path": "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
-      "bytes": 20440,
-      "sha256": "2423279a90a4f66026aab569fcb4547ca41fe82ad30e1580f91813d40e7703e6"
+      "bytes": 20723,
+      "sha256": "3de108296a1241a40e5506964ecf8e87b0e868e707cd2347e631925658395945"
     },
     {
       "path": "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json",
