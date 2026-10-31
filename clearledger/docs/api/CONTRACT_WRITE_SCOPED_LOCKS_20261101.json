@@ -1,6 +1,6 @@
 {
   "protocol": "contract-write-scoped-locks-v1",
-  "status": "SOURCE_B1_FOLLOWUP_AUTHORED_RUNTIME_NOTRUN",
+  "status": "SOURCE_OPTIONENGINE_SUCCESSOR_AUTHORED_RUNTIME_NOTRUN",
   "date": "2026-11-01",
   "exact_base": "d71e4f3754efce7c911cc95cb46eb22707e8efbc",
   "root_authority": "msg_b211505b113a",
@@ -332,6 +332,13 @@
       "reset": "never removed by Session events/commit/close; old weak key may remain until GC, fresh DB-root object has a different identity",
       "second_acquire": "reject before any further advisory SQL in active DB root; different Session rejection leaves original active issuer capability usable",
       "validation": "_live checks attempt Connection identity along with existing exact issuance/root/enlistment checks"
+    },
+    "connection_observer_registration": {
+      "target": "Connection class, same five managed events listed by historical connection_instance_events field",
+      "filter": "weak Connection key -> weak _Entrance value; exact entrance.connection identity",
+      "late_enablement": "connection._has_events=True on the enrolled exact Connection only; SQLAlchemy 2.0.36 source-pinned",
+      "dedup": "fixed module callback identity; public contains/listen under short stdlib Lock; no per-acquire closure",
+      "ownership": "no strong Session/Connection/ORM-root/DB-root key or value in added registry; callbacks capture none of those"
     }
   },
   "managed_lifetime_boundary": {
@@ -923,9 +930,51 @@
             "line": 550,
             "end_line": 602,
             "status": "NOTRUN"
+          },
+          {
+            "name": "test_option_engine_enrollment_preserves_actual_connection_and_root",
+            "line": 650,
+            "end_line": 673,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_precreated_connection_observes_late_class_install_and_deduplicates",
+            "line": 677,
+            "end_line": 734,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_option_engine_managed_end_invalidates_exact_lifetime",
+            "line": 740,
+            "end_line": 762,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1",
+            "line": 768,
+            "end_line": 801,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_option_engine_partial_failure_keeps_actual_attempt_until_db_end",
+            "line": 807,
+            "end_line": 872,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_option_engine_foreign_connection_events_do_not_poison_issuer",
+            "line": 877,
+            "end_line": 917,
+            "status": "NOTRUN"
+          },
+          {
+            "name": "test_option_engine_authorized_dirty_and_normal_flush_child_stay_live",
+            "line": 921,
+            "end_line": 945,
+            "status": "NOTRUN"
           }
         ],
-        "top_level_test_function_count": 21,
+        "top_level_test_function_count": 28,
         "parameterized_case_count": "UNKNOWN: no collection"
       }
     ],
@@ -1192,6 +1241,353 @@
         "dispatch_id": "ctx_2691863683f8",
         "paths": "outside this helper follow-up ownership; untouched"
       }
+    }
+  },
+  "optionengine_successor": {
+    "exact_base": "18d9061f5a9fa6671c128f3ad97d77490360f3cc",
+    "immutable_history": "c9e841c / 148 / 18d9061 snapshots untouched; additive successor, no amend/reset/rebase",
+    "task_id": "task_d6890656878b",
+    "dispatch_id": "ctx_c0ef2f5caaa8",
+    "root_authority": [
+      "msg_8d9ef1e3552f",
+      "msg_2f6f20e1a57f"
+    ],
+    "ownership_exact4": [
+      "clearledger/server/app/services/contract_write_locks.py",
+      "clearledger/server/tests/test_contract_write_locks_pg.py",
+      "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+      "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.json"
+    ],
+    "reported_root_runtime_history": {
+      "attribution": "ROOT reported; this author performed zero runtime, imports or collection",
+      "minimal_helper": {
+        "composition": "a065c557",
+        "cases": 99,
+        "PASS": 99,
+        "meaning": "separate minimal composition; no native-suite acceptance"
+      },
+      "native_four_table_pg": {
+        "composition": "326457edd0b8029b2739cf5563c492f4f8169a10",
+        "cases": 27,
+        "FAIL": 18,
+        "PASS": 9,
+        "helper_event_registration_failures": 16,
+        "other_owner_AST_oracle_failures": 2
+      },
+      "safe_artifact_reference": ".artifacts/native-user-role-pg-20261101-fa0a460dc22a",
+      "artifact_credentials": "DSN/env/secrets never read",
+      "current_successor_runtime": "NOTRUN; prior 99 PASS is not acceptance of this successor"
+    },
+    "root_cause": "SQLAlchemy 2.0.36 Connection.dispatch joins OptionEngine.dispatch, which already joins proxied dispatch; Events._accept_with checks only one parent and rejects nested joined instance listener targets",
+    "fix": {
+      "registration": "public event.contains/listen on Connection class for exactly commit/rollback/savepoint/rollback_savepoint/release_savepoint",
+      "event_gate": "enrolled connection._has_events=True; own False from construction otherwise shadows late class True",
+      "existing_connection_proof": "existing _EmptyListener.parent_listeners points to live per-class deque; class append mutates same deque; _JoinedListener includes local listener and recursively reads parent",
+      "filter": "_CONNECTION_WATCHES weak Connection key -> weakref(_Entrance); exact Connection identity checked before permanent phase=poisoned",
+      "dedup": "fixed function identity and public contains/listen serialized by stdlib Lock; five callbacks regardless of acquisitions/roots",
+      "lifecycle": "one weak entry per live enrolled Connection, overwritten for its next DB root; dead weak value retains no owner; weak-key GC removes entry; no listener removal inside dispatch",
+      "unrelated_connections": "no watch -> return; a different watched connection only poisons its own current entrance",
+      "narrow_private_integration_added": [
+        "Connection._has_events"
+      ],
+      "third_party_changes": "NONE; no library, dispatcher or Engine field mutation in helper",
+      "plain_and_option_engine": "same exact issuance/Session/Connection/DB-root lifetime checks, no exemptions or fallback"
+    },
+    "source_trace": [
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 253,
+        "end": 257,
+        "symbol": "_connection_lifetime_changed"
+      },
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "start": 260,
+        "end": 275,
+        "symbol": "_watch_connection"
+      }
+    ],
+    "primary_sqlalchemy_readonly_pins": [
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/__init__.py",
+        "bytes": 13033,
+        "sha256": "2763ec762262356f7712dc64e9837ca3f0b74dca51d7f0dc914ef5af82c17061",
+        "read_only": true,
+        "spans": [
+          {
+            "start": 272,
+            "end": 272,
+            "meaning": "literal SQLAlchemy 2.0.36 version, never imported"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py",
+        "bytes": 122958,
+        "sha256": "7eb592326b777657a7b581f840d3777228dd1b3a7c35bba70a89546705ac5a02",
+        "read_only": true,
+        "spans": [
+          {
+            "start": 87,
+            "end": 130,
+            "meaning": "ordinary Connection class with instance storage, weak-key ownership source"
+          },
+          {
+            "start": 164,
+            "end": 175,
+            "meaning": "Connection joins engine dispatch and snapshots own _has_events"
+          },
+          {
+            "start": 1113,
+            "end": 1169,
+            "meaning": "all five managed completion/savepoint event gates"
+          },
+          {
+            "start": 3316,
+            "end": 3343,
+            "meaning": "OptionEngine adds joined dispatch"
+          },
+          {
+            "start": 3359,
+            "end": 3367,
+            "meaning": "OptionEngine dynamically forwards proxied event gate"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/engine/events.py",
+        "bytes": 37381,
+        "sha256": "734ba73451621f34c0be452d5e825ac73305303c2eac19078a2521b8df2a96e7",
+        "read_only": true,
+        "spans": [
+          {
+            "start": 91,
+            "end": 107,
+            "meaning": "documented late Engine listener limitation"
+          },
+          {
+            "start": 124,
+            "end": 136,
+            "meaning": "ConnectionEvents acceptance delegates to Events"
+          },
+          {
+            "start": 138,
+            "end": 151,
+            "meaning": "registration enables target _has_events"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/event/base.py",
+        "bytes": 15127,
+        "sha256": "dbbd0e4a14c3d7bf9b4855059cfb4a7559c1d0d149676028b983e8d704f4689c",
+        "read_only": true,
+        "spans": [
+          {
+            "start": 137,
+            "end": 167,
+            "meaning": "existing instance stores class EmptyListener proxies"
+          },
+          {
+            "start": 337,
+            "end": 369,
+            "meaning": "joined dispatcher keeps local and parent; event lookup"
+          },
+          {
+            "start": 376,
+            "end": 400,
+            "meaning": "instance acceptance examines only one joined parent"
+          },
+          {
+            "start": 425,
+            "end": 455,
+            "meaning": "class target returns dispatch class via descriptor"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/event/attr.py",
+        "bytes": 20751,
+        "sha256": "5fc41e1c62b88a849886dd6f921735d5feb4ebf9aafedf758cc3484f7d78b9bb",
+        "read_only": true,
+        "spans": [
+          {
+            "start": 177,
+            "end": 220,
+            "meaning": "class registration appends to existing per-class deque"
+          },
+          {
+            "start": 325,
+            "end": 330,
+            "meaning": "existing EmptyListener retains live deque by reference"
+          },
+          {
+            "start": 374,
+            "end": 378,
+            "meaning": "EmptyListener iterates that class deque"
+          },
+          {
+            "start": 490,
+            "end": 510,
+            "meaning": "compound call and iteration include live parent listeners"
+          },
+          {
+            "start": 605,
+            "end": 631,
+            "meaning": "JoinedListener local and recursively read parent listeners"
+          }
+        ]
+      }
+    ],
+    "baseline_raw_pins": [
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "bytes": 15023,
+        "sha256": "9c3a820c3f93c479aca1c0cab2f00cef8be5fda63b5fe688a104142ea3f6c8ae"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks.py",
+        "bytes": 8044,
+        "sha256": "9933f98fdda703815e289daffe9ecc80656e87da15ea4569a0b370c8eeb2d1a1"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks_pg.py",
+        "bytes": 28899,
+        "sha256": "1512c541b93294a7b84f3f49902f2914c5f7b83768f83a419063bbcdaf9cb133"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+        "bytes": 16588,
+        "sha256": "14c9fd2da37e9015fcb7a433edb9f9cf4bd526a5a6544a585f3bf5bb83c7e58c"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.json",
+        "bytes": 42475,
+        "sha256": "1459b440d673e8a0b4613004ae9dbb3745958f99d168363ab857added7ed0032"
+      }
+    ],
+    "current_raw_pins": [
+      {
+        "path": "clearledger/server/app/services/contract_write_locks.py",
+        "bytes": 16309,
+        "sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks.py",
+        "bytes": 8044,
+        "sha256": "9933f98fdda703815e289daffe9ecc80656e87da15ea4569a0b370c8eeb2d1a1"
+      },
+      {
+        "path": "clearledger/server/tests/test_contract_write_locks_pg.py",
+        "bytes": 48666,
+        "sha256": "064cd6d79774879f749eb6ad3ce96fda1898a57dc52019192ccc1f8d05f7d5fb"
+      },
+      {
+        "path": "clearledger/docs/api/CONTRACT_WRITE_SCOPED_LOCKS_20261101.md",
+        "bytes": 23295,
+        "sha256": "4d00d57a03d4fc0dd5827bbf665dd49995b6b0648c0942d4b7eca41467723413"
+      }
+    ],
+    "self_hash_policy": "Final four-file SHA256 and frozen HEAD delivered via Orca; JSON has no recursive self hash",
+    "preserved": {
+      "public_api_signatures": "AST identical to exact base",
+      "existing_helper_symbols_byte_exact_except": [
+        "_watch_connection"
+      ],
+      "encoder_namespaces_plan_order_original_semantic_coverage_capability_identity": "byte-exact existing symbols",
+      "B1_actual_DB_root_marker": "_ATTEMPTS declaration and all acquisition/liveness logic byte-exact; remains before lock SQL and independent of ORM end",
+      "unit_module_byte_exact": true,
+      "pg_exact_base_prefix_and_original_definitions_byte_exact": true,
+      "original_unit_test_functions": 9,
+      "original_pg_test_functions": 21,
+      "new_pg_test_functions": 7,
+      "current_unit_test_functions": 9,
+      "current_pg_test_functions": 28,
+      "total_test_functions": 37,
+      "all_test_functions": "NOTRUN; imports/collection NOTRUN",
+      "parameterized_case_count": "UNKNOWN: no collection",
+      "M00-M19/11": "unchanged; no reduction or closure claim",
+      "parent_raw_pins": "five exact parent artifacts and all historical pin fields preserved"
+    },
+    "authored_pg_specs": [
+      {
+        "name": "test_option_engine_enrollment_preserves_actual_connection_and_root",
+        "line": 650,
+        "end_line": 673,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_precreated_connection_observes_late_class_install_and_deduplicates",
+        "line": 677,
+        "end_line": 734,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_option_engine_managed_end_invalidates_exact_lifetime",
+        "line": 740,
+        "end_line": 762,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1",
+        "line": 768,
+        "end_line": 801,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_option_engine_partial_failure_keeps_actual_attempt_until_db_end",
+        "line": 807,
+        "end_line": 872,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_option_engine_foreign_connection_events_do_not_poison_issuer",
+        "line": 877,
+        "end_line": 917,
+        "status": "NOTRUN"
+      },
+      {
+        "name": "test_option_engine_authorized_dirty_and_normal_flush_child_stay_live",
+        "line": 921,
+        "end_line": 945,
+        "status": "NOTRUN"
+      }
+    ],
+    "authored_oracles": [
+      "same actual Connection/SessionTransaction/RootTransaction identities and native pg_locks for ordinary, one and nested OptionEngine schema_translate_map",
+      "real precreated cold Connection before helper class install; own False and Engine False, cached joined event attribute, actual late registration and savepoint rollback dispatch",
+      "exact callback occurrence count remains one per event across two real DB roots, using observable dispatch iteration, no monkeypatch or fake event success",
+      "Session/direct Connection commit and rollback emit actual managed end, poison receipt and release observed PG locks",
+      "Session/direct materialized savepoint commit/rollback leaves actual outer root live and nested object absent but receipt poisoned",
+      "RuntimeError/BaseException on second real acquire leaves first PG lock, no second lock and no second-plan SQL across rollback_only commit/close, same/new Session",
+      "actual DB-root rollback releases locks and new DB root on the same Connection acquires a full new plan",
+      "real distinct foreign Connection/backend events, both enrolled and unrelated, cannot poison issuer; foreign receipt use still rejects",
+      "authorized pending ORM writes and real normal flush child preserve exact root and capability with OptionEngine"
+    ],
+    "instrumentation": "new tests use filtered Connection-class event targets; cold-enablement test uses public remove/listen for only helper five registrations and restores prior registrations; never sets Connection/Engine flag or patches library/dispatch; ordinary Engine event registration used only to make unrelated foreign events actually emit",
+    "verification": {
+      "performed": [
+        "source/Git/filesystem reads",
+        "stdlib AST/source-segment and raw SHA256 comparisons",
+        "JSON analysis",
+        "in-memory compile without exec"
+      ],
+      "not_performed": [
+        "app/helper/encoder/pure-function/SQLAlchemy import or execution",
+        "tests/import/collection",
+        "SQL/DB/Node/SSH/Docker/HTTP/browser/network/install/build/CI/external compiler",
+        "credential/DSN/env reads"
+      ],
+      "runtime": "NOTRUN",
+      "independent_successor_source_review": "pending coordinator",
+      "next_runtime_owner": "ROOT only after independent SOURCE recheck and explicit target approval"
+    },
+    "gates": {
+      "full_B": "OPEN",
+      "CREATE": "OFF; acceptance OPEN",
+      "schema4": "SOURCE reserved 0004_partner_contract_create parent0003; acceptance/activation OPEN; separate owner",
+      "outside_repo_closure": "UNKNOWN",
+      "future_guard_and_conftest_limitation": "unchanged; no new runner/harness"
     }
   }
 }

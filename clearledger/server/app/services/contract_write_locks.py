@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, fields
 from enum import IntEnum
 import hashlib
 import json
+from threading import Lock
 from typing import TypeAlias
 from uuid import UUID
 import weakref
@@ -206,6 +207,16 @@ _ATTEMPTS: weakref.WeakKeyDictionary[
     RootTransaction, weakref.ReferenceType[Connection]
 ] = weakref.WeakKeyDictionary()
 
+# Class listeners are shared, but only this exact Connection's current weak
+# entrance is observed. Neither side of this index retains an owner or DB root.
+_CONNECTION_WATCHES: weakref.WeakKeyDictionary[
+    Connection, weakref.ReferenceType[_Entrance]
+] = weakref.WeakKeyDictionary()
+_CONNECTION_EVENTS = (
+    "commit", "rollback", "savepoint", "rollback_savepoint", "release_savepoint",
+)
+_CONNECTION_OBSERVER_LOCK = Lock()
+
 
 def _transaction_created(session: Session, transaction: SessionTransaction) -> None:
     state = _ENTRANCES.get(session)
@@ -239,17 +250,29 @@ def _watch_session(session: Session) -> None:
             event.listen(session, name, listener)
 
 
+def _connection_lifetime_changed(connection: Connection, *args: object) -> None:
+    reference = _CONNECTION_WATCHES.get(connection)
+    entrance = reference() if reference is not None else None
+    if entrance is not None and entrance.connection is connection:
+        entrance.phase = "poisoned"
+
+
 def _watch_connection(state: _Entrance) -> None:
-    reference = weakref.ref(state)
-
-    def invalidate(connection: Connection, *args: object) -> None:
-        entrance = reference()
-        if entrance is not None:
-            entrance.phase = "poisoned"
-
-    # Instance listeners only. Do not remove listeners inside a dispatch iterator.
-    for name in ("commit", "rollback", "savepoint", "rollback_savepoint", "release_savepoint"):
-        event.listen(state.connection, name, invalidate)
+    # SQLAlchemy 2.0.36 instance acceptance examines only one dispatch parent;
+    # OptionEngine adds another joined level. Class targets avoid that path.
+    # Serialize contains/listen so concurrent Sessions install only five fixed
+    # callbacks, never an accumulating callback for each acquisition.
+    with _CONNECTION_OBSERVER_LOCK:
+        for name in _CONNECTION_EVENTS:
+            if not event.contains(Connection, name, _connection_lifetime_changed):
+                event.listen(Connection, name, _connection_lifetime_changed)
+    connection = state.connection
+    _CONNECTION_WATCHES[connection] = weakref.ref(state)
+    # Narrow version-pinned integration: existing Connections retain their own
+    # False flag after late class registration. Their local dispatch already
+    # references the live class listener deque; enable this Connection's gate.
+    # No Engine/dispatcher mutation, no listener removal during dispatch.
+    connection._has_events = True
 
 
 def _reject(message: str) -> None:
