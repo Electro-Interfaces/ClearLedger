@@ -44,7 +44,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 @pytest_asyncio.fixture(loop_scope="session")
 async def world(db):
     token = uuid.uuid4().hex
-    companies = [Company(name="Синтетическая компания Store", slug=f"store-contract-{token}-{i}") for i in range(2)]
+    companies = [Company(name="Синтетическая компания Store", slug=f"store-contract-{token}-{i}", profile_id="energy") for i in range(2)]
     db.add_all(companies)
     await db.flush()
     cid, foreign = (row.id for row in companies)
