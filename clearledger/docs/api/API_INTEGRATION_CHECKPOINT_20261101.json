@@ -36,7 +36,15 @@
   },
   "commonPermission": {
     "sourceHead": "4cd4d20020c7e36e698c3c85753cf90ec0fbec4a",
-    "integration": "PENDING independent source recheck; tested source remains separate candidate",
+    "integration": {
+      "rootCodeCommit": "d71e4f3754efce7c911cc95cb46eb22707e8efbc",
+      "sourceFiles": 5,
+      "testCompositionExactSHA": 8,
+      "independentF1Review": "SOURCECLOSED",
+      "reviewMD": "14e52958c572a3da8e850334edb431c838293664994ad4ecc8c0b151f401a3b5",
+      "reviewJSON": "7a21104d8110aa73d8f186451f92ad339792a862dc2d87cfd52bc4ba180cc1b2",
+      "notNewRun": true
+    },
     "targetedActual": {
       "status": "ROOT_ACCEPTED_ISOLATED_PURE_AND_SYNTHETIC_ASGI",
       "sourceHead": "4cd4d20020c7e36e698c3c85753cf90ec0fbec4a",
@@ -128,5 +136,9 @@
     "264 =174 new synthetic guard cases +90 existing common guard cases, not whole CI",
     "V1/V2 outer refused readonly entropy reads; V3 accepts only actual char1:9 readonly; repeated outputs not added",
     "No full combined tree runtime, merge, deploy, working activation or external pilot"
-  ]
+  ],
+  "nextImplementation": {
+    "DX": "scoped parent lock implementation, then actual roles/member writers",
+    "RootSchemaAuthor": "task_59227e1bdafa/ctx_b573a2312fc1; SOURCE ordinal4 0004_partner_contract_create reserved; explicit migration not working activation"
+  }
 }
