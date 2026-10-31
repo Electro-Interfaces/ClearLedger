@@ -15,6 +15,21 @@
       "parent": null,
       "runner_format": 1,
       "source_commit": "b55d99597ae0dbd3986e8cde0469f7e117d18177"
+    },
+    {
+      "artifact_sha256": "203ee350a47fb3e12d2e2fb6d292fc0e1a19b4cd3cd348b507551cf233cae2f0",
+      "files": {
+        "revisions/0002_calendar_contract.json": "482e1288effc7eed97eda57ea27f31501b49000090ee65aa607c6e99d98634ad",
+        "revisions/0002_calendar_protocol_sequence.sql": "28d296c60bb1fa04534b2871febf8acd4163253156e6e00871fc6e5bad9b5835",
+        "revisions/catalog_v2.py": "6d60ec4e18b5e3c66808acede434f82641d4f7701ee3867a8cbb9159b0d80dd1",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0002_calendar_protocol_sequence",
+      "namespace": "core",
+      "ordinal": 2,
+      "parent": "0001_product_api_budgets",
+      "runner_format": 1,
+      "source_commit": "ba9fc30be815a554cb0c646a6c75f59e17c19fb0"
     }
   ]
 }

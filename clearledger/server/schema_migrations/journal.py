@@ -5,6 +5,21 @@ from schema_migrations.manifest import FILES
 
 def validate_history(rows, package, owner):
     e = package.entry
+    if package.parent is not None:
+        if not rows or len(rows) > 2:
+            raise MigrationError(4, "parent_history")
+        validate_history(rows[:1], package.parent, owner)
+        if len(rows) == 1:
+            return False
+        row = rows[1]
+        if (row["ordinal"] != 2 or row["revision"] != e["id"] or row["parent_revision"] != package.parent.entry["id"]
+                or row["artifact_sha256"] != e["artifact_sha256"]
+                or row["contract_sha256"] != e["files"][package.contract_file]
+                or row["predecessor_sha256"] != package.parent.entry["artifact_sha256"]
+                or row["runner_format"] != e["runner_format"] or row["app_commit"] != e["source_commit"]
+                or row["applied_by"] != owner or row["action"] not in {"created", "adopted"}):
+            raise MigrationError(4, "history")
+        return True
     if len(rows) > 1:
         raise MigrationError(4, "history")
     for row in rows:
@@ -22,9 +37,10 @@ async def read_verified_history(conn, package, owner, exists):
     if not exists:
         return False
     # Bounded: any second row is already an unknown/newer/history mismatch.
+    limit = 3 if package.parent is not None else 2
     rows = await conn.fetch("""SELECT revision, ordinal, parent_revision, artifact_sha256,
         contract_sha256, predecessor_sha256, action, applied_by, app_commit, runner_format
-        FROM core.core_schema_versions ORDER BY ordinal LIMIT 2""")
+        FROM core.core_schema_versions ORDER BY ordinal LIMIT $1""", limit)
     return validate_history(rows, package, owner)
 
 
@@ -35,5 +51,7 @@ async def append_applied(conn, package, owner, action):
     await conn.execute("""INSERT INTO core.core_schema_versions
         (revision,ordinal,parent_revision,artifact_sha256,contract_sha256,
          predecessor_sha256,action,applied_by,app_commit,runner_format)
-        VALUES ($1,1,NULL,$2,$3,NULL,$4,$5,$6,1)""",
-        e["id"], e["artifact_sha256"], e["files"][FILES[2]], action, owner, e["source_commit"])
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""",
+        e["id"], e["ordinal"], e["parent"], e["artifact_sha256"], e["files"][package.contract_file],
+        package.parent.entry["artifact_sha256"] if package.parent is not None else None,
+        action, owner, e["source_commit"], e["runner_format"])

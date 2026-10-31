@@ -28,3 +28,18 @@ async def inspect_prerequisites(conn, contract, owner):
     # Called only after manifest.load() succeeds in the explicit runner.
     from schema_migrations.revisions.catalog_v1 import inspect_prerequisites as v1
     return await v1(conn, contract, owner)
+
+
+async def inspect_calendar(conn, contract, owner):
+    from schema_migrations.revisions.catalog_v2 import inspect_calendar as v2
+    return await v2(conn, contract, owner)
+
+
+async def verify_calendar_cutover(conn, contract, acknowledgement):
+    from schema_migrations.revisions.catalog_v2 import verify_cutover
+    await verify_cutover(conn, contract, acknowledgement)
+
+
+async def verify_calendar_preserved(before, after):
+    from schema_migrations.revisions.catalog_v2 import verify_preserved
+    await verify_preserved(before, after)
