@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member
 from app.models import Contract, User
 from app.schemas import ContractCreate
+from app.services.contract_card_creation import (
+    ContractCardValues, create_contract_card, find_contract_card_duplicates,
+)
 from app.services.reference_identity import contract_identity, lock_manual_creation
 from app.services.reference_validation import (
     _CONTRACT_REQ_FIELDS, _check_type_code, _req_val, _validate_contract_parties,
@@ -42,15 +45,11 @@ async def create_native_contract(
                 raise HTTPException(409, "Ключ создания договора уже использован с другими реквизитами")
             return previous
     if identity:
-        candidates = (await db.execute(select(Contract).where(
-            Contract.company_id == cid, Contract.counterparty_id == cp_id,
-            Contract.organization_id == org_id,
-        ))).scalars().all()
-        duplicates = [c for c in candidates if contract_identity(c.number, c.date, c.type) == identity]
+        duplicates = await find_contract_card_duplicates(db, cid, cp_id, org_id, identity)
         if duplicates:
             raise HTTPException(409, "Договор с такими сторонами и реквизитами уже существует: "
                                 + ", ".join(sorted(str(c.id) for c in duplicates)))
-    c = Contract(
+    c = await create_contract_card(db, ContractCardValues(
         company_id=cid,
         creation_key=body.creationKey,
         creation_actor_id=current_user.id if body.creationKey else None,
@@ -73,7 +72,5 @@ async def create_native_contract(
         is_closed=body.isClosed,
         scope_type=body.scopeType,
         **{col: _req_val(api, getattr(body, api)) for api, col in _CONTRACT_REQ_FIELDS.items()},
-    )
-    db.add(c)
-    await db.flush()
+    ))
     return c
