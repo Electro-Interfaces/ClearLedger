@@ -1368,7 +1368,7 @@ class Contract(Base):
     # в субконто оборотов и в реквизитах документов. Без неё связь восстанавливается
     # разбором строки, а он спотыкается на «233\2011-пост от 20.06.11».
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    # Срок действия из карточки 1С. Пока его не грузили, «просроченные договоры»
+    # СрокДействия из карточки 1С (ISO-дата строкой). Пока его не грузили, «просроченные договоры»
     # считались эвристикой «заключён больше года назад» — 22 из 55 ложных.
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # UUID со ссылкой, как во всём остальном слое. Раньше здесь стояла строка без
@@ -1422,8 +1422,7 @@ class Contract(Base):
     signer_cp: Mapped[str | None] = mapped_column(String(200), nullable=True)
     signer_cp_position: Mapped[str | None] = mapped_column(String(200), nullable=True)
     signer_cp_basis: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
-    valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # ДоговорЗакрыт
     is_closed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -3723,13 +3722,6 @@ class ReconcileMapping(Base):
     method: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
     # Комментарий пользователя
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(),
-        onupdate=func.now(), nullable=False
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -7023,6 +7015,9 @@ class EzsSite(Base):
     # без них «Итого затраты на подключение» нечем разложить.
     input_price_kwth: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)  # R
     smr_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)          # T
+    # Реквизиты СМР проекта; сами по себе не меняют состояние объекта/оборудования.
+    dismantle_location_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    decommissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # Условия площадки, которые проверяет отдел развития глазами (этап 2/3).
     long_term_contract: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # Y
     has_video: Mapped[bool | None] = mapped_column(Boolean, nullable=True)           # Z
@@ -11378,10 +11373,16 @@ class CalendarEvent(Base):
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Новая встреча начинает с 0. Старый ORM не знает колонки и получает
+    # совместимый legacy baseline от БД; cutover выполняет explicit revision 0002.
+    protocol_sequence: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("2000000000"))
 
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ck_calendar_event_span"),
         Index("ix_calendar_events_span", "company_id", "starts_at", "ends_at"),
+        CheckConstraint("protocol_sequence >= 0 AND protocol_sequence <= 2147483647",
+                        name="ck_calendar_event_protocol_sequence"),
     )
 
 
@@ -12524,6 +12525,18 @@ class PulseViewGrant(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class PulseViewRoleGrant(Base):
+    """Назначение витрины именованной роли; не самостоятельное право на компанию."""
+    __tablename__ = "pulse_view_role_grants"
+
+    view_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pulse_views.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_roles.id", ondelete="CASCADE"), primary_key=True
     )
 
 

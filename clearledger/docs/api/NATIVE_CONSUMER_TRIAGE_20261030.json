@@ -1,0 +1,1942 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-30",
+  "sourceRevision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+  "historicalInventoryPin": "06e02207c29651682530309bea1a4157f48b3168",
+  "scope": "Офлайн source review 43 native AST records; production src только; не 43 бизнес-запроса; runtime не исполнялся",
+  "inventory": {
+    "sourceFiles": 1147,
+    "sourceLines": 304635,
+    "records": 5266,
+    "shared": 1459,
+    "native": 43,
+    "unresolvedWrappers": 3764,
+    "implementationNative": 9,
+    "outsideImplementation": 34,
+    "nativeTransports": {
+      "fetch": 39,
+      "WebSocket": 2,
+      "XMLHttpRequest": 1,
+      "XMLHttpRequest.open": 1
+    },
+    "syntacticDiagnostics": 0,
+    "manifestSha256": "37e718fcf202740a545e2e37c5048b3269f7ad006a1a4025db62497770e0ead3",
+    "privateInventorySha256": "6d80bd8cd6640e73e7884f27a1252b78a4c1f614f64df45de9958707d6149580",
+    "generatorSha256": "a197d4788dda5502884b276dda71b0f61ef82538d20cabd9adcdae00a962cd05",
+    "typescriptVersion": "5.9.3"
+  },
+  "semantics": {
+    "inheritance": "Каждый item наследует owner/protocol/auth/context/error/abort и refs из boundaries[item.boundary], затем применяет contractOverrides при наличии; Nxx в refs — native source span. callerRefs — конкретный call или UI/import edge, не runtime activity.",
+    "sourceReachable": "Найден source caller/entry chain, без production execution proof.",
+    "decisions": "keep сохраняет протокол; extract — предложение adapter внутри текущего owner после отдельного root решения; defer — недостаточно caller/route proof. Runtime edits не разрешены.",
+    "rawEvidence": "Полный inventory/manifest/source snippets только own .artifacts/private/native-triage-20261030, ignored и mode0600; не publish."
+  },
+  "nativeSourceSha256": {
+    "src/components/auditor/AuditorTerminal.tsx": "c89606e968e62c184f26a4723f79db359344fd365d2ac04af5845f5c5523078b",
+    "src/components/map/MapLayers.tsx": "c9b85529bfc2d2e39b95d73cc857593d871294b52f252b6c37a1d4e29d555963",
+    "src/hooks/useChatWs.ts": "9f92132f270dcface8f2918dda185703ea63185daee20a167e7f2ddbe4d92da9",
+    "src/lib/appUpdate.ts": "ff03bfad2ceca4f287ebd11d3d275884a47a2b542745a5e1a3b9fef5a0b6e82d",
+    "src/lib/reportClientError.ts": "18516dcefe99c53c5c55e3fb8716eda4a109858c17fb21939048b5f7077938ce",
+    "src/public/main.tsx": "4742f78eb06d6e53fd2e8670283239485ac7041131f7fd30c17b5c289e9a6dd8",
+    "src/services/apiClient.ts": "72db95aeb56c1a613579def4c444593e1f1bde550b3c8c172c38533a4f7cc34c",
+    "src/services/auditorService.ts": "ab6ad6d439db0f776be54960bb9be3827921e9702c616a81206942ab6b6cee53",
+    "src/services/authService.ts": "46facb79868006a4af79a2156c8bdcbf1669eb0af5d9a34d55846a77b70d17e1",
+    "src/services/chargeExport.ts": "65e734c9c813aadf055be147944c4dffd8bcc70891125d624984db95499cafad",
+    "src/services/confService.ts": "53224dd41b790f74922b0cfdc57de2051be4cfe9fb155229536503e764989952",
+    "src/services/developerDocsService.ts": "31de1e129b377b014d3227a1900a83cbaee20b693e9d700b39ebf1840acdb082",
+    "src/services/fuel/stsApiClient.ts": "9e75bdc815fbda461a42bc26b199d0c3531318845e052aebff848b33b05ccba5",
+    "src/services/msto/mstoApiClient.ts": "fda25d1b56fc61a4b8a2a18c73868e20516d39719513c07a0bb32d00b89124f2",
+    "src/services/spaceAuditorService.ts": "5c785e0beda4d5c798cd3e6ae925d4c0d1c68c1467f39a90f3d3ffb0bcb7c08c",
+    "src/services/tradecorp/tradecorpApiClient.ts": "38b045399a0689bb08d6ca73d9b69b13e3eb6d2ea7843a335aa33f61bf8e43bb",
+    "src/services/voiceService.ts": "96c8fe505a147caba962b1c7cb6245173ce15fe2f4a3de0aac74f18f6bcb310d"
+  },
+  "counts": {
+    "decisions": {
+      "defer": 2,
+      "extract": 13,
+      "keep": 28
+    },
+    "usage": {
+      "dev-only-conditional": 1,
+      "no-static-caller": 1,
+      "shared-implementation": 9,
+      "source-callers-route-unmatched": 1,
+      "source-reachable": 31
+    }
+  },
+  "boundaries": {
+    "core-json": {
+      "owner": "Core API / apiClient; route зависит от caller",
+      "protocol": "HTTP JSON; BASE=VITE_API_URL",
+      "auth": "Core Bearer + X-Company-Id + X-Organization-Id snapshot на dispatch; browser credentials default",
+      "context": "JSON success не fenced; late401 сравнивает sent Bearer после error body; demo dispatch guard",
+      "error": "handleResponse: 204, JSON/content-type, ApiError/422/403; текущий private401 Core logout",
+      "abort": "GET принимает caller signal; JSON mutations signal не принимают",
+      "refs": [
+        "core-headers",
+        "core-errors"
+      ]
+    },
+    "core-upload": {
+      "owner": "Core API / apiClient upload",
+      "protocol": "HTTP multipart fetch либо XHR progress; BASE=VITE_API_URL",
+      "auth": "Core headers snapshot; include только явно запрошенный upload option",
+      "context": "intake уже переведён на upload; успешный ответ без context generation guard",
+      "error": "fetch/XHR используют handleResponse; XHR network/timeout ApiError",
+      "abort": "upload публичного signal не имеет; xhr abort handler/signal API отсутствует",
+      "refs": [
+        "upload-caller",
+        "xhr-caller",
+        "core-errors"
+      ]
+    },
+    "core-binary": {
+      "owner": "Core API / apiClient binary implementation",
+      "protocol": "HTTP Blob; downloadFile/downloadBlob; BASE=VITE_API_URL",
+      "auth": "Core Bearer/company/org snapshot",
+      "context": "binary generation + header comparisons при await и перед download effects; A→B→A через setters",
+      "error": "общий HTTP error parser; filename fallback и finally cleanup уже приняты",
+      "abort": "caller signal плюс generation guard; уже отправленную server mutation не откатывает",
+      "refs": [
+        "core-guard",
+        "binary-local-callers",
+        "binary-local-blob"
+      ]
+    },
+    "auditor-proxy-json": {
+      "owner": "ecosystem-deploy services/auditor; отдельно от Core /api/auditor",
+      "protocol": "same-origin /auditor/api HTTP JSON/multipart",
+      "auth": "agentHeaders: Core Bearer и явный company; отдельные export/dictate без company; reload вообще без headers",
+      "context": "нет общего lifecycle generation; caller передаёт company; org не переносится автоматически",
+      "error": "собственные error JSON; часть GET проверяет JSON MIME; sessions/prompts fallback []",
+      "abort": "у обычных HTTP helpers нет caller signal",
+      "refs": [
+        "auditor-headers",
+        "auditor-backend"
+      ]
+    },
+    "auditor-proxy-binary": {
+      "owner": "ecosystem-deploy services/auditor export-work",
+      "protocol": "same-origin HTTP tar Blob → object URL → anchor click",
+      "auth": "Core Bearer; без X-Company-Id в этом вызове",
+      "context": "нет guard между await blob и download effects; caller найден, race не воспроизведена",
+      "error": "error JSON/message; click и revoke без finally",
+      "abort": "signal не принимается",
+      "refs": [
+        "export-work-caller",
+        "auditor-backend"
+      ]
+    },
+    "auditor-proxy-sse": {
+      "owner": "ecosystem-deploy services/auditor ask",
+      "protocol": "POST multipart-independent JSON → text/event-stream reader",
+      "auth": "Core Bearer + явный X-Company-Id; payload context/history/files/workshop",
+      "context": "контекст передан caller; общий session fence отсутствует; UI owns controller",
+      "error": "проверка status/body/MIME, callbacks onError/onDone; AbortError тихо",
+      "abort": "возвращаемый AbortController.signal в fetch; reader обработан своим циклом",
+      "refs": [
+        "ask-caller",
+        "auditor-backend"
+      ]
+    },
+    "auditor-ws": {
+      "owner": "ecosystem-deploy services/auditor terminal",
+      "protocol": "same-origin ws(s) /auditor/ws/terminal; PTY messages",
+      "auth": "первый frame type=start: Core token + companyRef; URL без token",
+      "context": "effect зависит attempt/tab/hasCompany; companyRef актуализируется; это не proof полноценного tenant lifecycle",
+      "error": "UI state; 4001 detached, 4002 ended, ограниченный reconnect",
+      "abort": "effect cleanup закрывает socket/terminal и timers",
+      "refs": [
+        "terminal-caller",
+        "auditor-ws-backend"
+      ]
+    },
+    "chat-ws": {
+      "owner": "Core chat_router websocket",
+      "protocol": "ws(s) от VITE_API_URL; subscribe/typing/ping frames",
+      "auth": "Core token query при connect; server _ws_user/_ws_can_subscribe",
+      "context": "connect effect с subscribe dependency; channels отдельным effect; reconnect читает новый token; lifecycle не проверен runtime",
+      "error": "1008 stop; exponential retry max5; polling fallback вне hook",
+      "abort": "disposed + timers cleanup + socket.close; AbortSignal не подходит WS",
+      "refs": [
+        "chat-caller",
+        "chat-ui",
+        "backend-chat"
+      ]
+    },
+    "static": {
+      "owner": "frontend build/public assets",
+      "protocol": "HTTP BASE_URL asset; JSON/text font dictionary",
+      "auth": "Bearer/company/org не нужны; browser default credentials",
+      "context": "не tenant data; не Core JSON consumer",
+      "error": "свой asset-specific fallback/parse; см. item",
+      "abort": "RegionsLayer alive guard; update stopped guard; fonts shared promise без signal",
+      "refs": [
+        "map-caller",
+        "update-caller",
+        "font-caller",
+        "build-version"
+      ]
+    },
+    "error-telemetry": {
+      "owner": "Core client_errors_router + ErrorBoundary",
+      "protocol": "HTTP JSON POST keepalive",
+      "auth": "optional Core Bearer; без company/org headers",
+      "context": "bounded per-tab rate limit; не обычный бизнес-запрос",
+      "error": "best effort; network errors swallowed; HTTP status не потребляется",
+      "abort": "намеренно keepalive; caller signal отсутствует",
+      "refs": [
+        "error-caller",
+        "backend-error"
+      ]
+    },
+    "gate-cookie": {
+      "owner": "Core auth gate/logout; public bundle entry",
+      "protocol": "same-origin POST HttpOnly gate cookie",
+      "auth": "gate Bearer + same-origin cookie; logout после clearToken без Bearer",
+      "context": "ToApp gone guard перед redirect; logout снимает только cookie",
+      "error": "gate ok→target иначе login; logout best effort без Core redirect handler",
+      "abort": "gone предотвращает effects; fetch signal отсутствует",
+      "refs": [
+        "backend-gate",
+        "public-router"
+      ]
+    },
+    "docs-oauth": {
+      "owner": "Core-owned docs_portal + partner_oauth; отдельная trust boundary",
+      "protocol": "same-origin docs cookie/session + OAuth form-urlencoded PKCE exchange/revoke",
+      "auth": "docs scoped OAuth access token в памяти → HttpOnly docs cookie + X-Docs-CSRF; credentials omit на OAuth; Core metadata только shared get",
+      "context": "generation/state/nonce/PKCE/currentSession.userId; cancelDocsRuntime; не хранит Core token",
+      "error": "DocsError; нет Core logout на docs401; token response отдельно проверяется",
+      "abort": "docsRequest пробрасывает supplied signal; exchange/revoke без signal, generation cleanup",
+      "refs": [
+        "docs-caller",
+        "docs-callback",
+        "docs-guard",
+        "backend-docs",
+        "backend-oauth"
+      ]
+    },
+    "conf-presence": {
+      "owner": "Core conf_router session_leave",
+      "protocol": "HTTP POST keepalive leave; ping shared post отдельно",
+      "auth": "Bearer читается в delayed leave; companyId/sessionId захвачены closure",
+      "context": "timer/pagehide lifetime; связь с login/context reset требует отдельного воспроизведения; backend фильтрует membership/session company/current_user presence",
+      "error": "best effort; HTTP status не потребляется",
+      "abort": "keepalive; timer cleared при window close/pagehide; context disposal API отсутствует",
+      "refs": [
+        "conf-caller",
+        "conf-ui",
+        "backend-conf"
+      ]
+    },
+    "external-sts": {
+      "owner": "внешний STS fuel API; backend implementation вне этого pin",
+      "protocol": "vendor HTTP JSON/text login; dev proxy либо settings base",
+      "auth": "свой STS token/storage/expiry/login и один auth401 retry; Core Bearer не используется",
+      "context": "own settings/token keys; company generation не предусмотрена; не RusHydro Core",
+      "error": "transport exception retries max3, HTTP ошибки у authFetch/login; demo guard",
+      "abort": "AbortSignal.timeout(30000) заменяет options signal; без caller cancellation",
+      "refs": [
+        "sts-local",
+        "sts-sync",
+        "sts-ui",
+        "external-ui"
+      ]
+    },
+    "external-msto": {
+      "owner": "внешний MSTO IntegratorService; backend implementation вне этого pin",
+      "protocol": "vendor HTTP session + private JSON APIs; dev proxy/override/base",
+      "auth": "собственный JWT storage/expiry; credentials из connection args; один auth401 relogin",
+      "context": "own global token keys; Core company/org headers здесь не контракт",
+      "error": "transport exception retries max3; HTTP ошибки у authFetch/login; wrapper без demo guard",
+      "abort": "AbortSignal.timeout(60000); без caller cancellation",
+      "refs": [
+        "msto-local",
+        "msto-sync",
+        "external-ui"
+      ]
+    },
+    "external-tradecorp": {
+      "owner": "внешний TradeCorp API; backend implementation вне этого pin",
+      "protocol": "vendor JSON-RPC login + versioned JSON data; dev proxy/override/base",
+      "auth": "свой token storage/expiry; один auth401 relogin",
+      "context": "own global token keys; Core company/org headers здесь не контракт",
+      "error": "transport exception retries max3; HTTP/RPC ошибки у login/authPost",
+      "abort": "AbortSignal.timeout(30000); без caller cancellation",
+      "refs": [
+        "tradecorp-local",
+        "tradecorp-sync",
+        "external-ui"
+      ]
+    },
+    "voice-dev": {
+      "owner": "dev-only voice issuer; адрес задаётся dev build, backend source не установлен",
+      "protocol": "HTTP token JSON; production branch issuer через shared Core get",
+      "auth": "dev issuer без Core Bearer; cid query; итог aud=voice contract",
+      "context": "createVoiceAuth issue + operationGeneration explicit reset guard уже принят",
+      "error": "VoiceError dev_token; cache generation; issuer errors fenced",
+      "abort": "dev fetch без signal; operation generation запрещает поздний результат",
+      "refs": [
+        "voice-issue-binding",
+        "voice-issue-caller",
+        "voice-context",
+        "backend-voice-issuer"
+      ]
+    },
+    "voice-http": {
+      "owner": "ContactHub voice node; Core только aud=voice issuer",
+      "protocol": "HTTP JSON/multipart/ETag/blob в узел через voice proxy; node source вне этого pin",
+      "auth": "короткий aud=voice Bearer, company привязан к issue; один node401 refresh/retry",
+      "context": "captureVoiceContext через dispatch/error/body/download; explicit reset fence уже принят; не Core logout",
+      "error": "VoiceError/problem issues, 412 и accepted health503; не ApiError Core",
+      "abort": "ordinary request без caller signal; explicit reset блокирует continuation, уже отправленное не отзывает",
+      "refs": [
+        "voice-http-caller",
+        "voice-context",
+        "backend-voice-issuer"
+      ]
+    },
+    "voice-sse": {
+      "owner": "ContactHub voice node /now/stream",
+      "protocol": "fetch GET event-stream; не EventSource constructor из-за Authorization",
+      "auth": "aud=voice Bearer; один node401 refresh",
+      "context": "explicit reset aborts registered streams; guard token/read/callback/reconnect уже принят",
+      "error": "VoiceError, nonretry401/403/429; controlled reconnect",
+      "abort": "stop function + AbortController + reader cancel/release",
+      "refs": [
+        "voice-caller",
+        "voice-context"
+      ]
+    },
+    "partner-auditor-stream": {
+      "owner": "Ledger partner auditorService; backend route /stream не найден в pin",
+      "protocol": "same-origin POST /api/auditor/stream SSE; другой сервис чем /auditor/api",
+      "auth": "Content-Type только; ни Bearer, ни company headers",
+      "context": "isApiEnabled branch; UI source callers найдены, runtime/deploy неизвестны",
+      "error": "callback error/status; parser собственный; Core logout нет",
+      "abort": "возвращает AbortController, signal передан fetch",
+      "refs": [
+        "partner-caller",
+        "backend-partner-auditor"
+      ]
+    },
+    "auditor-health": {
+      "owner": "ecosystem-deploy services/auditor health",
+      "protocol": "same-origin HTTP JSON health",
+      "auth": "без Bearer/company; public readiness contract",
+      "context": "readiness не tenant business data",
+      "error": "Error при HTTP/MIME; network/JSON errors propagate",
+      "abort": "signal отсутствует",
+      "refs": [
+        "health-caller",
+        "auditor-health-backend"
+      ]
+    }
+  },
+  "items": [
+    {
+      "id": "N01",
+      "key": "src/components/auditor/AuditorTerminal.tsx:222:18:WebSocket",
+      "transport": "WebSocket",
+      "function": "AuditorTerminal effect",
+      "boundary": "auditor-ws",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "terminal-caller"
+      ],
+      "reason": "PTY auth frame/close/reconnect требуют собственного WS adapter"
+    },
+    {
+      "id": "N02",
+      "key": "src/components/map/MapLayers.tsx:66:5:fetch",
+      "transport": "fetch",
+      "function": "RegionsLayer effect",
+      "boundary": "static",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "map-caller"
+      ],
+      "reason": "поставка GeoJSON, alive guard; это asset"
+    },
+    {
+      "id": "N03",
+      "key": "src/hooks/useChatWs.ts:73:18:WebSocket",
+      "transport": "WebSocket",
+      "function": "useChatWs connect",
+      "boundary": "chat-ws",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "chat-caller",
+        "chat-ui"
+      ],
+      "reason": "WS subscribe protocol нельзя заменить JSON request"
+    },
+    {
+      "id": "N04",
+      "key": "src/lib/appUpdate.ts:25:21:fetch",
+      "transport": "fetch",
+      "function": "fetchVersion",
+      "boundary": "static",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "update-caller"
+      ],
+      "reason": "version.json no-store + stopped guard"
+    },
+    {
+      "id": "N05",
+      "key": "src/lib/reportClientError.ts:51:3:fetch",
+      "transport": "fetch",
+      "function": "reportClientError",
+      "boundary": "error-telemetry",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "error-caller"
+      ],
+      "reason": "best-effort telemetry keepalive, рекурсивный error UI не нужен"
+    },
+    {
+      "id": "N06",
+      "key": "src/public/main.tsx:62:5:fetch",
+      "transport": "fetch",
+      "function": "ToApp effect",
+      "boundary": "gate-cookie",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "public-router"
+      ],
+      "reason": "cookie bootstrap перед reload основной сборки"
+    },
+    {
+      "id": "N07",
+      "key": "src/services/apiClient.ts:298:21:fetch",
+      "transport": "fetch",
+      "function": "get",
+      "boundary": "core-json",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "get-caller"
+      ],
+      "reason": "общая реализация, не обход общего транспорта"
+    },
+    {
+      "id": "N08",
+      "key": "src/services/apiClient.ts:306:21:fetch",
+      "transport": "fetch",
+      "function": "post",
+      "boundary": "core-json",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "post-caller"
+      ],
+      "reason": "общая реализация"
+    },
+    {
+      "id": "N09",
+      "key": "src/services/apiClient.ts:318:21:fetch",
+      "transport": "fetch",
+      "function": "patch",
+      "boundary": "core-json",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "patch-caller"
+      ],
+      "reason": "общая реализация"
+    },
+    {
+      "id": "N10",
+      "key": "src/services/apiClient.ts:330:21:fetch",
+      "transport": "fetch",
+      "function": "put",
+      "boundary": "core-json",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "put-caller"
+      ],
+      "reason": "общая реализация"
+    },
+    {
+      "id": "N11",
+      "key": "src/services/apiClient.ts:342:21:fetch",
+      "transport": "fetch",
+      "function": "del",
+      "boundary": "core-json",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "del-caller"
+      ],
+      "reason": "общая реализация"
+    },
+    {
+      "id": "N12",
+      "key": "src/services/apiClient.ts:366:23:fetch",
+      "transport": "fetch",
+      "function": "upload fetch branch",
+      "boundary": "core-upload",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "upload-caller"
+      ],
+      "reason": "intake include сохранён уже принятым пакетом"
+    },
+    {
+      "id": "N13",
+      "key": "src/services/apiClient.ts:375:17:XMLHttpRequest",
+      "transport": "XMLHttpRequest",
+      "function": "upload XHR constructor",
+      "boundary": "core-upload",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "xhr-caller"
+      ],
+      "reason": "один объект progress upload; связан с N14, не отдельная отправка"
+    },
+    {
+      "id": "N14",
+      "key": "src/services/apiClient.ts:376:5:XMLHttpRequest.open",
+      "transport": "XMLHttpRequest.open",
+      "function": "upload XHR open",
+      "boundary": "core-upload",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "xhr-caller"
+      ],
+      "reason": "инициализация того же XHR N13; send на строке394"
+    },
+    {
+      "id": "N15",
+      "key": "src/services/apiClient.ts:414:21:fetch",
+      "transport": "fetch",
+      "function": "fetchBinary",
+      "boundary": "core-binary",
+      "usage": "shared-implementation",
+      "decision": "keep",
+      "callerRefs": [
+        "binary-local-callers",
+        "binary-local-blob",
+        "binary-caller",
+        "binary-file-caller"
+      ],
+      "reason": "binary fencing/cleanup уже приняты; повторного исправления нет"
+    },
+    {
+      "id": "N16",
+      "key": "src/services/auditorService.ts:79:5:fetch",
+      "transport": "fetch",
+      "function": "streamAudit",
+      "boundary": "partner-auditor-stream",
+      "usage": "source-callers-route-unmatched",
+      "decision": "defer",
+      "callerRefs": [
+        "partner-caller"
+      ],
+      "reason": "две source calls; /api/auditor/stream отсутствует в backend pin; нет deployment proof, не active production defect"
+    },
+    {
+      "id": "N17",
+      "key": "src/services/authService.ts:128:8:fetch",
+      "transport": "fetch",
+      "function": "logout",
+      "boundary": "gate-cookie",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "auth-logout-caller"
+      ],
+      "reason": "cookie logout после local clearToken; общий JSON client изменит границу"
+    },
+    {
+      "id": "N18",
+      "key": "src/services/chargeExport.ts:23:16:fetch",
+      "transport": "fetch",
+      "function": "loadPdfFonts",
+      "boundary": "static",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "font-caller",
+        "font-ui"
+      ],
+      "reason": "локальный font dictionary text/JSON без исполнения JS, promise очищается при ошибке"
+    },
+    {
+      "id": "N19",
+      "key": "src/services/confService.ts:143:10:fetch",
+      "transport": "fetch",
+      "function": "следитьЗаВкладкой/выйти",
+      "boundary": "conf-presence",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "conf-caller",
+        "conf-ui"
+      ],
+      "reason": "кандидат отдельного lifetime adapter после root решения и воспроизведения; keepalive сохранить"
+    },
+    {
+      "id": "N20",
+      "key": "src/services/developerDocsService.ts:50:26:fetch",
+      "transport": "fetch",
+      "function": "docsRequest",
+      "boundary": "docs-oauth",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "docs-caller",
+        "docs-callback"
+      ],
+      "reason": "session cookie/CSRF auth отделён от Core JSON"
+    },
+    {
+      "id": "N21",
+      "key": "src/services/developerDocsService.ts:78:9:fetch",
+      "transport": "fetch",
+      "function": "revoke",
+      "boundary": "docs-oauth",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "docs-revoke-caller"
+      ],
+      "reason": "OAuth form + credentials omit без Core logout"
+    },
+    {
+      "id": "N22",
+      "key": "src/services/developerDocsService.ts:100:28:fetch",
+      "transport": "fetch",
+      "function": "finishDocsLogin token exchange",
+      "boundary": "docs-oauth",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "docs-callback"
+      ],
+      "reason": "PKCE transaction и generation cleanup сохранять"
+    },
+    {
+      "id": "N23",
+      "key": "src/services/fuel/stsApiClient.ts:59:26:fetch",
+      "transport": "fetch",
+      "function": "STS fetchWithRetry",
+      "boundary": "external-sts",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "sts-local",
+        "sts-sync",
+        "sts-ui"
+      ],
+      "reason": "vendor timeout/retry/auth не Core transport"
+    },
+    {
+      "id": "N24",
+      "key": "src/services/msto/mstoApiClient.ts:79:20:fetch",
+      "transport": "fetch",
+      "function": "MSTO fetchWithRetry",
+      "boundary": "external-msto",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "msto-local",
+        "msto-sync"
+      ],
+      "reason": "vendor timeout/retry/auth не Core transport"
+    },
+    {
+      "id": "N25",
+      "key": "src/services/spaceAuditorService.ts:90:21:fetch",
+      "transport": "fetch",
+      "function": "getHealth",
+      "boundary": "auditor-health",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "health-caller"
+      ],
+      "reason": "health boolean readiness probe без user headers"
+    },
+    {
+      "id": "N26",
+      "key": "src/services/spaceAuditorService.ts:142:21:fetch",
+      "transport": "fetch",
+      "function": "uploadFile",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "file-caller"
+      ],
+      "reason": "общий adapter внутри Auditor owner; не Core upload migration",
+      "contractOverrides": {
+        "auth": "Core Bearer + explicit company; multipart boundary browser-owned",
+        "error": "status + optional error JSON; success JSON without MIME guard"
+      }
+    },
+    {
+      "id": "N27",
+      "key": "src/services/spaceAuditorService.ts:197:21:fetch",
+      "transport": "fetch",
+      "function": "readJson/getMethods/getGrowth",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "methods-caller",
+        "growth-caller"
+      ],
+      "reason": "единый Auditor parser/header policy имеет смысл внутри proxy boundary",
+      "contractOverrides": {
+        "auth": "agentHeaders(companyId): Core Bearer + company",
+        "error": "status/JSON MIME guard, generic unavailable; getMethods and getGrowth share this single record"
+      }
+    },
+    {
+      "id": "N28",
+      "key": "src/services/spaceAuditorService.ts:212:21:fetch",
+      "transport": "fetch",
+      "function": "getKnowledge",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "knowledge-caller"
+      ],
+      "reason": "сохранить MIME guard и company header в Auditor adapter",
+      "contractOverrides": {
+        "auth": "agentHeaders(companyId): Core Bearer + company",
+        "error": "status/JSON MIME guard, knowledge-specific unavailable"
+      }
+    },
+    {
+      "id": "N29",
+      "key": "src/services/spaceAuditorService.ts:227:21:fetch",
+      "transport": "fetch",
+      "function": "exportWork",
+      "boundary": "auditor-proxy-binary",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "export-work-caller"
+      ],
+      "reason": "runtime candidate: lifetime/blob cleanup в Auditor owner; Core binary API не переносить вслепую"
+    },
+    {
+      "id": "N30",
+      "key": "src/services/spaceAuditorService.ts:257:21:fetch",
+      "transport": "fetch",
+      "function": "act",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "act-caller"
+      ],
+      "reason": "явное подтверждение действия + company/Bearer, без самовольного повторения"
+    },
+    {
+      "id": "N31",
+      "key": "src/services/spaceAuditorService.ts:268:21:fetch",
+      "transport": "fetch",
+      "function": "getSessions",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "sessions-caller"
+      ],
+      "reason": "сохранить осознанный [] fallback отдельно от ошибки auth",
+      "contractOverrides": {
+        "error": "non-ok or non-JSON MIME => []; network/parse failures still reject"
+      }
+    },
+    {
+      "id": "N32",
+      "key": "src/services/spaceAuditorService.ts:285:21:fetch",
+      "transport": "fetch",
+      "function": "getPrompts",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "prompts-caller"
+      ],
+      "reason": "сохранить [] fallback; source race без reproduction не дефект",
+      "contractOverrides": {
+        "error": "non-ok or non-JSON MIME => []; network/parse failures still reject"
+      }
+    },
+    {
+      "id": "N33",
+      "key": "src/services/spaceAuditorService.ts:292:21:fetch",
+      "transport": "fetch",
+      "function": "deleteAgentFile",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "delete-caller"
+      ],
+      "reason": "Auditor API JSON/status boundary"
+    },
+    {
+      "id": "N34",
+      "key": "src/services/spaceAuditorService.ts:310:21:fetch",
+      "transport": "fetch",
+      "function": "uploadKnowledge",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "upload-knowledge-caller"
+      ],
+      "reason": "Auditor multipart, не storage Core"
+    },
+    {
+      "id": "N35",
+      "key": "src/services/spaceAuditorService.ts:324:21:fetch",
+      "transport": "fetch",
+      "function": "saveAgentFile",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "save-caller"
+      ],
+      "reason": "Auditor JSON mutation, не Core settings endpoint"
+    },
+    {
+      "id": "N36",
+      "key": "src/services/spaceAuditorService.ts:343:21:fetch",
+      "transport": "fetch",
+      "function": "reloadAgent",
+      "boundary": "auditor-proxy-json",
+      "usage": "no-static-caller",
+      "decision": "defer",
+      "callerRefs": [],
+      "reason": "definition-only: нет статического caller; без headers при server auth guard лишь source mismatch, не active defect",
+      "contractOverrides": {
+        "auth": "no Authorization/company headers",
+        "context": "no static caller found; use unknown, not production active",
+        "error": "non-ok generic Error; success JSON"
+      }
+    },
+    {
+      "id": "N37",
+      "key": "src/services/spaceAuditorService.ts:355:21:fetch",
+      "transport": "fetch",
+      "function": "dictate",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "dictate-caller",
+        "dictate-dispatch"
+      ],
+      "reason": "ASR multipart, свои 502/503 messages; отдельный Auditor auth",
+      "contractOverrides": {
+        "auth": "Core Bearer only; company not sent",
+        "error": "error JSON; friendly >=502 fallback; success.text string"
+      }
+    },
+    {
+      "id": "N38",
+      "key": "src/services/spaceAuditorService.ts:373:21:fetch",
+      "transport": "fetch",
+      "function": "getSkills",
+      "boundary": "auditor-proxy-json",
+      "usage": "source-reachable",
+      "decision": "extract",
+      "callerRefs": [
+        "skills-caller"
+      ],
+      "reason": "Auditor-specific MIME guard при отсутствующем профиле"
+    },
+    {
+      "id": "N39",
+      "key": "src/services/spaceAuditorService.ts:418:3:fetch",
+      "transport": "fetch",
+      "function": "ask",
+      "boundary": "auditor-proxy-sse",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "ask-caller"
+      ],
+      "reason": "SSE callbacks/controller принадлежат stream adapter"
+    },
+    {
+      "id": "N40",
+      "key": "src/services/tradecorp/tradecorpApiClient.ts:81:20:fetch",
+      "transport": "fetch",
+      "function": "TradeCorp fetchWithRetry",
+      "boundary": "external-tradecorp",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "tradecorp-local",
+        "tradecorp-sync"
+      ],
+      "reason": "vendor timeout/retry/auth не Core transport"
+    },
+    {
+      "id": "N41",
+      "key": "src/services/voiceService.ts:26:23:fetch",
+      "transport": "fetch",
+      "function": "выпустить/dev branch",
+      "boundary": "voice-dev",
+      "usage": "dev-only-conditional",
+      "decision": "keep",
+      "callerRefs": [
+        "voice-issue-binding",
+        "voice-issue-caller"
+      ],
+      "reason": "import.meta.env.DEV guard; production issue через Core shared get"
+    },
+    {
+      "id": "N42",
+      "key": "src/services/voiceService.ts:185:39:fetch",
+      "transport": "fetch",
+      "function": "отправить",
+      "boundary": "voice-http",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "voice-http-caller",
+        "voice-caller"
+      ],
+      "reason": "aud=voice HTTP+body/reset guard уже принят"
+    },
+    {
+      "id": "N43",
+      "key": "src/services/voiceService.ts:390:23:fetch",
+      "transport": "fetch",
+      "function": "nowStream/раз",
+      "boundary": "voice-sse",
+      "usage": "source-reachable",
+      "decision": "keep",
+      "callerRefs": [
+        "voice-caller"
+      ],
+      "reason": "SSE explicit reset boundary уже принят"
+    }
+  ],
+  "refs": {
+    "N01": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorTerminal.tsx",
+      "startLine": 222,
+      "endLine": 222,
+      "snippetSha256": "b7615257a9fefd1d8b75656a4d8f4ff35e894205198e8d95a30bdb6ab02b9a4c"
+    },
+    "N02": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/map/MapLayers.tsx",
+      "startLine": 66,
+      "endLine": 66,
+      "snippetSha256": "360c31fe3cccf1b3e026fd242c15be3e5ce4731a659fb11222b54676f5742f00"
+    },
+    "N03": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/hooks/useChatWs.ts",
+      "startLine": 73,
+      "endLine": 73,
+      "snippetSha256": "a69a3bc4c62dc71f37879785e81e7501ae02260632fcb69bc691b8bd07b15f6e"
+    },
+    "N04": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/lib/appUpdate.ts",
+      "startLine": 25,
+      "endLine": 25,
+      "snippetSha256": "e3b439224b613f1afae64bd9dd334a037c0ef73de2cfea58e165fe11745f1b3a"
+    },
+    "N05": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/lib/reportClientError.ts",
+      "startLine": 51,
+      "endLine": 59,
+      "snippetSha256": "25c75a6ea278742608bdcc1db4f7160cdc05a8472364b92d49ebd2e4826cbdd7"
+    },
+    "N06": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/public/main.tsx",
+      "startLine": 62,
+      "endLine": 62,
+      "snippetSha256": "9f4a6958dfdf04b03bc677ff50d3526640108c54a2f539d029e9bee65759ba83"
+    },
+    "N07": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 298,
+      "endLine": 298,
+      "snippetSha256": "df0fe1ade56c8df14753e1d8e813f6be7f3022b4140a52337b01731da3f81194"
+    },
+    "N08": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 306,
+      "endLine": 310,
+      "snippetSha256": "aefd4ce1fc82013e494507a1eda33f7d505f8c248d6158b97aac2b69b13fedca"
+    },
+    "N09": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 318,
+      "endLine": 322,
+      "snippetSha256": "8f8e1da1e9a9cf831aaf899c0ccca0bbc7211f040aade42314fc014547984972"
+    },
+    "N10": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 330,
+      "endLine": 334,
+      "snippetSha256": "a6c26d1b47057ffad600d0d58b2ae095e7b638fade53a7f97d0660ec94ac2509"
+    },
+    "N11": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 342,
+      "endLine": 345,
+      "snippetSha256": "0ad668ff1bc88f3095f44258416ffbddaf30d687f1f21b2801e43ae47d87e1d1"
+    },
+    "N12": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 366,
+      "endLine": 371,
+      "snippetSha256": "07a289f31b496c8292c4376706f55019da9db9490562aa90de5b8c43549ea351"
+    },
+    "N13": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 375,
+      "endLine": 375,
+      "snippetSha256": "902881b331e571f88583a9eabd380a026ea992795c8f53758db0ee69fa677350"
+    },
+    "N14": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 376,
+      "endLine": 376,
+      "snippetSha256": "a3b452730089149c20cfad3dd242d596f302291bc3b0a874002e7e84e0a597eb"
+    },
+    "N15": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 414,
+      "endLine": 414,
+      "snippetSha256": "e3ef57e47b6c90c1b25c751950772cc7addc7eac97182b4d1cd99afa06d270f3"
+    },
+    "N16": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/auditorService.ts",
+      "startLine": 79,
+      "endLine": 84,
+      "snippetSha256": "b6aa052a313d192914be8a99341674c7d818e0bdfb81c92124d19d9af7000039"
+    },
+    "N17": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/authService.ts",
+      "startLine": 128,
+      "endLine": 128,
+      "snippetSha256": "0b0312f5816d31b92547ad00fc3de84057f1766cb32448c12a9fcc6d1e1efee6"
+    },
+    "N18": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/chargeExport.ts",
+      "startLine": 23,
+      "endLine": 23,
+      "snippetSha256": "53fa1fb5a7d2eae3440526aebe5d3f43fc2726132041dd9a0b9a77538662cb03"
+    },
+    "N19": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/confService.ts",
+      "startLine": 143,
+      "endLine": 146,
+      "snippetSha256": "da343b600053527afa0da2723b09f877e9a5212df700b521eebc7a6f70af9cce"
+    },
+    "N20": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/developerDocsService.ts",
+      "startLine": 50,
+      "endLine": 50,
+      "snippetSha256": "e7f678f2198f7def2eb224a02ed118fe7d4668869e36cbb33f48612e5c08abd7"
+    },
+    "N21": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/developerDocsService.ts",
+      "startLine": 78,
+      "endLine": 79,
+      "snippetSha256": "bdf53acb9374cd5ca3976781e2bd2488959a5895499973329bfb30884af325d3"
+    },
+    "N22": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/developerDocsService.ts",
+      "startLine": 100,
+      "endLine": 102,
+      "snippetSha256": "fc64715b04c7871592bc309ec3458cb81cbfc413140c9f53a8865737b250c961"
+    },
+    "N23": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/fuel/stsApiClient.ts",
+      "startLine": 59,
+      "endLine": 59,
+      "snippetSha256": "7335e8dfbdcbef74ed5d3a81c2423b2f747beeef1b7a3469aa953c61ab3cd915"
+    },
+    "N24": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/msto/mstoApiClient.ts",
+      "startLine": 79,
+      "endLine": 79,
+      "snippetSha256": "f0f59e10ca9d8969333bef05e76647635acb4509a658401c67fd5f9143e88e46"
+    },
+    "N25": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 90,
+      "endLine": 90,
+      "snippetSha256": "911c9e7db5cc52a946f9b7c859450fb79a184549c017e8d1b99b24540e3000aa"
+    },
+    "N26": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 142,
+      "endLine": 146,
+      "snippetSha256": "c1c31587a4f800cbd63becb31d6a3fcce09dd8e83b129343ee53ccc44e21ea96"
+    },
+    "N27": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 197,
+      "endLine": 197,
+      "snippetSha256": "bb3b566dd2a81b6b8dd06c3947f85ef4e6b766579f1bd0725ce373537e4171c0"
+    },
+    "N28": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 212,
+      "endLine": 212,
+      "snippetSha256": "c2cd9441e1c78ffbf674ed34b3710d583d813a8b75aa2ef8017cfcdaeea4925d"
+    },
+    "N29": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 227,
+      "endLine": 229,
+      "snippetSha256": "305eb9d0c4cb29abf26b82c969a0fe9a4ecf80f0ac5b4d2304a4b3b234815fd4"
+    },
+    "N30": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 257,
+      "endLine": 261,
+      "snippetSha256": "bbc94db87740a8cad877a109151bc9fae1d1c30e2acd3a73d416edb2bc78aa0a"
+    },
+    "N31": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 268,
+      "endLine": 268,
+      "snippetSha256": "6ec0773efb30d56355528fb58ff11afeb9fa6ad8df41bef26a4314cc18893851"
+    },
+    "N32": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 285,
+      "endLine": 285,
+      "snippetSha256": "5fbb018003c9c84dfe71985a44b8ac7a4a46517d874dc00de2febbacef2bf9f3"
+    },
+    "N33": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 292,
+      "endLine": 295,
+      "snippetSha256": "7243bc54c5a8adac390e4794ec762141fff6a59ea3881a65196ac889ef5de731"
+    },
+    "N34": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 310,
+      "endLine": 314,
+      "snippetSha256": "37ffabaf661e01d81f6b190063ba07117f974f4f2d5a404b95652503e3b4814b"
+    },
+    "N35": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 324,
+      "endLine": 332,
+      "snippetSha256": "08c07b1d69f0f854a0154d66ff40faa6e44b4126b2ec9ebe2d5e3b8071af79c9"
+    },
+    "N36": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 343,
+      "endLine": 343,
+      "snippetSha256": "22837d9815e79534a5033b7341952967f44c7c3086e1fdf8f91e7c30106bae91"
+    },
+    "N37": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 355,
+      "endLine": 359,
+      "snippetSha256": "177e598cc7eebc082f3be289e0c05afd0e35fff154bd0d433dbcfbeb33a9008e"
+    },
+    "N38": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 373,
+      "endLine": 373,
+      "snippetSha256": "7a9ef025b2e4d76d452a928ccc3550ff071a3dc7b0402260eff4d034fad3405f"
+    },
+    "N39": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 418,
+      "endLine": 427,
+      "snippetSha256": "b182bc0e520bb808bbebd4f25fe55c005c0cebb2f503c6e1ee1517a8c8b91451"
+    },
+    "N40": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/tradecorp/tradecorpApiClient.ts",
+      "startLine": 81,
+      "endLine": 81,
+      "snippetSha256": "2d003f3b559f9c18b061054c46427274de109b860c39062e2e2adbd81111b1e3"
+    },
+    "N41": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 26,
+      "endLine": 26,
+      "snippetSha256": "7d1e4b079563d8bffa077a33c18709450b4f53c24c16682289be37ebb50af4ed"
+    },
+    "N42": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 185,
+      "endLine": 188,
+      "snippetSha256": "36b6cf9de1ef29e0c7350093441f72a6e82bab930a8276d9f39a3ca388e73e0d"
+    },
+    "N43": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 390,
+      "endLine": 393,
+      "snippetSha256": "9a15a3826a3a354c089b9657e5cd5f845bea07d643701965963c34aa4763de2f"
+    },
+    "terminal-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 152,
+      "endLine": 152,
+      "snippetSha256": "e432820e125c64592b73a52489591ea43c3f1f632e78e7de02c2032195433aa2"
+    },
+    "map-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/map/MapLayers.tsx",
+      "startLine": 107,
+      "endLine": 107,
+      "snippetSha256": "53f73381c6312b033b8b75ce33e155785e485c675117f116546b4a4c1edf4150"
+    },
+    "chat-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/contexts/SupportContext.tsx",
+      "startLine": 170,
+      "endLine": 170,
+      "snippetSha256": "744ae3899106ac5437cac551c6c4dc419ab165c7f4f6d2d624059b7caab9c14a"
+    },
+    "chat-ui": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/chat/ChatPanel.tsx",
+      "startLine": 2390,
+      "endLine": 2390,
+      "snippetSha256": "7906cc7fa47ab25007ad980802960efc530554355837bbc955df64d6df5b6a76"
+    },
+    "update-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/common/MobileShell.tsx",
+      "startLine": 71,
+      "endLine": 71,
+      "snippetSha256": "00ed491fcd352f099c38ddcb2aeff28cf40e8fa1982c6f931052dbea3d9bd19b"
+    },
+    "error-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/common/ErrorBoundary.tsx",
+      "startLine": 28,
+      "endLine": 28,
+      "snippetSha256": "2e456a2156292de9cb0966912bc2b495f27c056d5e40e8ddfdcee3dde12bf181"
+    },
+    "public-router": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/public/main.tsx",
+      "startLine": 55,
+      "endLine": 55,
+      "snippetSha256": "d32e17913c9b4e05652b553533c8cd711c2837df9d6679042778206e738d67a0"
+    },
+    "get-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/authService.ts",
+      "startLine": 115,
+      "endLine": 116,
+      "snippetSha256": "86e0876406cb106bd71c284fb965dd2df4dedebf1d5ece866c90481f9b900f83"
+    },
+    "post-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/authService.ts",
+      "startLine": 86,
+      "endLine": 89,
+      "snippetSha256": "82a49db8477a5ca1321630174b6b745574f6bb5044d6185dfd6a951cbd1f8654"
+    },
+    "patch-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/tasksService.ts",
+      "startLine": 433,
+      "endLine": 433,
+      "snippetSha256": "f99f75f5e7f853ebbf64cff501adfd704fbb015f7bb2ffa345b697529f66465b"
+    },
+    "put-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/docsService.ts",
+      "startLine": 444,
+      "endLine": 444,
+      "snippetSha256": "ab0efa37f18cbcc77bcc4f21b25ce4a1a4495304c07fbdd605b6332415186787"
+    },
+    "del-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/chatService.ts",
+      "startLine": 389,
+      "endLine": 389,
+      "snippetSha256": "696c6ebc575dee5885d5d9f75b62bfecdc4f4cf26f71c805236e142e763e310b"
+    },
+    "upload-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/intakeDocsService.ts",
+      "startLine": 58,
+      "endLine": 58,
+      "snippetSha256": "4086976f5513e7c766a15af71c6bab6f754bbd52ed016386e674b6ec281cd148"
+    },
+    "xhr-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/chatService.ts",
+      "startLine": 435,
+      "endLine": 435,
+      "snippetSha256": "6b2268b544bed26cd56981bd12f7afc1673cff9337ede5670d4d15b652e1fa35"
+    },
+    "binary-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/confService.ts",
+      "startLine": 274,
+      "endLine": 274,
+      "snippetSha256": "174a2dfbafb9bd6da0de10b671eca4304d24bf4f1fdae4af56e22858b26915d5"
+    },
+    "binary-file-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/sitesService.ts",
+      "startLine": 1021,
+      "endLine": 1021,
+      "snippetSha256": "3a65b7e9f4fd61fe584ca5a1dd0d1704a43b9414cb9f76fec0f6f90e6b4c5994"
+    },
+    "binary-local-callers": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 107,
+      "endLine": 109,
+      "snippetSha256": "a55aa43a9b1ab982b79fd7fa480b4a568a4b1e133816ba92f9a4d30fe40bf66b"
+    },
+    "binary-local-blob": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 424,
+      "endLine": 427,
+      "snippetSha256": "45fad1f215cb59fd8a7ff7dcfb972c4d8d7ca86642c78e8683002ff54f2ed61b"
+    },
+    "partner-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/partner/AuditorPage.tsx",
+      "startLine": 165,
+      "endLine": 165,
+      "snippetSha256": "febaa228574b6afcf5fc25befcd70a8ec77ef1dd7dffb15111753157783e7ca5"
+    },
+    "auth-logout-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/contexts/AuthContext.tsx",
+      "startLine": 130,
+      "endLine": 130,
+      "snippetSha256": "a1993e2f335e144ec9688165523b5848ca3f28ce90d226483d70210c1ad1b4fa"
+    },
+    "font-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/chargeExport.ts",
+      "startLine": 234,
+      "endLine": 238,
+      "snippetSha256": "c7ff19a4c00485baa64d6dec4ec8e299dfae1d57279cf80dc85032960fc215d0"
+    },
+    "font-ui": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/workspace/analytics/ExportButton.tsx",
+      "startLine": 10,
+      "endLine": 10,
+      "snippetSha256": "f6d9f178fad776529f790288504c67a05af3a402154daa9bfea0cb6e02101ae6"
+    },
+    "conf-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/confService.ts",
+      "startLine": 176,
+      "endLine": 176,
+      "snippetSha256": "4735b02e30af25b6a7a866bb0604d638ffe40e61b5090a124e96f0893e49ef2e"
+    },
+    "conf-ui": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/conf/parts.tsx",
+      "startLine": 106,
+      "endLine": 106,
+      "snippetSha256": "1e0eb90266e90849825bc4217c12fd852a441893135bbd44577f1c64340ed344"
+    },
+    "docs-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/DeveloperApiPage.tsx",
+      "startLine": 31,
+      "endLine": 31,
+      "snippetSha256": "89b56fd5cf9ce9eeadac7a51b90e4eac7a7526d560b22dccfab823c2e6c87e25"
+    },
+    "docs-callback": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/public/DocsCallbackPage.tsx",
+      "startLine": 20,
+      "endLine": 20,
+      "snippetSha256": "141cb6e0600bdcbac5ba2e520a88c424e4f85b0582e893cc9399b5664dad0763"
+    },
+    "docs-revoke-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/developerDocsService.ts",
+      "startLine": 136,
+      "endLine": 138,
+      "snippetSha256": "f7fe45cb8a76f47ea9585393503b2b48803609ef7205359e8d96fb2e221f4d06"
+    },
+    "sts-local": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/fuel/stsApiClient.ts",
+      "startLine": 78,
+      "endLine": 78,
+      "snippetSha256": "b63a65d019d7636429307fedf5c1dde0755e2fe725d7ced2a86707babbde08ba"
+    },
+    "sts-ui": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/SourcesPage.tsx",
+      "startLine": 24,
+      "endLine": 24,
+      "snippetSha256": "bada3e4ea801e078d075cc78415f71b835b785a8cf715a0a7c7f47970ee98414"
+    },
+    "sts-sync": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/channelSyncService.ts",
+      "startLine": 97,
+      "endLine": 97,
+      "snippetSha256": "0a4fee23d547d60d47b686e61f1cab9d57f5c5418e4799699ef6e5958f476d32"
+    },
+    "msto-local": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/msto/mstoApiClient.ts",
+      "startLine": 92,
+      "endLine": 92,
+      "snippetSha256": "8b4608922eda764fbc7a24e05c805070ffd552f432a33f2127e29741feba2007"
+    },
+    "msto-sync": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/channelSyncService.ts",
+      "startLine": 200,
+      "endLine": 200,
+      "snippetSha256": "41719e0c91327a9dbec08e39ffe3e0d1afad32a62c638c1d31f6d8e82d152e68"
+    },
+    "tradecorp-local": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/tradecorp/tradecorpApiClient.ts",
+      "startLine": 94,
+      "endLine": 94,
+      "snippetSha256": "5f998be2ad26246390c09b36f95922aec0de798bffd88c59c884745d74baccc3"
+    },
+    "tradecorp-sync": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/channelSyncService.ts",
+      "startLine": 297,
+      "endLine": 297,
+      "snippetSha256": "97284ee6c058c839468bf9ddc8a59cf44d76490784bd57d3969e48fa233c292b"
+    },
+    "external-ui": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/ChannelDetailPage.tsx",
+      "startLine": 2268,
+      "endLine": 2268,
+      "snippetSha256": "13fc35c284d1083272ad7a97d35c30c383bf1c96fd43af783316b1ea06e57ae0"
+    },
+    "methods-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 327,
+      "endLine": 327,
+      "snippetSha256": "e2a153f86ccbf46ead81b3913a9ef24d236da263059c942ab87ad3f8cf0a5f45"
+    },
+    "growth-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 510,
+      "endLine": 510,
+      "snippetSha256": "c062b917a446453570c17e6dc22f02a7b125f9f4da268bffbab11dd9e2c64e84"
+    },
+    "knowledge-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 463,
+      "endLine": 463,
+      "snippetSha256": "c2f1d706675e93579819960d2b2dc2789591c0a5263afd4af3210acc2d3eb048"
+    },
+    "export-work-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 374,
+      "endLine": 374,
+      "snippetSha256": "327e930590e3e692257a3fdd2b1f40f1dff67562667635eb7e8c7dba9d1c370d"
+    },
+    "act-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorPanel.tsx",
+      "startLine": 130,
+      "endLine": 130,
+      "snippetSha256": "160d7b3be57d8e13e2bb163973abddbf1d6fbe8509221692b85e45edf906150c"
+    },
+    "sessions-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorTerminal.tsx",
+      "startLine": 85,
+      "endLine": 85,
+      "snippetSha256": "1f606ecdfcb7af09ce9321065a7b6125e903fb754fe89a4a673fe38b5dd13c56"
+    },
+    "prompts-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorPanel.tsx",
+      "startLine": 201,
+      "endLine": 201,
+      "snippetSha256": "591c57babb343928f1d85a9ed3cd513ab024726bec466a7a5fbf21bd392dd935"
+    },
+    "delete-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 612,
+      "endLine": 612,
+      "snippetSha256": "f58f348f256cd634fde5fe59642103e07d385d28ca31e699617c11755e242437"
+    },
+    "upload-knowledge-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 674,
+      "endLine": 674,
+      "snippetSha256": "728851023af44edfa1d2231b074abc2a6f1c611459d27d92339b65c530251e9d"
+    },
+    "save-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 281,
+      "endLine": 281,
+      "snippetSha256": "72af0e5c45fd36f37ed090b0bca3b35ccf6a8865b06697ce7dc4db12203fd8e8"
+    },
+    "dictate-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/DictateButton.tsx",
+      "startLine": 26,
+      "endLine": 26,
+      "snippetSha256": "29155fd8da44dbed4b8babc9ed2c1c4a3ec913c55a7ba6f33c874b8bb81b6dd6"
+    },
+    "dictate-dispatch": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/DictateButton.tsx",
+      "startLine": 48,
+      "endLine": 48,
+      "snippetSha256": "25d4271a507f4746d3004e35c7493de6046ab322ba1cfd5fc38ab2326590742f"
+    },
+    "skills-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/AuditorPage.tsx",
+      "startLine": 163,
+      "endLine": 163,
+      "snippetSha256": "1f4791119d69dc7d414e3ceb83c6ac84049434093116901522f20d84402b3161"
+    },
+    "ask-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorPanel.tsx",
+      "startLine": 259,
+      "endLine": 259,
+      "snippetSha256": "5926d8ea977a1f8920e2db702a38d3a5ec222a89fbe770746004bc97841127e5"
+    },
+    "file-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorPanel.tsx",
+      "startLine": 231,
+      "endLine": 231,
+      "snippetSha256": "1d5a8c1ac22c8f986a1856e15c2d975962426fa3962dc015e85348eaccf7c380"
+    },
+    "voice-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/pages/voice/VoiceNowPage.tsx",
+      "startLine": 59,
+      "endLine": 59,
+      "snippetSha256": "d98d456397dfa72294364cc368c13082f4e789b94c346875c04a82061d289bc8"
+    },
+    "voice-http-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 362,
+      "endLine": 362,
+      "snippetSha256": "13a1b1f66d7a2ef793686529ef696dce50d77827419a2171cbebdb13e56c4e3e"
+    },
+    "voice-issue-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 86,
+      "endLine": 86,
+      "snippetSha256": "b1219b540d713bec161453c41f31269099ea24cea2ae582f80d3ad3878998805"
+    },
+    "voice-issue-binding": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 43,
+      "endLine": 43,
+      "snippetSha256": "458633b2a9dffe906d1135369c7e54146da4763b7265d0e93d1ff23e67980379"
+    },
+    "voice-context": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/voiceService.ts",
+      "startLine": 43,
+      "endLine": 86,
+      "snippetSha256": "451b3d44edf2bf8e1e544986490ab35a2f77a71ac1fa73525add5bef42199599"
+    },
+    "core-headers": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 272,
+      "endLine": 280,
+      "snippetSha256": "74b3f8585ba4a1ab63e5f50a696b3948e9fb871af8d5df692ef5293d3342cb0b"
+    },
+    "core-errors": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 196,
+      "endLine": 268,
+      "snippetSha256": "c1ac0f82615c3f6179ddf7d27199b33a55886094372110a824c84db9179a9f2a"
+    },
+    "core-guard": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/apiClient.ts",
+      "startLine": 399,
+      "endLine": 422,
+      "snippetSha256": "09d5b1be863b3e2429fbc16a1e50fdcac4900d007feb5bafb42ffe6677818787"
+    },
+    "auditor-headers": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/spaceAuditorService.ts",
+      "startLine": 125,
+      "endLine": 128,
+      "snippetSha256": "6d9e06770b48e0a4852a58a3d3513b54558cc0fb735824d84bdc80458edd1c0d"
+    },
+    "docs-guard": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/services/developerDocsService.ts",
+      "startLine": 85,
+      "endLine": 127,
+      "snippetSha256": "f600acbf0d0d9f1371ab82a14bd0ea213959da8013831a5d26608a3b854c2f82"
+    },
+    "backend-gate": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/auth_router.py",
+      "startLine": 558,
+      "endLine": 585,
+      "snippetSha256": "0133d39c1987bc25c3e7fd22e5d28bc38a015663d5c329c543dc09bb25b7896c"
+    },
+    "backend-chat": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/chat_router.py",
+      "startLine": 3295,
+      "endLine": 3338,
+      "snippetSha256": "0ee9b5a17a0728a80318edfda1299b48d9b7b7895f18749a3beef81a7565ee60"
+    },
+    "backend-conf": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/conf_router.py",
+      "startLine": 737,
+      "endLine": 756,
+      "snippetSha256": "30a8b922241a49f08ea8a785d3e7968fc42041692d3c903852685ec7eee28d22"
+    },
+    "backend-error": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/client_errors_router.py",
+      "startLine": 82,
+      "endLine": 105,
+      "snippetSha256": "85b88d8a133abd3c55d8ddbf068c4d6617f67caf2572d604968ccbbc78370cbe"
+    },
+    "backend-docs": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/docs_portal_router.py",
+      "startLine": 47,
+      "endLine": 103,
+      "snippetSha256": "b0703323876b935edfe892483352c67c27ffc66538eaaf81006ea08fb4c158f2"
+    },
+    "backend-oauth": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "startLine": 131,
+      "endLine": 153,
+      "snippetSha256": "016c5446f7399218224ec3733b01f80ea31790442bc98a14d0016a98e712dc53"
+    },
+    "backend-partner-auditor": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/auditor_router.py",
+      "startLine": 33,
+      "endLine": 34,
+      "snippetSha256": "772e65aef77ad45ec1a29cd336809fbc3725d3553bad68e20996f739ee92d118"
+    },
+    "backend-voice-issuer": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/sso_router.py",
+      "startLine": 327,
+      "endLine": 350,
+      "snippetSha256": "8b05618204c340558788401c49d80c5ee385b4043d57dd3c519e9b7269d027d2"
+    },
+    "backend-intake": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/server/app/routers/intake_docs_router.py",
+      "startLine": 1,
+      "endLine": 15,
+      "snippetSha256": "9ce2cab7b1ac7d46b96c46829f1e4f2dfd39b009b545f35c9441ac3e39184ede"
+    },
+    "auditor-backend": {
+      "revision": "ec22e16483b3a980cc85905ae647377cdd03a230",
+      "repository": "ecosystem-deploy",
+      "path": "services/auditor/server.js",
+      "startLine": 2129,
+      "endLine": 2201,
+      "snippetSha256": "cb93f42c5219ffaba3ea63bbd0ac0a4be4ecad130798c8ea7a9c34332b192da5"
+    },
+    "auditor-health-backend": {
+      "revision": "ec22e16483b3a980cc85905ae647377cdd03a230",
+      "repository": "ecosystem-deploy",
+      "path": "services/auditor/server.js",
+      "startLine": 2115,
+      "endLine": 2127,
+      "snippetSha256": "c9475c50cef7c825b720645a9d93874fb8464355a0c3f44362c361040627e17a"
+    },
+    "build-version": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/vite.config.ts",
+      "startLine": 29,
+      "endLine": 43,
+      "snippetSha256": "dd71a911ec562c7802d108dafd83d6f10b9ac123ab539c3ea157cc1d030c1e1c"
+    },
+    "auditor-ws-backend": {
+      "revision": "ec22e16483b3a980cc85905ae647377cdd03a230",
+      "repository": "ecosystem-deploy",
+      "path": "services/auditor/server.js",
+      "startLine": 2222,
+      "endLine": 2222,
+      "snippetSha256": "b6e9ad8580c335a7ae2b56d8412546726eeca12148934556f7b40c83a970243e"
+    },
+    "health-caller": {
+      "revision": "62bd4a4604028309ea17100ee8c320818d9c2400",
+      "repository": "Ledger/app",
+      "path": "clearledger/src/components/auditor/AuditorTerminal.tsx",
+      "startLine": 89,
+      "endLine": 89,
+      "snippetSha256": "20a97f5a0c2277db9fd855ba68d9ef9c8a4cdb61ecaab2e70ba0cc1d6b934f85"
+    }
+  },
+  "priorAccepted": [
+    {
+      "package": "voice reset guard",
+      "status": "present; не повторять",
+      "sourceRefs": [
+        "voice-context",
+        "N41",
+        "N42",
+        "N43"
+      ],
+      "report": "VOICE_CONTEXT_BOUNDARY_20261030.md",
+      "limit": "explicit reset, не rollback server effects"
+    },
+    {
+      "package": "intake upload",
+      "status": "present; native consumer отсутствует",
+      "sourceRefs": [
+        "upload-caller",
+        "N12",
+        "N13",
+        "N14"
+      ],
+      "report": "INTAKE_UPLOAD_TRANSPORT_20261030.md",
+      "limit": "include сохранён; success context fence не обещан"
+    },
+    {
+      "package": "Core binary",
+      "status": "present; native N15 implementation",
+      "sourceRefs": [
+        "core-guard",
+        "binary-local-callers",
+        "binary-local-blob"
+      ],
+      "report": "CORE_BINARY_TRANSPORT_20261030.md",
+      "limit": "caller signal + generation через setters, не browser download manager acceptance"
+    }
+  ],
+  "runtimeCandidates": [
+    {
+      "id": "R1",
+      "item": "N29",
+      "owner": "Auditor proxy frontend owner",
+      "hypothesis": "После смены контекста deferred blob может инициировать старую загрузку; cleanup при исключении требует проверки.",
+      "next": "Только root может назначить actual-service synthetic race и failure cleanup reproduction; при FAIL отдельно утвердить runtime ownership.",
+      "status": "source-suspicion; not validated vulnerability"
+    },
+    {
+      "id": "R2",
+      "item": "N19",
+      "owner": "Core conference presence frontend owner",
+      "hypothesis": "Отложенный leave использует текущий Bearer при старом session/company closure; backend current-user фильтры ограничивают эффект.",
+      "next": "Root решает нужен ли synthetic delayed timer/pagehide + reset reproduction; проверить caller disposal и backend ownership перед изменением.",
+      "status": "source-suspicion; not validated vulnerability"
+    }
+  ],
+  "verification": {
+    "gitManifestBlobsCompared": 1147,
+    "gitByteMismatches": 0,
+    "nativeSpanCount": 43,
+    "uniqueKeys": 43,
+    "selectedSourceRefs": 117,
+    "sourceSnippets": "checked against immutable git show; SHA256 in refs; full snippets private",
+    "docs": "JSON drives MD tables; agreement checked offline",
+    "runtime": "SKIP by task; no new tests/fixes; no SQL/DB/SSH/browser/env/network API/install/merge/deploy",
+    "program": "M00–M19 unfinished; report-only handoff; any PR must remain draft"
+  }
+}

@@ -5,7 +5,7 @@
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Значение секрета по умолчанию — заведомо небезопасное. Если оно доедет до
@@ -39,6 +39,12 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger"
     )
 
+    # Opt-in ownership gate only for the already versioned Core budget table.
+    # Legacy standalone public/Core bootstrap remains the default.
+    managed_core_budget_enabled: bool = False
+    managed_core_budget_expected_database: str = ""
+    managed_core_budget_expected_user: str = ""
+
     # Безопасность. Секрет читается из SECRET_KEY ИЛИ JWT_SECRET — историческое
     # расхождение имён (прод-compose отдавал JWT_SECRET, а приложение ждало
     # SECRET_KEY → втихую брался дефолт). AliasChoices принимает оба.
@@ -48,6 +54,36 @@ class Settings(BaseSettings):
     )
     access_token_expire_minutes: int = 1440  # 24 часа
     algorithm: str = "HS256"
+
+    # Внешний OAuth/OIDC: отдельный профиль, по умолчанию полностью закрыт.
+    # Issuer — уникальный HTTPS origin пространства, без завершающего slash.
+    partner_oauth_enabled: bool = False
+    # Независимый gate продуктового /api/v1: его включает отдельная приёмка M03.
+    partner_api_enabled: bool = False
+    # Распределённая квота product API, отдельно от legacy/IP limiter.
+    partner_api_budget_enabled: bool = False
+    partner_api_budget_limit: int = Field(default=120, ge=1, le=1_000_000, strict=True)
+    partner_api_budget_window_seconds: int = Field(default=60, ge=1, le=3600, strict=True)
+    partner_api_budget_timeout_ms: int = Field(default=1000, ge=50, le=5000, strict=True)
+
+    @field_validator("partner_api_budget_limit", "partner_api_budget_window_seconds",
+                     "partner_api_budget_timeout_ms", mode="before")
+    @classmethod
+    def product_budget_integer(cls, value):
+        # Environment strings are accepted; bool/float/fractional inputs are not.
+        if isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 10:
+            return int(value)
+        return value
+    # Документация и интерактивный sandbox включаются отдельной приёмкой.
+    partner_docs_enabled: bool = False
+    partner_docs_client_id: str = ""
+    partner_docs_environment: str = "unconfigured"
+    partner_docs_sandbox_api_url: str = ""
+    partner_oauth_issuer: str = ""
+    partner_oauth_audience: str = ""
+    partner_oauth_signing_key: str = ""  # base64 PEM; пусто = RSA ключ SSO
+    partner_oauth_kid: str = "partner/1"
+    partner_oauth_allow_localhost: bool = False
 
     # Сид суперадмина. Создаётся при старте ТОЛЬКО если заданы обе переменные
     # (SEED_SUPERADMIN_EMAIL + SEED_SUPERADMIN_PASSWORD). Пусто → суперадмин на

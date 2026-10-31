@@ -1,0 +1,17 @@
+# Связи договоров в партнёрских пилотах: проверка ROOT · 31.10.2026
+
+Пакет PR86 перенесён в отдельную интеграционную ветку: `eca5791c`, `ab30202e`, `6e893817`. Все шесть файлов совпали с источником `21f33b0fa51029aab02799e85a5e8bd63f00948f` побайтно. Отдельная зависимость ROOT `230b508e` добавляет только синтетическому documents client contracts:read, SET двух договоров и явный contracts vector. Рабочие учётные записи и права не менялись.
+
+На совместном HEAD `6e893817a9f4741eee555f9190d6977b73ffb4bc` выполнены:
+
+- `node --experimental-strip-types --test guards.test.ts relations.test.ts`: 16 PASS, 0 FAIL, 0 SKIP; семь прежних проверок URL/intent и девять сценариев связей на запрограммированных ответах.
+- `./node_modules/.bin/tsc -p tsconfig.json`: exit0, без диагностик. Node v22.23.2, существующие зависимости, установки не было.
+- Сверка шести source hashes, Python AST/compile без выполнения, JSON parse и `git diff --check`: PASS.
+
+Сценарии проверяют обход страниц до nextCursor=null, точные эффективные множества, дубликаты, неверного родителя, скрытые дочерние ID, независимые scope/grant prerequisites, opaque ObjectId, неизвестный typeCode и исходный validUntil. Ответ403 в mock заранее задан; он не доказывает серверную ACL. Python seed не выполнялся.
+
+OAuth/HTTP, запуск трёх приложений, реальная БД, Swagger через ingress/SSO и полный CI окончательного состава остаются NOTRUN. Исходный отчёт PR86 описывает исторический SOURCE freeze, поэтому его NOTRUN не означает отрицание этой более поздней отдельной проверки. На первом срезе имена новых тестов содержали метку NOTRUN, а штатный script запускал лишь guards.test.ts; исправление и его отдельная проверка описаны ниже.
+
+Локальные доказательства ROOT: `.artifacts/pr86-root-review-20261031/source.json` и `unit.tap`. Это подтверждение узкого клиентского пакета, M12/M18 и общая программа M00–M19 с 11 gates остаются незавершёнными. Merge и выпуска нет.
+
+Позднее ROOT перенёс follow-up exact73b9be2d как621d1d53/c0bfc220: штатный test:unit теперь включает relations.test.ts, исторические NOTRUN удалены из9названий и вводного комментария; тела тестов сохранены побайтно. На совместном c0bfc220 `npm run test:unit` дал16PASS/0FAIL/0SKIP, `npm run typecheck` завершился exit0. Это повтор тех же16сценариев через исправленную команду, не32различных теста. Доказательства: unit-script-followup.tap и unit-script-followup-acceptance.json рядом с первым receipt. HTTP/OAuth/SQL остаются NOTRUN.

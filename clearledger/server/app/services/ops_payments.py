@@ -26,11 +26,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Counterparty, OpsPayment, OpsPeriodCharge
+from app.services.reference_identity import CounterpartyIndex, IdentityConflict
 
 log = logging.getLogger("clearledger.ops.payments")
 
@@ -191,12 +192,24 @@ async def store(db: AsyncSession, company_id: uuid.UUID, parsed: dict[str, Any],
     """Записать разобранные платежи. Повтор той же выгрузки обновляет, а не двоит."""
     batch = batch_id or uuid.uuid4()
     known = await _counterparty_index(db, company_id)
-    saved, matched = 0, 0
+    saved = matched = ambiguous = unmatched = retained = 0
+    issues = []
     for item in _fold(parsed["payments"]):
-        cp_id = known.get(_norm_name(item["counterparty_name"]))
-        if cp_id:
-            matched += 1
-        await db.execute(pg_insert(OpsPayment).values(
+        try:
+            candidate = known.resolve(item["counterparty_name"])
+            cp_id = candidate.id if candidate is not None else None
+            status = "matched" if cp_id else "unmatched"
+        except IdentityConflict:
+            cp_id, status = None, "ambiguous"
+        ambiguous += status == "ambiguous"
+        unmatched += status == "unmatched"
+        # A replay updates source facts, not an existing valid company link.
+        valid_existing = select(Counterparty.id).where(
+            Counterparty.id == OpsPayment.counterparty_id,
+            Counterparty.company_id == company_id,
+            Counterparty.is_group.is_(False),
+        ).correlate(OpsPayment).exists()
+        result = await db.execute(pg_insert(OpsPayment).values(
             company_id=company_id, period=item["period"], granularity=item["granularity"],
             cost_item=item["cost_item"], is_capital=item["is_capital"],
             counterparty_id=cp_id, counterparty_name=item["counterparty_name"],
@@ -205,16 +218,30 @@ async def store(db: AsyncSession, company_id: uuid.UUID, parsed: dict[str, Any],
             external_key=item["external_key"], loaded_at=datetime.now(timezone.utc),
         ).on_conflict_do_update(
             index_elements=[OpsPayment.company_id, OpsPayment.external_key],
-            set_={"amount": item["amount"], "counterparty_id": cp_id,
+            set_={"amount": item["amount"], "counterparty_id": case(
+                      (valid_existing, OpsPayment.counterparty_id), else_=cp_id),
                   "object_numbers": item.get("object_numbers") or None,
                   "batch_id": batch, "loaded_at": datetime.now(timezone.utc)},
-        ))
+        ).returning(OpsPayment.counterparty_id))
+        actual_id = result.scalar_one()
+        matched += bool(cp_id and actual_id == cp_id)
+        if actual_id is not None and actual_id != cp_id:
+            retained += 1
+            status = "existing_link_retained"
+        if status != "matched" and len(issues) < 100:
+            issues.append({"external_key": item["external_key"], "status": status,
+                "counterparty_name": item["counterparty_name"]})
         saved += 1
     await db.flush()
     return {
         "batch_id": str(batch),
         "saved": saved,
         "counterparties_matched": matched,
+        "counterparties_ambiguous": ambiguous,
+        "counterparties_unmatched": unmatched,
+        "counterparties_retained": retained,
+        "identity_issues": issues,
+        "identity_issues_truncated": saved - matched > len(issues),
         "unknown_items": parsed.get("unknown_items") or [],
     }
 
@@ -241,22 +268,10 @@ def _fold(payments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(folded.values())
 
 
-def _norm_name(name: str) -> str:
-    """Имя контрагента для сопоставления: без формы собственности и кавычек.
-
-    Заказчик пишет «АВТО ПЕРЕКРЕСТОК ООО», мы — «ООО "Авто Перекресток"». Ключом
-    сопоставления это делать нельзя, подсказкой — можно: опознанного контрагента
-    видно рядом с исходным именем, и ошибку человек заметит.
-    """
-    clean = re.sub(r"[\"«»'()\-,.]", " ", (name or "").lower().replace("ё", "е"))
-    clean = re.sub(r"\b(ооо|оао|зао|ао|ип|пао|нао|тсж|снт|филиал)\b", " ", clean)
-    return re.sub(r"\s+", " ", clean).strip()
-
-
-async def _counterparty_index(db: AsyncSession, company_id: uuid.UUID) -> dict[str, uuid.UUID]:
-    rows = (await db.execute(select(Counterparty.id, Counterparty.name).where(
-        Counterparty.company_id == company_id))).all()
-    return {_norm_name(name): cid for cid, name in rows if name}
+async def _counterparty_index(db: AsyncSession, company_id: uuid.UUID) -> CounterpartyIndex:
+    rows = (await db.scalars(select(Counterparty).where(
+        Counterparty.company_id == company_id, Counterparty.is_group.is_(False)))).all()
+    return CounterpartyIndex(rows)
 
 
 async def summary(db: AsyncSession, company_id: uuid.UUID, *,

@@ -1,0 +1,217 @@
+{
+  "package": "M08/M16-C2 Pulse view role schema owner",
+  "status": "ROOT_ACCEPTED_SCOPED_IMPLEMENTATION",
+  "base": "875929b3885d98ace8e370a72d62a825bf76960b",
+  "stage1_base": "e9d793d600974fe3142abade67ad8f5ff6980de2",
+  "acceptance_receipt": "msg_80dc21a1034f",
+  "implementation_decisions": [
+    "msg_56a78a3251de",
+    "msg_a0ed2a39a257",
+    "msg_127f176d121f",
+    "msg_75122d6c59fe"
+  ],
+  "contract": {
+    "relation": "pulse_view_role_grants",
+    "columns": [
+      {
+        "name": "view_id",
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "name": "role_id",
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      }
+    ],
+    "primary": [
+      "view_id",
+      "role_id"
+    ],
+    "foreign_keys": [
+      {
+        "column": "view_id",
+        "parent": "pulse_views.id",
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      },
+      {
+        "column": "role_id",
+        "parent": "company_roles.id",
+        "delete": "CASCADE",
+        "update": "NO ACTION"
+      }
+    ],
+    "indexes": "only compositePK btree, no role_id index",
+    "acl": "default or explicit normalized owner-only seven privileges; no nonowner/PUBLIC/column grants",
+    "RLS": "disabled,notforced,no policies",
+    "triggers": "8 internal enabledO immediate/nondeferrable RI triggers, no custom in requested child/parent scope",
+    "tenant_rule": "native company filters and membership/product remain ACL; two simpleFKs are not cross-company constraint"
+  },
+  "ownership": {
+    "Core": "explicit existing revision0003 sole DDL owner, parent0002, ORM mapping excluded from legacyCoreDDL; catalogue-required guard beforestartupDDL/seed/jobs",
+    "public": "explicit legacyfresh ORM samecanonical mapping+guard beforebootstrapcommit; no public migration/adoption or silentmissingCorefallback",
+    "readiness": "new catalogue-only borrowedconnection3s guard; missing/drift ->503; legacyshape need not be stamped0003 for catalogueuse",
+    "history": "existingexplicitrunner0001/check/apply semantics preserved; frozen0001/0002 payloads byteexact",
+    "fresh_proof": "literal10parentORM+existingphonefunction+existingownerkey, no main/seed/jobs; same0001created/0002adopted/0003created+guard thenownedCoreDROP; fullCorelegacybootstrap not executed/proved"
+  },
+  "readonly_public_APIs": {
+    "load_known_head": "manifest.load_known_head(root=ROOT) -> Package, strictly verified allowlisted source head0003",
+    "require_applied_prefix": "async runner.require_applied_prefix(conn, config, known_head, *, required_revision=ID) -> None",
+    "guarantees": "readN+1=4 complete appliedknownprefix/checksums/catalogues; required0001 does not require unappliedlatest/parents; unknownfuture/gaps/mismatch refuse; no connection creation,BEGIN/SET/commit/rollback/lock/write",
+    "errors": {
+      "MigrationError2": "source artifact/manifest/known_head/required_revision integrity",
+      "MigrationError3": "config/target/identity admission",
+      "MigrationError4": "unapplied/history/checksum/catalogue mismatch",
+      "driver_errors": "borrowed connection driver exceptions may propagate; consumer must sanitize; API does not change caller lifecycle"
+    }
+  },
+  "live_catalogue_provenance": {
+    "first_snapshot": {
+      "receipt": "msg_1b028c2ce67f",
+      "observed_utc": "2026-10-31T01:23:39.830013+00:00",
+      "readonly": true,
+      "business_rows": false,
+      "app_imported": false,
+      "stable_target": true,
+      "process": {
+        "exit": 0,
+        "reaped": true,
+        "elapsed": 2.0513455402106047,
+        "readOnly": true
+      },
+      "query_sha256": "32505341456c9ae06b3cc2692a013000af0b7d5329d8d8e142576f0b1f28a58b",
+      "hashes": {
+        "live-catalog-snapshot.json": "4a70f7b90b4a7555525ff9f2334e4dbc1454b1dfa8c81f4297b975f6aee9ffbf",
+        "live-catalog-parsed.json": "c584b07eb205acfa166505ccd99d61c17342db1fa46f389d61500eedf54053c3",
+        "process-v2.json": "8ca5b91b2d7c8335d626acec3ade565af873191b85072bcebb9540cea1aa3312"
+      },
+      "catalogue_summary": {
+        "core_relation": "ordinary persistent table",
+        "public_counterpart": false,
+        "columns": "view_id/role_id pg_catalog.uuid typmod-1 NOT NULL; no default/identity/generated/column ACL",
+        "keys": "composite PK(view_id,role_id); exactly two validated immediate nondeferrable simple FKs to core.pulse_views.id/core.company_roles.id, deleteCASCADE/updateNOACTION",
+        "indexes": "exactly PK btree(view_id,role_id), valid/ready/live; NO standalone role_id index",
+        "RLS": "disabled and not forced; no policies in uncapped policy section",
+        "owner": "matches runtime application role, raw role omitted",
+        "table_acl": "explicit owner-only seven table privileges, no nonowner/PUBLIC grant in uncapped ACL section; do not assume relacl NULL",
+        "identity": "PostgreSQL16, Core then public namespace; exact target/transport privately verified by ROOT"
+      },
+      "completeness": {
+        "headers": "all14 literal pairs, fixed cardinality not evidence of truncation",
+        "columns": 148,
+        "constraints": 39,
+        "indexes": 31,
+        "policies": 0,
+        "acl": 77,
+        "triggers": "256 cap reached, INCOMPLETE; absence of role-grant rows not proof no triggers"
+      },
+      "narrow_trigger_request_sha256": "3e82f458f2bddc8cbc5f18bceabcf4ebc98f3e6615636e3394c7272c37f33295"
+    },
+    "separate_trigger_snapshot": {
+      "receipt": "msg_de49c270f7c9",
+      "observed_utc": "2026-10-31T01:29:23.281699+00:00",
+      "same_snapshot_as_initial": false,
+      "readonly": true,
+      "business_rows": false,
+      "app_imported": false,
+      "stable_target": true,
+      "count": 8,
+      "complete_under_cap64": true,
+      "process": {
+        "exit": 0,
+        "reaped": true,
+        "elapsed": 2.0005678860470653,
+        "readOnly": true,
+        "supplementalOnlyTruncatedSection": true
+      },
+      "query_sha256": "3e82f458f2bddc8cbc5f18bceabcf4ebc98f3e6615636e3394c7272c37f33295",
+      "hashes": {
+        "parent-triggers-snapshot.json": "9353d5324028a969dde537438c1eb0aa67b0a52728aa9816f1e8c7b6655c5f8c",
+        "parent-triggers-parsed.json": "9403682eeb7df5f01a617c1368ce6b84ff91d32f0e0c6fbeb328b3efd534d6c9",
+        "parent-triggers-process.json": "5d94607adf0cb6d4699112d55fae4613b30ccff46441dfb0581ec992a8999683",
+        "role-triggers-parsed.json": "d883051424eeb63b7cf2521b0d78846baf1114394d256de7f301ed3c4987f1d7"
+      },
+      "generalized_facts": "8 internal enabledO nondeferrable immediate RI triggers for2FK: child check_ins/check_upd and parent cascade_del/noaction_upd; no custom child or queried parent triggers in complete requested scope; no function bodies or business rows read"
+    },
+    "scope": "only Rushydro livecatalogue read byROOT, not businessrows/liveDDL/restore/other spaces; rawCSV/roles/OIDs/containerIDs not copied toGit; prior boundedDDLsearch reused,not repeated/worldwide absence claim"
+  },
+  "source_proof": {
+    "base": "875929b3885d98ace8e370a72d62a825bf76960b",
+    "models_reverse_AST": true,
+    "whole_main_reverse_AST": true,
+    "all_other_database_symbols_AST": {
+      "Base": true,
+      "database_startup_lock": true,
+      "_ensure_active_group_readiness": true,
+      "get_db": true
+    },
+    "legacy_create_all_tail_AST": true,
+    "old_P8_test_bodies_AST": true,
+    "frozen_0001_0002_entries": true,
+    "changed_old_app_blobs": [
+      "clearledger/server/app/database.py",
+      "clearledger/server/app/main.py",
+      "clearledger/server/app/models.py"
+    ],
+    "new_app_file": "app/services/pulse_view_role_schema.py"
+  },
+  "actual": {
+    "V1": {
+      "receipt": "msg_75122d6c59fe",
+      "primary_pass": 41,
+      "primary_fail": 14,
+      "subtests_pass": 13,
+      "pytest_seconds": 25.44,
+      "outer_seconds": 43.624425892,
+      "exit": 1,
+      "reaped": true,
+      "sourceAfter": true,
+      "inventory": 77,
+      "sendmsg_controls": 16,
+      "forbidden": 0,
+      "cleanup": "normalDROP exactDB/relations0/clients0/exists0/maxlocks64"
+    },
+    "V2": {
+      "receipt": "msg_80dc21a1034f",
+      "primary_pass": 14,
+      "primary_fail": 0,
+      "subtests": 0,
+      "subtests_ok": true,
+      "pytest_seconds": 34.65,
+      "outer_seconds": 52.648500619,
+      "exit": 0,
+      "reaped": true,
+      "sourceAfter": true,
+      "inventory": 77,
+      "sendmsg_controls": 16,
+      "forbidden": 0,
+      "cleanup": "normalDROP exactDB/relations0/clients0/exists0/maxlocks64"
+    },
+    "combined": "55 different primarycases across TWOseries,41retained+14corrected;13oldpure subtests retained. NOT single55green/fullCI. Production/schema same bothseries; only2newfixturecorrections+strictsubtestreporter afterV1."
+  },
+  "runtime_pins": {
+    "runner": "bfb5a258f9f44cedfd82bd4c72c60ea208e28d87564e64f0532ea4cfda059eb5",
+    "app503": "2630f4725d9befcc8061d781f633e1c3fecf0e26d3d49c0316cf29587db2ebde",
+    "tests382_without_runner": "9157f82a9fca11db0dd516d54d02b03cefaabdb1947cec749aa26b8196879b97",
+    "schema24": "36144e75b41d79b27e5e8d455e963d46deb400968582d6f53983d440344b2165",
+    "v3_artifact": "c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d",
+    "candidate": "exact77/Python3.13.7/PG16 dedicated syntheticDB, ROOT only",
+    "database": "api_pulse_view_role_schema_test_20261031",
+    "port": 33546
+  },
+  "limitations": [
+    "sharedCorecode unconditionally requires rolecatalogue forstartup/readiness; onlyRushydro live shape seen, other spaces not measured/validated/activated",
+    "fullCore successfullegacybootstrap/currentfullCI/liveupgrade/liveRestore not proved",
+    "budgetmanagedON default0001/newerhistory refusal remains owned separately byROOT/C3; no flag/gate change here",
+    "metadata and simpleFK types alone are not ACL proof or absence of corrupt businessrows",
+    "M08/M16/M00-M19+11 remain active; no deploy/merge/ship/flags/frontend/SDK/deps changes; nextowner/releaseROOT"
+  ],
+  "evidence": {
+    "ROOT": ".artifacts/root-pulse-role-schema-review-20261031/",
+    "worker": ".artifacts/pulse-view-role-schema-20261031/",
+    "V1_preserved": "worker v1/ and originalROOTreceipts; noforeigncleanup"
+  }
+}

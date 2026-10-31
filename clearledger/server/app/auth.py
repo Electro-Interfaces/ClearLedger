@@ -5,6 +5,7 @@ JWT-аутентификация: создание токена, верифик�
 import asyncio
 import logging
 import uuid
+from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
@@ -211,21 +212,8 @@ def decode_token(token: str) -> dict:
         )
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """
-    FastAPI dependency: извлекает текущего пользователя из JWT.
-    Возвращает объект User из БД.
-    """
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Требуется авторизация",
-        )
-
-    payload = decode_token(credentials.credentials)
+async def native_user_from_claims(payload: dict, db: AsyncSession) -> User:
+    """Прежняя native identity/session проверка, без presence и commit."""
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
@@ -254,15 +242,50 @@ async def get_current_user(
             detail="Сессия завершена — войдите заново",
         )
 
-    _token_claims.set(payload)
+    return user
+
+
+async def native_visit_from_claims(payload: dict, user: User, db: AsyncSession) -> uuid.UUID | None:
+    """Те же visit/unknown-scope правила, без изменения контекста caller."""
     if payload.get("scp") == VISIT_SCOPE:
-        _visit_company.set(await _check_visit(payload, user, db))
+        return await _check_visit(payload, user, db)
     elif payload.get("scp"):
-        # Область, которой здесь не знают, — не повод пускать без ограничений.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Невалидный токен: неизвестная область")
-    else:
-        _visit_company.set(None)
+    return None
+
+
+@contextmanager
+def native_claims_context(payload: dict | None, company: uuid.UUID | None):
+    """Ограниченный контекст одной проверки; private ContextVars остаются у auth."""
+    claims_token = _token_claims.set(payload)
+    visit_token = _visit_company.set(company)
+    try:
+        yield
+    finally:
+        _visit_company.reset(visit_token)
+        _token_claims.reset(claims_token)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    FastAPI dependency: извлекает текущего пользователя из JWT.
+    Возвращает объект User из БД.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Требуется авторизация",
+        )
+
+    payload = decode_token(credentials.credentials)
+    user = await native_user_from_claims(payload, db)
+
+    _token_claims.set(payload)
+    _visit_company.set(await native_visit_from_claims(payload, user, db))
 
     await _touch_presence(user, db)
     return user

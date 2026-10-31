@@ -17,6 +17,7 @@ import { SupportProvider } from '@/contexts/SupportContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
+import '@/services/developerDocsService' // Strip OAuth callback query before Router/Auth effects.
 import { TabFilterSync } from '@/components/layout/TabFilterSync'
 import { DocumentTitle } from '@/components/layout/DocumentTitle'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -110,6 +111,8 @@ const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then(
 const NormalizationWorkspacePage = lazy(() => import('@/pages/NormalizationWorkspacePage').then((m) => ({ default: m.NormalizationWorkspacePage })))
 const EcosystemHomePage = lazy(() => import('@/pages/EcosystemHomePage').then((m) => ({ default: m.EcosystemHomePage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
+const DeveloperAuthorizePage = lazy(() => import('@/pages/DeveloperAuthorizePage').then((m) => ({ default: m.DeveloperAuthorizePage })))
+const DeveloperApiPage = lazy(() => import('@/pages/DeveloperApiPage').then((m) => ({ default: m.DeveloperApiPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
 const SpaceGuestPage = lazy(() => import('@/pages/SpaceGuestPage').then((m) => ({ default: m.SpaceGuestPage })))
@@ -312,6 +315,14 @@ const SPACE_PAGE_ELEMENTS: Record<string, React.ReactNode> = {
 
 
 const router = createBrowserRouter([
+  { path: '/developer/api', element: <ErrorBoundary><AuthProvider><LazyPage><DeveloperApiPage /></LazyPage></AuthProvider></ErrorBoundary> },
+  { path: '/developer/api/callback', element: <ErrorBoundary><AuthProvider><LazyPage><DeveloperApiPage /></LazyPage></AuthProvider></ErrorBoundary> },
+  // Согласие — действие вошедшего пользователя, без admin gate и без оболочки
+  // выбранной компании: разрешённые компании определяет сам запрос на сервере.
+  {
+    path: '/developer/authorize',
+    element: <ErrorBoundary><AuthProvider><LazyPage><DeveloperAuthorizePage /></LazyPage></AuthProvider></ErrorBoundary>,
+  },
   {
     element: <Providers />,
     children: [

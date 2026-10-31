@@ -340,25 +340,15 @@ async def store_file(db: AsyncSession, company_id: uuid.UUID, filename: str | No
     Отпечаток считаем всегда: по нему видно, что один и тот же скан приложили к
     двум документам, — обычная история, когда акт и счёт лежат в одном PDF.
     """
-    import hashlib
-    import os
-    from pathlib import Path
+    from app.services import file_store
 
-    from app.models import SourceFile
-
-    file_id = file_id or uuid.uuid4()
-    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    ext = Path(filename or "file").suffix
-    path = upload_dir / f"{file_id}{ext}"
-    with open(path, "wb") as fh:
-        fh.write(content)
-    db.add(SourceFile(
-        id=file_id, company_id=company_id, file_name=filename or "документ",
-        mime_type=mime or "application/octet-stream", size=len(content),
-        storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest()))
-    await db.flush()
-    return file_id
+    row = await file_store.put_and_flush(
+        db, company_id, content, file_name=filename or "документ", mime=mime,
+        # Preserve this adapter's previous SourceFile default; changing data
+        # classification/counters requires a separate, measured migration.
+        purpose="data", file_id=file_id,
+    )
+    return row.id
 
 
 async def attach_file(db: AsyncSession, company_id: uuid.UUID, doc_id: uuid.UUID,

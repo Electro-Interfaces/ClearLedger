@@ -50,7 +50,7 @@ from app.models import (
 from sqlalchemy import true as _sa_true
 
 from app.config import settings
-from app.services import (calendar_series, jitsi, oversight, placement, space_time, work_query,
+from app.services import (calendar_protocol, calendar_queries, calendar_series, jitsi, oversight, placement, space_time, work_query,
                           work_state)
 
 log = logging.getLogger(__name__)
@@ -1110,19 +1110,8 @@ async def _attendees(db: AsyncSession, event_ids: list[uuid.UUID]) -> dict[uuid.
 
 
 def _my_events_clause(user_id: uuid.UUID):
-    """Мои встречи: те, что я собрал, и те, куда меня позвали.
-
-    Общий календарь компании сюда не входит намеренно: «все встречи всех» —
-    другой экран с другим вопросом, и подмешивать его значит утопить свои три
-    встречи в сотне чужих.
-    """
-    from app.models import CalendarAttendee, CalendarEvent
-
-    return or_(
-        CalendarEvent.organizer_id == user_id,
-        CalendarEvent.id.in_(select(CalendarAttendee.event_id).where(
-            CalendarAttendee.user_id == user_id)),
-    )
+    """Совместимый sync вход для native callers календаря."""
+    return calendar_queries.my_events_clause(user_id)
 
 
 @router.get("/calendar")
@@ -1431,7 +1420,7 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
     Окно ограничено: год назад и год вперёд. Полная история пухла бы без предела
     и загружалась бы каждым клиентом при каждом обновлении подписки.
     """
-    from app.models import CalendarAttendee, CalendarEvent
+    from app.models import CalendarEvent
     from app.services import ics as ics_service
 
     if not token or len(token) < 20:
@@ -1446,9 +1435,7 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
         select(CalendarEvent)
         .where(CalendarEvent.starts_at >= now - timedelta(days=365),
                CalendarEvent.starts_at <= now + timedelta(days=365),
-               or_(CalendarEvent.organizer_id == хозяин.id,
-                   CalendarEvent.id.in_(select(CalendarAttendee.event_id).where(
-                       CalendarAttendee.user_id == хозяин.id))))
+               _my_events_clause(хозяин.id))
         .order_by(CalendarEvent.starts_at))).scalars().all()
 
     база = settings.app_public_url.rstrip("/")
@@ -1468,6 +1455,7 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
         "location": e.location,
         "url": f"{база}/docs/work?view=calendar&event={e.id}",
         "cancelled": e.status == "cancelled",
+        "sequence": calendar_protocol.version(e),
     } for e in строки], name="Трек")
     return Response(content=файл, media_type="text/calendar; charset=utf-8",
                     headers={"Content-Disposition": 'inline; filename="trek.ics"',
@@ -1537,7 +1525,7 @@ async def calendar_ics(
         organizer_email=organizer.email if organizer else None,
         organizer_name=organizer.name if organizer else None,
         cancelled=ev.status == "cancelled",
-        sequence=1 if ev.status == "cancelled" else 0)
+        sequence=calendar_protocol.version(ev))
     return Response(
         content=текст, media_type="text/calendar; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="meeting.ics"'})
@@ -1717,6 +1705,7 @@ async def calendar_action(
         db, cid, _uuid_or_400(event_id, "event_id"))
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    protocol_before = calendar_protocol.state(ev)
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
     приглашён = any(a.user_id == current_user.id for a in parts)
     if ev.organizer_id != current_user.id and not приглашён:
@@ -1792,10 +1781,15 @@ async def calendar_action(
             for future in (await db.execute(select(CalendarEvent).where(
                     CalendarEvent.series_id == ev.id,
                     CalendarEvent.starts_at >= datetime.now(timezone.utc),
-                    CalendarEvent.status != "cancelled"))).scalars():
+                    CalendarEvent.status != "cancelled")
+                    .order_by(CalendarEvent.id).with_for_update()
+                    .execution_options(populate_existing=True))).scalars():
+                future_before = calendar_protocol.state(future)
                 future.status = "cancelled"
                 future.cancel_reason = ev.cancel_reason
+                calendar_protocol.advance_if_changed(future, future_before)
                 await reminders.drop_for(db, f"event:{future.id}")
+        calendar_protocol.advance_if_changed(ev, protocol_before)
         await db.commit()
         # Отмена, о которой узнают только открыв календарь, — это пустая
         # переговорная: участникам — в чат и письмом (РусГидро, 14.10.2026).
@@ -1901,6 +1895,7 @@ async def calendar_action(
                     PersonalReminder.target_ref == f"event:{ev.id}",
                     PersonalReminder.fired_at.is_(None)))).scalars():
                 напоминание.remind_at = напоминание.remind_at + сдвиг
+    calendar_protocol.advance_if_changed(ev, protocol_before)
     await calendar_series.materialize_series(db, cid, ev.id, datetime.now(timezone.utc))
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
     await db.commit()
@@ -2016,7 +2011,7 @@ async def can_manage_calendar(db: AsyncSession, cid: uuid.UUID,
 
 
 async def _event_of_organizer(db: AsyncSession, cid: uuid.UUID, event_id: str,
-                              user: User):
+                              user: User, *, lock: bool = False):
     """Встреча, которой этот человек распоряжается: собранная им или та, чей
     организатор выдал ему полномочие вести свой календарь."""
     from app.models import CalendarEvent
@@ -2028,6 +2023,10 @@ async def _event_of_organizer(db: AsyncSession, cid: uuid.UUID, event_id: str,
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Звать и открывать материалы может тот, кто собрал "
                             "встречу, или его помощник")
+    if lock:
+        ev = await calendar_series.lock_event(db, cid, ev.id)
+        if ev is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
     return ev
 
 
@@ -2105,7 +2104,7 @@ async def _письмо_гостю(db: AsyncSession, ev, guest, token: str,
         organizer_email=organizer.email, organizer_name=organizer.name,
         attendees=[(guest.email, guest.name)],
         invite=not отменена, cancelled=отменена,
-        sequence=1 if отменена else 0)
+        sequence=calendar_protocol.version(ev))
 
     тема = (f"Отменено: {ev.title}" if отменена
             else f"Приглашение: {ev.title} — {подпись}")
@@ -2529,7 +2528,8 @@ async def poll_open(
     from app.models import CalendarPollOption
 
     cid = await _assert_work(payload.company_id, current_user, db)
-    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    ev = await _event_of_organizer(db, cid, event_id, current_user, lock=True)
+    protocol_before = calendar_protocol.state(ev)
     if ev.status == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
     await db.execute(delete(CalendarPollOption).where(
@@ -2547,6 +2547,7 @@ async def poll_open(
                                 "Конец варианта не может быть раньше начала")
         db.add(CalendarPollOption(event_id=ev.id, starts_at=н, ends_at=к))
     ev.status = "poll"
+    calendar_protocol.advance_if_changed(ev, protocol_before)
     await db.commit()
     return {"status": ev.status, "options": len(payload.options)}
 
@@ -2642,12 +2643,14 @@ async def poll_pick(
     from app.models import CalendarAttendee, CalendarPollOption
 
     cid = await _assert_work(payload.company_id, current_user, db)
-    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    ev = await _event_of_organizer(db, cid, event_id, current_user, lock=True)
+    protocol_before = calendar_protocol.state(ev)
     opt = await db.get(CalendarPollOption, _uuid_or_400(payload.option_id, "option_id"))
     if opt is None or opt.event_id != ev.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден")
     ev.starts_at, ev.ends_at = opt.starts_at, opt.ends_at
     ev.status = "planned"
+    calendar_protocol.advance_if_changed(ev, protocol_before)
     await db.execute(delete(CalendarPollOption).where(
         CalendarPollOption.event_id == ev.id))
     for a in (await db.execute(select(CalendarAttendee).where(

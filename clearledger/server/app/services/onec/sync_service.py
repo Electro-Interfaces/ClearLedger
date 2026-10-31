@@ -1149,8 +1149,12 @@ class OneCSyncService:
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
         await lock_manual_creation(self.session, connection.company_id, "counterparty")
+        # После чужого PATCH identity map может хранить прежние поля и markers.
+        # Под общим барьером перечитываем БД; обычный autoflush сохраняет свои
+        # pending edits перед SELECT, commit остаётся у вызывающего кода.
         rows = (await self.session.execute(select(Counterparty).where(
-            Counterparty.company_id == connection.company_id))).scalars().all()
+            Counterparty.company_id == connection.company_id)
+            .execution_options(populate_existing=True))).scalars().all()
         cp_index = CounterpartyIndex(rows)
         by_ref = {}
         for cp in rows:
@@ -1254,8 +1258,12 @@ class OneCSyncService:
             Counterparty, connection.company_id, by="id")
         local_org = await self._build_local_index(
             Organization, connection.company_id, by="id")
+        # PATCH другой сессии мог изменить реквизиты и manual_overrides после
+        # прежнего commit. Свои правки уже сохранены flush выше; перечитываем
+        # свежие значения перед matcher и применением импортных полей.
         rows = (await self.session.execute(select(Contract).where(
-            Contract.company_id == connection.company_id))).scalars().all()
+            Contract.company_id == connection.company_id)
+            .execution_options(populate_existing=True))).scalars().all()
         contract_index = ContractIndex(rows)
         by_ref = {}
         for contract in rows:

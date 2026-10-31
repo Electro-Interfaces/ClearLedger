@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from app.services.reference_identity import IdentityConflict, id_key, unique_candidate
+from app.services import location_commands
 
 import json
 import uuid
@@ -118,29 +119,17 @@ async def code_taken(
     db: AsyncSession, company_id: uuid.UUID, code: str, *, except_id: str | None = None,
 ) -> bool:
     """Код уникален в пределах КОМПАНИИ: у двух компаний холдинга может быть своя «Площадка 1»."""
-    stmt = select(ServiceLocation.id).where(
-        ServiceLocation.company_id == company_id, ServiceLocation.code == code)
-    if except_id:
-        stmt = stmt.where(ServiceLocation.id != except_id)
-    return (await db.execute(stmt)).first() is not None
+    # Compatibility preflight only; the command repeats it behind the barrier.
+    return await location_commands.code_taken(db, company_id, code, except_id=except_id)
 
 
 async def create_object(
     db: AsyncSession, company_id: uuid.UUID, data: dict[str, Any], *, actor: Any | None,
 ) -> dict[str, Any]:
-    loc = ServiceLocation(
-        id=uuid.uuid4().hex[:24],          # id — строка (исторически клиентский nanoid)
-        company_id=company_id,
-        code=data["code"].strip(),
-        name=data["name"].strip(),
-        type=data.get("type") or "other",
-        status=data.get("status") or "active",
-        address=data.get("address"),
-        description=data.get("description"),
-        source_bindings=[],
-    )
-    _apply_optional(loc, data)
-    db.add(loc)
+    try:
+        loc = await location_commands.create(db, company_id, uuid.uuid4().hex[:24], data)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
     await db.flush()
     await _audit(db, company_id, actor, "space.object.create", loc, {"code": loc.code})
     await db.commit()
@@ -152,34 +141,21 @@ async def update_object(
     db: AsyncSession, company_id: uuid.UUID, object_id: str, data: dict[str, Any],
     *, actor: Any | None,
 ) -> dict[str, Any] | None:
-    loc = await _load(db, company_id, object_id)
-    if loc is None:
+    try:
+        mutation = await location_commands.update(db, company_id, object_id, data,
+            actor_id=getattr(actor, "id", None), source="registry.objects",
+            name_intent="manual" if actor is not None and "name" in data else None)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+    if mutation is None:
         return None
-
-    changed: dict[str, Any] = {}
-    for field in ("code", "name", "type", "status", "address", "description"):
-        if field in data and data[field] is not None and getattr(loc, field) != data[field]:
-            changed[field] = {"from": getattr(loc, field), "to": data[field]}
-            setattr(loc, field, data[field].strip() if isinstance(data[field], str) else data[field])
-    _apply_optional(loc, data, changed)
+    loc, changed = mutation.location, mutation.changes
 
     if changed:
         await _audit(db, company_id, actor, "space.object.update", loc, changed)
     await db.commit()
     await db.refresh(loc)
     return to_card(loc)
-
-
-def _apply_optional(
-    loc: ServiceLocation, data: dict[str, Any], changed: dict[str, Any] | None = None,
-) -> None:
-    """Адрес и гео — часть паспорта пространства, поэтому правятся через реестр."""
-    for field, key in (("city", "city"), ("street", "street"), ("house", "house"),
-                       ("latitude", "latitude"), ("longitude", "longitude")):
-        if key in data and data[key] is not None:
-            if changed is not None and getattr(loc, field, None) != data[key]:
-                changed[field] = {"from": getattr(loc, field, None), "to": data[key]}
-            setattr(loc, field, data[key])
 
 
 async def list_organizations(

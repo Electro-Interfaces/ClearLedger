@@ -14,6 +14,7 @@
  */
 
 import { demoGet, demoPost, demoWrite } from '@/demo/demoApi'
+import { safeBackTo } from '@/lib/safeBackTo'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 const TOKEN_KEY = 'clearledger-token'
@@ -47,9 +48,16 @@ export const isApiEnabled = (): boolean => isDemoMode() || !!BASE_URL
 // «по юзеру» (fuel/store/…) раньше игнорировали выбор компании в шапке и всегда
 // показывали дефолтную; теперь следуют выбору. Устанавливается из CompanyContext.
 let activeCompanyId: string | null = null
+// Поколение проверяют binary transport и явно захваченные guards отложенных
+// действий. Оно замечает A→B→A и новый вход с тем же токеном.
+let binaryContextGeneration = 0
+// Для session-effects JSON важен вход/выход, а не выбор company/org.
+// Строка Bearer не отличает новый вход с тем же токеном от старого запроса.
+let sessionGeneration = 0
 
 /** Прокинуть активную компанию в HTTP-клиент (заголовок X-Company-Id). */
 export function setApiCompany(id: string | null): void {
+  if (activeCompanyId !== (id || null)) binaryContextGeneration++
   activeCompanyId = id || null
 }
 
@@ -62,6 +70,7 @@ let activeOrganizationId: string | null = localStorage.getItem(ORG_KEY)
 
 /** Прокинуть активную организацию в HTTP-клиент (заголовок X-Organization-Id). */
 export function setApiOrganization(id: string | null): void {
+  if (activeOrganizationId !== (id || null)) binaryContextGeneration++
   activeOrganizationId = id || null
   if (id) localStorage.setItem(ORG_KEY, id)
   else localStorage.removeItem(ORG_KEY)
@@ -79,11 +88,16 @@ export function getToken(): string | null {
 
 /** Сохранить токен */
 export function setToken(token: string): void {
+  binaryContextGeneration++
+  sessionGeneration++
+  cancelSessionRedirect()
   localStorage.setItem(TOKEN_KEY, token)
 }
 
 /** Удалить токен */
 export function clearToken(): void {
+  binaryContextGeneration++
+  sessionGeneration++
   localStorage.removeItem(TOKEN_KEY)
 }
 
@@ -95,32 +109,31 @@ export function clearToken(): void {
  * здесь имя эту работу перечеркнёт и вернёт папку одинаковых файлов. Аргумент —
  * запасной вариант на случай, если заголовка нет.
  */
-export async function downloadFile(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: headers() })
-  if (!res.ok) {
-    // Тело ошибки — это JSON с `detail`, а не файл: показать человеку причину
-    // отказа лучше, чем сохранить на диск страницу с ошибкой.
-    let причина = `Выгрузка не удалась (${res.status})`
-    try {
-      const тело = await res.json()
-      if (тело?.detail) причина = String(тело.detail)
-    } catch { /* тело не JSON — остаётся код ответа */ }
-    throw new ApiError(res.status, причина)
-  }
+export async function downloadFile(path: string, fallbackName: string, options?: { signal?: AbortSignal }): Promise<void> {
+  const { res, blob, guard } = await fetchBinary(path, options?.signal)
   const заголовок = res.headers.get('Content-Disposition') ?? ''
   const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(заголовок)
   const ascii = /filename="([^"]+)"/i.exec(заголовок)
-  const имя = utf8 ? decodeURIComponent(utf8[1]) : ascii?.[1] ?? fallbackName
+  let имя = ascii?.[1] ?? fallbackName
+  if (utf8) {
+    try { имя = decodeURIComponent(utf8[1]) || имя } catch { /* повреждённый filename*: запасное имя */ }
+  }
 
-  const blob = await res.blob()
+  guard()
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = имя
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  let a: HTMLAnchorElement | undefined
+  try {
+    guard()
+    a = document.createElement('a')
+    a.href = url
+    a.download = имя
+    guard()
+    document.body.appendChild(a)
+    guard()
+    a.click()
+  } finally {
+    try { a?.remove() } finally { URL.revokeObjectURL(url) }
+  }
 }
 
 export class ApiError extends Error {
@@ -153,18 +166,42 @@ export function isNetworkError(err: unknown): boolean {
 
 /** Guard от множественных 401 редиректов (race condition при параллельных запросах) */
 let isRedirecting = false
+let sessionRedirectTimer: ReturnType<typeof setTimeout> | undefined
+
+function cancelSessionRedirect() {
+  if (sessionRedirectTimer !== undefined) clearTimeout(sessionRedirectTimer)
+  sessionRedirectTimer = undefined
+  isRedirecting = false
+}
+
+function redirectExpiredSession() {
+  sessionRedirectTimer = undefined
+  // За время уведомления человек мог войти снова или уже попасть на login
+  // со своим next. Старый таймер не имеет права выбросить новую сессию/intent.
+  if (getToken() || isPublicPage(window.location.pathname)) { isRedirecting = false; return }
+  const base = safeBackTo(import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/')
+  const { pathname, search, hash } = window.location
+  const path = base !== '/' && (pathname === base.slice(0, -1) || pathname.startsWith(base))
+    ? `/${pathname.slice(base.length)}` : pathname
+  const next = safeBackTo(`${path}${search}${hash}`)
+  window.location.href = `${base}login?next=${encodeURIComponent(next)}`
+}
 
 /** Страницы, доступные без сессии: увести отсюда на вход — значит сломать вход. */
 const PUBLIC_PAGES = [
   '/login', '/invite/', '/reset-password/', '/showcase/', '/demo/shop', '/doc-share/', '/doc-verify/',
   '/space-guest',
+  '/developer/api/callback',
 ]
 export function isPublicPage(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '')
   return PUBLIC_PAGES.some((s) => p.endsWith(s.replace(/\/$/, '')) || p.includes(s))
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
+async function handleResponseError(
+  res: Response, sentAuthorization: string | undefined, signal?: AbortSignal, guard?: () => void,
+  sentSessionGeneration?: number,
+): Promise<void> {
   if (!res.ok) {
     let detail = res.statusText
     let body: Record<string, unknown> | undefined
@@ -175,8 +212,16 @@ async function handleResponse<T>(res: Response): Promise<T> {
       detail = (body?.detail as string) || JSON.stringify(body) || res.statusText
     } catch { /* ignore */ }
 
-    if (res.status === 401 && !isRedirecting) {
-      const base = import.meta.env.BASE_URL ?? '/'
+    // Для binary отмена/смена контекста важнее позднего HTTP-ответа,
+    // особенно 401: прежний ответ не должен завершить новую сессию.
+    guard?.()
+
+    // Проверяем после body await: новый вход может вернуть прежнюю строку Bearer.
+    // Binary использует более строгий guard выше; обычный JSON сохраняет ApiError.
+    const currentToken = getToken()
+    if (res.status === 401 && !isRedirecting && !signal?.aborted && currentToken
+        && (sentSessionGeneration === undefined || sentSessionGeneration === sessionGeneration)
+        && sentAuthorization === `Bearer ${currentToken}`) {
       // На публичных страницах 401 от фоновых запросов — не «истёкшая сессия»: не шумим
       // и не редиректим (иначе фоновый 401 сбивает свежий вход). Приглашение и сброс
       // пароля открывают как раз те, у кого сессии нет или она протухла: `/auth/me`
@@ -188,9 +233,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
         import('sonner').then(({ toast }) => {
           toast.error('Сессия истекла', { description: 'Войдите в систему снова' })
         })
-        setTimeout(() => {
-          window.location.href = `${base}login`
-        }, 1500)
+        sessionRedirectTimer = setTimeout(redirectExpiredSession, 1500)
       }
     }
 
@@ -216,6 +259,13 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
     throw new ApiError(res.status, detail)
   }
+}
+
+async function handleResponse<T>(
+  res: Response, sentAuthorization: string | undefined, sentSessionGeneration: number,
+  signal?: AbortSignal, contextGuard?: () => void,
+): Promise<T> {
+  if (!res.ok) await handleResponseError(res, sentAuthorization, signal, contextGuard, sentSessionGeneration)
 
   if (res.status === 204) return undefined as T
   const contentType = res.headers.get('content-type')?.toLowerCase() ?? ''
@@ -223,8 +273,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
     throw new ApiError(502, 'Сервис вернул неожиданный ответ. Обновите страницу или повторите позже.')
   }
   try {
-    return await res.json()
+    const value = await res.json()
+    contextGuard?.()
+    return value
   } catch {
+    contextGuard?.()
     throw new ApiError(502, 'Сервис вернул повреждённые данные. Обновите страницу или повторите позже.')
   }
 }
@@ -238,8 +291,28 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   return h
 }
 
+/** Граница отложенного действия: проверяется вызывающим до его побочных эффектов. */
+export function captureApiContextGuard(): () => void {
+  const generation = binaryContextGeneration
+  const captured = headers()
+  return () => {
+    const current = headers()
+    if (generation !== binaryContextGeneration
+        || captured.Authorization !== current.Authorization
+        || captured['X-Company-Id'] !== current['X-Company-Id']
+        || captured['X-Organization-Id'] !== current['X-Organization-Id']) {
+      throw new DOMException('Контекст запроса изменился', 'AbortError')
+    }
+  }
+}
+
 /** GET запрос */
-export async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+export async function get<T>(
+  path: string,
+  params?: Record<string, string | number | undefined>,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  options?.signal?.throwIfAborted()
   if (isDemoMode()) return demoGet<T>(path, params)
   // База обязательна: в контейнере VITE_API_URL пуст (API на том же origin), и без второго
   // аргумента `new URL('/api/…')` бросает «Invalid URL» — падали все GET с параметрами.
@@ -249,51 +322,70 @@ export async function get<T>(path: string, params?: Record<string, string | numb
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v))
     }
   }
-  const res = await fetch(url.toString(), { headers: headers() })
-  return handleResponse<T>(res)
+  const requestHeaders = headers()
+  const generation = sessionGeneration
+  const res = await fetch(url.toString(), { headers: requestHeaders, signal: options?.signal })
+  return handleResponse<T>(res, requestHeaders.Authorization, generation, options?.signal)
 }
 
 /** POST запрос (JSON) */
-export async function post<T>(path: string, body?: unknown): Promise<T> {
+export async function post<T>(path: string, body?: unknown, options?: { contextGuard?: () => void }): Promise<T> {
+  const contextGuard = options?.contextGuard
+  contextGuard?.()
   if (isDemoMode()) return demoPost<T>(path)
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: headers({ 'Content-Type': 'application/json' }),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  return handleResponse<T>(res)
+  const requestHeaders = headers({ 'Content-Type': 'application/json' })
+  const generation = sessionGeneration
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch (error) {
+    contextGuard?.()
+    throw error
+  }
+  contextGuard?.()
+  return handleResponse<T>(res, requestHeaders.Authorization, generation, undefined, contextGuard)
 }
 
 /** PATCH запрос */
 export async function patch<T>(path: string, body: unknown): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers({ 'Content-Type': 'application/json' })
+  const generation = sessionGeneration
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PATCH',
-    headers: headers({ 'Content-Type': 'application/json' }),
+    headers: requestHeaders,
     body: JSON.stringify(body),
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation)
 }
 
 /** PUT запрос */
 export async function put<T>(path: string, body: unknown): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers({ 'Content-Type': 'application/json' })
+  const generation = sessionGeneration
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PUT',
-    headers: headers({ 'Content-Type': 'application/json' }),
+    headers: requestHeaders,
     body: JSON.stringify(body),
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation)
 }
 
 /** DELETE запрос */
 export async function del<T = void>(path: string): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers()
+  const generation = sessionGeneration
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'DELETE',
-    headers: headers(),
+    headers: requestHeaders,
   })
-  return handleResponse<T>(res)
+  return handleResponse<T>(res, requestHeaders.Authorization, generation)
 }
 
 /** POST multipart (файлы) */
@@ -307,20 +399,26 @@ export async function upload<T>(
    * узнать ход отправки в браузере нет, у `fetch` его не существует.
    */
   onProgress?: (доля: number) => void,
+  /** Сохранить cross-origin cookies для явно запросившего их consumer. */
+  options?: { credentials?: 'include' },
 ): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
+  const requestHeaders = headers()
+  const generation = sessionGeneration
   if (!onProgress) {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: headers(), // НЕ ставим Content-Type — browser сам добавит boundary
+      headers: requestHeaders, // НЕ ставим Content-Type — browser сам добавит boundary
       body: formData,
+      credentials: options?.credentials,
     })
-    return handleResponse<T>(res)
+    return handleResponse<T>(res, requestHeaders.Authorization, generation)
   }
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${BASE_URL}${path}`)
-    for (const [k, v] of Object.entries(headers())) xhr.setRequestHeader(k, v)
+    if (options?.credentials === 'include') xhr.withCredentials = true
+    for (const [k, v] of Object.entries(requestHeaders)) xhr.setRequestHeader(k, v)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
     }
@@ -332,7 +430,7 @@ export async function upload<T>(
         statusText: xhr.statusText,
         headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
       })
-      handleResponse<T>(тело).then(resolve, reject)
+      handleResponse<T>(тело, requestHeaders.Authorization, generation).then(resolve, reject)
     }
     xhr.onerror = () => reject(new ApiError(0, 'Не удалось связаться с сервером'))
     xhr.ontimeout = () => reject(new ApiError(0, 'Загрузка не уложилась во время ожидания'))
@@ -340,10 +438,34 @@ export async function upload<T>(
   })
 }
 
-/** Скачать файл (blob) */
-export async function downloadBlob(path: string): Promise<Blob> {
-  if (isDemoMode()) return demoWrite<Blob>()
-  const res = await fetch(`${BASE_URL}${path}`, { headers: headers() })
-  if (!res.ok) throw new ApiError(res.status, res.statusText)
-  return res.blob()
+/** Общий binary transport: снимок заголовков и проверка каждого await. */
+async function fetchBinary(path: string, signal?: AbortSignal) {
+  signal?.throwIfAborted()
+  if (isDemoMode()) return demoWrite<never>()
+  const requestHeaders = headers()
+  const generation = binaryContextGeneration
+  const guard = () => {
+    signal?.throwIfAborted()
+    const currentHeaders = headers()
+    if (generation !== binaryContextGeneration
+        || requestHeaders.Authorization !== currentHeaders.Authorization
+        || requestHeaders['X-Company-Id'] !== currentHeaders['X-Company-Id']
+        || requestHeaders['X-Organization-Id'] !== currentHeaders['X-Organization-Id']) {
+      throw new DOMException('Контекст выгрузки изменился', 'AbortError')
+    }
+  }
+  const res = await fetch(`${BASE_URL}${path}`, { headers: requestHeaders, signal })
+  guard()
+  await handleResponseError(res, requestHeaders.Authorization, signal, guard)
+  guard()
+  const blob = await res.blob()
+  guard()
+  return { res, blob, guard }
+}
+
+/** Скачать файл (blob); прежний вызов без options остаётся совместимым. */
+export async function downloadBlob(path: string, options?: { signal?: AbortSignal }): Promise<Blob> {
+  const { blob, guard } = await fetchBinary(path, options?.signal)
+  guard()
+  return blob
 }

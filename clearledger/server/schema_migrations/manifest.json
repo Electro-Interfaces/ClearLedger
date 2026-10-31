@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "revisions": [
+    {
+      "artifact_sha256": "301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1",
+      "files": {
+        "revisions/0001_contract.json": "19450cd978b88df859aa6f4d33ad745f48fb4f0b55a17850aa875e75b66a0194",
+        "revisions/0001_product_api_budgets.sql": "98da0597f9e4d6a3d21326a310496b790753a5d9e766cfec8005d84641dd2ac9",
+        "revisions/catalog_v1.py": "ae3c42d51a7e7e37ee293b2c64f73addd421cf792b63af6bed6c36b1ed5f24f5",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0001_product_api_budgets",
+      "namespace": "core",
+      "ordinal": 1,
+      "parent": null,
+      "runner_format": 1,
+      "source_commit": "b55d99597ae0dbd3986e8cde0469f7e117d18177"
+    },
+    {
+      "artifact_sha256": "203ee350a47fb3e12d2e2fb6d292fc0e1a19b4cd3cd348b507551cf233cae2f0",
+      "files": {
+        "revisions/0002_calendar_contract.json": "482e1288effc7eed97eda57ea27f31501b49000090ee65aa607c6e99d98634ad",
+        "revisions/0002_calendar_protocol_sequence.sql": "28d296c60bb1fa04534b2871febf8acd4163253156e6e00871fc6e5bad9b5835",
+        "revisions/catalog_v2.py": "6d60ec4e18b5e3c66808acede434f82641d4f7701ee3867a8cbb9159b0d80dd1",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0002_calendar_protocol_sequence",
+      "namespace": "core",
+      "ordinal": 2,
+      "parent": "0001_product_api_budgets",
+      "runner_format": 1,
+      "source_commit": "ba9fc30be815a554cb0c646a6c75f59e17c19fb0"
+    },
+    {
+      "artifact_sha256": "c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d",
+      "files": {
+        "revisions/0003_pulse_view_role_grants.sql": "cc59ec7b281db6120a81fb01dd5b9b7f1ff44c259b6b8b94993f91dbbd1e583b",
+        "revisions/0003_pulse_view_role_grants_contract.json": "d7e78791a5792c606253f74ee15eca9b70a2baeff28aa56844759e548531846c",
+        "revisions/catalog_pulse_view_role_grants_v1.py": "6b291890dcd02a8ce019e7c1e85306b445b6a3ba0c20d4d05492c33e539b9540",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0003_pulse_view_role_grants",
+      "namespace": "core",
+      "ordinal": 3,
+      "parent": "0002_calendar_protocol_sequence",
+      "runner_format": 1,
+      "source_commit": "875929b3885d98ace8e370a72d62a825bf76960b"
+    }
+  ]
+}

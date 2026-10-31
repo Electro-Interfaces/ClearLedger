@@ -37,19 +37,6 @@ def uid_встречи(ev: CalendarEvent) -> str:
     return f"{ev.id}@conf.elsyplus" if своя_комната else f"{ev.id}@trek"
 
 
-def _sequence() -> int:
-    """Номер версии встречи для календаря получателя: только растёт.
-
-    Секунды от эпохи: хранить счётчик правок ради одного числа незачем. Были
-    минуты — перенос и отмена в одну минуту уходили с одним номером, и Outlook
-    вправе такое обновление пропустить (QA 27.10.2026). Секунды больше прежних
-    минут, так что уже разосланные приглашения новыми номерами перекрываются.
-    # ponytail: две правки в одну секунду получат один номер; нужен счётчик в
-    # строке встречи, если это начнёт встречаться.
-    """
-    return int(datetime.now(timezone.utc).timestamp())
-
-
 async def в_личку(db: AsyncSession, company_id, от: User, кому: User,
                   текст: str, заголовок: str) -> bool:
     """Строка в личную переписку двоих и push закрытой вкладке.
@@ -113,10 +100,11 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     `повод` — `invite`, `cancel` или `move`; для переноса `было` — прежнее
     начало. `только` — известить лишь этих людей (новые участники), `кроме` —
     всех, кроме них. Гостям приглашение уходит своим путём (`/guests`), здесь
-    они получают только отмену и перенос. Тот, кто действует, извещение себе
-    не получает: он и так знает.
+    они получают только отмену и перенос. Тот, кто действует, не получает чат
+    с собой, но получает календарное письмо по своим настройкам: его внешний
+    календарь тоже должен узнать новое время или отмену.
     """
-    from app.services import email_service, ics, jitsi, notify, space_time
+    from app.services import calendar_protocol, email_service, ics, jitsi, notify, space_time
 
     отмена = повод == "cancel"
     когда = _когда(ev)
@@ -128,9 +116,8 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         if ev.conference_url:
             # Кого ждут в комнате — видно сразу: ведущий впускает гостей, без
             # него первые пять минут никто не откроет конференцию.
-            from app.routers.conf_router import ведущие_встречи
             имена = list((await db.execute(select(User.name).where(
-                User.id.in_(await ведущие_встречи(db, ev))))).scalars())
+                User.id.in_(await jitsi.meeting_hosts(db, ev))))).scalars())
             if имена:
                 строка += "\nВедущие: " + ", ".join(sorted(имена))
     elif отмена:
@@ -153,7 +140,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
 
     люди = (await db.execute(select(User).join(
         CalendarAttendee, CalendarAttendee.user_id == User.id).where(
-        CalendarAttendee.event_id == ev.id, User.id != кто.id))).scalars().all()
+        CalendarAttendee.event_id == ev.id))).scalars().all()
     люди = [ч for ч in люди if (только is None or ч.id in только)
             and not (кроме and ч.id in кроме)]
     # Отозванному гостю ни переноса, ни отмены: приглашение у него уже снято.
@@ -169,7 +156,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     хозяин = (await db.get(User, ev.organizer_id)) if ev.organizer_id else None
     хозяин = хозяин or кто
     чужие = [(г.email, г.name) for г in гости]
-    номер = _sequence()
+    номер = calendar_protocol.version(ev)
 
     def файл(uid: str, кому: list[tuple[str, str | None]]) -> str:
         return ics.event_ics(
@@ -189,6 +176,8 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
 
     чатом = письмом = 0
     for человек in люди:
+        if человек.id == кто.id:
+            continue
         try:
             значок = "📅 " if повод == "invite" else "❌ " if отмена else "🕑 "
             await в_личку(db, ev.company_id, кто, человек, значок + строка, тема)

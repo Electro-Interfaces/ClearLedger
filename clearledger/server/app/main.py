@@ -4,6 +4,8 @@ FastAPI приложение с CORS, роутерами, startup seed.
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +25,8 @@ from app.database import (
     async_session_factory,
     create_all,
     database_startup_lock,
+    preflight_startup_sources,
+    require_startup_schema,
     get_db,
 )
 from app.routers import management_router
@@ -130,6 +134,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("clearledger")
+from app.api_access_logging import install_oauth_access_filters
+
+install_oauth_access_filters()
 
 settings = get_settings()
 
@@ -185,6 +192,7 @@ async def _prepare_database(started_before: datetime) -> None:
 
 async def _prepare_database_once(started_before: datetime) -> None:
     """Выполнить DDL/seed один раз на контейнер, а не по разу на worker."""
+    await require_startup_schema()
     instance_id = os.getenv("HOSTNAME", "").strip() if settings.app_env == "prod" else ""
     if not instance_id:
         await _prepare_database(started_before)
@@ -245,6 +253,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Gunicorn запускает два процесса. Без общего лока оба одновременно меняют
     # схему и делают check-then-insert seed, что даёт гонки на DDL и unique.
+    preflight_startup_sources()
+    await require_startup_schema()
     async with database_startup_lock():
         await _prepare_database_once(started_at)
 
@@ -483,6 +493,21 @@ app.add_middleware(
 # Роутеры — все под /api
 API_PREFIX = "/api"
 
+# Версионированный product API имеет собственный verifier и закрытые docs URLs.
+# Mount не запускает lifespan дочернего приложения: проверяем реестр явно.
+from app.api_contracts import policy_registry
+from app.product_api import create_product_api
+
+product_api = create_product_api(
+    issuer=settings.partner_oauth_issuer or None,
+    # Стабильно между workers/restarts, с отдельным криптографическим назначением.
+    cursor_key=hmac.digest(settings.secret_key.encode(), b"elsyplus/product-api/cursor/v1", hashlib.sha256),
+    source_revision=os.environ.get("SOURCE_REVISION", "unverified"),
+)
+policy_registry(product_api)
+app.state.product_api = product_api
+app.mount("/api/v1", product_api)
+
 app.include_router(management_router.router, prefix=API_PREFIX)
 app.include_router(auth_router.router, prefix=API_PREFIX)
 # Журнал сбоев интерфейса: открыт без токена — экран входа падает до входа.
@@ -574,6 +599,15 @@ work_contexts.register(ObjectsContext())
 app.include_router(work_contexts_router.router, prefix=API_PREFIX)
 app.include_router(info_router.router, prefix=API_PREFIX)   # «Инфо»: знание пространства
 app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаза 0): лаунчер + handoff + JWKS
+from app.routers import partner_admin_router, partner_oauth_router
+from app.services.partner_identity import PartnerProblem, problem_handler
+app.add_exception_handler(PartnerProblem, problem_handler)
+app.include_router(partner_admin_router.router, prefix=API_PREFIX)
+app.include_router(partner_oauth_router.router, prefix=API_PREFIX)
+app.include_router(partner_oauth_router.well_known_router)
+from app.routers import docs_portal_router
+app.include_router(docs_portal_router.router, prefix=API_PREFIX)
+app.include_router(partner_oauth_router.consent_router, prefix=API_PREFIX)
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
 app.include_router(space_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр объектов пространства
 app.include_router(core_router.router, prefix=API_PREFIX)  # ElsyPlus Core: состояние Ядра (Центр управления)
@@ -644,6 +678,11 @@ async def live_check():
 async def readiness_check(db: AsyncSession = Depends(get_db)):
     """Readiness: рабочая БД, обязательная схема и доступное хранилище файлов."""
     try:
+        if settings.managed_core_budget_enabled:
+            from app.services.schema_version_gate import require_connection
+            await require_connection(await db.connection(), settings)
+        from app.services.pulse_view_role_schema import require_connection as require_pulse_schema
+        await require_pulse_schema(await db.connection())
         schema_ready = await db.scalar(text("""
             SELECT count(*) = 20
               FROM pg_class AS c

@@ -2203,15 +2203,90 @@ TASK_ASSIGNMENT_MIGRATION_DDL = (
 )
 
 
+async def _assert_bootstrap_namespace(conn) -> str:
+    """Refuse search_path fallback to another application's table namespace.
+
+    Unqualified metadata belongs to current_schema(), including standalone public.
+    Explicitly qualified tables retain their own namespace (for example edge).
+    checkfirst alone tests visibility, which does not establish this ownership.
+    """
+    from app.services.pulse_view_role_schema import namespace_path_is_explicit
+    probe = (await conn.execute(text("SELECT pg_catalog.current_schema() AS namespace, "
+        "pg_catalog.current_setting('search_path') AS configured_path"))).mappings().one()
+    namespace = probe["namespace"]
+    if not namespace_path_is_explicit(namespace, probe["configured_path"]):
+        raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
+    names = sorted({table.name for table in Base.metadata.tables.values() if table.schema is None})
+    # Те же table-like relkind, что у PostgreSQL has_table в SQLAlchemy; не индексы/последовательности.
+    foreign = await conn.scalar(text("""SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+        WHERE c.relname = ANY(CAST(:names AS text[]))
+          AND c.relkind IN ('r', 'p', 'f', 'v', 'm')
+          AND pg_catalog.pg_table_is_visible(c.oid)
+          AND n.nspname <> :namespace
+    )"""), {"names": names, "namespace": namespace})
+    if foreign:
+        # Provisioning failure, not a data migration; do not expose catalog names.
+        raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
+
+    return namespace
+
+
+def preflight_startup_sources() -> None:
+    """Offline source/config admission before any startup socket or owner lock."""
+    from app.services.schema_version_gate import preflight
+    from schema_migrations.runner import preflight_bootstrap_source
+    preflight(settings)
+    preflight_bootstrap_source()
+
+
+async def require_startup_schema() -> None:
+    """Read-only actual namespace/Core audience admission; explicit public may be fresh.
+
+    Called before the startup lock, then again under it before the marker. It
+    never provisions, stamps, changes defaults/ACL, or waives a Core catalogue.
+    """
+    preflight_startup_sources()
+    from app import models_product_budget  # register every namespace-owned name
+    from app.services.schema_version_gate import require_connection
+    from app.services.pulse_view_role_schema import require_connection as require_pulse
+    async with engine.connect() as conn:
+        conn = await conn.execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
+        async with conn.begin():
+            await require_connection(conn, settings)
+            namespace = await _assert_bootstrap_namespace(conn)
+            if namespace not in {"core", "public"}:
+                raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
+            if namespace == "core":
+                await require_pulse(conn)
+
+
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     from app.services.phone_e164 import PHONE_FUNCTION_DDL
+    from app import models_product_budget  # noqa: F401 — register before namespace guard/create_all
 
     async with engine.begin() as conn:
-        # Функция — раньше таблиц: на ней стоят генерируемые колонки телефонов,
-        # и в новой базе create_all заводит их сразу вместе с таблицей.
+        if settings.managed_core_budget_enabled:
+            from app.services.schema_version_gate import require_connection
+            await require_connection(conn, settings)
+        namespace = await _assert_bootstrap_namespace(conn)
+        from app.models import PulseViewRoleGrant
+        from app.services.pulse_view_role_schema import require_connection as require_pulse_schema
+        if namespace == "core":
+            # Managed Core audience DDL belongs only to explicit revision0003.
+            # Fail before legacy DDL/seed/jobs; fresh provisioning is separate.
+            await require_pulse_schema(conn)
         await conn.execute(text(PHONE_FUNCTION_DDL))
-        await conn.run_sync(Base.metadata.create_all)
+        excluded = {PulseViewRoleGrant.__table__} if namespace == "core" else set()
+        if settings.managed_core_budget_enabled:
+            excluded.add(models_product_budget.ProductAPIBudget.__table__)
+        tables = [table for table in Base.metadata.tables.values() if table not in excluded]
+        await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+        if namespace == "public":
+            # Legacy fresh public keeps ORM provisioning, verified before commit.
+            await require_pulse_schema(conn)
 
     # Инкрементальные миграции для существующих таблиц
     async with engine.begin() as conn:
@@ -3252,6 +3327,8 @@ async def create_all() -> None:
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS owner_user_id UUID",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS next_action VARCHAR(300)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS workspace_data JSONB",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS dismantle_location_ids JSONB",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS decommissioned_on VARCHAR(10)",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_purpose VARCHAR(40)",
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS audience VARCHAR(16) NOT NULL DEFAULT 'mixed'",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_context_purpose ON chat_rooms (company_id, scope_ref, scope_purpose) WHERE scope_purpose IS NOT NULL AND is_active = true",

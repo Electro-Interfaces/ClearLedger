@@ -1,0 +1,2766 @@
+{
+  "schemaVersion": 1,
+  "status": "SOURCE_DESIGN_PENDING_ROOT_REVIEW",
+  "date": "2026-10-31",
+  "workerExecution": {
+    "Node": 0,
+    "appImports": 0,
+    "testCollection": 0,
+    "SQL": 0,
+    "requests": 0,
+    "PTY": 0,
+    "installers": 0
+  },
+  "scope": {
+    "allowedChanges": [
+      "clearledger/docs/api/AUDITOR_COMPOSITION_DESIGN_20261031.md",
+      "clearledger/docs/api/AUDITOR_COMPOSITION_DESIGN_20261031.json"
+    ],
+    "productionChanges": 0,
+    "globalCompletion": false
+  },
+  "sourcePins": {
+    "Ledger": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+    "Deploy": "48c84d81c061424578c10e238d3a81f22d68fa44"
+  },
+  "sourceManifest": [
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "AGENTS.md",
+      "bytes": 5879,
+      "gitBlobSHA1": "c434289759decb04011acea75d33598bdf544ca6",
+      "sha256": "22f485f2c6f26d963a79a4425b8ce074961b226e67f443bd0ba3af82ebb5ccba"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "CLAUDE.md",
+      "bytes": 14479,
+      "gitBlobSHA1": "97ab56a9545a5844ea0057a80f96a0f682cf4e5b",
+      "sha256": "3cf8b5e899f81007f36a3286767e3ab22680f9106c86457291974bda7f1f0e69"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "README.md",
+      "bytes": 16544,
+      "gitBlobSHA1": "c0e0ff8c8f4479621b293f4cfa69e43bdb7afce9",
+      "sha256": "d111e85ade4fd5752c7b97f104ff77e4fc8b6ef1b2dc937e1ba57795f2cf3a89"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "apps/auditor.yml",
+      "bytes": 2996,
+      "gitBlobSHA1": "7c02c4c1a71149514c6d452e7f519f4aff6736af",
+      "sha256": "49ab635a1cd39f5eef265dbb32579d5ea4e23f76a7ab1bed8e8e66734b765d0c"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "docs/AGENT-MEMORY.md",
+      "bytes": 4404,
+      "gitBlobSHA1": "e45238ff5748fdf440bf73e0681ed17c48c11ec2",
+      "sha256": "bcaf67c3a38c464299423daf88f45154b37d60db3c055d95a8bd03fa672de554"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "docs/AUDITOR.md",
+      "bytes": 66542,
+      "gitBlobSHA1": "7c879d2bae801c3e071adc5750d98af8f5b6ac6f",
+      "sha256": "b28b0bb611fe7f84250b7f867d062b3a1fd189a86516468db35d999a00b47971"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "docs/CURRENT-STATE.md",
+      "bytes": 397255,
+      "gitBlobSHA1": "61fe751ab20d216eb3748b9688bae236aec7d0a6",
+      "sha256": "6d983be3d1e6ae4bfd2ee511923c67d505f235e8178fc48c888dd7c58ddd09e1"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "docs/WORKFLOW.md",
+      "bytes": 13448,
+      "gitBlobSHA1": "b1a173d81cb8396c4549faf5f8e0db51e981e201",
+      "sha256": "c763fae2bbb46d372d7c6a9f6293727ba4fca05ff70993f8f1a4a4578c70d4eb"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "scripts/auditor",
+      "bytes": 2247,
+      "gitBlobSHA1": "89a918d35a9d0431886253cbb33dbe92437e5d6d",
+      "sha256": "8b25117866606e1950c30babf44333d750bf25c88924e3763c7a64dc4cca34e0"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "scripts/auditor-cli.sh",
+      "bytes": 2077,
+      "gitBlobSHA1": "2d875af44507484d6e22993b986b3ce3ed296ba9",
+      "sha256": "4c9e4712eae4c7761f047cd0c75676b5a8c92dc17e753c3a20b83bbe411ec552"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/Dockerfile",
+      "bytes": 16693,
+      "gitBlobSHA1": "68e2227a78399acad5da061d604562f359b846a0",
+      "sha256": "c3b90aac4e679c3d6970d441050fb9563488bb1af9fcbc5397d3d0f4567974a5"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/actions.js",
+      "bytes": 8243,
+      "gitBlobSHA1": "8d8733df8c6cac8d41a96cb99794f2c614488454",
+      "sha256": "029d7dc3a6d442295537fcc46f01d8d0af3abf6c4da731fbbfd2215d024b3bf0"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/actions.test.mjs",
+      "bytes": 2762,
+      "gitBlobSHA1": "3490531dc5280cb87d3fe65189b92ca32f7fafba",
+      "sha256": "de5bb6802dcf3aa40ee66027edd4f9d097e41633cae7a913b39899131b2342e7"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/kits/accounting/scripts/profile.py",
+      "bytes": 18190,
+      "gitBlobSHA1": "81a22736ff7eaa08e04b9ff5656f8c6e9aa22a79",
+      "sha256": "4ec6715ba184aedd2c9442c370ab2d1ef0450c41ec9388c664a561fea6ec3407"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/kits/accounting/scripts/update-normativy.py",
+      "bytes": 11504,
+      "gitBlobSHA1": "c74d2f48c60a9c4496a8fff6c0861cab00ef277a",
+      "sha256": "b2122a20c94a472fd950b77dc64465c581c29d41e59f9a91b0137dbc833a9af5"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/package.json",
+      "bytes": 312,
+      "gitBlobSHA1": "0f94bf5a26ac22e975ec12732c0d1316263ed21a",
+      "sha256": "402b96cf9e8899f3119722cfb70866502abebdff4609266074f7c9a81e0c3554"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/server.js",
+      "bytes": 175704,
+      "gitBlobSHA1": "907b45160706242e66b282e70787a77a2188acec",
+      "sha256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/shrink.js",
+      "bytes": 3046,
+      "gitBlobSHA1": "8c246364fa8b2a61c186ecd8bcf6987962453c62",
+      "sha256": "a8b2dea4ecf649191aad9f3459d61735080f9967b589f3b0f448cfb7aef68cb1"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/shrink.test.mjs",
+      "bytes": 2141,
+      "gitBlobSHA1": "e3319c72c5148e36fe3b2d31aa0a42edf035e91d",
+      "sha256": "e94c30518d4a648db280e541de5354e61d56965bbd42e4927a05cdaa2fd7d79c"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/skills.js",
+      "bytes": 26274,
+      "gitBlobSHA1": "b54486e3f3254ed299a88d404b7a50538e283d76",
+      "sha256": "80ce8b67d8521f134aa45e67e136a96adb489ea727cd0c81daa96c7dbe443c54"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/work/scripts/check-knowledge.py",
+      "bytes": 14994,
+      "gitBlobSHA1": "746016a974d26e024245ddb9ea1455b5b46c9675",
+      "sha256": "9e08cc9082bda3ee5fda21873d06ea44b5c59873f61e806b3c2d51c4fe99336a"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/work/scripts/check-settings.py",
+      "bytes": 8558,
+      "gitBlobSHA1": "0fb31de5169e48952f8a8326ea30eb6a5d3c67d2",
+      "sha256": "589b54587bc965447476227c756368f77d9ac073e850636214943d6081a11724"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/work/scripts/save_knowledge.py",
+      "bytes": 4228,
+      "gitBlobSHA1": "bc49ae1a12c01fcd4d0bf68aebe3dfc0c8ee6a99",
+      "sha256": "40403e5c127dd246cfeaa9ae2fd161184152047ba78c5ede8dddccab695085da"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/workshop.js",
+      "bytes": 2279,
+      "gitBlobSHA1": "f1ac7370049e68d5ff8a58ed2ce680270ee2b3d3",
+      "sha256": "7349014786112ea2e611c0876319c1c01adf956cfc6b86b77cadfd4f79ad5970"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "services/auditor/workshop.test.mjs",
+      "bytes": 2177,
+      "gitBlobSHA1": "c26b75a2738fb041e271a5e18e7e988064252f84",
+      "sha256": "c0a1b09eb57b560fdb402dcc2e24f54fa371a6b2d29bfe6a1ebe9ce2bcf3cefc"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "stacks/_template/compose.yml",
+      "bytes": 15308,
+      "gitBlobSHA1": "e992a64ad41903eb3c41721cd73bfa01ab22856b",
+      "sha256": "accef9098fb08e7ab7f4d5b8f26a9b8eda707ba5c0092ac774ed64ba1cfef1ea"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "stacks/_template/nginx.conf",
+      "bytes": 24410,
+      "gitBlobSHA1": "2c6c8a29e3199ca4bd63835682ca6e0c1a5dcbb7",
+      "sha256": "f946e672627bc7942d3d70190805937e7795d11d1eaa556b216db31e8d25fde9"
+    },
+    {
+      "repository": "Deploy",
+      "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+      "file": "stacks/_template/services/auditor.yml",
+      "bytes": 13573,
+      "gitBlobSHA1": "e1704bf0a3caf69947eaa3ba6bf97b755702d4f0",
+      "sha256": "f80f75fca3c4b3b7afef020d0cfd8a74ef8ec1eb27d0c93537d997ecd6c24b48"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/server/app/auth.py",
+      "bytes": 37575,
+      "gitBlobSHA1": "9c79caf49a51d6b6f731e5e1ccbc82cad8fa4ae2",
+      "sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/server/app/main.py",
+      "bytes": 46708,
+      "gitBlobSHA1": "4d8a567f3dd985a23352cc402b8b9b42926181eb",
+      "sha256": "aa3f045a41e5235eb421be11ca13f3d34670b1d0ed6a36b9a258f7634618c0ed"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/server/app/routers/auditor_router.py",
+      "bytes": 13215,
+      "gitBlobSHA1": "757622ce02cd995d3067ac40d703cb93c6c96e2e",
+      "sha256": "af35c3e97ca95d19e74c13ece7be23c37cb585e55d6d10ec020693a9fdc59e8d"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/components/auditor/AuditorPanel.tsx",
+      "bytes": 22945,
+      "gitBlobSHA1": "5db786705e527800db4df2ea0477fda83d998f4a",
+      "sha256": "41bb0fa0784a86acba7a561b7a5236499658c1d74d0fd8148472c1f0099c17e1"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/components/auditor/AuditorTerminal.tsx",
+      "bytes": 41776,
+      "gitBlobSHA1": "668c65f3121f03dea4ba3a33eab7a4feafafd6c2",
+      "sha256": "c89606e968e62c184f26a4723f79db359344fd365d2ac04af5845f5c5523078b"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/components/auditor/DictateButton.tsx",
+      "bytes": 4218,
+      "gitBlobSHA1": "11fa9ea4083f3b1626f7d1ca7a5e43a62a4d9d33",
+      "sha256": "1e9abd60f99176f3b72b4017ef23a63c65e12ad84b686526b4fd3e312d6d815f"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/lib/auditorExportContext.test.ts",
+      "bytes": 18575,
+      "gitBlobSHA1": "41b9bedffd41c07a0caf860ea5159cfbabaec36d",
+      "sha256": "d9f3f51768c90a5735d5d675e7b7e14eadd6de81e89679b73e23c26f70433bd1"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/lib/auditorSseContext.test.ts",
+      "bytes": 19092,
+      "gitBlobSHA1": "facf2adc1ba59c37f3116f6fc8f48bb09b002007",
+      "sha256": "f937e48337b41a62f6d13ec88c76218cf3d34cb61de3e4f84e73cd17159ec338"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/pages/AuditorPage.tsx",
+      "bytes": 50695,
+      "gitBlobSHA1": "aef2cdc6a0d0840807c8deffa551e368ec3aae87",
+      "sha256": "40ef132fed68989e2c9f49ae696b367b7d1e22fd3f65cc1a8f6a1df341b8fc2f"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/pages/partner/AuditorPage.tsx",
+      "bytes": 24734,
+      "gitBlobSHA1": "f88fb300385b62e53ab2dc8b2905502daab83dc8",
+      "sha256": "e8c6427df895ec11a66adcdb1eeb3ca571fa9185908e63b7499eb5b80e754ba8"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/services/apiClient.ts",
+      "bytes": 22731,
+      "gitBlobSHA1": "caa0231db0db1710849989aa50c2069235060738",
+      "sha256": "e392ea29cb3708b256510220eb04c564d2529fdede1384aaaeb109651c31a898"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/services/auditorService.ts",
+      "bytes": 6698,
+      "gitBlobSHA1": "1076e3a06f2ad495e4e1dece6254efd00e51b674",
+      "sha256": "ab6ad6d439db0f776be54960bb9be3827921e9702c616a81206942ab6b6cee53"
+    },
+    {
+      "repository": "Ledger",
+      "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+      "file": "clearledger/src/services/spaceAuditorService.ts",
+      "bytes": 26725,
+      "gitBlobSHA1": "adfaf019d9212fd999c066ccd5210e55985b79b2",
+      "sha256": "8c03974bc4f987245821f84f0d33013a915e1b1835c189a61e2cc2e407dc8afe"
+    }
+  ],
+  "sourceManifestSHA256": "ce35b2bab9b5783dc9953f6a00bc98253ba5769dfd5402c7c2a0ce19ed92522d",
+  "sourceManifestSummary": {
+    "files": 41,
+    "bytes": 1211954,
+    "AuditorLocalJSModules": 5,
+    "AuditorJSBytes": 215546
+  },
+  "rootFirstpass": {
+    "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/root-auditor-entry-source-review-20261031/source-review.json",
+    "bytes": 2875,
+    "sha256": "7be31828d37fc3424975850210bfd06bb1a1276f3630e712a7b31009835f60d9",
+    "parity": [
+      {
+        "file": "services/auditor/server.js",
+        "bytes": 175704,
+        "sha256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "equalRootFirstpass": true,
+        "equalHistorical03450b4": true
+      },
+      {
+        "file": "services/auditor/skills.js",
+        "bytes": 26274,
+        "sha256": "80ce8b67d8521f134aa45e67e136a96adb489ea727cd0c81daa96c7dbe443c54",
+        "equalRootFirstpass": true,
+        "equalHistorical03450b4": true
+      },
+      {
+        "file": "services/auditor/actions.js",
+        "bytes": 8243,
+        "sha256": "029d7dc3a6d442295537fcc46f01d8d0af3abf6c4da731fbbfd2215d024b3bf0",
+        "equalRootFirstpass": true,
+        "equalHistorical03450b4": true
+      },
+      {
+        "file": "services/auditor/shrink.js",
+        "bytes": 3046,
+        "sha256": "a8b2dea4ecf649191aad9f3459d61735080f9967b589f3b0f448cfb7aef68cb1",
+        "equalRootFirstpass": true,
+        "equalHistorical03450b4": true
+      },
+      {
+        "file": "services/auditor/workshop.js",
+        "bytes": 2279,
+        "sha256": "7349014786112ea2e611c0876319c1c01adf956cfc6b86b77cadfd4f79ad5970",
+        "equalRootFirstpass": true,
+        "equalHistorical03450b4": true
+      },
+      {
+        "file": "services/auditor/package.json",
+        "bytes": 312,
+        "sha256": "402b96cf9e8899f3119722cfb70866502abebdff4609266074f7c9a81e0c3554",
+        "equalRootFirstpass": true,
+        "equalHistorical03450b4": true
+      }
+    ],
+    "rangeClarification": {
+      "inclusiveLines": [
+        2112,
+        2221
+      ],
+      "sha256": "80799edeb6bfd04dfd918d19490fb2adce14decc7f3dc12358d2b3b86102bbac",
+      "constructorLine2222Excluded": true
+    }
+  },
+  "classification": {
+    "framework": "native node:http + ws, not Express",
+    "historical16NativePlus2Manual": "historical source evidence, not actual capture",
+    "sourceTerminalExactPathFamilies": 16,
+    "dispatcherSteps": 21,
+    "wireMethodUniverse": "UNKNOWN native parser; unrestricted predicate is symbolic, not expanded",
+    "actualRouteRegistrationInventory": "not introspectable as Express stack; NOTRUN",
+    "domainHumanPublicationOwners": "UNKNOWN"
+  },
+  "dispatcher": [
+    {
+      "id": "AUD-PARSE",
+      "order": 0,
+      "kind": "URL_parse_before_try",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2113,
+        "lineEnd": 2113,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "dcf6a3d924707e6d0f75aa1abd88335af3a95b869ec20b37cb5bf7ee2db0aabf"
+      },
+      "rawSource": "  const url = new URL(req.url, 'http://x')\n",
+      "predicate": "new URL(req.url, 'http://x')",
+      "path": {
+        "kind": "native_URL_pathname"
+      },
+      "method": null,
+      "handler": null,
+      "profile": {
+        "error": "URL constructor precedes try; rejection not converted by catch2210; native async callback rejection behavior NOTRUN"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H01",
+      "order": 1,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2115,
+        "lineEnd": 2125,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "47bafeec57fcdeda1e90d88356c0bf790af4b8148d6e08055ad798d706ba1af2"
+      },
+      "rawSource": "    if (url.pathname === '/health') {\n      return json(res, 200, {\n        ok: true, engine: ENGINE, cli: !!engineBin, auth: hasCredentials(), skills: SKILLS.length,\n        workshop: WORKSHOP_ENABLED,\n        // Кому показывать пункт «Мастерская»: по умолчанию админу, при флаге — всем.\n        workshop_all: WORKSHOP_ALL,\n        sources: MCP_SOURCES.filter((x) => (process.env[x.env] || '').trim()).map((x) => x.key),\n        dictation: await asrReachable(),\n        ...(oauthTokenProblem.reason ? { authProblem: oauthTokenProblem.reason } : {}),\n      })\n    }\n",
+      "predicate": "if (url.pathname === '/health') {",
+      "path": {
+        "kind": "exact",
+        "value": "/health"
+      },
+      "method": {
+        "kind": "unrestricted_after_native_parser",
+        "symbolic": "ALL",
+        "expanded": false
+      },
+      "handler": "inlineHealth",
+      "profile": {
+        "success": 200,
+        "body": "ok,engine,cli,auth,skills,workshop,workshop_all,sources,dictation,optional authProblem",
+        "auth": "none in callback; credential state and ASR network probe still invoked",
+        "effects": [
+          "hasCredentials",
+          "asrReachable(cache60s,fetch timeout4s)"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-G01",
+      "order": 2,
+      "kind": "shared_nonterminal_auth_gate",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2129,
+        "lineEnd": 2137,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "77d7d55d05d0c826f148095addf01fad744bbc110f1459db5abadb6d0027d0a4"
+      },
+      "rawSource": "    if (['/api/skills', '/api/methods', '/api/knowledge', '/api/prompts',\n         '/api/growth', '/api/sessions'].includes(url.pathname) && req.method === 'GET') {\n      const gAuth = req.headers.authorization || ''\n      if (!gAuth.startsWith('Bearer ')) return json(res, 401, { error: 'нужен токен пространства' })\n      const gCfg = await fetchSettings(gAuth, safeCompany(req.headers['x-company-id']))\n      if (gCfg.core_down) return json(res, 503, { error: CORE_DOWN })\n      if (!gCfg.ok) return json(res, 403, { error: 'нет доступа к этому пространству' })\n      req.agentCfg = gCfg\n    }\n",
+      "predicate": "['/api/skills','/api/methods','/api/knowledge','/api/prompts','/api/growth','/api/sessions'].includes(url.pathname) && req.method === 'GET'",
+      "path": {
+        "kind": "array",
+        "values": [
+          "/api/skills",
+          "/api/methods",
+          "/api/knowledge",
+          "/api/prompts",
+          "/api/growth",
+          "/api/sessions"
+        ]
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "fetchSettings",
+      "profile": {
+        "errors": [
+          401,
+          403,
+          503
+        ],
+        "sideEffects": [
+          "Core GET/settings with same Bearer and safeCompany query",
+          "req.agentCfg assignment"
+        ],
+        "success": "continue, not terminal response"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H02",
+      "order": 3,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2139,
+        "lineEnd": 2141,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "fb7f7f0ddb62d0bd405e772255382d40c682c5ea9e57841a65b69ff8f8341fc9"
+      },
+      "rawSource": "    if (url.pathname === '/api/skills' && req.method === 'GET') {\n      return json(res, 200, SKILLS.map(({ id, name, group, when }) => ({ id, name, group, when })))\n    }\n",
+      "predicate": "if (url.pathname === '/api/skills' && req.method === 'GET') {",
+      "path": {
+        "kind": "exact",
+        "value": "/api/skills"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "SKILLS.map",
+      "profile": {
+        "success": 200,
+        "sharedGate": "AUD-G01",
+        "body": "id,name,group,when only"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H03",
+      "order": 4,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2144,
+        "lineEnd": 2144,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "8e01e8fa37e85a0ef4ae689c70594ef7d04d431bf1e3efd545ce6846ee8b7eb7"
+      },
+      "rawSource": "    if (url.pathname === '/api/methods' && req.method === 'GET') return json(res, 200, readMethods())\n",
+      "predicate": "if (url.pathname === '/api/methods' && req.method === 'GET') return json(res, 200, readMethods())",
+      "path": {
+        "kind": "exact",
+        "value": "/api/methods"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "readMethods",
+      "profile": {
+        "success": 200,
+        "sharedGate": "AUD-G01",
+        "effects": [
+          "FS methods under work/home external skills"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H04",
+      "order": 5,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2145,
+        "lineEnd": 2157,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "5d85e9a884c634e16024e85f6ff6ad408f270764f58adb776aa8086112813812"
+      },
+      "rawSource": "    if (url.pathname === '/api/knowledge' && req.method === 'GET') {\n      // Личная карточка показывается только тому, чья она: её видно, когда запрос\n      // пришёл с токеном пространства. Без токена ручка отдаёт общее знание, как и\n      // раньше, — это состав агента, а не данные компании.\n      // 🔴 Слой ОРГАНИЗАЦИИ — это её документы: учётная политика, договоры, правила\n      // исключений. Раньше он уезжал по одному заголовку `X-Company-Id`, без токена:\n      // «состав агента читается открыто» верно для общего слоя, но не для клиентского.\n      // Без токена отдаём только знание пространства.\n      // Членство подтверждено гейтом выше: `req.agentCfg.ok` истинно только когда\n      // Ядро согласилось выдать настройки ИМЕННО этой организации спросившему.\n      const kCompany = safeCompany(req.headers['x-company-id'])\n      return json(res, 200, readKnowledge(kCompany, req.agentCfg?.user_id))\n    }\n",
+      "predicate": "if (url.pathname === '/api/knowledge' && req.method === 'GET') {",
+      "path": {
+        "kind": "exact",
+        "value": "/api/knowledge"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "readKnowledge",
+      "profile": {
+        "success": 200,
+        "sharedGate": "AUD-G01",
+        "scope": "safeCompany header + agentCfg.user_id; dynamic FS company/person knowledge"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H05",
+      "order": 6,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2161,
+        "lineEnd": 2179,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "f4195cdcb1e062bc2e050bb150ab19d3591f5121ebefab5ebc41b4902b0ae8cd"
+      },
+      "rawSource": "    if (url.pathname === '/api/sessions' && req.method === 'GET') {\n      // Свои вкладки, а не все в контейнере: чужие сеансы — это чужая работа, и знать\n      // о ней «занято/свободно» человеку незачем, тем более что подключиться к ним он\n      // теперь всё равно не может.\n      const meId = req.agentCfg?.user_id\n      let live = []\n      try {\n        live = execSync('tmux list-sessions -F \"#{session_name} #{session_many_attached}\"', { encoding: 'utf8' })\n          .trim().split('\\n').filter(Boolean)\n          .map((l) => l.split(' '))\n          .map(([name, many]) => ({ name, many: many === '1' }))\n      } catch { /* сервера tmux нет — значит и сеансов нет */ }\n      return json(res, 200, Array.from({ length: TABS }, (_, tab) => {\n        const s = live.find((x) => x.name === sessionName(tab, meId))\n        // `shared` — сеанс смотрят из нескольких окон. Это нормально, но объясняет\n        // узкое поле справа: окно идёт по самому маленькому из них.\n        return { tab, live: !!s, shared: !!s?.many }\n      }))\n    }\n",
+      "predicate": "if (url.pathname === '/api/sessions' && req.method === 'GET') {",
+      "path": {
+        "kind": "exact",
+        "value": "/api/sessions"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "inlineSessions",
+      "profile": {
+        "success": 200,
+        "sharedGate": "AUD-G01",
+        "effects": [
+          "execSync tmux list-sessions"
+        ],
+        "scope": "4 tabs filtered by derived current cfg.user_id session names; catch returns empty-live view"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H06",
+      "order": 7,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2180,
+        "lineEnd": 2180,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "5c7088acee788d78268200bd2f35f252a2c235527831a89d8dc818eacccebae8"
+      },
+      "rawSource": "    if (url.pathname === '/api/export-work' && req.method === 'GET') return await handleExportWork(req, res)\n",
+      "predicate": "if (url.pathname === '/api/export-work' && req.method === 'GET') return await handleExportWork(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/export-work"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "handleExportWork",
+      "profile": {
+        "success": 200,
+        "contentType": "application/gzip",
+        "contentDisposition": "attachment; filename=\"auditor-work.tar.gz\"",
+        "errors": [
+          401,
+          403,
+          404,
+          500,
+          503
+        ],
+        "auth": "separate Bearer/fetchSettings(can_manage); raw header String company, not shared gate",
+        "effects": [
+          "frozen DELIVERY_PATHS startup snapshot",
+          "execSync tar maxBuffer64MiB"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H07",
+      "order": 8,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2181,
+        "lineEnd": 2183,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "504daef9269c055a105c981ac625e1edd853a7c7a537c3ec372784879e225f4c"
+      },
+      "rawSource": "    if (url.pathname === '/api/prompts' && req.method === 'GET') {\n      return json(res, 200, readPrompts(String(req.headers['x-company-id'] || '')))\n    }\n",
+      "predicate": "if (url.pathname === '/api/prompts' && req.method === 'GET') {",
+      "path": {
+        "kind": "exact",
+        "value": "/api/prompts"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "readPrompts",
+      "profile": {
+        "success": 200,
+        "sharedGate": "AUD-G01",
+        "input": "String raw x-company-id after safeCompany gate"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H08",
+      "order": 9,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2184,
+        "lineEnd": 2184,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "083b46181180ad1509f0173a929afb0847e7f467151a8c5bcf631f7dc1db1ca6"
+      },
+      "rawSource": "    if (url.pathname === '/api/knowledge/upload' && req.method === 'POST') return await handleKnowledgeUpload(req, res)\n",
+      "predicate": "if (url.pathname === '/api/knowledge/upload' && req.method === 'POST') return await handleKnowledgeUpload(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/knowledge/upload"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "POST"
+      },
+      "handler": "handleKnowledgeUpload",
+      "profile": {
+        "success": 200,
+        "errors": [
+          400,
+          401,
+          403,
+          503
+        ],
+        "auth": "Bearer, fetchSettings, can_manage, nonempty raw company",
+        "input": "multipart25MiB, allowed extension set",
+        "effects": [
+          "optional temp write + markitdown child",
+          "company knowledge write",
+          "Git commit",
+          "cache.clear"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H09",
+      "order": 10,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2185,
+        "lineEnd": 2185,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "49e136d906699b05d6e6156b2d39ab06ca7f8aa86278fe75215accc95c01832e"
+      },
+      "rawSource": "    if (url.pathname === '/api/agent-file' && req.method === 'DELETE') return await handleDeleteFile(req, res, url)\n",
+      "predicate": "if (url.pathname === '/api/agent-file' && req.method === 'DELETE') return await handleDeleteFile(req, res, url)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/agent-file"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "DELETE"
+      },
+      "handler": "handleDeleteFile",
+      "profile": {
+        "success": 200,
+        "errors": [
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "auth": "Bearer, fetchSettings,can_manage",
+        "input": "URL.searchParams path, companyFile regex",
+        "effects": [
+          "git rm/commit",
+          "cache.clear"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H10",
+      "order": 11,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2186,
+        "lineEnd": 2186,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "cbea50867074ab4fde47a68b986a853d8fe7280eb2a494ef74ba49a5f213d606"
+      },
+      "rawSource": "    if (url.pathname === '/api/growth' && req.method === 'GET') return json(res, 200, readGrowth())\n",
+      "predicate": "if (url.pathname === '/api/growth' && req.method === 'GET') return json(res, 200, readGrowth())",
+      "path": {
+        "kind": "exact",
+        "value": "/api/growth"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "readGrowth",
+      "profile": {
+        "success": 200,
+        "sharedGate": "AUD-G01",
+        "effects": [
+          "execSync git log; catch []"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H11",
+      "order": 12,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2187,
+        "lineEnd": 2187,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "0651070205dc79300910b9149917aa0bd2335f0e6b6ab53bd21073a203c162f2"
+      },
+      "rawSource": "    if (url.pathname === '/api/agent-file' && req.method === 'PUT') return await handleSaveFile(req, res)\n",
+      "predicate": "if (url.pathname === '/api/agent-file' && req.method === 'PUT') return await handleSaveFile(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/agent-file"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "PUT"
+      },
+      "handler": "handleSaveFile",
+      "profile": {
+        "success": 200,
+        "errors": [
+          400,
+          401,
+          403,
+          503
+        ],
+        "auth": "Bearer/fetchSettings; own user card OR can_manage; preserve exact branch distinctions",
+        "input": "JSON path/body, safeRel/spaceFile/companyFile/skill regex, body<=200000characters",
+        "effects": [
+          "FS write",
+          "Git commit",
+          "void Core logEvent",
+          "cache.clear"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H12",
+      "order": 13,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2188,
+        "lineEnd": 2197,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "9e5d13113110bf40f4612c3a7939aedb350a2b2b937aae1a54bd0a79dc542b14"
+      },
+      "rawSource": "    if (url.pathname === '/api/reload' && req.method === 'POST') {\n      // Пересчёт дёргает psql и python-скрипты минутами и глушит процесс целиком —\n      // такое не может быть открытым: раньше ручку мог позвать кто угодно снаружи.\n      const rAuth = req.headers.authorization || ''\n      if (!rAuth.startsWith('Bearer ')) return json(res, 401, { error: 'нужен токен пространства' })\n      const rCfg = await fetchSettings(rAuth, String(req.headers['x-company-id'] || ''))\n      if (rCfg.core_down) return json(res, 503, { error: CORE_DOWN })\n      if (!rCfg.can_manage) return json(res, 403, { error: 'Пересчёт запускает администратор пространства' })\n      return handleReload(res)\n    }\n",
+      "predicate": "if (url.pathname === '/api/reload' && req.method === 'POST') {",
+      "path": {
+        "kind": "exact",
+        "value": "/api/reload"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "POST"
+      },
+      "handler": "handleReload",
+      "profile": {
+        "success": 200,
+        "errors": [
+          401,
+          403,
+          503
+        ],
+        "auth": "inline Bearer/fetchSettings,can_manage; raw company",
+        "effects": [
+          "cache.clear",
+          "seedWorkdir",
+          "refreshProfile -> psql/Python",
+          "writeMcpConfig",
+          "refreshNormativy -> Python/curl"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H13",
+      "order": 14,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2198,
+        "lineEnd": 2198,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "610b90dddc4435dccc49dfac565b27f18f218ce80d4ed06210d35b99fea99f87"
+      },
+      "rawSource": "    if (url.pathname === '/api/upload' && req.method === 'POST') return await handleUpload(req, res)\n",
+      "predicate": "if (url.pathname === '/api/upload' && req.method === 'POST') return await handleUpload(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/upload"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "POST"
+      },
+      "handler": "handleUpload",
+      "profile": {
+        "success": 200,
+        "errors": [
+          400,
+          401,
+          415
+        ],
+        "auth": "Bearer + loose36-character company regex + Core auth/me; Core failure maps401 here",
+        "input": "multipart MAX_UPLOAD default25MiB, ALLOWED_EXT",
+        "effects": [
+          "UUID",
+          "session directory/file write"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H14",
+      "order": 15,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2199,
+        "lineEnd": 2199,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "9ee0d82dbb81752d2807086d74ea65f5f05cf45f2d0c239c974260bf63aac55f"
+      },
+      "rawSource": "    if (url.pathname === '/api/dictate' && req.method === 'POST') return await handleDictate(req, res)\n",
+      "predicate": "if (url.pathname === '/api/dictate' && req.method === 'POST') return await handleDictate(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/dictate"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "POST"
+      },
+      "handler": "handleDictate",
+      "profile": {
+        "success": 200,
+        "errors": [
+          400,
+          401,
+          502,
+          503
+        ],
+        "auth": "Bearer + Core auth/me; unreachable/5xx=>503; no company requirement",
+        "input": "multipart25MiB",
+        "effects": [
+          "ASR POST/file?language=ru, FormData/Blob,timeout180s"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H15",
+      "order": 16,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2200,
+        "lineEnd": 2200,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "f190b99cd3c8797fa1243f27339e43280396192e20ffc511feed959cb2236a47"
+      },
+      "rawSource": "    if (url.pathname === '/api/act' && req.method === 'POST') return await handleAct(req, res)\n",
+      "predicate": "if (url.pathname === '/api/act' && req.method === 'POST') return await handleAct(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/act"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "POST"
+      },
+      "handler": "handleAct",
+      "profile": {
+        "success": 200,
+        "errors": [
+          400,
+          401,
+          403,
+          502,
+          503,
+          {
+            "kind": "forwarded",
+            "expression": "r.status"
+          }
+        ],
+        "auth": "Bearer, safeCompany UUID, fetchSettings cfg.ok",
+        "input": "JSON id/params; ACTIONS allowlist + buildRequest filters",
+        "effects": [
+          "Core action method/endpoint, same user Authorization, company query/body",
+          "void event on action/denial"
+        ]
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-H16",
+      "order": 17,
+      "kind": "terminal_exact_path",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2201,
+        "lineEnd": 2201,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "615e6a7d3f313cc6350c5de5114b85231eb51446bcf5a301a16c963af1c2f78d"
+      },
+      "rawSource": "    if (url.pathname === '/api/ask' && req.method === 'POST') return await handleAsk(req, res)\n",
+      "predicate": "if (url.pathname === '/api/ask' && req.method === 'POST') return await handleAsk(req, res)",
+      "path": {
+        "kind": "exact",
+        "value": "/api/ask"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "POST"
+      },
+      "handler": "handleAsk",
+      "profile": {
+        "preStreamErrors": [
+          400,
+          401,
+          503
+        ],
+        "success": 200,
+        "contentType": "text/event-stream; charset=utf-8",
+        "headers": {
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no"
+        },
+        "auth": "Bearer/nonempty company/CLI/credentials before body/auth-me; then cfg settings after SSE headers",
+        "stream": "data: JSON + LF LF; status/skills/text/findings/actions/run/error; data: [DONE] LF LF",
+        "effects": [
+          "CLI child calls",
+          "Core skills/settings/runs",
+          "knowledge FS",
+          "void rememberPerson"
+        ],
+        "cancellation": "no req close/aborted -> child.kill binding found; UI cancellation does not prove server child cancellation"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-REDIRECT",
+      "order": 18,
+      "kind": "dynamic_prefix_fallback",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2205,
+        "lineEnd": 2208,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "3ac02465252e9f581986ae6cbd0c3fc342dfd9bb3e7ebfeb2c61a734238dbd6b"
+      },
+      "rawSource": "    if (req.method === 'GET' && !url.pathname.startsWith('/api')) {\n      res.writeHead(302, { Location: APP_PATH })\n      return res.end()\n    }\n",
+      "predicate": "req.method === 'GET' && !url.pathname.startsWith('/api')",
+      "path": {
+        "kind": "negative_prefix",
+        "value": "/api"
+      },
+      "method": {
+        "kind": "exact",
+        "value": "GET"
+      },
+      "handler": "res.writeHead/res.end",
+      "profile": {
+        "status": 302,
+        "Location": "APP_PATH env or /ClearLedger/auditor",
+        "auth": "none for unmatched non-api GET",
+        "case": "GET /ws/terminal without Upgrade also follows this source fallback"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-404",
+      "order": 19,
+      "kind": "fallthrough",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2209,
+        "lineEnd": 2209,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b1f128c80fb1d89d8b450f8aa4bcdaf8eb759cb52cbb4e3d2ebd9cf35a147f7e"
+      },
+      "rawSource": "    json(res, 404, { error: 'нет такого адреса' })\n",
+      "predicate": "all prior terminal predicates false",
+      "path": {
+        "kind": "remaining_unknown_or_unmatched"
+      },
+      "method": null,
+      "handler": "json",
+      "profile": {
+        "status": 404,
+        "body": {
+          "error": "нет такого адреса"
+        },
+        "note": "not405; explicit GET branches do not synthesize HEAD/OPTIONS handlers"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    },
+    {
+      "id": "AUD-CATCH",
+      "order": 20,
+      "kind": "conditional_error_boundary",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2210,
+        "lineEnd": 2212,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "e4bfb8f7167e1e94d78b879b72382012a44e695ed4cd28187aa8691621e7858f"
+      },
+      "rawSource": "  } catch (e) {\n    if (!res.headersSent) json(res, 500, { error: e.message })\n  }\n",
+      "predicate": "catch(e); if(!res.headersSent)",
+      "path": null,
+      "method": null,
+      "handler": "json",
+      "profile": {
+        "status": 500,
+        "bodyExpression": "{error:e.message}",
+        "afterHeadersSent": "no fallback response written; completion UNKNOWN",
+        "excludes": "new URL before try"
+      },
+      "actual": "NOTRUN",
+      "domainOwner": "UNKNOWN",
+      "humanOwner": "UNKNOWN",
+      "externalAuthorization": "UNKNOWN"
+    }
+  ],
+  "functionRanges": [
+    {
+      "name": "seedWorkdir",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 255,
+        "lineEnd": 392,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "50f9c8c69de84bfaf27e3fbf4268b168661f56e25a1b081cb3506861cac86188"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "writeMcpConfig",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 417,
+        "lineEnd": 454,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "df0f952f211ce2e0b614daa9ca64d01370caf494f62ed9139a99d63b6d23a94c"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "markOnboarded",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 465,
+        "lineEnd": 481,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "bfa5e32167567451107cd725d12a2ea59cb381851be9efc5b913826d8a93118e"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "findBin",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 491,
+        "lineEnd": 501,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "03ce33598baa86e6384f8832c0c0e7804cb3ba09260c6d1fb5410ef1deef6808"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "ensureCredentials",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 508,
+        "lineEnd": 515,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "848fd65d1c909c1826dac30d380f0b5aa37f6a2f9440bded12bddfe86354b6dc"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "hasCredentials",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 546,
+        "lineEnd": 554,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "99399cfc96fb54644f0d742a156796a9e2d09fa2d02a7e4ad32ab98c07d62e56"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "ensureCodexAuth",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 567,
+        "lineEnd": 572,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "1ccc887a7fa1d0f53073d4a9ba80d80f4b2f3f4f4ec1a351071c598d9d6e1ce4"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "writeCodexConfig",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 592,
+        "lineEnd": 649,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "1d2f7058a8ec12d835d339286ed9cfa1675a09754c0d4fcc409317410563eb54"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "cliEnv",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 667,
+        "lineEnd": 682,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "f4da80eb00288895fd30977589341127aa4f6a9230711147983c0e2074df94ff"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "callModel",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 696,
+        "lineEnd": 787,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "421e0368fc62cb4b53c1240cb0dc8cc8f21757497c2f3739ef760f4f5682d8ba"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "linkCodexAssets",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 800,
+        "lineEnd": 819,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "80a10fce39f22521c6965cc2bf5ca86d885341f44f521cf8f1f7aa5c6233d631"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "callCodex",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 840,
+        "lineEnd": 898,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b904890ea9eb994acb911a31ca6b8c0beb187266eb0634cb2e6f197074142f26"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "fetchSkill",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 932,
+        "lineEnd": 942,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b2b863f2644430355ae4b1617ceb635473143b4625c2826def36b97a493dd7f4"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "fetchSettings",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 951,
+        "lineEnd": 967,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "26dc3a2b954e8b961f3edb2a248abafa15cae4e793a5de0cc87179db97e7872d"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "logEvent",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 979,
+        "lineEnd": 988,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "fdbc16f903c268f70cfa2354c4b7ce01f7d2628203dafed09a3714df540c456f"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "saveRun",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 998,
+        "lineEnd": 1008,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "7158a7c810e7ac466e455ce0e3b2f7e0234aa2896e05d47bd9b47be6a278422a"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "writeAgentFile",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1393,
+        "lineEnd": 1404,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "c3e4919c2a51be0f51a17f34509679900a0d345adf66a6ea19c8e1bc5dfdbafc"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleExportWork",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1435,
+        "lineEnd": 1457,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "561d4be30236d2d5a4189657b6aed81b5fe0ff6ae2789ab8e5e66cbda970e4d7"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "readGrowth",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1460,
+        "lineEnd": 1470,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "ea15e635da384f8098b1d3f68d9718f96157ed02c07511f997d8e5b8e26ecaf3"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "asrReachable",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1489,
+        "lineEnd": 1496,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "3ad3784f6fe021fed6d279d1546d384677a9c280783049a2ff70441d520287a9"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "readSingleFile",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1542,
+        "lineEnd": 1568,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "c245ac7725bb65eb1406efd484cb11aa9ef95872391473686fe4db4414e3e4a7"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleDictate",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1578,
+        "lineEnd": 1607,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "585042586b8825f4d2b51c647b912746a09e08f8e6115ea6d0b8bc6c2d6ac29a"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleUpload",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1610,
+        "lineEnd": 1632,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "f029b4ed79fa3af14a542fcd66a9c72d89d0d2d27658a974046ea796018c3a6f"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleSaveFile",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1641,
+        "lineEnd": 1686,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "8602bdb608eca652268fb9745562106ff38c018d0b4f59f377bc938902f83a5b"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleDeleteFile",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1695,
+        "lineEnd": 1719,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "7b8511071889086ebeec1ab603060e1b038e15cc330696abaae77b48905b4bf5"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleKnowledgeUpload",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1732,
+        "lineEnd": 1774,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "78d7814a68bd132ab59d53cdbd070800bb6e0cf139450e96770496c39b2aa374"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "refreshProfile",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1797,
+        "lineEnd": 1827,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "51c5128736b72bc6ceec93910dd11cb71482eedcffd9bd5073ffd757b1162307"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "refreshNormativy",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1836,
+        "lineEnd": 1846,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "c698cf8a108023bbfb723aaaeb74447b6d28c01de7913ef05427b35d1d131a48"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleReload",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1856,
+        "lineEnd": 1870,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "8c589406c2f51454d51765ac46c1d9334ae009447803c5e9ec01a58cf52fcddc"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "readBody_and_json",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1874,
+        "lineEnd": 1883,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "8cc21c03bd759cb59587621f269dd046c989a726443f31130b61fcd342b43605"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleAsk",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1885,
+        "lineEnd": 2048,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "21c3265fd687bbf244c4ea8de1003a9787bea5775e71bfe4494bf790037a5a7e"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    },
+    {
+      "name": "handleAct",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2067,
+        "lineEnd": 2110,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "bcd1044bffae6d29ca33397cf6dde412aedde55de88079c3a41ce175a09d8a9b"
+      },
+      "classification": "technical_definition_not_domain_owner"
+    }
+  ],
+  "websocket": [
+    {
+      "id": "AUD-WS01",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2222,
+        "lineEnd": 2222,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b6e9ad8580c335a7ae2b56d8412546726eeca12148934556f7b40c83a970243e"
+      },
+      "stage": "bind",
+      "observedSource": "new WebSocketServer({server:httpServer,path:/ws/terminal}); dependency upgrade matching not executed",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS02",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2265,
+        "lineEnd": 2302,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "5fd54170e4284524e739463fc1214ada5622a16ac0422cf1d29096915d54cb88"
+      },
+      "stage": "connection",
+      "observedSource": "state/bye; pong + 30s heartbeat before auth; connection/error logging; malformed JSON ignored",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS03",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2305,
+        "lineEnd": 2316,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b9abfa6701f1a354981141bf36770e9059dd7b33123b9154d88ad91b82994b79"
+      },
+      "stage": "prestart",
+      "observedSource": "data strings buffered up to64; other types ignored until start",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS04",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2317,
+        "lineEnd": 2333,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "be0fd2c60ccbb3192bfcf5ca86f21fa3e9225a273307624800e7edbde29917e8"
+      },
+      "stage": "admission",
+      "observedSource": "WORKSHOP_ENABLED -> Bearer msg.token -> safeCompany -> fetchSettings -> core_down -> allowWorkshop(cfg) -> engineBin",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS05",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2335,
+        "lineEnd": 2380,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "9761d33c42f125be420a333ad2ccd15fa1d2fe77d8bb8eb3b4a8c479263a217d"
+      },
+      "stage": "PTY_launch",
+      "observedSource": "cliEnv writes credentials on request; user+tab tmux name; void open event; optional fresh kill; real spawnPty tmux -A -D",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS06",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2381,
+        "lineEnd": 2459,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "bac712d3b437b59288af90f8f36485e95a7ec56fcc9774b180d1def303f05e56"
+      },
+      "stage": "PTY_IO_exit",
+      "observedSource": "queued input700ms; raw PTY data to ws; redraw500ms; tmux has-session on exit; close4001/4002",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS07",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2471,
+        "lineEnd": 2480,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b27a36477b54d9ba3b6da7ce1b633cf3e63f1554099c9239868b0605ed927d75"
+      },
+      "stage": "scroll",
+      "observedSource": "clamp1..20; tmux copy-mode/send-keys",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS08",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2482,
+        "lineEnd": 2492,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "ff6318a04e9e9fc98bfa51539826b1b89d012384479cc723a5cc899b584f0cb6"
+      },
+      "stage": "data",
+      "observedSource": "cancel copy-mode; optional DEBUG_INPUT logs120chars; pty.write",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS09",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2502,
+        "lineEnd": 2516,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "6f167a43d3bf7e1ab627878910584c64af676580eef3b7e7b93a59dd92b25699"
+      },
+      "stage": "resize_refresh",
+      "observedSource": "minimum20x5; pty.resize; refresh120ms; refresh command",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    },
+    {
+      "id": "AUD-WS10",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2519,
+        "lineEnd": 2527,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "f288deb456eb810886d8d8a2ee7926c21709a5a9010f8ff9946a9b59c3924c7c"
+      },
+      "stage": "close",
+      "observedSource": "clear heartbeat; kill PTY tmux client; retain tmux server session; schedule guard45min",
+      "actual": "NOTRUN",
+      "nativePTY": "NOT_VALIDATED",
+      "authorizationConformance": "UNKNOWN"
+    }
+  ],
+  "bootstrapTimeline": [
+    {
+      "id": "AUD-BOOT01",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 20,
+        "lineEnd": 31,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "67ef5e63abe71e4cc1c9c01ca7e42e2ba3f686851553f043285331d950fff1a4"
+      },
+      "phase": "ESM imports",
+      "effects": "node-pty native addon and ws evaluated before module body, then four local catalog/helper modules",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT02",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 33,
+        "lineEnd": 114,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "dee554743f923d1c09eea5f1f8cc7fec7c55ede3c114bd83c6fe9ba86ad8972f"
+      },
+      "phase": "configuration",
+      "effects": "module env/default constants plus knowledge cache",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT03",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 392,
+        "lineEnd": 392,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "b40d80997db03a7c427b21af0e6be0eff1551c15cc948cee59b619dd78c13a5a"
+      },
+      "phase": "seedWorkdir",
+      "effects": "calls function255: FS template/kit/external copy, SSH-keygen, git init/add/commit, trust config writes",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT04",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 497,
+        "lineEnd": 500,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "6902d94cd5c29fc0e00f0a5a54761f1712b345c7598f2d13ad0aa6fd830ef028"
+      },
+      "phase": "CLI discovery",
+      "effects": "findBin exists checks and command-v execSync for claude/codex",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT05",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 553,
+        "lineEnd": 665,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "2fbbdd544b792f716937e44bb5462a38440c72fa8bb195e813dad3117a2e6dcf"
+      },
+      "phase": "configuration",
+      "effects": "CODEX_AUTH home path + oauth token IIFE; definition ranges are not all executed bodies",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT06",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 1423,
+        "lineEnd": 1433,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "a8511ee3c7a40c03286434c3dd05700763cd7e43932fcfe62974fff2cf04da36"
+      },
+      "phase": "FS snapshot",
+      "effects": "DELIVERY_PATHS top-level exists/readdir after seed, before HTTP composition",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT07",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2112,
+        "lineEnd": 2213,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "2f47850de8733e73b77d0cea2111778fc04faa9e20554f01b3db4b8d419bbc47"
+      },
+      "phase": "HTTP composition",
+      "effects": "native createServer callback binding; not listen",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT08",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2222,
+        "lineEnd": 2528,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "911b40468b2b72da28eaac1883bfe6dc12a1cb8f2cea68c7a8eecbaa0591fda8"
+      },
+      "phase": "WS composition",
+      "effects": "constructor attaches to httpServer; listener definitions registered; connection callbacks not yet run",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT09",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2535,
+        "lineEnd": 2542,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "dddb400c8244d831b2dae6ae7834a92879fefcbc57a522add9ac10e484fa1987"
+      },
+      "phase": "credential/config bootstrap",
+      "effects": "ensureCredentials,ensureCodexAuth,writeCodexConfig,linkCodexAssets,markOnboarded,conditional writeMcpConfig in this exact order",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT10",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2544,
+        "lineEnd": 2544,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "9f8d592885f0e76f7f037c6041b7d258c34318ea7dd9345bedc7366d427a21c1"
+      },
+      "phase": "scheduler",
+      "effects": "profile startup timeout3000ms",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT11",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2559,
+        "lineEnd": 2566,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "0245e03cbcbd9c04555462f5d68396692c298c8cee10da1adef7d09d4521d827"
+      },
+      "phase": "scheduler",
+      "effects": "profile interval4h; normative timeout20000ms then interval24h",
+      "actual": "NOTRUN"
+    },
+    {
+      "id": "AUD-BOOT12",
+      "source": {
+        "repository": "Deploy",
+        "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+        "file": "services/auditor/server.js",
+        "lineStart": 2568,
+        "lineEnd": 2574,
+        "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+        "rangeSHA256": "0e111a41d14dcc696f7015ab7190539facb457979f5338a1050084bd6d670414"
+      },
+      "phase": "listen",
+      "effects": "httpServer.listen(PORT) + logs/hasCredentials in listening callback",
+      "actual": "NOTRUN"
+    }
+  ],
+  "callgraph": [
+    {
+      "id": "AUD-CALL01",
+      "from": "HTTP common6 GET gate",
+      "to": "fetchSettings",
+      "ownerBoundary": "Core /api/auditor/settings",
+      "contract": "Bearer user + safeCompany query; response cfg.ok from successful Core status, no service alternative",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 2129,
+          "lineEnd": 2137,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "77d7d55d05d0c826f148095addf01fad744bbc110f1459db5abadb6d0027d0a4"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 951,
+          "lineEnd": 967,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "26dc3a2b954e8b961f3edb2a248abafa15cae4e793a5de0cc87179db97e7872d"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL02",
+      "from": "handleAsk",
+      "to": "Core auth/me + fetchSettings + callModel + fetchSkill + saveRun + rememberPerson",
+      "ownerBoundary": "CLI/Core/FS",
+      "contract": "SSE headers before settings, preserve failures and timeouts; no implemented server-disconnect kill binding observed",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 1885,
+          "lineEnd": 2048,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "21c3265fd687bbf244c4ea8de1003a9787bea5775e71bfe4494bf790037a5a7e"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 696,
+          "lineEnd": 898,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "676cd8d9a4f0f059afa707f4f6ce3c1fcdbaf19d7cad081012ecd33faa297bd6"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL03",
+      "from": "handleAct",
+      "to": "actionById/buildRequest + fetchSettings + fetch(action.method) + logEvent",
+      "ownerBoundary": "Core action endpoint",
+      "contract": "same caller Authorization; company injected into body/query, path parameters validated by actions.js",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 2067,
+          "lineEnd": 2110,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "bcd1044bffae6d29ca33397cf6dde412aedde55de88079c3a41ce175a09d8a9b"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/actions.js",
+          "lineStart": 98,
+          "lineEnd": 123,
+          "fileSHA256": "029d7dc3a6d442295537fcc46f01d8d0af3abf6c4da731fbbfd2215d024b3bf0",
+          "rangeSHA256": "b62cfc2a8e93c26f1bb3af3fcab7a5b45c26a06fc06bd52d779354463d46b819"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL04",
+      "from": "handleDictate",
+      "to": "Core auth/me + readSingleFile + fetchASR",
+      "ownerBoundary": "Core/ASR",
+      "contract": "Core auth/me failure distinguishes unreachable503; no company requirement",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 1578,
+          "lineEnd": 1607,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "585042586b8825f4d2b51c647b912746a09e08f8e6115ea6d0b8bc6c2d6ac29a"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL05",
+      "from": "handleUpload",
+      "to": "Core auth/me + readSingleFile + sessionDir/writeFile",
+      "ownerBoundary": "Core/FS",
+      "contract": "loose UUID-like company regex; Core failure401 preserved",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 1610,
+          "lineEnd": 1632,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "f029b4ed79fa3af14a542fcd66a9c72d89d0d2d27658a974046ea796018c3a6f"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL06",
+      "from": "FS routes",
+      "to": "fetchSettings + writeAgentFile/readMethods/readKnowledge",
+      "ownerBoundary": "Core/FS/Git",
+      "contract": "own card vs can_manage differences not repaired",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 1229,
+          "lineEnd": 1404,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "c6682d19bb30d2bfbe45e9fbad5ac0fda3aa27ff5db8c0327c6e16981e381610"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 1641,
+          "lineEnd": 1774,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "848f564423d4093e30d48a002fd4c3412afce0d8e325617dd37ac4fcf3c8417e"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL07",
+      "from": "reload/timers",
+      "to": "refreshProfile/refreshNormativy",
+      "ownerBoundary": "psql/Python/curl/FS/Git",
+      "contract": "jobs and body/permissions remain bootstrap/request owned, never composition",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 1797,
+          "lineEnd": 1870,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "a03e90596c6347973a8d42cee7b16636a564744bd401eff5384a622e5cc9fd07"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 2544,
+          "lineEnd": 2566,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "9b109aa8883491e780fef407bbd5e2a26ab62719199e8bd70315d59dae3e815a"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL08",
+      "from": "WS message start",
+      "to": "fetchSettings + workshopAllowed + cliEnv + spawnPty",
+      "ownerBoundary": "Core/nativePTY/tmux",
+      "contract": "prestart has heartbeat; native launch only after source admission checks",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/server.js",
+          "lineStart": 2317,
+          "lineEnd": 2380,
+          "fileSHA256": "a51ba3cd14d5ee220c0e4a01cd863ce4f1aaeb5663f0905ad8e92d7083b7e578",
+          "rangeSHA256": "4655de94118c621ec9f2c0b5925df304809e5dba975e498cfebb1f86bde143c2"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "services/auditor/workshop.js",
+          "lineStart": 19,
+          "lineEnd": 30,
+          "fileSHA256": "7349014786112ea2e611c0876319c1c01adf956cfc6b86b77cadfd4f79ad5970",
+          "rangeSHA256": "fbc0f8d14271921579da9b049b9019e2e963b84dfcacdcc08f72b40d1c4359ca"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL09",
+      "from": "nginx /auditor/api/",
+      "to": "rewrite ^/auditor(/.*)$ $1 break + proxy_pass",
+      "ownerBoundary": "Auditor native HTTP",
+      "contract": "not a Core auth proxy; HTTP headers forwarded by source config, runtime ingress unknown",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "stacks/_template/nginx.conf",
+          "lineStart": 293,
+          "lineEnd": 304,
+          "fileSHA256": "f946e672627bc7942d3d70190805937e7795d11d1eaa556b216db31e8d25fde9",
+          "rangeSHA256": "bd013391f3c6b538bf4ff280cdc3a1841ce539d9f2c92e8e4bf5a818d8a7699e"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL10",
+      "from": "nginx /auditor/ws/terminal",
+      "to": "HTTP1.1 Upgrade/Connection",
+      "ownerBoundary": "Auditor ws",
+      "contract": "exact location, read/send86400s, no token in URL",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "stacks/_template/nginx.conf",
+          "lineStart": 266,
+          "lineEnd": 276,
+          "fileSHA256": "f946e672627bc7942d3d70190805937e7795d11d1eaa556b216db31e8d25fde9",
+          "rangeSHA256": "6e7137e7a3c6c69a3c6cf0999199495ab9fcd2b64e76f9226f0087608ee6a33e"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL11",
+      "from": "Core auditor_router",
+      "to": "get_current_user/assert_company_product/_is_space_admin",
+      "ownerBoundary": "Core persistence",
+      "contract": "settings/runs/events/rating ownership remains Core; company membership/module/tenant checks are delegated, not proven here",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/server/app/routers/auditor_router.py",
+          "lineStart": 33,
+          "lineEnd": 45,
+          "fileSHA256": "af35c3e97ca95d19e74c13ece7be23c37cb585e55d6d10ec020693a9fdc59e8d",
+          "rangeSHA256": "065f6a37d4a3793ce54f32be44534230bcfc6b377bf8e62e5c2d2800de3d0bb8"
+        },
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/server/app/routers/auditor_router.py",
+          "lineStart": 120,
+          "lineEnd": 146,
+          "fileSHA256": "af35c3e97ca95d19e74c13ece7be23c37cb585e55d6d10ec020693a9fdc59e8d",
+          "rangeSHA256": "99cf625c40e203cb7a07fd27e57eff21838862f0a0c5f40ed646c7a6bcadd4ec"
+        },
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/server/app/auth.py",
+          "lineStart": 214,
+          "lineEnd": 267,
+          "fileSHA256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+          "rangeSHA256": "ff04a337bb84f192509f7c30f212d9e430569bd73005f6c2f517f660ed25afc4"
+        },
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/server/app/auth.py",
+          "lineStart": 441,
+          "lineEnd": 468,
+          "fileSHA256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+          "rangeSHA256": "525fadfeeff9c9e0956210ff7e4a3183269f91570b849703694a9ac533bf1cab"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL12",
+      "from": "spaceAuditorService",
+      "to": "same-origin /auditor/api + Bearer/X-Company-Id",
+      "ownerBoundary": "UI consumer",
+      "contract": "settings/runs use Core /api/auditor; partner auditorService is separate domain/source client",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/src/services/spaceAuditorService.ts",
+          "lineStart": 114,
+          "lineEnd": 129,
+          "fileSHA256": "8c03974bc4f987245821f84f0d33013a915e1b1835c189a61e2cc2e407dc8afe",
+          "rangeSHA256": "d43ecff50636ec3f5d2fb60a00ac8473b27f7b35453af6612bcfe8980e59e17d"
+        },
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/src/services/spaceAuditorService.ts",
+          "lineStart": 410,
+          "lineEnd": 421,
+          "fileSHA256": "8c03974bc4f987245821f84f0d33013a915e1b1835c189a61e2cc2e407dc8afe",
+          "rangeSHA256": "93a7d06b62c3e114d0e94bf1720ea3c80c2bf927a41a2c2049810f3d215a4fed"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL13",
+      "from": "AuditorTerminal",
+      "to": "same-origin /auditor/ws/terminal + first start JSON",
+      "ownerBoundary": "UI WS consumer",
+      "contract": "token in message, user-scoped tab; close4001 does not auto reconnect",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Ledger",
+          "revision": "0c38469ffcdf2d901a4261e26acbd473ac1de620",
+          "file": "clearledger/src/components/auditor/AuditorTerminal.tsx",
+          "lineStart": 218,
+          "lineEnd": 254,
+          "fileSHA256": "c89606e968e62c184f26a4723f79db359344fd365d2ac04af5845f5c5523078b",
+          "rangeSHA256": "3935c1445ac3d7bdf2bc8b30eb073a891418fc872cdbfff36124acdc6d97c64e"
+        }
+      ]
+    },
+    {
+      "id": "AUD-CALL14",
+      "from": "scripts/auditor and auditor-cli.sh",
+      "to": "docker exec + tmux/CLI",
+      "ownerBoundary": "operator entrypoint",
+      "contract": "separate direct operator authority, not covered by HTTP product gate",
+      "runtime": "NOTRUN",
+      "sourceRefs": [
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "scripts/auditor",
+          "lineStart": 15,
+          "lineEnd": 33,
+          "fileSHA256": "8b25117866606e1950c30babf44333d750bf25c88924e3763c7a64dc4cca34e0",
+          "rangeSHA256": "52613617ca8c79266a27f35a5f3a41febbbc271b20ad79db24b34aba3af07142"
+        },
+        {
+          "repository": "Deploy",
+          "revision": "48c84d81c061424578c10e238d3a81f22d68fa44",
+          "file": "scripts/auditor-cli.sh",
+          "lineStart": 15,
+          "lineEnd": 30,
+          "fileSHA256": "4c9e4712eae4c7761f047cd0c75676b5a8c92dc17e753c3a20b83bbe411ec552",
+          "rangeSHA256": "9c5fef93580f792a231896fb190bff5672a133b1e7264351c9bff1a806571b6c"
+        }
+      ]
+    }
+  ],
+  "dependencyProvenance": {
+    "packageFile": "services/auditor/package.json",
+    "declared": {
+      "node-pty": "^1.0.0",
+      "ws": "^8.18.0"
+    },
+    "serviceLockfiles": [],
+    "lockScope": "none tracked in services/auditor; Docker COPY only package.json then npm install, no claim about unrelated repo lockfiles",
+    "dockerBase": "node:22-alpine floating tag",
+    "cliBuildArguments": {
+      "CLAUDE_CLI_VERSION": "latest",
+      "CODEX_CLI_VERSION": "0.154.0"
+    },
+    "nativeBuild": "node-pty compiled during image build under Alpine/musl; installed versions/ABI/binary/live image UNKNOWN",
+    "SupportToolroot": "not an Auditor dependency proof; do not borrow it"
+  },
+  "proposal": {
+    "status": "PROPOSED_NOT_IMPLEMENTED",
+    "futureOwner": "ROOT assigns separate Deploy implementation owner; current worker owns only two Ledger documents",
+    "productionFiles": [
+      {
+        "file": "services/auditor/server.js",
+        "change": "thin production bootstrap retaining CMD and relative effect order; native/ws/catalog dynamic imports only inside start, never imported by composition probe"
+      },
+      {
+        "file": "services/auditor/auditor-runtime.js",
+        "change": "NEW bounded per-service closure factory createAuditorRuntime({env,home,io,catalogs}); move existing helpers/real native requestHandler/wsConnection definitions, no router registry/framework"
+      },
+      {
+        "file": "services/auditor/Dockerfile",
+        "change": "only extend existing COPY line151 with auditor-runtime.js; dependencies/versions/CMD unchanged"
+      }
+    ],
+    "factoryResult": [
+      "requestHandler",
+      "onTerminalConnection",
+      "seedWorkdir",
+      "discoverBins",
+      "snapshotDeliveryPaths",
+      "ensureCredentials",
+      "ensureCodexAuth",
+      "writeCodexConfig",
+      "linkCodexAssets",
+      "markOnboarded",
+      "writeMcpConfig",
+      "scheduleExistingJobs"
+    ],
+    "dependencyContracts": {
+      "env": "explicit synthetic object in probe; production passes live process.env object to preserve request-time reads; original catalogs import with same bootstrap env",
+      "home": "explicit resolved bootstrap home, no host discovery during composition",
+      "io": "existing fs/path/crypto/fetch/child/timer/logging/clock primitives; pure factory must not invoke IO; strict deny adapters are tripwires, never successful stubs",
+      "nativePTY": "real sync spawnPty loaded only in production bootstrap before seed/listen; guarded composition never imports node-pty; disabled/shim profile is NOT native validation",
+      "ws": "real audited ws constructor outside pure factory, production bootstrap binds same options/listener; no request/connection callback invocation in C1"
+    },
+    "preservation": "source branch predicates, order, handler bodies/auth/proxy/errors/stream/FS/PTY behavior retained; initialization side effects become explicit entry calls, not business rewrites",
+    "outOfScope": [
+      "change domain ACL",
+      "repair reload client missing Bearer",
+      "repair upload/dictate differences",
+      "introduce disconnect child cancellation",
+      "change token storage/logging/error policy",
+      "change jobs/CLI/WS protocols",
+      "generic transport framework",
+      "new dependency versions/locks",
+      "new publication permission"
+    ]
+  },
+  "validationPlan": {
+    "status": "DESIGN_ONLY_NOT_EXECUTION_FREEZE",
+    "currentTaskRuntime": "FORBIDDEN",
+    "futureFreezeRequired": [
+      "exact before/after source full manifest incl new module+tests+runner and Docker COPY",
+      "Auditor-owned dependency closure/package-resolution lock evidence, native binaries/platform/ABI provenance or explicit unknown",
+      "actual Node executable+systemloader+tool hashes and Node flags; no Support dependency reuse",
+      "all argv/env/allowed roots/socket/timer exceptions/control selections/counts and sourceAfter contracts",
+      "ROOT source review before each phase; phaseC2 requires additional concrete approval"
+    ],
+    "phases": [
+      {
+        "id": "C0",
+        "kind": "ROOT source inventory/identity and guard self-controls",
+        "appImports": 0,
+        "runtimeStatus": "NOTRUN"
+      },
+      {
+        "id": "C1",
+        "kind": "actual pure factory construction and optional real native HTTP/ws attachment, no listen/callback/request",
+        "permittedNetwork": [],
+        "permittedProcesses": [],
+        "permittedNativeAddons": [],
+        "permittedTimers": [],
+        "actualBranchProof": false,
+        "status": "NOTRUN"
+      },
+      {
+        "id": "C2",
+        "kind": "separate bounded real native HTTP requests/ws handshake in private namespace with exact owned socket permits and approved timer sites",
+        "requiresNewRootReview": true,
+        "CoreResponders": "selective synthetic forwarding/status fixtures; NOT real Core auth/ACL proof",
+        "PTYCalls": "forbidden; separate native phase required",
+        "status": "NOTRUN"
+      }
+    ],
+    "proposedNodeArgv": [
+      "/usr/bin/node",
+      "--permission",
+      "--no-addons",
+      "--allow-fs-read=/work/source",
+      "--allow-fs-read=/work/node_modules",
+      "--allow-fs-read=/work/tools",
+      "--allow-fs-write=/evidence",
+      "/work/tools/auditor-composition-probe.mjs",
+      "--phase=C1",
+      "--variant=accounting-claude-off"
+    ],
+    "argvCaveat": "future probe does not exist in this design task; not runnable/approved until source/deps/Node/loader/tool manifest freeze, no placeholder SHA presented as proof",
+    "syntheticEnvironment": {
+      "HOME": "/home/synthetic",
+      "PATH": "/usr/bin:/bin",
+      "LANG": "C.UTF-8",
+      "TZ": "UTC",
+      "PORT": "0",
+      "CORE_API": "http://core.invalid",
+      "ASR_URL": "http://asr.invalid",
+      "AUDITOR_WORK_DIR": "/tmp/work",
+      "AUDITOR_KNOWLEDGE_DIR": "/tmp/work/knowledge",
+      "AUDITOR_UPLOAD_DIR": "/tmp/work/uploads",
+      "AUDITOR_APP_PATH": "/ClearLedger/auditor"
+    },
+    "environmentCaveat": "fresh empty HOME/no credential/token/DB/proxy vars; invalid host strings are never resolved or allowlisted; env object explicit, not ambient",
+    "variants": [
+      {
+        "id": "accounting-claude-off",
+        "AUDITOR_KIT": "accounting",
+        "AUDITOR_ENGINE": "claude",
+        "AUDITOR_WORKSHOP": "off",
+        "AUDITOR_WORKSHOP_ALL": "off",
+        "AUDITOR_WORKSHOP_USERS": ""
+      },
+      {
+        "id": "space-codex-admin",
+        "AUDITOR_KIT": "space",
+        "AUDITOR_ENGINE": "codex",
+        "AUDITOR_WORKSHOP": "on",
+        "AUDITOR_WORKSHOP_ALL": "off",
+        "AUDITOR_WORKSHOP_USERS": ""
+      },
+      {
+        "id": "space-claude-users",
+        "AUDITOR_KIT": "space",
+        "AUDITOR_ENGINE": "claude",
+        "AUDITOR_WORKSHOP": "on",
+        "AUDITOR_WORKSHOP_ALL": "on",
+        "AUDITOR_WORKSHOP_USERS": "00000000-0000-4000-8000-000000000001"
+      },
+      {
+        "id": "accounting-codex-admin",
+        "AUDITOR_KIT": "accounting",
+        "AUDITOR_ENGINE": "codex",
+        "AUDITOR_WORKSHOP": "on",
+        "AUDITOR_WORKSHOP_ALL": "off",
+        "AUDITOR_WORKSHOP_USERS": ""
+      }
+    ],
+    "isolation": "own ephemeral user/mount/net/IPC/PID namespace/chroot; read-only selected source/Auditor-owned toolroot/exact system loader libs; no host home/.env/keys/vault/proc; private tmp/HOME/evidence; Node permissions plus independent kernel process/network/native restrictions and pre-import JS tripwires; deny/caught attempt invalidates proof",
+    "provisionalCaps": {
+      "floorAvailableBytes": 8589934592,
+      "sourceStagingPlanningMiB": 64,
+      "cpuSeconds": 30,
+      "wallSeconds": 45,
+      "addressSpaceBytes": 2147483648,
+      "fileDescriptors": 64,
+      "outputBytes": 4194304,
+      "scratchBytes": 16777216,
+      "scratchEntries": 2048,
+      "childAppProcesses": 1,
+      "modeledResourceMeasurement": "NOTRUN; 64MiB is source staging planning only; ROOT must measure exact Auditor deps/system bytes and child peak before actual, never generic 5GiB extra reserve"
+    },
+    "cleanup": "ROOT kills/reaps only own process group; closes own bound handles/timers/sockets, verifies no leftover FD/native/session/jobs; removes only explicitly owned scratch/evidence by decision; no host mounts/firewall/config changes"
+  },
+  "prospectiveControls": [
+    {
+      "id": "AUD-C01",
+      "phase": "composition",
+      "falsifiableExpectation": "Import new runtime module with all IO/native/process/timer guards installed: zero attempts, including caught; no bootstrap/entry import",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-C02",
+      "phase": "composition",
+      "falsifiableExpectation": "Call real createAuditorRuntime with explicit synthetic env and real pure catalog/helper exports: callable request/connection handlers, no IO/provider invocation",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-C03",
+      "phase": "composition",
+      "falsifiableExpectation": "Bind returned real requestHandler to native createServer: listening=false and listener identity exact; no callback invocation or route count inference",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-C04",
+      "phase": "composition",
+      "falsifiableExpectation": "Optional audited real ws constructor attaches exact server/path/listener under guards, without node-pty import; this is attachment only, not upgrade conformance",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-N01",
+      "phase": "negative",
+      "falsifiableExpectation": "Deliberate process/spawn/exec/worker/native-addon attempts are denied independently by namespace/Node and logged as invalid, even caught",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-N02",
+      "phase": "negative",
+      "falsifiableExpectation": "DNS/socket/listen attempts fail; phaseC1 has no permitted network, not even generic loopback",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-N03",
+      "phase": "negative",
+      "falsifiableExpectation": "Timers including unref are tripwire failures; never substitute successful no-op scheduling",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-N04",
+      "phase": "negative",
+      "falsifiableExpectation": "Outside-source HOME/envfile/credential/config reads and unowned writes denied; malformed manifest/hash/path/UID rejected before imports",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-N05",
+      "phase": "negative",
+      "falsifiableExpectation": "Change source/deps/node/tool/flags/variant or leave FD/child/timer state -> proof refused; sourceAfter exact",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-O01",
+      "phase": "source_preservation",
+      "falsifiableExpectation": "Native dispatcher predicate sequence/raw branch ranges/hash equivalence across move, including shared gate and URL-before-try placement",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-O02",
+      "phase": "source_preservation",
+      "falsifiableExpectation": "Preserve constants/defaults/late env reads and per-instance cache/maps; catalogs KIT/maxRows still evaluated in reviewed bootstrap with same env",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-O03",
+      "phase": "source_preservation",
+      "falsifiableExpectation": "Startup order seed->findBins->DELIVERY snapshot->HTTP->WS->credential/config/link/onboard->jobs->listen preserved; Docker COPY includes new module",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-HC01",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Owned native HTTP /health accepts source-unrestricted methods after parser; HEAD wire behavior measured, never infer GET-only from a single probe",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-HC02",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Explicit GET paths with HEAD/OPTIONS/POST must follow source fallthrough404, no Express implied HEAD/method expansion or405 rewrite",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-HC03",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "GET non-api path redirects APP_PATH302; GET /apiUnknown404; GET ws path without Upgrade uses native HTTP source fallback",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-HC04",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Malformed URL versus malformed JSON/oversize body: preserve URL-before-try and JSON catch500, req.destroy/headersSent behavior",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-A01",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Common6 GET gate: missing Bearer401, selective synthetic Core403=>403,5xx/unreachable=>503; no handler FS/exec after denial",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-A02",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Separate export/reload/files admission ordering, own-card exception and company validators unchanged; synthetic upstream is only a forwarding fixture, not real Core ACL proof",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-A03",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Upload auth/me failures map401 while dictate unreachable/5xx maps503; do not consolidate accidentally",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-A04",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Core same-user Authorization, company query/body and action path allowlist preserved; no service credential alternative introduced",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-S01",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "Ask pre-SSE JSON errors/headers versus post-SSE error/DONE frames, event order and chunk framing preserved with no actual model process",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-S02",
+      "phase": "future_HTTP",
+      "falsifiableExpectation": "UI abort releases/cancels reader/context; do not assert it kills server CLI, preserve source unknown/cancellation gap",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-W01",
+      "phase": "future_WS",
+      "falsifiableExpectation": "Audited real ws handshake only in ROOT-approved namespace with exact owned sockets; no origin/auth/upgrade claims from constructor options alone",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-W02",
+      "phase": "future_WS",
+      "falsifiableExpectation": "WS prestart JSON/data buffer64/unknown types, disabled workshop, Core failure/member/admin/all/users admission before PTY; token never moved to URL",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-W03",
+      "phase": "future_WS",
+      "falsifiableExpectation": "Heartbeat30s before auth/close cleanup and zero native invocation on denied start; allow exact owned timers only in this separate phase",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-W04",
+      "phase": "future_native_separate",
+      "falsifiableExpectation": "Real PTY/tmux process identity/env/fresh/session namespace/detach4001/ended4002/redraw/idle semantics require separately approved native phase; shim does not count",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-L01",
+      "phase": "source_lifecycle",
+      "falsifiableExpectation": "Profile3s and4h; normative20s then24h; existing reload invocation ordering and error text retained; actual psql/Python/curl/jobs NOTRUN",
+      "status": "PROSPECTIVE_NOTRUN"
+    },
+    {
+      "id": "AUD-L02",
+      "phase": "source_lifecycle",
+      "falsifiableExpectation": "No accidental process.on cleanup/global singleton or new shutdown contract added in extraction; cleanup for harness is harness-owned, not production behavior change",
+      "status": "PROSPECTIVE_NOTRUN"
+    }
+  ],
+  "controlCount": 28,
+  "remainingUnknowns": [
+    "all proposed tests NOTRUN; no actual Auditor capture",
+    "real HTTP/WS upgrade/auth/Core ACL semantics and native-addon/PTY/platform behavior",
+    "domain/human/external authorization decisions",
+    "live public paths/container/installed deps/bootstrap/jobs/CLI/proxy/credential state",
+    "Core/Support/Auditor unified current authoritative registry and global CI/pilot/deprecation",
+    "domains EZS/equipment/counterparties/contracts/documents/accounts and all20M+11 continuation"
+  ]
+}

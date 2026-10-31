@@ -108,30 +108,29 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const [companyId, setCompanyIdState] = useState<string>('')
 
-  // Выбор активной компании при появлении пользователя / смене списка.
-  useEffect(() => {
-    if (!user) { setApiCompany(null); setCompanyIdState(''); return }
-    const saved = localStorage.getItem(activeKey(user.id))
-    const valid = saved && companies.some((c) => c.id === saved)
-    const next = valid ? saved! : (companies[0]?.id ?? '')
-    setApiCompany(next)  // синхронно до setState — чтобы первые запросы несли X-Company-Id
-    setCompanyIdState(next)
-  }, [user, companies])
-
-  // Изоляция: при СМЕНЕ активной компании (не первый выбор) — сброс кэшей.
-  const prevId = useRef<string | null>(null)
-  useEffect(() => {
-    if (!companyId) return
-    // Заголовок X-Company-Id ставим ПЕРЕД сбросом кэша — чтобы рефетчи после
-    // qc.clear() уже несли новую компанию (fuel/store скоупятся по нему).
-    setApiCompany(companyId)
-    if (prevId.current && prevId.current !== companyId) {
+  const serviceContext = useRef<{ userId: string; companyId: string } | null>(null)
+  const activateContext = useCallback((userId: string | null, id: string) => {
+    const previous = serviceContext.current
+    // Граница готова до render дочерних queryFn, включая первый выбор и смену
+    // пользователя с той же компанией. reset инвалидирует старые await.
+    setApiCompany(id || null)
+    if (previous && (previous.userId !== userId || previous.companyId !== id)) {
       qc.clear()
       resetServiceCaches()
     }
-    setServicesCompany(companyId)  // синхронизируем модульный _companyId сервисов
-    prevId.current = companyId
-  }, [companyId, qc])
+    if (id) setServicesCompany(id)
+    serviceContext.current = userId ? { userId, companyId: id } : null
+  }, [qc])
+
+  // Выбор активной компании при появлении пользователя / смене списка.
+  useEffect(() => {
+    if (!user) { activateContext(null, ''); setCompanyIdState(''); return }
+    const saved = localStorage.getItem(activeKey(user.id))
+    const valid = saved && companies.some((c) => c.id === saved)
+    const next = valid ? saved! : (companies[0]?.id ?? '')
+    activateContext(user.id, next)
+    setCompanyIdState(next)
+  }, [user, companies, activateContext])
 
   const setCompanyId = useCallback((id: string) => {
     if (!user) return
@@ -141,15 +140,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     // Готовим границу компаний до нового render. Если ждать effect, VoiceLayout
     // успеет начать `/me` с новым companyId, а последующий reset выбросит уже
     // выданный пропуск и дочерний экран выпустит второй.
-    setApiCompany(id)
-    if (companyId) {
-      qc.clear()
-      resetServiceCaches()
-    }
-    setServicesCompany(id)
-    prevId.current = id
+    activateContext(user.id, id)
     setCompanyIdState(id)
-  }, [user, companies, companyId, qc])
+  }, [user, companies, companyId, activateContext])
 
   // Организации активной компании: список нужен и переключателю, и для сброса
   // выбора при смене компании — юрлицо одного клиента не должно утечь в другого.

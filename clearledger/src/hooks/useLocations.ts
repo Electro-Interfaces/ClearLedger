@@ -14,7 +14,7 @@ export function useLocations(): ServiceLocation[] {
   const { companyId } = useCompany()
   const q = useQuery({
     queryKey: ['locations', companyId],
-    queryFn: () => loadLocations(companyId),
+    queryFn: ({ signal }) => loadLocations(companyId, signal),
     enabled: !!companyId,
     staleTime: 60_000,
   })

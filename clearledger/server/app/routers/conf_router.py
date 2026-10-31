@@ -33,7 +33,7 @@ from app.models import (
     CalendarAttendee, CalendarEvent, CalendarGuest, ConfPresence, ConfRoom,
     ConfSession, User, UserCompany,
 )
-from app.services import jitsi
+from app.services import calendar_protocol, calendar_series, jitsi
 
 router = APIRouter(prefix="/conf", tags=["Конференции"])
 
@@ -501,7 +501,7 @@ async def _пригласить(db: AsyncSession, ev: CalendarEvent, кого: l
                              organizer_email=организатор.email,
                              organizer_name=организатор.name,
                              attendees=[(человек.email, человек.name)], invite=True,
-                             sequence=meeting_notice._sequence())
+                             sequence=calendar_protocol.version(ev))
     письмом = чатом = 0
     for человек in кого:
         if человек.id == организатор.id:
@@ -610,9 +610,7 @@ async def meeting_create(
 
 async def ведущие_встречи(db: AsyncSession, ev: CalendarEvent) -> set:
     """Ведущие встречи: отмеченные участники, а не отмечен никто — организатор."""
-    отмечены = set((await db.execute(select(CalendarAttendee.user_id).where(
-        CalendarAttendee.event_id == ev.id, CalendarAttendee.is_host.is_(True)))).scalars())
-    return отмечены or {ev.organizer_id}
+    return await jitsi.meeting_hosts(db, ev)
 
 
 async def войти_во_встречу(db: AsyncSession, cid, ev: CalendarEvent, user: User) -> dict:
@@ -624,6 +622,12 @@ async def войти_во_встречу(db: AsyncSession, cid, ev: CalendarEven
     после начала ведущего в комнате нет, первый вошедший получает пропуск
     ведущего — только он: следующий застанет ведущего в комнате.
     """
+    # The row and series-head lock precede any room URL mutation. Attendance
+    # alone does not revise the organizer's calendar component.
+    ev = await calendar_series.lock_event(db, cid, ev.id)
+    if ev is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Конференция не найдена")
+    protocol_before = calendar_protocol.state(ev)
     room = jitsi.event_room(ev)
     сессия = (await db.execute(select(ConfSession).where(
         ConfSession.event_id == ev.id,
@@ -646,6 +650,7 @@ async def войти_во_встречу(db: AsyncSession, cid, ev: CalendarEven
     if not ev.conference_url:
         ev.conference_url = urls["guest_url"]
         await jitsi.share_series_url(db, ev)
+    calendar_protocol.advance_if_changed(ev, protocol_before)
     if сессия is None:
         сессия = ConfSession(company_id=cid, event_id=ev.id, room=room,
                              title=ev.title, subject_ref=ev.subject_ref,
@@ -776,7 +781,7 @@ async def session_end(
     # сессии открытой конференции виден всем в «Идут сейчас» (QA 27.10.2026).
     # Постоянная комната общая — её закрывает любой, как и раньше.
     from app.routers.work_router import can_manage_calendar
-    ev = await db.get(CalendarEvent, s.event_id) if s.event_id else None
+    ev = await calendar_series.lock_event(db, cid, s.event_id) if s.event_id else None
     if ev is not None and not await can_manage_calendar(db, cid, ev.organizer_id, current_user):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Завершить конференцию может тот, кто её собрал, или его помощник")
@@ -790,7 +795,9 @@ async def session_end(
         # голову серии не трогаем: по голове считаются следующие встречи.
         if (ev is not None and not ev.all_day and not ev.recurrence
                 and ev.starts_at < s.ended_at < ev.ends_at):
+            protocol_before = calendar_protocol.state(ev)
             ev.ends_at = s.ended_at
+            calendar_protocol.advance_if_changed(ev, protocol_before)
         # Конференция закрыта — в ней никого не осталось по определению. Прежде
         # записи присутствия жили дальше, и комната показывала участников уже
         # после того, как её погасили (замечание Маркова 11.09.2026).

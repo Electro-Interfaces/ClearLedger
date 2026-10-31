@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from app.services.reference_identity import lock_manual_creation
+from app.services.contract_commands import create_imported_contract
 from app.services.reference_overrides import apply_import_values
 from app.services.reference_identity import (
     ContractIndex, CounterpartyIndex, organization_for_import, require_organization,
@@ -22,7 +23,7 @@ from typing import Any
 
 import re
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import case, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
@@ -639,6 +640,10 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         Organization.company_id == company_id))).scalars().all()
     org_id = organization_for_import(organizations, existing)
 
+    from app.services.counterparty_commands import (
+        add_imported_counterparty_alias, create_imported_counterparty,
+    )
+
     cp_by_phone: dict[str, Counterparty] = {}
     for o in orgs:
         name = str(o.get("name") or "").strip()
@@ -647,20 +652,15 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             continue
         cp = cp_index.resolve(_clean_cp_name(name), o.get("inn"), o.get("kpp"))
         if cp is None:
-            cp = Counterparty(
-                company_id=company_id, inn=str(o.get("inn") or "")[:20], kpp=o.get("kpp") or None,
-                name=_clean_cp_name(name)[:500], type=_cp_type(name),
-                aliases=["corporate"], kind="external",
-                raw={"referenceIdentity": {"name": _clean_cp_name(name), "inn": str(o.get("inn") or ""), "kpp": o.get("kpp")}},
+            cp = await create_imported_counterparty(
+                db, company_id, cp_index, name=_clean_cp_name(name),
+                inn=str(o.get("inn") or ""), kpp=o.get("kpp"),
+                cp_type=_cp_type(name), alias="corporate",
             )
-            db.add(cp)
-            await db.flush()
-            cp_index.add(cp)
         else:
             # Одно юрлицо может быть и покупателем, и поставщиком — роль в реестре
             # прикладная, поэтому она копится в aliases, а не заводит вторую карточку.
-            if "corporate" not in (cp.aliases or []):
-                apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + ["corporate"]))})
+            add_imported_counterparty_alias(cp, "corporate")
         cp_by_phone[str(o.get("phone") or "")] = cp
         if contracts.resolve(cp, CORP_CONTRACT_TYPE) is not None:
             continue
@@ -669,8 +669,8 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         # сортируется и не видна в поле даты формы.
         if len(start) == 10 and start[2] == "." and start[5] == ".":
             start = f"{start[6:]}-{start[3:5]}-{start[:2]}"
-        contract = Contract(
-            company_id=company_id, number="б/н", date=start,
+        contract = await create_imported_contract(
+            db, company_id, contracts, number="б/н", date=start,
             counterparty_id=str(cp.id), organization_id=require_organization(org_id),
             type=CORP_CONTRACT_TYPE, kind="СПокупателем", basis="договор",
             # Зарядка идёт по всей сети, а не по набору станций.
@@ -678,9 +678,6 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": CORP_CONTRACT_TYPE,
                                        "number": "б/н", "date": start}},
         )
-        db.add(contract)
-        await db.flush()
-        contracts.add(contract)
 
     # Ссылка клиента на карточку контрагента: реестр клиентов пересоздаётся при каждой
     # загрузке справочника, поэтому связь ставится здесь, а не разовым сопоставлением —
@@ -785,7 +782,35 @@ async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id,
             ).values(client_tariff=rate, client_amount=S.energy_kwh * rate))).rowcount or 0)
             if region is None:
                 priced += n_priced
+    await classify_corporate_sessions(db, company_id, channel_id)
     return named, priced, matched
+
+
+async def classify_corporate_sessions(db: AsyncSession, company_id, channel_id=None) -> int:
+    """Восстановить отсутствующий тип по подтверждённому обогащению организации.
+
+    API сессий может не передавать тип пользователя. Имя и телефон должны вместе
+    совпасть с реестром той же компании; нулевое списание само по себе не доказывает
+    ЮЛ. Существующий явный тип, тарифы и учтённые суммы остаются прежними.
+    """
+    S, C = ChargeSession, CorporateClient
+    conditions = [
+        S.company_id == company_id,
+        or_(S.user_type.is_(None), func.trim(S.user_type) == ""),
+        select(C.id).where(
+            C.company_id == S.company_id, C.name == S.client_name,
+            C.phone == S.user_id,
+        ).exists(),
+    ]
+    if channel_id is not None:
+        conditions.append(S.channel_id == channel_id)
+    result = await db.execute(update(S).where(*conditions).values(
+        user_type="ЮЛ",
+        # Служебный запуск остаётся вне выручки даже при известной организации.
+        cut_key=case((func.upper(func.trim(S.charge_type)) == "ADMIN", "ezs_admin"),
+                     else_="ezs_corp"),
+    ))
+    return int(result.rowcount or 0)
 
 
 async def _enrichment_result(db, company_id, orgs_count, named, priced, matched) -> dict[str, Any]:
