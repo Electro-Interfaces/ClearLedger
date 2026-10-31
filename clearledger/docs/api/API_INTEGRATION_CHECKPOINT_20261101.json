@@ -1,0 +1,132 @@
+{
+  "status": "PARTIAL_IMPLEMENTATION_AND_TARGETED_VERIFICATION",
+  "fullProgram": "20M00–M19 +11 original cross-cutting requirements unchanged/open; no overall percentage",
+  "contractCard": {
+    "rootCodeCommit": "489e385d20b467a3f9244961e513f7e7bb5ff764",
+    "source": {
+      "status": "SOURCE_ACCEPTED_RUNTIME_NOTRUN",
+      "sources": [
+        {
+          "folder": "/home/mag/orca/workspaces/ledger-app/contract-create-workflow-20261101",
+          "head": "2e1a96d5fbee291c93e2b3869028af01d6c40a57",
+          "parent": "675654298f9a7cde30f3ab8097935478bb534088",
+          "files": {
+            "clearledger/server/app/services/contract_card_creation.py": "9a18628d5e6f701dab13c30fced65ef711ce8aa3d7fef4a0ae51ecf8cf5b4158",
+            "clearledger/server/app/services/native_contract_commands.py": "9a8f88d0b5bb539a19c596a374e786d5f00be672f489625be4066557a71f49e4",
+            "clearledger/server/tests/test_contract_card_creation.py": "4dd129e23d0317a31d1446900aeed259c664c1c3c5be596d79a057e82716cbf2",
+            "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.md": "fbe295e31c83f5536cfaf6073e932a4b24e933f98558f7c63ed769047b9ca2f3",
+            "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.json": "324a459fa5bf191d488c45425a72c7c6f760de6e2e981eb9b12be7b1eda203d0"
+          }
+        },
+        {
+          "folder": "/home/mag/orca/workspaces/ledger-app/contract-card-typecode-followup-20261101",
+          "head": "8f260771a3d44788bec6acd256941829b5579715",
+          "parent": "2e1a96d5fbee291c93e2b3869028af01d6c40a57",
+          "files": {
+            "clearledger/server/tests/test_contract_card_creation.py": "9e869985cb574f2dd26ced6d63377b715d1ce7e64618fb41b5333c4f514f20d6",
+            "clearledger/docs/api/CONTRACT_CARD_TYPE_CODE_PORTABILITY_20261101.md": "188eae336a014a1843d952ba09450160db5f965b9f736e199ee29dc24a83f9a7",
+            "clearledger/docs/api/CONTRACT_CARD_TYPE_CODE_PORTABILITY_20261101.json": "a92b1a503a4992bf5ab7ad072d384f8fd7d861dd84cb213ad3cf4323111c6ca7"
+          }
+        }
+      ]
+    },
+    "actualNewPG10": "NOTRUN",
+    "legacyNative55": "NOT_RERUN",
+    "partnerCREATE": "NOT_IMPLEMENTED"
+  },
+  "commonPermission": {
+    "sourceHead": "4cd4d20020c7e36e698c3c85753cf90ec0fbec4a",
+    "integration": "PENDING independent source recheck; tested source remains separate candidate",
+    "targetedActual": {
+      "status": "ROOT_ACCEPTED_ISOLATED_PURE_AND_SYNTHETIC_ASGI",
+      "sourceHead": "4cd4d20020c7e36e698c3c85753cf90ec0fbec4a",
+      "passed": 264,
+      "failed": 0,
+      "skipped": 0,
+      "suiteCounts": {
+        "tests.test_api_contracts_context": 34,
+        "tests.test_api_contracts_http": 56,
+        "tests.test_named_contract_receipt_permission": 174
+      },
+      "execution": {
+        "argv": [
+          "/home/mag/.local/share/uv/python/cpython-3.13.7-linux-x86_64-gnu/bin/python3.13",
+          "-I",
+          "-S",
+          "-B",
+          "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/h01-root-pure-verification-20261101-v3/isolated.py"
+        ],
+        "exitCode": 0,
+        "elapsed": 2.24354076012969,
+        "reaped": true,
+        "runnerSHA256": "08fb9d6393ba657a1b0874004d41a158406bcef584e691d250d4e5bac342913f",
+        "limits": {
+          "wall": 45,
+          "cpu": 30,
+          "as": 1073741824,
+          "nofile": 128,
+          "fsize": 8388608
+        },
+        "profile": "8 selected copied source files/no conftest/plugins/DB/product imports/network/subprocess",
+        "stdout": {
+          "bytes": 1419,
+          "SHA256": "f9ba3f32884c5ff0a4d8d22798978f9b35172a4f98f73df8ada62a4e370489c9"
+        },
+        "stderr": {
+          "bytes": 0,
+          "SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "audit": {
+        "denied": [],
+        "modules": [
+          "app",
+          "app.api_contracts",
+          "app.api_contracts.context",
+          "app.api_contracts.routing",
+          "tests",
+          "tests.test_api_contracts_context",
+          "tests.test_api_contracts_http",
+          "tests.test_named_contract_receipt_permission"
+        ]
+      },
+      "rawFiles": {
+        "source.json": "c6dd5ebb4ef88252ff5223ec76366b222f36c94296b05ee5c68f99d973484255",
+        "isolated.py": "08fb9d6393ba657a1b0874004d41a158406bcef584e691d250d4e5bac342913f",
+        "execution.json": "06cb9f9fe34984567ee30f44b5fa70188a7467bc60b9e09493b9cfc9a8baef30",
+        "stdout": "f9ba3f32884c5ff0a4d8d22798978f9b35172a4f98f73df8ada62a4e370489c9",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "junit.xml": "7abffd565e0914457e1f86fb25f187cdb03684e3545381f0e132373656666280",
+        "audit.json": "89f9237a3ec246a02058cb64a72b14d27ff645852cfdd2757b31844d0c85b009"
+      },
+      "v1v2": "Outer refused exact readonly entropy device, historical output not accepted; same264 are not792 distinct tests",
+      "productionDBOrOAuthOrLivePilot": "NOTRUN",
+      "globalPercent": null
+    },
+    "productionRouteOptIns": 0,
+    "SQLIssuer": "NOT_IMPLEMENTED",
+    "OAuthPilot": "NOTRUN"
+  },
+  "CoreBootstrap": {
+    "acceptedDistinctIDs": 55,
+    "totalComponentIDs": 57,
+    "separateSeries": 50,
+    "remaining": [
+      "REC-old-binaries NOTPASS wall180",
+      "REC-synthetic-restore NOTRUN"
+    ],
+    "wholeProgramRatio": null
+  },
+  "support": {
+    "rootHead": "bcb2bbce54d62704f1afcf22924c7421f1a098fd",
+    "guardTestsActualPassed": 16,
+    "atomicSeamActualPassed": 22,
+    "physicalPG": "NOTRUN"
+  },
+  "reviewLimits": [
+    "memory compile and hashes do not prove runtime parity",
+    "264 =174 new synthetic guard cases +90 existing common guard cases, not whole CI",
+    "V1/V2 outer refused readonly entropy reads; V3 accepts only actual char1:9 readonly; repeated outputs not added",
+    "No full combined tree runtime, merge, deploy, working activation or external pilot"
+  ]
+}
