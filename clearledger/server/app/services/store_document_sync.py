@@ -44,7 +44,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import StoreDocumentProjection
+from app.models import StoreDocumentProjection, StoreDocumentProjectionState
 from app.services.store_document_snapshot import queue_onec_document_snapshot
 from app.services.document_status_downlink import queue_document_status
 from app.services.store_documents import (
@@ -71,8 +71,12 @@ async def сверить_документы(
     """
     итог = {"rebuilt": False, "snapshot": False, "headers": 0, "detail": ""}
     порог = datetime.now(timezone.utc) - timedelta(minutes=СВЕЖЕСТЬ_МИНУТ)
-    собран = (await db.execute(select(func.max(StoreDocumentProjection.rebuilt_at)).where(
-        StoreDocumentProjection.company_id == company_id))).scalar()
+    собран = (await db.execute(select(
+        StoreDocumentProjectionState.last_successful_rebuild_at,
+    ).where(StoreDocumentProjectionState.company_id == company_id))).scalar()
+    if собран is None:  # первый запуск после добавления метки
+        собран = (await db.execute(select(func.max(StoreDocumentProjection.rebuilt_at)).where(
+            StoreDocumentProjection.company_id == company_id))).scalar()
     if собран is None or собран <= порог:
         # Реестр устарел — пересборку ведёт отдельная задача, запрос станции её
         # не ждёт. Снимок и статусы ниже пойдут по тому реестру, что есть:
@@ -123,23 +127,25 @@ def запустить_пересборку(company_id: uuid.UUID, station_id: i
 async def _пересобрать(company_id: uuid.UUID, station_id: int) -> None:
     """Пересобрать реестр компании в своей сессии, один раз на компанию.
 
-    Замок берётся НЕблокирующим `pg_try_advisory_lock`: пока одна пересборка
-    идёт, стуки остальных станций той же компании просто уходят ни с чем, а не
-    копят очередь ожидания — именно эта очередь 26.10.2026 и останавливала
-    обмен. Замок сеансовый, а не транзакционный: пересборка внутри делает
-    commit, и `xact`-замок снялся бы на первом же из них.
+    Транзакционный try-lock совпадает с lock ручной пересборки. Занятую
+    компанию пропускаем без очереди. Сборка только flush-ит; commit делается
+    здесь после полного успеха. При отказе транзакция и lock откатываются.
     """
     from app.database import async_session_factory
 
-    ключ = int.from_bytes(company_id.bytes[:8], "big", signed=True)
+    # Тот же ключ и транзакция, что у ручной пересборки. Commit/rollback
+    # освобождает lock до возврата соединения в пул, в том числе при ошибке.
+    scope_key = f"store-documents:{company_id}"
     async with async_session_factory() as db:
         взят = (await db.execute(
-            text("SELECT pg_try_advisory_lock(:k)"), {"k": ключ})).scalar()
+            text("SELECT pg_try_advisory_xact_lock(hashtextextended(:scope_key, 0))"),
+            {"scope_key": scope_key})).scalar()
         if not взят:
             log.info("пересборка реестра компании %s уже идёт — пропускаю", company_id)
             return
         try:
             реестр = await rebuild_store_document_projection(db, company_id)
+            await db.commit()
             log.info("реестр документов компании %s пересобран: %s",
                      company_id, реестр.get("records"))
         except ProjectionRevisionConflict as exc:
@@ -168,9 +174,6 @@ async def _пересобрать(company_id: uuid.UUID, station_id: int) -> Non
         except Exception as exc:  # noqa: BLE001 — обмен важнее сверки
             await db.rollback()
             log.warning("реестр документов компании %s не собран: %r", company_id, exc)
-        finally:
-            try:
-                await db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ключ})
-                await db.commit()
-            except Exception:  # noqa: BLE001 — соединение всё равно уходит в пул
-                pass
+        except asyncio.CancelledError:
+            await db.rollback()
+            raise

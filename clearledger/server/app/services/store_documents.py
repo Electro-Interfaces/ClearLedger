@@ -11,7 +11,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, tuple_
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -26,6 +27,7 @@ from app.models import (
     StoreCheque,
     StoreDocFile,
     StoreDocumentProjection,
+    StoreDocumentProjectionState,
     StoreDocumentProjectionLine,
     StoreDocumentRelation,
     StoreReceipt,
@@ -952,22 +954,82 @@ def _edge_document_identity(packet: EdgePacket, document: dict, kind: str) -> tu
 _АВТО_РЕВИЗИИ = os.environ.get("EDGE_AUTO_APPLY_REVISIONS", "0") == "1"
 
 
+# Размер порции ограничивает одновременно загруженные JSONB; виды конвертов
+# не фильтруем: старые и будущие пакеты могут нести те же законные документы.
+_EDGE_PACKET_BATCH_SIZE = 128
+
+
+async def _iter_edge_packets(db: AsyncSession, company_id: uuid.UUID):
+    """Читать только выбранное содержимое пакетов, ограниченными порциями.
+
+    Курсор держит снимок списка пакетов. Последняя непустая редакция заменяет
+    исходное тело; пустая редакция, как прежде, не стирает прошлое содержимое.
+    Архив L1 не меняем, в identity/revision передаём тот же момент редакции.
+    """
+    from app.models import EdgePacketRevision
+
+    stream = await db.stream(select(
+        EdgePacket.packet_uuid, EdgePacket.station_id, EdgePacket.received_at,
+        EdgePacket.kind,
+    ).where(EdgePacket.company_id == company_id).order_by(EdgePacket.id)
+      .execution_options(yield_per=_EDGE_PACKET_BATCH_SIZE))
+    try:
+        async for packets in stream.partitions(_EDGE_PACKET_BATCH_SIZE):
+            uuids = [p.packet_uuid for p in packets]
+            revisions = {}
+            if _АВТО_РЕВИЗИИ:
+                # DISTINCT ON выбирает ID без чтения payload всех прошлых версий.
+                latest = select(EdgePacketRevision.id).where(
+                    EdgePacketRevision.company_id == company_id,
+                    EdgePacketRevision.packet_uuid.in_(uuids),
+                ).distinct(EdgePacketRevision.packet_uuid).order_by(
+                    EdgePacketRevision.packet_uuid,
+                    EdgePacketRevision.received_at.desc(), EdgePacketRevision.id.desc(),
+                )
+                rows = (await db.execute(select(
+                    EdgePacketRevision.id, EdgePacketRevision.packet_uuid,
+                    EdgePacketRevision.received_at, EdgePacketRevision.payload,
+                ).where(EdgePacketRevision.company_id == company_id,
+                        EdgePacketRevision.id.in_(latest)))).all()
+                for revision in rows:
+                    # Редкий пустой JSON: ищем предыдущую редакцию только этого
+                    # пакета. Тело остальных архивных версий не загружаем.
+                    while revision is not None and not revision.payload:
+                        revision = (await db.execute(select(
+                            EdgePacketRevision.id, EdgePacketRevision.packet_uuid,
+                            EdgePacketRevision.received_at, EdgePacketRevision.payload,
+                        ).where(
+                            EdgePacketRevision.company_id == company_id,
+                            EdgePacketRevision.packet_uuid == revision.packet_uuid,
+                            tuple_(EdgePacketRevision.received_at, EdgePacketRevision.id)
+                            < (revision.received_at, revision.id),
+                        ).order_by(EdgePacketRevision.received_at.desc(),
+                                   EdgePacketRevision.id.desc()).limit(1))).first()
+                    if revision is not None:
+                        revisions[str(revision.packet_uuid)] = revision
+            initial = [key for key in uuids if str(key) not in revisions]
+            originals = {
+                str(row.packet_uuid): row.payload
+                for row in (await db.execute(select(
+                    EdgePacket.packet_uuid, EdgePacket.payload,
+                ).where(EdgePacket.company_id == company_id,
+                        EdgePacket.packet_uuid.in_(initial)))).all()
+            } if initial else {}
+            for packet in packets:
+                revision = revisions.get(str(packet.packet_uuid))
+                yield SimpleNamespace(
+                    station_id=packet.station_id, packet_uuid=packet.packet_uuid,
+                    kind=packet.kind,
+                    received_at=max(filter(None, (
+                        packet.received_at, revision.received_at if revision else None,
+                    )), default=None),
+                    payload=revision.payload if revision else originals.get(str(packet.packet_uuid)),
+                )
+    finally:
+        await stream.close()
+
+
 async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[ProjectionCandidate]:
-    packets = (await db.execute(select(EdgePacket).where(
-        EdgePacket.company_id == company_id))).scalars().all()
-    # Без этого пересборка откатывала бы применённую правку станции: приёмник
-    # кладёт новую версию в EdgePacketRevision (сырьё L1 append-only и не
-    # переписывается), а реестр читал бы первую доставку.
-    свежие: dict[str, tuple[dict, datetime | None]] = {}
-    if _АВТО_РЕВИЗИИ:
-        from app.models import EdgePacketRevision
-        ревизии = (await db.execute(select(EdgePacketRevision).where(
-            EdgePacketRevision.company_id == company_id,
-        ).order_by(EdgePacketRevision.received_at))).scalars().all()
-        for rev in ревизии:  # последняя по времени перезаписывает предыдущие
-            if rev.payload:
-                # Содержание и время версии передаются вместе, без изменения L1.
-                свежие[str(rev.packet_uuid)] = (rev.payload, rev.received_at)
     # Приёмка приезжает пакетом и тут же разворачивается в реестр приёмок: это
     # один документ, а не два. Связь известна по source_uuid — без неё каждая
     # накладная стояла в реестре дважды, причём копия из пакета с нулевой
@@ -993,16 +1055,7 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
     """), {"c": company_id})).all() if v}
     # копия пакета — не второй документ: на ключ остаётся самая свежая доставка
     freshest: dict[tuple, tuple[datetime, str, ProjectionCandidate]] = {}
-    for packet in packets:
-        # Свежую версию подставляем ОБЁРТКОЙ: менять packet.payload нельзя —
-        # это ORM-объект, правка улетела бы в БД, а сырьё L1 неприкосновенно.
-        _свежий = свежие.get(str(packet.packet_uuid))
-        if _свежий:
-            _данные, _момент = _свежий
-            packet = SimpleNamespace(
-                station_id=packet.station_id, packet_uuid=packet.packet_uuid,
-                received_at=max(filter(None, (packet.received_at, _момент)), default=None),
-                kind=packet.kind, payload=_данные)
+    async for packet in _iter_edge_packets(db, company_id):
         for index, document in enumerate((packet.payload or {}).get("Документы") or []):
             if not isinstance(document, dict):
                 continue
@@ -2149,6 +2202,14 @@ async def rebuild_store_document_projection(
             current.related_record_id = related
             current.metadata_json = relation.metadata
     await db.flush()
+    # Успешный no-op не меняет все строки лишь ради метки свежести.
+    # Время фиксируется в той же транзакции, что и сам реестр.
+    state = insert(StoreDocumentProjectionState).values(
+        company_id=company_id, last_successful_rebuild_at=datetime.now(timezone.utc))
+    await db.execute(state.on_conflict_do_update(
+        index_elements=[StoreDocumentProjectionState.company_id],
+        set_={"last_successful_rebuild_at": state.excluded.last_successful_rebuild_at},
+    ))
     return {
         "created": created, "updated": updated, "unchanged": unchanged,
         "removed": len(stale_ids), "records": len(by_record),
