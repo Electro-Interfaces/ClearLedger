@@ -6,7 +6,7 @@ import type { ContractWire, ContractTypeWire, ContractObjectsWire, ContractDocum
   RentalRelations, DocumentRelations, RelationAuthority } from "./scenarios.ts";
 import type { components } from "../../../src/generated/partner-api.d.ts";
 
-// NOTRUN proposal: pure scripted typed mocks, no OAuth, SDK initialization, server,
+// proposal: pure scripted typed mocks, no OAuth, SDK initialization, server,
 // sandboxTransport invocation, HTTP, database, file, control or pilot evidence.
 const origin = "https://example.invalid";
 const c0: ContractWire = { id: "50000000-0000-4000-8000-000000000001", number: "SYN-0", date: "2026-10-29",
@@ -70,7 +70,7 @@ function cursorDenials(id: string, resource: "objects" | "documents"): Step[] {
     deny(relationsPath(c1.id, resource, { cursor: opaque }), 400)];
 }
 
-test("NOTRUN rental flow consumes typed metadata/objects and preserves exact raw values", async () => {
+test("rental flow consumes typed metadata/objects and preserves exact raw values", async () => {
   const firstList: FilteredContractsWire = { items: [c0], total: 2, nextCursor: opaque };
   const exactList: FilteredContractsWire = { items: [c0], total: 1, nextCursor: null };
   const mock = scripted([
@@ -92,7 +92,7 @@ test("NOTRUN rental flow consumes typed metadata/objects and preserves exact raw
   assert.equal(mock.observed.filter(path => path.startsWith("/api/v1/contract-types?")).length, 1); // empty type not queried
 });
 
-test("NOTRUN delegated document flow uses independent effective children; terminal null ends without another read", async () => {
+test("delegated document flow uses independent effective children; terminal null ends without another read", async () => {
   requireDocumentRelationAuthority(authority);
   const mock = scripted([
     { path: relationsPath(c0.id, "documents"), body: documentPage([d0], opaque) },
@@ -106,7 +106,7 @@ test("NOTRUN delegated document flow uses independent effective children; termin
   assert.ok(mock.observed.every(path => !path.includes("/versions/")), "relation IDs confer no file authority");
 });
 
-test("NOTRUN current document profile and each missing scope/grant fail closed independently", () => {
+test("current document profile and each missing scope/grant fail closed independently", () => {
   const missing: RelationAuthority[] = [
     { scopes: ["openid", "documents:read", "documents.files:download"], resourceScopes: { ...authority.resourceScopes, contracts: { mode: "EMPTY", ids: [] } } },
     { ...authority, scopes: ["documents:read"] }, { ...authority, scopes: ["contracts:read"] },
@@ -118,26 +118,26 @@ test("NOTRUN current document profile and each missing scope/grant fail closed i
   assert.doesNotThrow(() => requireDocumentRelationAuthority(authority));
 });
 
-test("NOTRUN independent scope/grant denial is a scripted expected403, not a server ACL test", async () => {
+test("independent scope/grant denial is a scripted expected403, not a server ACL test", async () => {
   const mock = scripted(Array.from({ length: 4 }, () => deny(relationsPath(c0.id, "documents"), 403)));
   for (let i = 0; i < 4; i++) await mock.app.denied(relationsPath(c0.id, "documents"), 403);
   mock.done();
 });
 
-test("NOTRUN walker rejects duplicated IDs even if subject/graph would repeat them", async () => {
+test("walker rejects duplicated IDs even if subject/graph would repeat them", async () => {
   const pages = [documentPage([d0], opaque), documentPage([d0], null)];
   await assert.rejects(() => relationPages(async () => { const page = pages.shift(); assert.ok(page); return page; },
     documents.contracts[0]!, page => page.items.map(item => item.documentId)), /DUPLICATE_RELATION_ACROSS_PAGES/);
 });
 
-test("NOTRUN walker rejects hidden child and globally counted total", async () => {
+test("walker rejects hidden child and globally counted total", async () => {
   for (const page of [documentPage(["private-doc"], opaque), { ...documentPage([d0], opaque), total: 5 }]) {
     await assert.rejects(() => relationPages(async () => page, documents.contracts[0]!,
       value => value.items.map(item => item.documentId)), /INDEPENDENTLY_HIDDEN_RELATION_DISCLOSED|RELATION_PAGE_SHAPE/);
   }
 });
 
-test("NOTRUN walker rejects wrong parent, premature null, repeated cursor and empty nonterminal page", async () => {
+test("walker rejects wrong parent, premature null, repeated cursor and empty nonterminal page", async () => {
   const scripts = [ [objectPage([p0], opaque, c1.id)], [objectPage([p0], null)],
     [objectPage([p0], opaque), objectPage([p1], opaque)], [objectPage([], opaque)] ];
   for (const pages of scripts) await assert.rejects(() => relationPages(async () => {
@@ -146,14 +146,14 @@ test("NOTRUN walker rejects wrong parent, premature null, repeated cursor and em
   /RELATION_PARENT_MISMATCH|RELATION_SET_MISMATCH|RELATION_CURSOR_REPEATED_OR_EMPTY_PAGE/);
 });
 
-test("NOTRUN native company scope has no explicit object expansion", async () => {
+test("native company scope has no explicit object expansion", async () => {
   const vector = { contractId: c0.id, allowed: [], hidden: [p0, p1] };
   const page: ContractObjectsWire = { contractId: c0.id, scopeType: "company", items: [], total: 0, nextCursor: null };
   assert.equal(await relationPages(async () => page, vector, value => value.items.map(item => item.objectId),
     value => assert.equal(value.scopeType, "company")), null);
 });
 
-test("NOTRUN unknown type null metadata and raw validUntil cannot be guessed or normalized", async () => {
+test("unknown type null metadata and raw validUntil cannot be guessed or normalized", async () => {
   for (const changed of [{ ...c0, typeCode: "lease" }, { ...c0, validUntil: "2030-12-31" }]) {
     const mock = scripted([{ path: `/api/v1/contracts/${c0.id}`, body: changed }]);
     await assert.rejects(() => rentalRelationsScenario(mock.app, rental), /RAW_CONTRACT_DETAIL_EXPECTATION_MISMATCH/); mock.done();
