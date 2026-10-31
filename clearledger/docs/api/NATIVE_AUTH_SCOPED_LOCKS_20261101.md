@@ -44,7 +44,7 @@ Dependency `_touch_presence` в frozen app.auth может коммитить **
 Точные before/after path:range/raw SHA/function AST, manifest исходников, frozen pins и исходные parent pins находятся в парном JSON. AST SHA привязаны к версии Python; raw SHA применимы независимо от неё. Read-only оригиналы M00–M19/11 требований сохранены:
 
 - `preview/api-platform-20261029/API-MODERNIZATION-PLAN.md`:29956 bytes,1–238, SHA `2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352`.
-- `preview/api-platform-20261029/completion-matrix.html`:28046 bytes,1–219, SHA `811b7dba00cdc456a71f051527fe6e2ef425b9649fb0ac3a8e8d5564f4dab493`.
+- `preview/api-platform-20261029/completion-matrix.html`:31088 bytes,1–245, SHA `0365af358af9a46c9a4e5c69ac82746efb00c5425aea0c3191e01d1a407c01a2`. Исторический наблюдавшийся raw snapshot из парного JSON; этот pin не утверждает совпадение с текущим изменяемым родительским файлом.
 - `preview/external-developer-experience-20261031/inputs/API-MODERNIZATION-PLAN.md`:29956 bytes,1–238, тот же SHA плана.
 
 PR98/99 имеют только SOURCE статус, их49 tests NOTRUN. ROOT Support2/Core alias16/23 OFFLINEPASS относятся к иной композиции, не к этой волне/schema PG4. Полный B/all-writer closure, M00–M19/11 closure, app accepted, runtime/CI PASS не заявляются. Push/PR/merge/deploy не выполнялись.
