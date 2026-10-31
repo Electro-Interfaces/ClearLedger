@@ -250,8 +250,8 @@ async def serve(database,upload,settings,state,callback):
                     'documents':empty},[callback])
             await register('monitoring',['objects:read','equipment:read','monitoring:read'],'client_secret_basic',
                 {'objects':obj,'equipment':selected(fixture['equipment'][:2]),'counterparties':empty,'contracts':empty,'documents':empty},[callback])
-            await register('documents',['openid','documents:read','documents.files:download'],'none',
-                {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,
+            await register('documents',['openid','documents:read','documents.files:download','contracts:read'],'none',
+                {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':selected(fixture['contracts'][:2]),
                     'documents':selected(fixture['documents'])},[callback])
             settings.partner_docs_client_id=await register('portal',['openid','docs:read','objects:read'],'none',
                 {'objects':obj,'equipment':empty,'counterparties':empty,'contracts':empty,'documents':empty},
@@ -262,7 +262,7 @@ async def serve(database,upload,settings,state,callback):
             manifest['operations']={**manifest['clients']['monitoring'],'vectors':{k:fixture['vectors'][k] for k in ('objects','equipment')},
                 'afterNarrowObjects':fixture['objects'][:1]}
             manifest['documents']={**manifest['clients']['documents'],'redirectUri':callback,
-                'vectors':{'documents':fixture['vectors']['documents']},'allowedContent':fixture['allowedContent'],'deniedContent':fixture['deniedContent']}
+                'vectors':{'documents':fixture['vectors']['documents'],'contracts':fixture['vectors']['contracts']},'allowedContent':fixture['allowedContent'],'deniedContent':fixture['deniedContent']}
             write_json(PRIVATE/'client-manifest.json',manifest)
             discovery=await call('GET','/.well-known/openid-configuration')
             if discovery['issuer']!=origin: raise RuntimeError('Discovery issuer mismatch')
