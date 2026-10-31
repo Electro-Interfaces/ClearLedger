@@ -72,6 +72,8 @@ static uid_t uid;static gid_t gid;
 static int child_channel=-1,pidfd=-1,storagefd=-1,poolfd=-1,cgroupfd=-1,writer=-1;
 static pid_t childpid=-1;
 static atomic_int rejected=0,watch_stop=0;
+static atomic_int kill_sent=0,kill_esrch=0,kill_failure_errno=0;
+_Static_assert(ATOMIC_INT_LOCK_FREE==2,"signal-handler state must be lock free");
 static atomic_ullong wall_deadline=0;
 static pthread_mutex_t sample_lock=PTHREAD_MUTEX_INITIALIZER;
 static uint64_t before_free,minimum_free,after_free,sample_ms,maxgap,samples;
@@ -84,12 +86,38 @@ static int reserves[4]={-1,-1,-1,-1};
 static struct stat python_stat;
 static char controller_ns[6][32];
 static char ready_mount_hash[65];
+static char owner_nonce[65];
 static const char*nsnames[]={"mnt","net","pid","ipc","user","time"};
 static void record_meta(unsigned op,const void*p,size_t n);
 static uint64_t nowms(void){struct timespec t;if(clock_gettime(CLOCK_MONOTONIC,&t))_exit(120);return(uint64_t)t.tv_sec*1000+(uint64_t)t.tv_nsec/1000000;}
-static void killreject(void){atomic_store(&rejected,1);if(pidfd>=0)(void)syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);}
+static void killreject(void){
+ int saved=errno;atomic_store(&rejected,1);
+ if(pidfd>=0){
+  long result=syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);
+  int failure=result<0?errno:0;
+  if(!result)atomic_store(&kill_sent,1);
+  else if(failure==ESRCH)atomic_store(&kill_esrch,1);
+  else {int zero=0;atomic_compare_exchange_strong(&kill_failure_errno,&zero,failure?failure:EIO);}
+ }
+ errno=saved;
+}
+static void kill_diagnostic(void){
+ /* Async-signal-safe, bounded rejection diagnostics, not terminal evidence.
+  * ESRCH and a successful signal syscall both still require external wait/empty.
+  * Keep the first non-ESRCH errno even if another thread later signals again. */
+ int failure=atomic_load(&kill_failure_errno);
+ if(failure){
+  char b[]="pidfd_send_signal failed errno=0000000000; termination UNCONFIRMED\n";
+  unsigned v=(unsigned)failure;for(int i=40;i>=31;i--){b[i]=(char)('0'+v%10);v/=10;}
+  (void)write(2,b,sizeof(b)-1);
+ }else if(atomic_load(&kill_esrch)){
+  const char b[]="pidfd_send_signal ESRCH; termination UNCONFIRMED\n";(void)write(2,b,sizeof(b)-1);
+ }else if(atomic_load(&kill_sent)){
+  const char b[]="pidfd_send_signal SIGNAL_SENT; termination UNCONFIRMED\n";(void)write(2,b,sizeof(b)-1);
+ }
+}
 static void fatal(const char*why){
- killreject();
+ killreject();kill_diagnostic();
  /* write is in the bootstrap filter; send/sendto deliberately are not. */
  if(child_channel>=0)(void)write(child_channel,why,strlen(why));
  (void)write(2,why,strlen(why));(void)write(2,"\n",1);
@@ -101,8 +129,8 @@ static void put32(unsigned char*p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uns
 static uint32_t ru32(Reader*r){NEED(r->n-r->p>=4,"truncated u32");uint32_t n=le32(r->b+r->p);r->p+=4;return n;}
 static void rstr(Reader*r,char*out,size_t cap){uint32_t n=ru32(r);NEED(n>0&&n<cap&&n<=r->n-r->p,"LP string length");for(unsigned i=0;i<n;i++)NEED(r->b[r->p+i]>=32&&r->b[r->p+i]<127,"LP ASCII");memcpy(out,r->b+r->p,n);out[n]=0;r->p+=n;}
 static void ioall(int fd,void*buf,size_t n,bool writing){unsigned char*p=buf;while(n){NEED(!atomic_load(&rejected),"watchdog rejected");struct pollfd f={fd,writing?POLLOUT:POLLIN,0};int q=poll(&f,1,100);if(q<0&&errno==EINTR)continue;NEED(q>=0,"protocol poll");if(!q)continue;NEED(!(f.revents&(POLLERR|POLLNVAL)),"protocol fd failure");ssize_t k=writing?write(fd,p,n):read(fd,p,n);if(k<0&&(errno==EINTR||errno==EAGAIN))continue;NEED(k>0,"protocol EOF/backpressure failure");p+=k;n-=(size_t)k;}}
-static void frame(unsigned op,const void*p,size_t n){NEED(n<=DX_FRAME_MAX&&outseq<UINT32_MAX,"outgoing frame bound");if(op!=DX_STDOUT&&op!=DX_STDERR)record_meta(op,p,n);unsigned char h[16]={ 'D','X','K','1',1,0,0,0 };h[6]=(unsigned char)op;put32(h+8,(uint32_t)n);put32(h+12,++outseq);ioall(1,h,16,true);ioall(1,(void*)p,n,true);}
-static Reader receive(unsigned want){unsigned char h[16];ioall(0,h,16,false);NEED(!memcmp(h,DX_MAGIC,4)&&h[4]==1&&!h[5]&&!h[7],"wire magic/version");NEED(h[6]==want&&inseq<UINT32_MAX&&le32(h+12)==++inseq,"wire opcode/sequence");uint32_t n=le32(h+8);NEED(n>0&&n<=DX_FRAME_MAX,"wire payload bound");unsigned char*b=malloc(n+1);NEED(b,"wire allocation");ioall(0,b,n,false);b[n]=0;return(Reader){b,n,0};}
+static void frame(unsigned op,const void*p,size_t n){NEED(n<=DX_FRAME_MAX&&outseq<UINT32_MAX,"outgoing frame bound");if(op!=DX_STDOUT&&op!=DX_STDERR)record_meta(op,p,n);unsigned char h[16]={ 'D','X','K','1',DX_VERSION,0,0,0 };h[6]=(unsigned char)op;put32(h+8,(uint32_t)n);put32(h+12,++outseq);ioall(1,h,16,true);ioall(1,(void*)p,n,true);}
+static Reader receive(unsigned want){unsigned char h[16];ioall(0,h,16,false);NEED(!memcmp(h,DX_MAGIC,4)&&h[4]==DX_VERSION&&!h[5]&&!h[7],"wire magic/version");NEED(h[6]==want&&inseq<UINT32_MAX&&le32(h+12)==++inseq,"wire opcode/sequence");uint32_t n=le32(h+8);NEED(n>0&&n<=DX_FRAME_MAX,"wire payload bound");unsigned char*b=malloc(n+1);NEED(b,"wire allocation");ioall(0,b,n,false);b[n]=0;return(Reader){b,n,0};}
 static void jadd(Json*j,const char*f,...){va_list a;va_start(a,f);int n=vsnprintf(j->b+j->n,sizeof(j->b)-j->n,f,a);va_end(a);NEED(n>=0&&(size_t)n<sizeof(j->b)-j->n,"JSON bound");j->n+=(size_t)n;}
 static void jq(Json*j,const char*s){jadd(j,"\"");for(const unsigned char*p=(const unsigned char*)s;*p;p++){NEED(*p<128,"JSON ASCII");if(*p=='"'||*p=='\\')jadd(j,"\\%c",*p);else if(*p=='\n')jadd(j,"\\n");else if(*p=='\r')jadd(j,"\\r");else if(*p=='\t')jadd(j,"\\t");else if(*p<32)jadd(j,"\\u%04x",*p);else jadd(j,"%c",*p);}jadd(j,"\"");}
 static void jb64(Json*j,const char*s){
@@ -397,7 +425,7 @@ static void seal_parse(Reader*r,char**admission,size_t*alen,char hash[65]){
   snprintf(envp[i],n,"%s=%s",k,envvalues[i]);
  }
  NEED(r->p==r->n,"SEAL trailing bytes");envp[24]=NULL;
- NEED(!strcmp(envvalues[0],"/inputs/admission/admission.json")&&!strcmp(envvalues[1],hash)&&!strcmp(envvalues[4],"kernel-controlled-v1")&&!strcmp(envvalues[5],cfg[DX_GID])&&!strcmp(envvalues[6],cfg[DX_UID])&&!strcmp(envvalues[7],cfg[DX_POLICY_SHA])&&!strcmp(envvalues[8],cfg[DX_CACHE_GUEST])&&hexstr(envvalues[9],64)&&!strcmp(envvalues[10],cfg[DX_RUNNER_SHA])&&!strcmp(envvalues[12],cfg[DX_SOURCE_BRANCH])&&!strcmp(envvalues[13],cfg[DX_SOURCE_HEAD])&&hexstr(envvalues[15],64)&&!strcmp(envvalues[16],cfg[DX_HOME]),"sealed environment bindings");
+ NEED(!strcmp(envvalues[0],"/inputs/admission/admission.json")&&!strcmp(envvalues[1],hash)&&!strcmp(envvalues[4],"kernel-controlled-v1")&&!strcmp(envvalues[5],cfg[DX_GID])&&!strcmp(envvalues[6],cfg[DX_UID])&&!strcmp(envvalues[7],cfg[DX_POLICY_SHA])&&!strcmp(envvalues[8],cfg[DX_CACHE_GUEST])&&hexstr(envvalues[9],64)&&!strcmp(envvalues[10],cfg[DX_RUNNER_SHA])&&!strcmp(envvalues[12],cfg[DX_SOURCE_BRANCH])&&!strcmp(envvalues[13],cfg[DX_SOURCE_HEAD])&&hexstr(envvalues[15],64)&&!strcmp(envvalues[15],owner_nonce)&&!strcmp(envvalues[16],cfg[DX_HOME]),"sealed environment bindings");
  const unsigned wi[]={2,14,3,11};const char*names[]={"cwd","upload","evidence","scratch"};
  for(unsigned i=0;i<4;i++){
   char p[4096];NEED(snprintf(p,sizeof(p),"%s/%s",cfg[DX_POOL],names[i])<(int)sizeof(p),"work environment length");
@@ -453,6 +481,7 @@ static uint64_t setup_deadline=0;
 static timer_t safety_timer;
 static char cgroup_name[128];
 static int cgroup_parent_fd=-1;
+static struct stat cgroup_identity,cgroup_parent_identity;
 
 /* This periodic kernel timer has no dependency on the Python event loop,
  * notification ioctl, statvfs, pthread mutex or output pipe. Its handler only
@@ -463,7 +492,7 @@ static void safety_tick(int sig){
  (void)sig;
  uint64_t t=nowms(),d=atomic_load(&wall_deadline),last=atomic_load(&last_sample);
  if(atomic_load(&rejected)||(d&&t>=d)||(!d&&t>=setup_deadline)||(last&&t-last>DX_GAP_MS)){
-  killreject();_exit(120);
+  killreject();kill_diagnostic();_exit(120);
  }
 }
 static void timer_arm(void){
@@ -543,23 +572,44 @@ static void cgroup_value(const char*name,const char*value){
  if(b[n-1]=='\n')b[n-1]=0;
  NEED(!strcmp(b,value),"cgroup hard cap not applied");NEED(!close(fd),"cgroup read close");
 }
-static void cgroup_setup(void){
- cgroup_parent_fd=open(cfg[DX_CGROUP_PARENT],O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
- NEED(cgroup_parent_fd>=0,"cgroup parent open");
- struct statfs fs;NEED(!fstatfs(cgroup_parent_fd,&fs)&&fs.f_type==0x63677270,"actual cgroup v2");
- snprintf(cgroup_name,sizeof(cgroup_name),"dx-%lu-%llu",(unsigned long)getpid(),(unsigned long long)nowms());
- NEED(!mkdirat(cgroup_parent_fd,cgroup_name,0700),"unique empty candidate cgroup");
- cgroupfd=openat(cgroup_parent_fd,cgroup_name,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
- NEED(cgroupfd>=0,"candidate cgroup open");
- cgroup_value("pids.max","1");cgroup_value("memory.max","2147483648");
- cgroup_value("memory.swap.max","0");cgroup_value("memory.oom.group","1");
-}
 static uint64_t cgroup_number(const char*file){
  int fd=openat(cgroupfd,file,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);NEED(fd>=0,"cgroup number open");
  char b[128]={0};ssize_t n=read(fd,b,sizeof(b)-1);NEED(n>0&&n<(ssize_t)sizeof(b)-1,"cgroup number read");
  close(fd);if(b[n-1]=='\n')b[n-1]=0;return decimal(b);
 }
+static void cgroup_owner_verify(void){
+ struct stat p,s,n;
+ NEED(!fstat(cgroup_parent_fd,&p)&&!fstat(cgroupfd,&s)&&!fstatat(cgroup_parent_fd,cgroup_name,&n,AT_SYMLINK_NOFOLLOW),"retained owner cgroup observation");
+ NEED(S_ISDIR(p.st_mode)&&p.st_uid==0&&!(p.st_mode&0022)&&p.st_dev==cgroup_parent_identity.st_dev&&p.st_ino==cgroup_parent_identity.st_ino,"retained trusted cgroup parent identity");
+ NEED(S_ISDIR(s.st_mode)&&s.st_uid==0&&!(s.st_mode&0077)&&s.st_dev==cgroup_identity.st_dev&&s.st_ino==cgroup_identity.st_ino&&S_ISDIR(n.st_mode)&&n.st_dev==s.st_dev&&n.st_ino==s.st_ino,"retained exact own cgroup identity");
+}
+static void cgroup_procs(bool live){
+ int fd=openat(cgroupfd,"cgroup.procs",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);NEED(fd>=0,"kernel membership open");
+ char b[128]={0},expected[128];ssize_t n=read(fd,b,sizeof(b)-1);
+ NEED(n>=0&&n<(ssize_t)sizeof(b)-1&&!close(fd),"kernel membership read");
+ if(live){snprintf(expected,sizeof(expected),"%ld\n",(long)childpid);NEED(!strcmp(b,expected),"current kernel membership must be exact clone3 child");}
+ else NEED(n==0,"initial/final cgroup procs must be empty");
+}
+static void cgroup_setup(void){
+ /* No broker-created resource/failure gap: controller already exclusively
+  * created, pinned and holds this exact inode before posix_spawn. Even death
+  * here before READY leaves the live external owner its complete identity. */
+ Reader r=receive(DX_OWNER);NEED(ru32(&r)==DX_OWNER_FIELDS,"exact OWNER count");
+ char fields[DX_OWNER_FIELDS][128];for(unsigned i=0;i<DX_OWNER_FIELDS;i++)rstr(&r,fields[i],sizeof(fields[i]));
+ NEED(r.p==r.n,"OWNER trailing bytes");free(r.b);
+ NEED(hexstr(fields[1],64)&&!strncmp(fields[0],"dx-",3)&&!strcmp(fields[0]+3,fields[1]),"exclusive owner nonce/name binding");
+ strcpy(cgroup_name,fields[0]);strcpy(owner_nonce,fields[1]);cgroupfd=DX_OWNER_CGROUP_FD;cgroup_parent_fd=DX_OWNER_PARENT_FD;
+ NEED(!fstat(cgroup_parent_fd,&cgroup_parent_identity)&&!fstat(cgroupfd,&cgroup_identity),"inherited exact owner handles");
+ NEED((uint64_t)cgroup_parent_identity.st_dev==decimal(fields[2])&&(uint64_t)cgroup_parent_identity.st_ino==decimal(fields[3])&&(uint64_t)cgroup_identity.st_dev==decimal(fields[4])&&(uint64_t)cgroup_identity.st_ino==decimal(fields[5]),"wire owner identity equals retained kernel handles");
+ struct statfs fs;NEED(!fstatfs(cgroup_parent_fd,&fs)&&fs.f_type==0x63677270&&!fstatfs(cgroupfd,&fs)&&fs.f_type==0x63677270,"actual retained cgroup v2");
+ int configured=open(cfg[DX_CGROUP_PARENT],O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);struct stat p;
+ NEED(configured>=0&&!fstat(configured,&p)&&p.st_dev==cgroup_parent_identity.st_dev&&p.st_ino==cgroup_parent_identity.st_ino&&!close(configured),"configured and retained parent binding");
+ cgroup_owner_verify();NEED(cgroup_number("pids.current")==0,"owner scope initially empty");cgroup_procs(false);
+ cgroup_value("pids.max","1");cgroup_value("memory.max","2147483648");
+ cgroup_value("memory.swap.max","0");cgroup_value("memory.oom.group","1");
+}
 static void cgroup_verify_live(void){
+ cgroup_owner_verify();cgroup_procs(true);
  NEED(cgroup_number("pids.current")==1&&cgroup_number("pids.max")==1,"one candidate kernel task");
  NEED(cgroup_number("memory.max")==DX_MEMORY_MAX&&cgroup_number("memory.swap.max")==0,"current cgroup hard memory caps");
  char p[128];snprintf(p,sizeof(p),"/proc/%ld/task",(long)childpid);
@@ -600,6 +650,10 @@ static void inspect_initial(struct seccomp_notif*n){
  status_exact(status,"Groups","");status_exact(status,"NoNewPrivs","1");status_exact(status,"Seccomp","2");
  const char*caps[]={"CapInh","CapPrm","CapEff","CapBnd","CapAmb"};
  for(unsigned i=0;i<5;i++)status_exact(status,caps[i],"0000000000000000");free(status);
+ /* Probe actual pidfd signalling permission after the UID drop, before any
+  * untrusted instruction/CONTINUE. CAP_KILL alone cannot bypass an LSM denial.
+  * A later SIGKILL result is still independently checked by killreject. */
+ NEED(!syscall(SYS_pidfd_send_signal,pidfd,0,NULL,0),"pre-candidate pidfd signalling authority");
 }
 static void notification_once(int listener){
  struct seccomp_notif_sizes sizes;
@@ -740,22 +794,25 @@ int main(int argc,char**argv){
  NEED(!*environ,"broker inherited environment must be empty");
  NEED(geteuid()==0&&getuid()==0&&getppid()>1,"privileged outside broker only");
  NEED(prctl(PR_GET_SECCOMP,0,0,0,0)==0,"unexpected inherited seccomp policy");
+ struct sigaction child_disposition;
+ NEED(!sigaction(SIGCHLD,NULL,&child_disposition)&&child_disposition.sa_handler==SIG_DFL&&!(child_disposition.sa_flags&SA_NOCLDWAIT),"broker retains positive child wait ownership");
  pid_t original_parent=getppid();
  NEED(!prctl(PR_SET_PDEATHSIG,SIGKILL,0,0,0)&&getppid()==original_parent&&original_parent>1,"controller death race/liveness");
  struct __user_cap_header_struct caph={_LINUX_CAPABILITY_VERSION_3,0};
  struct __user_cap_data_struct capd[2]={{0},{0}};
  NEED(!syscall(SYS_capget,&caph,capd),"outside actual capabilities");
- const unsigned required_caps[]={CAP_SYS_ADMIN,CAP_SYS_PTRACE,CAP_SETUID,CAP_SETGID,CAP_SETPCAP,CAP_DAC_OVERRIDE,CAP_DAC_READ_SEARCH};
+ const unsigned required_caps[]={CAP_SYS_ADMIN,CAP_SYS_PTRACE,CAP_SETUID,CAP_SETGID,CAP_SETPCAP,CAP_DAC_OVERRIDE,CAP_DAC_READ_SEARCH,CAP_KILL};
  for(unsigned i=0;i<sizeof(required_caps)/sizeof(*required_caps);i++){
   unsigned c=required_caps[i];
   NEED(capd[c/32].effective&(1U<<(c%32)),"outside required capability unavailable");
  }
- for(int fd=0;fd<=1;fd++){
+ for(int fd=0;fd<=2;fd++){
   int flags=fcntl(fd,F_GETFL);
-  NEED(flags>=0&&!fcntl(fd,F_SETFL,flags|O_NONBLOCK),"nonblocking outside protocol channels");
+  NEED(flags>=0&&!fcntl(fd,F_SETFL,flags|O_NONBLOCK),"nonblocking outside protocol/diagnostic channels");
  }
  DIR*initial=opendir("/proc/self/fd");NEED(initial,"broker descriptor census");int self=dirfd(initial);struct dirent*entry;
- while((entry=readdir(initial))){if(entry->d_name[0]=='.')continue;unsigned long fd=strtoul(entry->d_name,NULL,10);NEED(fd<=2||(int)fd==self,"unexpected inherited broker capability");}closedir(initial);
+ while((entry=readdir(initial))){if(entry->d_name[0]=='.')continue;unsigned long fd=strtoul(entry->d_name,NULL,10);NEED(fd<=2||(int)fd==self||fd==DX_OWNER_CGROUP_FD||fd==DX_OWNER_PARENT_FD,"unexpected inherited broker capability");}closedir(initial);
+ NEED(!fcntl(DX_OWNER_CGROUP_FD,F_SETFD,FD_CLOEXEC)&&!fcntl(DX_OWNER_PARENT_FD,F_SETFD,FD_CLOEXEC),"owner handles are broker-only");
  for(unsigned i=0;i<6;i++)nsread("/proc/self",nsnames[i],controller_ns[i]);
  Reader config=receive(DX_CONFIG);NEED(ru32(&config)==DX_CONFIG_FIELDS,"exact config count");
  for(unsigned i=0;i<DX_CONFIG_FIELDS;i++)rstr(&config,cfg[i],sizeof(cfg[i]));
@@ -824,7 +881,7 @@ int main(int argc,char**argv){
   if(!waited){pid_t w=waitpid(childpid,&status,WNOHANG);NEED(w>=0,"actual waitpid");if(w==childpid){waited=true;atomic_store(&phase,2);atomic_store(&wall_deadline,nowms()+30000);}}
  }
  NEED(exec_observed&&WIFEXITED(status)&&WEXITSTATUS(status)==0,"nonzero/signal/missing exec rejects run");
- NEED(cgroup_number("pids.current")==0,"candidate cgroup empty after wait");
+ cgroup_owner_verify();NEED(cgroup_number("pids.current")==0,"candidate cgroup empty after wait");cgroup_procs(false);
  close(listener);close(boot[0]);close(out[0]);close(err[0]);physical_sample(2);
  Json*tracejson=calloc(1,sizeof(Json));NEED(tracejson,"trace allocation");native_trace(tracejson);archive_copy(false);physical_sample(2);exit_event(DX_EXIT,status);
  Reader finalize=receive(DX_FINALIZE);NEED(finalize.n==4&&ru32(&finalize)==0,"closed FINALIZE request");free(finalize.b);
@@ -838,6 +895,8 @@ int main(int argc,char**argv){
  tracejson->n=0;native_trace(tracejson);archive_copy(true);free(tracejson);
  exit_event(DX_FINAL,status);NEED(!timer_delete(safety_timer),"disarm completed native safety timer");
  for(unsigned i=0;i<4;i++)close(reserves[i]);close(poolfd);close(storagefd);close(pidfd);close(cgroupfd);
- NEED(!unlinkat(cgroup_parent_fd,cgroup_name,AT_REMOVEDIR),"remove own empty cgroup");close(cgroup_parent_fd);
+ /* FINAL/exit0 are still provisional: external owner must positively reap
+  * this exact scope before it may publish any accepted F. */
+ close(cgroup_parent_fd);
  return 0;
 }
