@@ -31,6 +31,18 @@ def _config(settings):
     return config
 
 
+def preflight(settings):
+    """Public offline managed admission; OFF returns before imports, config or I/O."""
+    if not settings.managed_core_budget_enabled:
+        return None
+    try:
+        from schema_migrations.manifest import load_known_head
+        _config(settings)
+        return load_known_head()
+    except Exception:
+        raise RuntimeError("Managed Core budget schema is not ready") from None
+
+
 async def require_connection(connection, settings):
     """Read only; never begin/finish a transaction or change options on a borrowed connection."""
     if not settings.managed_core_budget_enabled:

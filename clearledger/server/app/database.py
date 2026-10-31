@@ -2233,6 +2233,35 @@ async def _assert_bootstrap_namespace(conn) -> str:
     return namespace
 
 
+def preflight_startup_sources() -> None:
+    """Offline source/config admission before any startup socket or owner lock."""
+    from app.services.schema_version_gate import preflight
+    from schema_migrations.runner import preflight_bootstrap_source
+    preflight(settings)
+    preflight_bootstrap_source()
+
+
+async def require_startup_schema() -> None:
+    """Read-only actual namespace/Core audience admission; explicit public may be fresh.
+
+    Called before the startup lock, then again under it before the marker. It
+    never provisions, stamps, changes defaults/ACL, or waives a Core catalogue.
+    """
+    preflight_startup_sources()
+    from app import models_product_budget  # register every namespace-owned name
+    from app.services.schema_version_gate import require_connection
+    from app.services.pulse_view_role_schema import require_connection as require_pulse
+    async with engine.connect() as conn:
+        conn = await conn.execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
+        async with conn.begin():
+            await require_connection(conn, settings)
+            namespace = await _assert_bootstrap_namespace(conn)
+            if namespace not in {"core", "public"}:
+                raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
+            if namespace == "core":
+                await require_pulse(conn)
+
+
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     from app.services.phone_e164 import PHONE_FUNCTION_DDL
