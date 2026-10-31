@@ -31,6 +31,7 @@ import ast
 import base64
 import contextlib
 import email.parser
+import errno
 import hashlib
 import importlib.abc
 import importlib.machinery
@@ -39,10 +40,13 @@ import io
 import json
 import os
 from pathlib import Path
+import posix
 import pwd
 import resource
+import _signal
 import signal
 import stat
+import _thread
 import subprocess
 import sys
 import tempfile
@@ -88,6 +92,12 @@ PINNED_DISTRIBUTIONS = {'aiofiles': '24.1.0', 'aiohappyeyeballs': '2.7.1', 'aioh
 FROZEN_SITE = {'count': 7245, 'bytes': 169999373, 'sha256': '49071b9c07b1fe65baf287e952e9b3c98907ee92f9434c0f30d151d513f8bec2'}
 
 VENV_CFG_SHA = 'e4664ed8e14b41d8f0e039d00f86c45817af9fc89befc9c6eee8bf1aa5a47db7'
+
+# Preserve the native object: a prebound alias must meet the same c_call gate.
+NATIVE_OPEN = posix.open
+NATIVE_SIGNAL_CONTROLS = (_signal.signal, _signal.alarm, _signal.setitimer, _signal.pthread_sigmask)
+NATIVE_THREAD_STARTS = (_thread.start_new_thread, _thread.start_joinable_thread)
+NATIVE_EXIT = posix._exit
 
 
 def require(value, reason):
@@ -256,18 +266,72 @@ def approval():
     return mode, directories
 
 
+class AbsoluteDeadline:
+    """Pinned Linux kernel timer; fatal expiry cannot be swallowed by check()."""
+    def __init__(self, started):
+        self.started = started
+        self.absolute = started + WALL_SECONDS
+        self.post_target = None
+        self.work_armed = False
+        self.frame = None
+        deadline = self
+        native_signal, native_alarm, native_timer, native_mask = NATIVE_SIGNAL_CONTROLS
+        require(signal.SIGALRM not in native_mask(signal.SIG_BLOCK, []), "SIGALRM must not be inherited blocked")
+
+        def soft_expired(signum, frame):
+            # Arm the fatal remainder BEFORE raising the catchable work error.
+            deadline.control("hard")
+            raise TimeoutError("ROOT harness work150s; absolute180s fatal timer armed")
+
+        def control(stage):
+            require(stage in {"work", "hard", "post"}, "trusted deadline stage")
+            if stage == "work":
+                require(not deadline.work_armed and deadline.post_target is None, "single pre-post work timer")
+                deadline.work_armed = True
+            if stage == "post" and deadline.post_target is None:
+                deadline.post_target = min(deadline.absolute, time.monotonic() + 30)
+            target = min(deadline.absolute, deadline.post_target if deadline.post_target is not None else deadline.absolute)
+            if stage == "work":
+                target = min(target, deadline.started + WALL_SECONDS - 30)
+            remaining = target - time.monotonic()
+            # Even an already-expired deadline gets an immediate fatal timer,
+            # never setitimer(0), which would disable the kernel deadline.
+            handler = soft_expired if stage == "work" and remaining > 0 else signal.SIG_DFL
+            require(deadline.frame is None, "nonrecursive timer capability")
+            deadline.frame = sys._getframe()
+            try:
+                native_signal(signal.SIGALRM, handler)
+                native_timer(signal.ITIMER_REAL, max(0.000001, target - time.monotonic()))
+            finally:
+                deadline.frame = None
+
+        self.control = control
+        self.code = control.__code__
+        self.closure = control.__closure__
+        self.globals = control.__globals__
+        self.closure_values = tuple(cell.cell_contents for cell in self.closure)
+
+    def trusted_call(self, frame):
+        return (frame is self.frame and frame.f_code is self.code and self.control.__code__ is self.code
+                and self.control.__closure__ is self.closure and self.control.__globals__ is self.globals
+                and frame.f_globals is self.globals and frame.f_locals.get("deadline") is self
+                and tuple(cell.cell_contents for cell in self.closure) == self.closure_values)
+
+    def intact(self):
+        require(self.frame is None and self.control.__code__ is self.code
+                and self.control.__closure__ is self.closure and self.control.__globals__ is self.globals
+                and tuple(cell.cell_contents for cell in self.closure) == self.closure_values
+                and (_signal.signal, _signal.alarm, _signal.setitimer, _signal.pthread_sigmask) == NATIVE_SIGNAL_CONTROLS
+                and signal.alarm is NATIVE_SIGNAL_CONTROLS[1] and signal.setitimer is NATIVE_SIGNAL_CONTROLS[2],
+                "absolute deadline capability/native identities intact")
+
+
 def set_limits():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_CPU, (150, 150))
     resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 ** 3, 2 * 1024 ** 3))
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_FILE, MAX_FILE))
     resource.setrlimit(resource.RLIMIT_NOFILE, (96, 96))
-
-    def expired(signum, frame):
-        raise TimeoutError("ROOT harness finite180s wall time")
-
-    signal.signal(signal.SIGALRM, expired)
-    signal.alarm(WALL_SECONDS)
 
 
 def git_prefetch(scratch):
@@ -324,8 +388,49 @@ def git_prefetch(scratch):
                    "cache": [{"args": list(args), "sha256": digest} for args, digest in GIT_CACHE_SHA.items()]}, git_state
 
 
+def inherited_fd_census():
+    """Finite Linux preclosure census; no concurrent FD mutation is permitted.
+
+    scandir's own FD may appear in its snapshot, then is closed before fstat.
+    Only that single vanished non-stdio entry is tolerated, never a live FD>2.
+    This is a source contract for the pinned interpreter, not an OS sandbox.
+    """
+    descriptors = []
+    with os.scandir("/proc/self/fd") as listing:
+        for entry in listing:
+            require(entry.name.isascii() and entry.name.isdecimal(), "proc FD entry")
+            descriptors.append(int(entry.name))
+            require(len(descriptors) <= 128, "finite preclosure FD census")
+    require(len(descriptors) == len(set(descriptors)), "unique proc FD census")
+    vanished, stdio = [], []
+    for descriptor in descriptors:
+        try:
+            info = os.fstat(descriptor)
+        except OSError as error:
+            require(error.errno == errno.EBADF and descriptor > 2 and not vanished,
+                    "only closed transient listing FD may vanish")
+            vanished.append(descriptor)
+            continue
+        require(descriptor <= 2, "inherited non-stdio FD capability")
+        require(not stat.S_ISDIR(info.st_mode), "directory stdio FD capability")
+        stdio.append(descriptor)
+    return {"stdio": sorted(stdio), "closed_listing_entries": len(vanished),
+            "live_nonstdio": 0, "entry_bound": 128}
+
+
+def single_thread_census():
+    tasks = []
+    with os.scandir("/proc/self/task") as listing:
+        for entry in listing:
+            require(entry.name.isascii() and entry.name.isdecimal(), "proc task entry")
+            tasks.append(entry.name)
+            require(len(tasks) <= 2, "bounded single kernel thread census")
+    require(len(tasks) == 1, "single kernel thread before closure")
+    return {"kernel_threads": 1, "entry_bound": 2}
+
+
 class Boundary:
-    def __init__(self, directories, source_bindings, site_bindings, cache, git_state):
+    def __init__(self, directories, source_bindings, site_bindings, cache, git_state, deadline):
         self.directories = directories
         self.source_bindings = source_bindings
         self.site_bindings = site_bindings
@@ -340,6 +445,21 @@ class Boundary:
         self.phase = "install"
         self.expected = expected_ids()
         self.original_spec = importlib.util.spec_from_file_location
+        require(os.open is posix.open is NATIVE_OPEN and isinstance(NATIVE_OPEN, types.BuiltinFunctionType)
+                and NATIVE_OPEN.__module__ == "posix", "original native open identity")
+        self.native_open = NATIVE_OPEN
+        self.open_wrapper = None
+        self.open_code = None
+        self.open_closure = None
+        self.open_globals = None
+        self.open_frame = None
+        self.fd_census = None
+        self.thread_census = None
+        self.deadline = deadline
+        self.checker_module = None
+        self.checker_function = None
+        self.checker_code = None
+        self.checker_globals = None
 
     def deny(self, reason):
         if len(self.denials) < 64:
@@ -382,11 +502,17 @@ class Boundary:
                 self.deny("mkdir outside evidence/scratch")
         if event != "open":
             return
+        # CPython may clear a profile callback when it raises. A caught native
+        # denial must never permit a second open with the c_call gate absent.
+        if self.closed and sys.getprofile() != self.profile:
+            self.deny("open without native call gate")
         if not isinstance(args[0], (str, bytes, os.PathLike)):
             self.deny("file descriptor open")
         path = lexical(args[0])
         mode = args[1] if len(args) > 1 else None
         flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
+        if flags & (os.O_DIRECTORY | os.O_PATH) or path.is_dir():
+            self.deny("directory open capability")
         writing = flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND)
         writing = writing or isinstance(mode, str) and any(c in mode for c in "wax+")
         if path.name == ".env" or path.name.startswith(".env.") or {".ssh", ".vault", ".claude"} & set(path.parts):
@@ -414,11 +540,14 @@ class Boundary:
 
     def check_output(self, *args, **kwargs):
         caller = sys._getframe(1)
-        checker_path = str(REPO / BINDINGS["partner_dx_source_checker_20261031"][0])
         if (len(args) != 1 or kwargs or type(args[0]) is not list
                 or not all(type(cell) is str for cell in args[0])
-                or caller.f_code.co_filename != checker_path or caller.f_code.co_name != "git"
-                or caller.f_globals.get("__name__") != "partner_dx_source_checker_20261031"):
+                or self.checker_function is None or caller.f_code is not self.checker_code
+                or caller.f_globals is not self.checker_globals
+                or self.checker_module.__dict__ is not self.checker_globals
+                or self.checker_globals.get("git") is not self.checker_function
+                or self.checker_function.__code__ is not self.checker_code
+                or self.checker_function.__globals__ is not self.checker_globals):
             self.deny("unknown subprocess.check_output caller/shape")
         command = tuple(args[0])
         if command not in self.cache:
@@ -429,6 +558,30 @@ class Boundary:
         return self.cache[command]  # Original stdout bytes, including terminal newline.
 
     def profile(self, frame, event, arg):
+        # A profile exception removes CPython's per-thread hook. Never let a
+        # caller catch that exception and then cancel the fatal timer/open raw.
+        # Fatal refusal cannot promise a receipt; ROOT must census externally.
+        try:
+            return self.profile_event(frame, event, arg)
+        except BaseException:
+            NATIVE_EXIT(1)
+
+    def profile_event(self, frame, event, arg):
+        if event == "c_call" and any(arg is native for native in NATIVE_THREAD_STARTS):
+            self.deny("new Python thread outside single-thread boundary")
+        if event == "c_call" and any(arg is native for native in NATIVE_SIGNAL_CONTROLS):
+            if not self.deadline.trusted_call(frame):
+                self.deny("native timer control outside exact deadline capability")
+            return
+        if event == "c_call" and arg is self.native_open:
+            wrapper = self.open_wrapper
+            if (wrapper is None or frame is not self.open_frame or frame.f_code is not self.open_code
+                    or wrapper.__code__ is not self.open_code or wrapper.__closure__ is not self.open_closure
+                    or frame.f_globals is not self.open_globals or wrapper.__globals__ is not self.open_globals
+                    or frame.f_locals.get("boundary") is not self or frame.f_locals.get("native_open") is not self.native_open
+                    or tuple(cell.cell_contents for cell in self.open_closure) != (self, self.native_open)):
+                self.deny("raw native open outside exact trusted wrapper capability")
+            return
         if event != "call":
             return
         module, name = frame.f_globals.get("__name__", ""), frame.f_code.co_name
@@ -464,6 +617,22 @@ class Boundary:
         boundary = self
 
         class FrozenSource(importlib.machinery.SourceFileLoader):
+            def exec_module(self, module):
+                if fullname != "partner_dx_source_checker_20261031":
+                    return super().exec_module(module)
+                require(boundary.checker_function is None, "single actual checker module execution")
+                code = self.get_code(fullname)  # Rechecks pinned actual .py bytes.
+                candidates = [item for item in code.co_consts if isinstance(item, types.CodeType) and item.co_name == "git"]
+                require(len(candidates) == 1, "one actual checker.git code in pinned module constants")
+                exec(code, module.__dict__)
+                function = module.__dict__.get("git")
+                require(isinstance(function, types.FunctionType) and function.__code__ is candidates[0]
+                        and function.__globals__ is module.__dict__, "actual checker.git code/globals identity")
+                boundary.checker_module = module
+                boundary.checker_function = function
+                boundary.checker_code = candidates[0]
+                boundary.checker_globals = module.__dict__
+
             def get_code(self, name):
                 require(name == fullname, "source loader name")
                 raw = bounded_bytes(path)
@@ -505,6 +674,25 @@ class Boundary:
 
     def install(self):
         boundary = self
+        native_open = self.native_open
+
+        def guarded_open(path, flags, mode=0o777, *, dir_fd=None):
+            # Audit open(path, mode, flags) omits dir_fd. Reject it BEFORE any
+            # native call; use a plain absolute string after lexical checks.
+            if dir_fd is not None or isinstance(path, int):
+                boundary.deny("open dir_fd/int path capability")
+            if type(flags) is not int or flags & (os.O_DIRECTORY | os.O_PATH):
+                boundary.deny("open directory flags capability")
+            path = lexical(path)
+            if path.is_dir():
+                boundary.deny("open existing directory capability")
+            if boundary.open_frame is not None:
+                boundary.deny("nested native open capability")
+            boundary.open_frame = sys._getframe()
+            try:
+                return native_open(str(path), flags, mode)
+            finally:
+                boundary.open_frame = None
 
         class Imports(importlib.abc.MetaPathFinder):
             def find_spec(self, fullname, path=None, target=None):
@@ -530,6 +718,14 @@ class Boundary:
                                      submodule_search_locations=found.submodule_search_locations)
 
         require(all(not name.startswith("app") for name in sys.modules), "install before app import")
+        self.fd_census = inherited_fd_census()
+        self.thread_census = single_thread_census()
+        self.open_wrapper = guarded_open
+        self.open_code = guarded_open.__code__
+        self.open_closure = guarded_open.__closure__
+        self.open_globals = guarded_open.__globals__
+        require(guarded_open.__code__.co_freevars == ("boundary", "native_open"), "exact open wrapper closure")
+        os.open = guarded_open  # posix.open stays native; profile gates aliases.
         subprocess.check_output = self.check_output
         importlib.util.spec_from_file_location = self.spec
         sys.meta_path[:] = [Imports()]
@@ -992,6 +1188,25 @@ def postcheck(directories, original_env, proof, boundary, external_state):
     if boundary is not None:
         def closed_state():
             require(sys.getprofile() == boundary.profile and sys.gettrace() is None, "closed tracing hooks intact")
+            boundary.deadline.intact()
+            require(boundary.checker_function is not None
+                    and boundary.checker_module.__dict__ is boundary.checker_globals
+                    and boundary.checker_globals.get("git") is boundary.checker_function
+                    and boundary.checker_function.__code__ is boundary.checker_code
+                    and boundary.checker_function.__globals__ is boundary.checker_globals
+                    and subprocess.check_output == boundary.check_output,
+                    "actual pinned checker.git and bridge identities intact")
+            require(os.open is boundary.open_wrapper and posix.open is boundary.native_open is NATIVE_OPEN
+                    and boundary.open_wrapper.__code__ is boundary.open_code
+                    and boundary.open_wrapper.__closure__ is boundary.open_closure
+                    and boundary.open_wrapper.__globals__ is boundary.open_globals
+                    and tuple(cell.cell_contents for cell in boundary.open_closure) == (boundary, boundary.native_open)
+                    and boundary.open_frame is None, "trusted open wrapper/native/closure intact")
+            require(boundary.fd_census is not None and boundary.fd_census["live_nonstdio"] == 0,
+                    "preclosure inherited FD census completed")
+            require(boundary.thread_census == {"kernel_threads": 1, "entry_bound": 2}
+                    and (_thread.start_new_thread, _thread.start_joinable_thread) == NATIVE_THREAD_STARTS,
+                    "single-thread preclosure census/native start identities intact")
             require(not boundary.denials, "guard attempts are failure, even if test caught exception")
             require(boundary.calls == 1, "one actual pytest.main")
             require({tuple(row) for row in boundary.cache_hits} == set(boundary.cache), "all12 exact baseline resolver commands exercised")
@@ -1009,6 +1224,8 @@ def postcheck(directories, original_env, proof, boundary, external_state):
                 "__name__", "__doc__", "__package__", "__loader__", "__spec__", "Base", "__getattr__"},
                 "inert database exports only real Base")
             return {"attempts": boundary.denials, "pytest_main_calls": boundary.calls,
+                    "inherited_fd_census": boundary.fd_census, "trusted_native_open_gate": True,
+                    "single_thread_census": boundary.thread_census, "absolute_fatal_deadline": True,
                     "cache_calls": len(boundary.cache_hits), "cache_distinct": len({tuple(row) for row in boundary.cache_hits}),
                     "app_modules": sorted(name for name in sys.modules if name == "app" or name.startswith("app."))}
 
@@ -1031,11 +1248,11 @@ def main():
                         "artifact_and_scratch_bytes": MAX_ARTIFACT_BYTES, "free_floor_bytes": FREE_FLOOR},
              "adapters": [], "phase": "preflight", "errors": []}
     boundary, external_state, payload = None, {}, None
+    deadline = AbsoluteDeadline(started)
     success = False
     try:
         set_limits()
-        # Reserve the last30s for mandatory postchecks/failure receipts.
-        signal.alarm(WALL_SECONDS - 30)
+        deadline.control("work")
         proof["expected_nodeids"] = expected_ids()
         proof["sources_before"], source_bindings = sources()
         proof["inventory_before"], site_bindings = inventory()
@@ -1055,7 +1272,7 @@ def main():
                 paths.append(str(path))
             sys.path[:] = [str(SERVER), str(SITE), *paths]
             tempfile.tempdir = str(scratch)
-            boundary = Boundary(directories, source_bindings, site_bindings, cache, external_state)
+            boundary = Boundary(directories, source_bindings, site_bindings, cache, external_state, deadline)
             proof["phase"] = "install_closed_boundary"
             boundary.install()  # Always before app/framework imports, including package __init__.
             proof["adapters"].append(inert_database(boundary))
@@ -1075,7 +1292,7 @@ def main():
         # Never turn FAIL/guard exceptions/skips/missing collection into success;
         # all feasible source/site/seal/environment/artifact checks run on FAIL.
         proof["phase"] = "postcheck"
-        signal.alarm(30)
+        deadline.control("post")  # Fixed min(started+180, first_post_entry+30).
         post_ok = postcheck(directories, original_env, proof, boundary, external_state)
         proof["ok"] = success and post_ok
         proof["elapsed_seconds"] = round(time.monotonic() - started, 6)
