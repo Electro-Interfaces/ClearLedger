@@ -13,14 +13,62 @@ _WS_HANDSHAKE_FORMATS = {
     '%s - "WebSocket %s" %d': 3,
 }
 
-# These three source-owned URL families carry authority in a path segment.
-_CAPABILITY_PREFIXES = ("/api/doc-share/", "/api/invite/", "/api/work/calendar/feed/")
+# Known Core/API and public UI families carry authority in a path segment.
+_CAPABILITY_PREFIXES = (
+    "/api/doc-share/", "/api/invite/", "/api/work/calendar/feed/",
+    "/api/auth/reset-password/", "/api/invitations/accept/", "/api/showcase/",
+    "/doc-share/", "/doc-verify/", "/meeting/", "/invite/", "/reset-password/", "/showcase/",
+)
+_CAPABILITY_SEGMENT_LIMIT = max(len(part) for prefix in _CAPABILITY_PREFIXES for part in prefix.split("/"))
 _CAPABILITY_MARKER = "[redacted-capability-target]"
 # Recognize raw percent spellings only to fail closed. No request path is decoded.
 _CAPABILITY_PREFIX_SPELLINGS = re.compile("(?:" + "|".join(
     "".join(f"(?:{re.escape(char)}|(?i:%{ord(char):02x}))" for char in prefix)
     for prefix in _CAPABILITY_PREFIXES) + ")")
 _VERIFY_SPELLING = re.compile(r"(?:v|%76)(?:e|%65)(?:r|%72)(?:i|%69)(?:f|%66)(?:y|%79)")
+
+
+def _capability_alias(raw_path):
+    """Probe structural prefix aliases only; never emit a decoded target.
+
+    Stop at the first known family boundary, before reading its opaque suffix.
+    This is logging classification, not request normalization or token parsing.
+    """
+    parts, segment = [], []
+    index = 0
+    while index < len(raw_path):
+        char = raw_path[index]
+        index += 1
+        if char == "%" and index + 1 < len(raw_path):
+            spelling = raw_path[index:index + 2]
+            if re.fullmatch(r"[0-9a-fA-F]{2}", spelling):
+                structural = chr(int(spelling, 16))
+                if structural in "/.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_":
+                    char = structural
+                    index += 2
+        if char != "/":
+            segment.append(char)
+            continue
+        item = "".join(segment)
+        segment.clear()
+        if item == "..":
+            if parts:
+                parts.pop()
+        elif item and item != ".":
+            parts.append(item)
+        offset = 1 if parts and parts[0] == "ClearLedger" else 0
+        # Known prefixes have at most four segments: keep ordinary scans linear.
+        if len(parts) - offset > 4:
+            continue
+        scoped = parts[offset:]
+        if any(len(part) > _CAPABILITY_SEGMENT_LIMIT for part in scoped):
+            # Keep the stack: later .. may remove a long ordinary segment.
+            continue
+        family = "/" + "/".join(scoped) + "/"
+        if family in _CAPABILITY_PREFIXES:
+            # Only the literal static operation is exempt; encoded ambiguity masks.
+            return not (family == "/api/work/calendar/feed/" and raw_path[index:] == "rotate")
+    return False
 
 
 def safe_target(target):
@@ -39,7 +87,10 @@ def safe_target(target):
         prefix = None
     if prefix is None:
         # Encoded structural prefixes are ambiguous logging inputs, not routing evidence.
-        if not static_rotate and _CAPABILITY_PREFIX_SPELLINGS.match(capability_path):
+        if not static_rotate and (_CAPABILITY_PREFIX_SPELLINGS.match(capability_path)
+                                  or _capability_alias(capability_path)
+                                  or authority and not authority.group(1)
+                                  and _capability_alias(re.split(r"[?#]", probe, maxsplit=1)[0])):
             return _CAPABILITY_MARKER
     else:
         if probe != target or re.search(r"[\x00-\x1f\x7f]", probe):
@@ -66,9 +117,12 @@ def safe_target(target):
             if (len(parts) == 1 or len(parts) == 2 and parts[1] in {"respond", "propose", "poll", "ics"}
                     or len(parts) == 3 and parts[1:] == ["poll", "vote"]):
                 return head + prefix + "/".join(["[redacted]", *parts[1:]])
-        else:
+        elif prefix == "/api/work/calendar/feed/":
             if len(parts) == 1 and parts[0].endswith(".ics") and parts[0][:-4]:
                 return head + prefix + "[redacted].ics"
+        else:
+            # New API/UI profile hides the complete opaque suffix, not its shape.
+            return head + prefix + "[redacted]"
         # Unknown suffix/empty/malformed shapes under a known family disclose no target.
         return _CAPABILITY_MARKER
     path, separator, query = target.partition("?")

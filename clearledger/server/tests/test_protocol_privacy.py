@@ -96,7 +96,11 @@ def test_ambiguous_known_families_fail_closed_without_path_decoding(target):
 ], ids=['doc-near-miss','invite-near-miss','feed-near-miss','feed-bootstrap','feed-rotate',
         'doc-base','invite-base','ordinary-id','nested-query-outside-scope','ordinary-referrer','case-distinct','dot-prefix-outside-scope'])
 def test_unmatched_targets_and_static_feed_operations_are_unchanged(target):
-    assert safe_target(target)==target
+    # ROOT msg_7717a23e12f8: intentional logging-only alias privacy expansion.
+    if target == '/api/./invite/SYNTHETIC_CAPABILITY_20261031':
+        assert safe_target(target)==MARKER
+    else:
+        assert safe_target(target)==target
 
 
 @pytest.mark.parametrize('target,expected', [
