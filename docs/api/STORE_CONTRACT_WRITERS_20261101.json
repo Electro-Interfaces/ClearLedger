@@ -26,8 +26,8 @@
     },
     {
       "path": "clearledger/server/tests/test_store_contract_commands_pg.py",
-      "bytes": 9867,
-      "sha256": "aaef40d0db73b0b573f35b0b94a3478bc6e93c46883afea3450b3407fba5f0e0"
+      "bytes": 9970,
+      "sha256": "ba2ea901840ba7bc7037ecc57075fd3090f3eda490a2807df5dc01f979af29e6"
     }
   ],
   "router_protected": {
@@ -64,7 +64,7 @@
     "PG: real varchar/JSONB bind, persisted title/raw/defaults, no locations/replay metadata",
     "PG: caller commit visibility and rollback removes card; mixed CP/card rollback atomicity",
     "PG: missing/cross-tenant parties400 and tenant-owned UPDATE404",
-    "PG: exact tenant/cp/org/date/type duplicate409; other scope distinct; repeated incomplete distinct",
+    "PG: exact tenant/cp/org/date/type; repeated incomplete distinct after caller flush and empty new/dirty/deleted assertion",
     "PG: UPDATE self excluded; actual cp/org/type against body; other current-party duplicate409 before mutation"
   ],
   "PG_guard": {
@@ -72,5 +72,10 @@
     "host": "127.0.0.1",
     "query_fragment_fallback": false,
     "executor": "ROOT pre-import approval required; no runner provided"
-  }
+  },
+  "known_limit": "Inherited INN pre-lock lookup race: no repeat lookup under CP lock; CP/edge duplicates possible; contract matcher across different CP does not merge. Code unchanged.",
+  "source_review_corrections": [
+    "M06-SR-01 authored PG reentry flush/clean session",
+    "M06-SR-02 document inherited INN race; no production changes"
+  ]
 }

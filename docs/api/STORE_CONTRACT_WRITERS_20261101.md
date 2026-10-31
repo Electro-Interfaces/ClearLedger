@@ -33,4 +33,7 @@ ROOT должен отдельно одобрить точную disposable test
 
 Независимая Source acceptance запрашивается после локального freeze. Полный 20/M11
 OPEN; B closure, runtime/PG/HTTP evidence, рабочие данные, merge/deploy/runtime GO
-не заявлены. ИНН-only matcher остаётся отдельным backlog. Push/PR выполняет ROOT.
+не заявлены. Унаследованная гонка: два INN lookup могут не найти запись до CP lock;
+повторного lookup под lock нет, поэтому возможны дубли CP/edge. Contract matcher
+разных CP их не схлопывает. INN matcher/early shape не изменены, это отдельный
+backlog. Push/PR выполняет ROOT.

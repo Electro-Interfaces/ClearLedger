@@ -134,6 +134,8 @@ async def test_matcher_exact_tenant_parties_identity_and_incomplete_distinct(wor
             row = await save_store_contract(db, w.foreign if case == "tenant" else w.cid, body(w, **changes))
             assert row.id != uid
             if case == "incomplete":
+                await db.flush()
+                assert not db.new and not db.dirty and not db.deleted
                 again = await save_store_contract(db, w.cid, body(w, **changes))
                 assert again.id not in {row.id, uid}
         await db.rollback()
