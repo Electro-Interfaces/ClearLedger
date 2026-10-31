@@ -1,36 +1,16 @@
 # M12: wire types внешнего product API
 
-Текущий NEXT-R2 добавляет `GET /api/v1/contracts/{contractId}/documents`
-(`listContractDocuments`): явные subject/graph связи с независимо доступными
-документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,
-а также отдельные typed resource grants обоих ресурсов. Machine-профиля нет.
-Ответ: `contractId, items[].documentId, total, nextCursor`; query только
-`pageSize` (1..200, default 50) и `cursor`. Чтение связи не даёт права на файлы:
-для content по-прежнему нужны отдельный download scope, права документа и file policy.
-Схема кандидата содержит 14 GET: 10 user/service и четыре user-only.
-ROOT принял 60 новых сценариев и отдельный corrective1, regression84 с 142
-subtests, official generation/freshness, 6 generator controls и 3 typed consumers.
-Это отдельные локальные серии; выпуска и включения не было. Подробности: [NEXT-R2](api/CONTRACT_DOCUMENTS_READ_20261030.md).
+Текущий кандидат M06-R3 содержит **15 GET: 11 user/service и четыре user-only**.
+Единая [таблица путей, operationId, scopes и профилей](PARTNER_QUICKSTART.md#текущий-контракт--31102026)
+находится в quickstart. В неё входят metadata типа договора и обе связи договора
+с объектами и документами. История 12/13/14 операций сохранена в конце этого файла.
 
-Следующие датированные сведения о NEXT-R1 и M12 сохранены как история срезов.
-
-Дополнение NEXT-R1: actual curated candidate расширен новым
-`listContractObjects` до 13 GET, из которых 10 допускают user/service и три
-документные требуют пользователя. Exporter и официальный генератор обновляют
-точный manifest, сохраняя проверки чужих/лишних/повторных операций. Исходный
-срез из 12 операций ниже остаётся историей M12; текущая генерация, проверка
-freshness/consumer и её точные результаты фиксируются отдельно в
-[отчёте NEXT-R1](api/CONTRACT_OBJECTS_READ_20261030.md). ROOT выполнил официальные
-generation/freshness, прежний и новый consumer checks и 6/6 generator controls;
-generated файл содержит новый контракт, ручной правки `.d.ts` нет.
-
-30.10.2026. База этого slice — `e94427bf6af8bbb84206dfc7f982bd7718ff0c52`,
-ветка `agent/api-wire-types-20261030`. Генерируемый файл:
-`src/generated/partner-api.d.ts`. Он экспортирует `paths`, `components`,
-`operations` реальных **12 candidate GET operations** curated product API.
-Это типы wire contract; они не включают transport, token storage, refresh,
-permission checks или ORM implementation types. Core `apiClient`, его trust
-boundaries и авторизация UI не меняются.
+`src/generated/partner-api.d.ts` содержит wire types `paths`, `components`,
+`operations`. Это определения HTTP-контракта; transport, хранение/refresh токенов,
+авторизация пользователя и повторы запросов реализуются клиентом отдельно.
+Текущие проверки source и SDK15 описаны в
+[отчёте M06-R3](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
+Свежесть полной опубликованной схемы и финального состава проверяется отдельно.
 
 ## Источник и offline граница
 
@@ -201,3 +181,38 @@ root обязан заново выполнить generation/check/consumer/test
 `.d.ts` подтверждена только для базы e94427bf, не для final integrated candidate.
 Откат — удалить отдельные tooling/generated/doc changes и npm commands;
 runtime API, credentials и persisted grants при этом не меняются.
+
+
+## История контрактных срезов · 30.10.2026
+
+NEXT-R2 от30.10.2026 добавил `GET /api/v1/contracts/{contractId}/documents`
+(`listContractDocuments`): явные subject/graph связи с независимо доступными
+документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,
+а также отдельные typed resource grants обоих ресурсов. Machine-профиля нет.
+Ответ: `contractId, items[].documentId, total, nextCursor`; query только
+`pageSize` (1..200, default 50) и `cursor`. Чтение связи не даёт права на файлы:
+для content по-прежнему нужны отдельный download scope, права документа и file policy.
+На этом историческом срезе схема содержала 14 GET: 10 user/service и четыре user-only.
+ROOT принял 60 новых сценариев и отдельный corrective1, regression84 с 142
+subtests, official generation/freshness, 6 generator controls и 3 typed consumers.
+Это отдельные локальные серии; выпуска и включения не было. Подробности: [NEXT-R2](api/CONTRACT_DOCUMENTS_READ_20261030.md).
+
+Следующие датированные сведения о NEXT-R1 и M12 сохранены как история срезов.
+
+Дополнение NEXT-R1: actual curated candidate расширен новым
+`listContractObjects` до 13 GET, из которых 10 допускают user/service и три
+документные требуют пользователя. Exporter и официальный генератор обновляют
+точный manifest, сохраняя проверки чужих/лишних/повторных операций. Исходный
+срез из 12 операций ниже остаётся историей M12; текущая генерация, проверка
+freshness/consumer и её точные результаты фиксируются отдельно в
+[отчёте NEXT-R1](api/CONTRACT_OBJECTS_READ_20261030.md). ROOT выполнил официальные
+generation/freshness, прежний и новый consumer checks и 6/6 generator controls;
+generated файл содержит новый контракт, ручной правки `.d.ts` нет.
+
+30.10.2026. База этого slice — `e94427bf6af8bbb84206dfc7f982bd7718ff0c52`,
+ветка `agent/api-wire-types-20261030`. Генерируемый файл:
+`src/generated/partner-api.d.ts`. Он экспортирует `paths`, `components`,
+`operations` реальных **12 candidate GET operations** curated product API.
+Это типы wire contract; они не включают transport, token storage, refresh,
+permission checks или ORM implementation types. Core `apiClient`, его trust
+boundaries и авторизация UI не меняются.

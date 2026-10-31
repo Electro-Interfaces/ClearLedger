@@ -31,6 +31,8 @@ export function authorizeRequest(origin: string, input: string | URL, method: st
   const oauthRead = ["/.well-known/openid-configuration", "/api/oauth2/.well-known/openid-configuration",
     "/api/oauth2/jwks", "/api/oauth2/userinfo"].includes(path);
   const productRead = /^\/api\/v1\/(?:objects|equipment|counterparties|contracts|documents)(?:\/[^/]+)?$/.test(path) ||
+    path === "/api/v1/contract-types" ||
+    /^\/api\/v1\/contracts\/[^/]+\/(?:objects|documents)$/.test(path) ||
     /^\/api\/v1\/objects\/[^/]+\/monitoring$/.test(path) ||
     /^\/api\/v1\/documents\/[^/]+\/versions\/[^/]+\/content$/.test(path);
   const protocolWrite = ["/api/oauth2/token", "/api/oauth2/revoke"].includes(path) && !url.search;

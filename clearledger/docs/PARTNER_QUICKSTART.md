@@ -13,30 +13,35 @@ M06-R3 добавляет required nullable `typeCode` и `validUntil` в Contra
 subtests, SDK15 generation/freshness, 6 generator checks и 4 consumers;
 [границы и остаток M06](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
 
-Ниже сохранены датированные сведения прежних срезов NEXT-R2/R1/M12.
 
-Текущий NEXT-R2 добавляет `GET /api/v1/contracts/{contractId}/documents`
-(`listContractDocuments`): явные subject/graph связи с независимо доступными
-документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,
-а также отдельные typed resource grants обоих ресурсов. Machine-профиля нет.
-Ответ: `contractId, items[].documentId, total, nextCursor`; query только
-`pageSize` (1..200, default 50) и `cursor`. Чтение связи не даёт права на файлы:
-для content по-прежнему нужны отдельный download scope, права документа и file policy.
-Схема кандидата содержит 14 GET: 10 user/service и четыре user-only.
-ROOT принял 60 новых сценариев и отдельный corrective1, regression84 с 142
-subtests, official generation/freshness, 6 generator controls и 3 typed consumers.
-Это отдельные локальные серии; выпуска и включения не было. Подробности: [NEXT-R2](api/CONTRACT_DOCUMENTS_READ_20261030.md).
+## Текущий контракт · 31.10.2026
 
-Следующие датированные сведения о NEXT-R1 и M12 сохранены как история срезов.
+15 GET: 11 доступны пользовательскому и сервисному приложению, четыре требуют
+пользовательского согласия. Для каждого ресурса нужны независимые grants; scopes
+сами по себе не дают доступа к записи или файлу. Флаги публикации остаются выключены.
 
-NEXT-R1 добавляет кандидат GET `/api/v1/contracts/{contractId}/objects`
-(`listContractObjects`): явные текущие связи договора только с независимо
-доступными точками обслуживания. Одновременно нужны `contracts:read` и
-`objects:read`, оба самостоятельных resource grants и текущие ограничения
-сотрудника. Query принимает только `pageSize/cursor`; company/unassigned не
-разворачивается на всю сеть. Кандидат расширяется с 12 до 13 GET (10 user/service,
-3 user-docs); статус проверки и ограничения —
-[в отчёте NEXT-R1](api/CONTRACT_OBJECTS_READ_20261030.md).
+| Путь GET | operationId | Обязательные scopes | Профиль |
+|---|---|---|---|
+| `/api/v1/objects` | `listObjects` | `objects:read` | Пользователь / сервис |
+| `/api/v1/objects/{objectId}` | `getObject` | `objects:read` | Пользователь / сервис |
+| `/api/v1/objects/{objectId}/monitoring` | `getObjectMonitoring` | `monitoring:read` + `objects:read` | Пользователь / сервис |
+| `/api/v1/equipment` | `listEquipment` | `equipment:read` | Пользователь / сервис |
+| `/api/v1/equipment/{equipmentId}` | `getEquipment` | `equipment:read` | Пользователь / сервис |
+| `/api/v1/counterparties` | `listCounterparties` | `counterparties:read` | Пользователь / сервис |
+| `/api/v1/counterparties/{counterpartyId}` | `getCounterparty` | `counterparties:read` | Пользователь / сервис |
+| `/api/v1/contracts` | `listContracts` | `contracts:read` | Пользователь / сервис |
+| `/api/v1/contract-types` | `getContractTypeMetadata` | `contracts:read` | Пользователь / сервис |
+| `/api/v1/contracts/{contractId}` | `getContract` | `contracts:read` | Пользователь / сервис |
+| `/api/v1/contracts/{contractId}/objects` | `listContractObjects` | `contracts:read` + `objects:read` | Пользователь / сервис |
+| `/api/v1/contracts/{contractId}/documents` | `listContractDocuments` | `contracts:read` + `documents:read` | Пользователь |
+| `/api/v1/documents` | `listDocuments` | `documents:read` | Пользователь |
+| `/api/v1/documents/{docId}` | `getDocument` | `documents:read` | Пользователь |
+| `/api/v1/documents/{docId}/versions/{versionId}/content` | `downloadDocumentVersion` | `documents.files:download` + `documents:read` | Пользователь |
+
+Серверная и браузерная схемы описывают эти же операции. Отличается профиль
+авторизации: confidential client_credentials описан только в серверной схеме;
+Swagger в браузере использует пользовательский Code+PKCE. Фактически опубликованные
+файлы и свежесть полного состава проверяются отдельно при подготовке внешнего доступа.
 
 Срез 30.10.2026: код подготовлен в интеграционной ветке, рабочее РусГидро этим
 документом не обновляется. OAuth, API и документация по умолчанию выключены.
@@ -185,5 +190,33 @@ docs session: `/api/developer/docs/openapi.server.json`. В нём отдель�
 пользовательский Code+PKCE и confidential client_credentials с обязательным
 прикладным `grant_id`. Файл `/api/developer/docs/openapi.json` служит Swagger
 в браузере и предлагает только пользовательский Code+PKCE; секрет серверного
-приложения в браузер не вводится. Оба текущих представления относятся к одним 14
+приложения в браузер не вводится. Оба текущих представления относятся к одним 15
 операциям и тем же политикам доступа.
+
+
+## История контрактных срезов
+
+Срезы ниже сохранены для истории. Их counts и результаты не заменяют текущую таблицу15.
+
+NEXT-R2 от30.10.2026 добавил `GET /api/v1/contracts/{contractId}/documents`
+(`listContractDocuments`): явные subject/graph связи с независимо доступными
+документами. Нужны delegated user consent, `contracts:read` **и** `documents:read`,
+а также отдельные typed resource grants обоих ресурсов. Machine-профиля нет.
+Ответ: `contractId, items[].documentId, total, nextCursor`; query только
+`pageSize` (1..200, default 50) и `cursor`. Чтение связи не даёт права на файлы:
+для content по-прежнему нужны отдельный download scope, права документа и file policy.
+На этом историческом срезе схема содержала 14 GET: 10 user/service и четыре user-only.
+ROOT принял 60 новых сценариев и отдельный corrective1, regression84 с 142
+subtests, official generation/freshness, 6 generator controls и 3 typed consumers.
+Это отдельные локальные серии; выпуска и включения не было. Подробности: [NEXT-R2](api/CONTRACT_DOCUMENTS_READ_20261030.md).
+
+Следующие датированные сведения о NEXT-R1 и M12 сохранены как история срезов.
+
+NEXT-R1 добавляет кандидат GET `/api/v1/contracts/{contractId}/objects`
+(`listContractObjects`): явные текущие связи договора только с независимо
+доступными точками обслуживания. Одновременно нужны `contracts:read` и
+`objects:read`, оба самостоятельных resource grants и текущие ограничения
+сотрудника. Query принимает только `pageSize/cursor`; company/unassigned не
+разворачивается на всю сеть. Кандидат расширяется с 12 до 13 GET (10 user/service,
+3 user-docs); статус проверки и ограничения —
+[в отчёте NEXT-R1](api/CONTRACT_OBJECTS_READ_20261030.md).

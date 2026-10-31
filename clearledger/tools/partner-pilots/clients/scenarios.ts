@@ -7,6 +7,9 @@ export type ObjectWire = components["schemas"]["Object"];
 export type ContractWire = components["schemas"]["Contract"];
 export type MonitoringWire = operations["getObjectMonitoring"]["responses"][200]["content"]["application/json"];
 export type DocumentWire = operations["getDocument"]["responses"][200]["content"]["application/json"];
+export type ContractTypeWire = operations["getContractTypeMetadata"]["responses"][200]["content"]["application/json"];
+export type ContractObjectsWire = operations["listContractObjects"]["responses"][200]["content"]["application/json"];
+export type ContractDocumentsWire = operations["listContractDocuments"]["responses"][200]["content"]["application/json"];
 export type Vector = { mode: "ALL" | "SET"; allowed: string[]; foreign: string[]; ungranted: string[] };
 export type Vectors = Partial<Record<Resource, Vector>>;
 export type Result = { case: string; passed: boolean; details?: Record<string, string | number | boolean> };
@@ -105,6 +108,31 @@ export class ReadApplication {
     contract(response.status === 200, "AUTHORIZED_MONITORING_FAILED");
     const value = await response.json() as MonitoringWire;
     contract(value.pointId === id && value.provenance.catalogMode === "current", "MONITORING_BOUNDARY_OR_PROVENANCE_MISMATCH");
+    return value;
+  }
+  async contractTypeMetadata(typeCode: string): Promise<ContractTypeWire> {
+    const response = await this.get("/api/v1/contract-types?" + new URLSearchParams({ typeCode }));
+    contract(response.status === 200, "AUTHORIZED_CONTRACT_TYPE_FAILED");
+    const value = await response.json() as ContractTypeWire;
+    contract(value.typeCode === typeCode, "CONTRACT_TYPE_SOURCE_CODE_MISMATCH");
+    return value;
+  }
+  async contractObjects(contractId: string, cursor?: string): Promise<ContractObjectsWire> {
+    const query = new URLSearchParams({ pageSize: "1" });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const response = await this.get(`/api/v1/contracts/${encodeURIComponent(contractId)}/objects?${query}`);
+    contract(response.status === 200, "AUTHORIZED_CONTRACT_OBJECTS_FAILED");
+    const value = await response.json() as ContractObjectsWire;
+    contract(value.contractId === contractId && Array.isArray(value.items), "CONTRACT_OBJECT_LINK_SHAPE_MISMATCH");
+    return value;
+  }
+  async contractDocuments(contractId: string, cursor?: string): Promise<ContractDocumentsWire> {
+    const query = new URLSearchParams({ pageSize: "1" });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const response = await this.get(`/api/v1/contracts/${encodeURIComponent(contractId)}/documents?${query}`);
+    contract(response.status === 200, "AUTHORIZED_CONTRACT_DOCUMENTS_FAILED");
+    const value = await response.json() as ContractDocumentsWire;
+    contract(value.contractId === contractId && Array.isArray(value.items), "CONTRACT_DOCUMENT_LINK_SHAPE_MISMATCH");
     return value;
   }
   async document(id: string): Promise<DocumentWire> {

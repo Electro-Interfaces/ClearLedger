@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { protocolBody } from "./transport.ts";
 import { authorizeRequest, authorizeSandbox, callbackUrl, loopbackOrigin } from "./guards.ts";
+import type { paths } from "../../../src/generated/partner-api.d.ts";
 
 // These are pure URL/intent checks, not permission to contact these test URLs.
 const origin = "https://127.0.0.1:1";
@@ -37,6 +38,43 @@ test("callback must retain exact registered origin/path; SDK still validates sta
   assert.equal(callbackUrl(origin + "/callback?code=synthetic&state=synthetic", origin + "/callback").pathname, "/callback");
   for (const value of ["https://example.invalid/callback", origin + "/other?code=synthetic", origin + "/callback#fragment"]) {
     assert.throws(() => callbackUrl(value, origin + "/callback"));
+  }
+});
+
+test("the assigned pilot transport accepts every generated product GET", () => {
+  const reads: Record<keyof paths, string> = {
+    "/contract-types": "/api/v1/contract-types?typeCode=lease",
+    "/contracts": "/api/v1/contracts",
+    "/contracts/{contractId}": "/api/v1/contracts/contract",
+    "/contracts/{contractId}/documents": "/api/v1/contracts/contract/documents?pageSize=1",
+    "/contracts/{contractId}/objects": "/api/v1/contracts/contract/objects?pageSize=1",
+    "/counterparties": "/api/v1/counterparties",
+    "/counterparties/{counterpartyId}": "/api/v1/counterparties/counterparty",
+    "/documents": "/api/v1/documents",
+    "/documents/{docId}": "/api/v1/documents/document",
+    "/documents/{docId}/versions/{versionId}/content": "/api/v1/documents/document/versions/version/content",
+    "/equipment": "/api/v1/equipment",
+    "/equipment/{equipmentId}": "/api/v1/equipment/station",
+    "/objects": "/api/v1/objects",
+    "/objects/{objectId}": "/api/v1/objects/service-point",
+    "/objects/{objectId}/monitoring": "/api/v1/objects/service-point/monitoring?days=90",
+  };
+  for (const path of Object.values(reads)) {
+    assert.equal(authorizeRequest(origin, origin + path, "GET", env).href, origin + path);
+  }
+});
+
+test("contract read additions retain method, exact path and origin boundaries", () => {
+  for (const path of ["/api/v1/contract-types", "/api/v1/contracts/id/objects", "/api/v1/contracts/id/documents"]) {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE", "HEAD"]) {
+      assert.throws(() => authorizeRequest(origin, origin + path, method, env));
+    }
+    assert.throws(() => authorizeRequest(origin, "https://127.0.0.1:2" + path, "GET", env));
+    assert.throws(() => authorizeRequest(origin, "https://example.invalid" + path, "GET", env));
+  }
+  for (const path of ["/api/v1/contract-types/id", "/api/v1/contracts/id/objects/other",
+    "/api/v1/contracts/id/documents/other", "/api/v1/contracts/id/equipment", "/api/references/contracts/id/objects"]) {
+    assert.throws(() => authorizeRequest(origin, origin + path, "GET", env));
   }
 });
 
