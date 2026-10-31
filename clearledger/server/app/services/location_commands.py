@@ -33,6 +33,154 @@ class Mutation:
     changes: dict[str, Any]
 
 
+OP_STATUSES = {"working", "no_link", "disabled", "not_working", "on_repair",
+               "maintenance", "unknown", "decommissioned"}
+
+
+@dataclass(eq=False)
+class _WarehouseCreationReceipt:
+    """One new row's legacy initialization, never an existing-row permission."""
+
+    db: Any
+    root: Any
+    company: Any
+    identifier: str
+    location: ServiceLocation
+    phase: str = "details"
+
+
+_WAREHOUSE_CREATIONS_KEY = "location-command:v1:warehouse-creations"
+
+
+def _warehouse_creation_receipt(db, company_id, loc, phase):
+    receipts = db.info.get(_WAREHOUSE_CREATIONS_KEY, {})
+    receipt = receipts.get(id(loc))
+    root = db.sync_session.get_transaction()
+    if (not isinstance(receipt, _WarehouseCreationReceipt) or receipt.db is not db
+            or root is None or not root.is_active or receipt.root is not root
+            or receipt.company != company_id or receipt.location is not loc
+            or receipt.identifier != loc.id or receipt.phase != phase
+            or loc.company_id != company_id or loc.type != "warehouse"):
+        return None
+    state = inspect(loc)
+    if not state.persistent or state.session is not db.sync_session or state.identity != (receipt.identifier,):
+        return None
+    return receipt
+
+
+def _assert_domain_location(company_id, loc, *, warehouse=False):
+    """Check the legacy writer ceiling, without native ContractLocation/org policy.
+
+    Company membership is admitted by the caller. Read the current object
+    context explicitly: an identity-map hit need not invoke the ORM filter.
+    Neither the object nor organization context is changed by these commands.
+    """
+    detail = "Склад не найден" if warehouse else "Не найдено"
+    if loc is None or loc.company_id != company_id or warehouse and loc.type != "warehouse":
+        raise LocationConflict(404, detail)
+    allowed = current_object_scope()
+    # Legacy ORM/get_owned treat an empty scope as unrestricted (_as_ids).
+    if allowed and loc.id not in allowed:
+        raise LocationConflict(404, detail)
+
+
+async def set_operational_status(db, company_id, loc, status) -> Mutation:
+    """Only the status write; caller retains get_owned, audit and all effects.
+
+    No native lock entrance is added to this legacy admitted-row path.
+    A repeated status still returns its previous value for the caller's audit.
+    """
+    if status not in OP_STATUSES:
+        raise LocationConflict(400, f"Недопустимый статус: {status}")
+    _assert_domain_location(company_id, loc)
+    previous = loc.operational_status
+    loc.operational_status = status
+    return Mutation(loc, {"operational_status": {"from": previous, "to": status}})
+
+
+async def create_warehouse(db, company_id, identifier, name):
+    """Warehouse-only constructor after the domain's ci-trim lookup.
+
+    No native number reservations, name preparation or lock acquisition: the
+    importer may already hold FK locks and have pending writes. The caller
+    keeps the original flush and DB collision behavior; this is never upsert.
+    """
+    loc = ServiceLocation(id=identifier, company_id=company_id,
+                          code=name, name=name, type="warehouse", status="active")
+    db.add(loc)
+    root = db.sync_session.get_transaction()
+    receipts = {key: receipt for key, receipt in db.info.get(_WAREHOUSE_CREATIONS_KEY, {}).items()
+                if receipt.root is root and receipt.db is db}
+    receipts[id(loc)] = _WarehouseCreationReceipt(db, root, company_id, identifier, loc)
+    db.info[_WAREHOUSE_CREATIONS_KEY] = receipts
+    return loc
+
+
+async def warehouse_for_mutation(db, company_id, identifier):
+    """Legacy warehouse lookup with an explicit ceiling, including warm rows."""
+    # Entering an existing-row workflow cannot reuse initialization authority.
+    receipts = db.info.get(_WAREHOUSE_CREATIONS_KEY, {})
+    for key, receipt in list(receipts.items()):
+        if receipt.identifier == identifier:
+            del receipts[key]
+    loc = await db.get(ServiceLocation, identifier)
+    _assert_domain_location(company_id, loc, warehouse=True)
+    return loc
+
+
+async def update_warehouse_details(db, company_id, loc, *, name, address, address_given):
+    """Keep rename/address before the domain's MOL lookup and its autoflush.
+
+    Domain duplicate-name and partial-input rules have already run. Warehouse
+    rename preserves code, technical identity and the legacy name authority.
+    """
+    receipt = _warehouse_creation_receipt(db, company_id, loc, "details")
+    if receipt is None:
+        _assert_domain_location(company_id, loc, warehouse=True)
+    if name:
+        loc.name = name
+    if address_given:
+        loc.address = address
+    if receipt is not None:
+        receipt.phase = "card"
+    return loc
+
+
+async def update_warehouse_card(db, company_id, loc, *, warehouse):
+    """Write the domain-prepared warehouse subtree after its MOL validation.
+
+    The domain owns parties, contract, MOL and partial-input rules. Identifiers,
+    history, provenance and source bindings retain their legacy behavior;
+    native merge_metadata must not filter out this nested warehouse object.
+    """
+    receipt = _warehouse_creation_receipt(db, company_id, loc, "card")
+    if receipt is None:
+        _assert_domain_location(company_id, loc, warehouse=True)
+    metadata = dict(loc.extra_metadata or {})
+    metadata["warehouse"] = deepcopy(warehouse)
+    loc.extra_metadata = metadata
+    db.info.get(_WAREHOUSE_CREATIONS_KEY, {}).pop(id(loc), None)
+    return loc
+
+
+async def set_warehouse_status(db, company_id, loc, close):
+    """Write lifecycle status AFTER the domain's close-only-empty check."""
+    _assert_domain_location(company_id, loc, warehouse=True)
+    loc.status = "closed" if close else "active"
+    return loc
+
+
+async def delete_unused_warehouse(db, company_id, loc):
+    """Delete the admitted row AFTER domain usage/history and stock cleanup.
+
+    This command does not prove unusedness: ezs_equipment_docs owns that
+    workflow. The router retains the single audit in the caller transaction.
+    No links, history or related entities are removed by this command.
+    """
+    _assert_domain_location(company_id, loc, warehouse=True)
+    await db.delete(loc)
+
+
 # Preserve import-owned snapshots and manually configured bindings on form edits.
 _SERVICE_META_KEYS = {
     "ext_id", "stationId", "ocppId", "ocppUrl", "source", "nameSource",

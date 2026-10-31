@@ -32,8 +32,7 @@ from app.services import hubex_service
 # оборудования (складской контур) выставить его не могли — асимметрия.
 # no_link/disabled — статусы CPO «Нет связи»/«Отключена»: показывают текущее
 # состояние станции и раньше схлопывались в unknown/not_working, теряя смысл.
-OP_STATUSES = {"working", "no_link", "disabled", "not_working", "on_repair",
-               "maintenance", "unknown", "decommissioned"}
+OP_STATUSES = location_commands.OP_STATUSES
 
 router = APIRouter(prefix="/locations", tags=["Точки обслуживания"])
 LocationId = Annotated[str, AfterValidator(location_commands.validate_identifier)]
@@ -310,8 +309,11 @@ async def set_operational_status(
     if body.status not in OP_STATUSES:
         raise HTTPException(400, f"Недопустимый статус: {body.status}")
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
-    prev = loc.operational_status
-    loc.operational_status = body.status
+    try:
+        mutation = await location_commands.set_operational_status(db, loc.company_id, loc, body.status)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
+    prev = mutation.changes["operational_status"]["from"]
     db.add(AuditEvent(
         company_id=loc.company_id,
         user_id=str(current_user.id),
