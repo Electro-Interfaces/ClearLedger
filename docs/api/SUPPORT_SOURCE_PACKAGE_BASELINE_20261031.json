@@ -1,0 +1,1044 @@
+{
+  "comparisonRules": "Object keys unordered; arrays ordered; bool distinct from number; exact decimal numeric equality; duplicate keys/nonfinite rejected; raw bytes/EOL/version changes preserved separately",
+  "compositionSourceEvidence": [
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/server.js",
+      "reviewLines": [
+        1,
+        158,
+        193,
+        227,
+        300,
+        315,
+        430,
+        440,
+        514,
+        590
+      ],
+      "sha256": "c8c1f537c9dc4866ffe61a7919e194638b3f02da8bcbcefb298f2a3fa8e711b4",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/env.js",
+      "reviewLines": [
+        5,
+        6
+      ],
+      "sha256": "129aef29efaefd8288dfba7b0bfec78c6d3c0afe19e068b02c49f11fc7b84b20",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/db.js",
+      "reviewLines": [
+        12,
+        17,
+        39,
+        57
+      ],
+      "sha256": "a653bc877950c11e51f62c4dcfaefa4dc6387fc098b458118cb2ea0a103e659a",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/ssh-execute.js",
+      "reviewLines": [
+        11,
+        13,
+        16,
+        17
+      ],
+      "sha256": "b0a61c5ad4605400d6bef6c1db04931d5243af811edb18c191794463377dce39",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/rate-limiter.js",
+      "reviewLines": [
+        9,
+        17
+      ],
+      "sha256": "79addaca9454565df3573f7e5a632d6ee2b23887a12de7da3feb0692de123dba",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/ai.js",
+      "reviewLines": [
+        20,
+        34,
+        41,
+        391
+      ],
+      "sha256": "586b84b37cf279eb4e9db98f2d238f9e7925be4b53bd19e4caf291952ae54634",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/ai-audit.js",
+      "reviewLines": [
+        24,
+        38,
+        45,
+        207
+      ],
+      "sha256": "6efbd9a4b912744f4209b32d0703dab39aa1b6fc728e59300c8f98be561ff4f3",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/terminal-manager.js",
+      "reviewLines": [
+        31,
+        70,
+        152,
+        153,
+        214,
+        223
+      ],
+      "sha256": "f602eaf4523097e391810fcaaed9d5676ca9664445bd6b79d88b2fc1d186806d",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/live-session.js",
+      "reviewLines": [
+        181,
+        193
+      ],
+      "sha256": "43994893a2c86ece372f33ba18da00016135ea56b3e120153644ea4c65fb1f03",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/ws-manager.js",
+      "reviewLines": [
+        30,
+        78
+      ],
+      "sha256": "bac4d3ea722e930dc041d621607f84722002a5e1d03e27525e2dc2de6d09e462",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/core-identity.js",
+      "reviewLines": [
+        111,
+        116,
+        118
+      ],
+      "sha256": "9d0d7bf205d0a4453403a9a9134914d3581561ebb1d454c3b9b933692d8cdc88",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/support-context-entry.js",
+      "reviewLines": [
+        12,
+        24,
+        32
+      ],
+      "sha256": "0781f7024432e14f3906dbddffc217d96eddb11bb0cb3031b14afb2fbc5c7d24",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/v1/support-context.js",
+      "reviewLines": [
+        30,
+        58,
+        104,
+        115
+      ],
+      "sha256": "1d827b1c6620424721fa72e49051b4b72e5e54553a349ce9d5e3b10fab26433c",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/lib/support-context.js",
+      "reviewLines": [
+        440,
+        444
+      ],
+      "sha256": "817b29dda6522b9e8fb70b3af0e5bf7ed31f9669769988af0650d87192b83696",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/ssh.js",
+      "reviewLines": [
+        67
+      ],
+      "sha256": "f83981ef52bd73c9863feb76ca687b9b4f1b9a0e53a7b80c5954a9958279b809",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/diagnostics.js",
+      "reviewLines": [
+        109
+      ],
+      "sha256": "ee066d4c311ffd5d33dccfd98fc8e639579d7828e53ccf7e5055fc789ae5a0b3",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/knowledge.js",
+      "reviewLines": [
+        5
+      ],
+      "sha256": "d417428ebfdf6a088a53ffab861e8ec873589b8ad34d4a13ed1363b47018cc24",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/notifications.js",
+      "reviewLines": [
+        7
+      ],
+      "sha256": "a6d98afad9def4b3ee8ba0b942380395f410e049da5e9f5dbd919359ede8150c",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/v1/eco.js",
+      "reviewLines": [
+        53,
+        54,
+        55,
+        56,
+        57
+      ],
+      "sha256": "5e7e2ad6b5cae04422098899dd213e9dabea7ba8d26ce5bcbea98725fcdb5ced",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/v1/voice-context.js",
+      "reviewLines": [
+        8
+      ],
+      "sha256": "248706350d1f23391d9ceda74127feb141ee9be99461c4140469fa1c6e100cd6",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/v1/ticket-communications.js",
+      "reviewLines": [
+        5
+      ],
+      "sha256": "e01548f7a3982ad2b6b9e124e91c0f14745b63f0e61503ea444538396587f5bb",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/v1/voice-knowledge.js",
+      "reviewLines": [
+        10
+      ],
+      "sha256": "cac348589c0d5808f7bd9ae6b6a310fc8c3592749ffcb6712699c112f33f2f30",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "scripts/routes/v1/voice-connections.js",
+      "reviewLines": [
+        7
+      ],
+      "sha256": "70b2a59470385b007ddb90fb3c55db8595c31dceb7e99ca6bff5350572073925",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "vite.config.ts",
+      "reviewLines": [
+        7,
+        14
+      ],
+      "sha256": "6103d67fd4c34fdd1de18aaf873f3ecd1edd556f2a37aaebc5f080dfdf396566",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    },
+    {
+      "evidenceClass": "manual_source_review_not_runtime",
+      "file": "Dockerfile",
+      "reviewLines": [
+        5,
+        10,
+        52,
+        53,
+        75
+      ],
+      "sha256": "acfb3be24f0034da837d8bdf88ac4ed170d40bc73579fd94af3386fc5749b92c",
+      "sourceRevision": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+    }
+  ],
+  "date": "2026-10-31",
+  "examinedHistory": {
+    "exactLiveBlobReachable": {
+      "package-lock.json": false,
+      "package.json": false
+    },
+    "examinedRefs": 105,
+    "liveVersionMatchingCommits": [],
+    "packageHistoryCommits": 101,
+    "pathObjects": 319,
+    "refManifestSha256": "3b30cc95047cb360ee20312e573d573aa02419bee4b2670b69cdefbcbe6fa273",
+    "scope": "Only frozen examined local refs/object roots; no fetch/network, not all Git repositories or unreferenced objects",
+    "uniqueObjectRoots": 73
+  },
+  "files": {
+    "package-lock.json": {
+      "comparisons": {
+        "baseline_to_candidate": {
+          "bytesEqual": true,
+          "changedLineCount": 0,
+          "differences": [],
+          "everyPackageEntry": {
+            "changedEntries": [],
+            "changedFieldCounts": {},
+            "dependenciesChanged": 0,
+            "equalNonRootEntries": 917,
+            "integrityChanged": 0,
+            "leftEntries": 918,
+            "packagePathSetEqual": true,
+            "resolvedChanged": 0,
+            "rightEntries": 918
+          },
+          "onlyRootVersionTokenReplacementReproducesBytes": true,
+          "semanticEqual": true
+        },
+        "baseline_to_live": {
+          "bytesEqual": false,
+          "changedLineCount": 2,
+          "differences": [
+            {
+              "after": {
+                "characters": 6,
+                "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                "type": "str",
+                "value": "1.2.32"
+              },
+              "before": {
+                "characters": 6,
+                "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                "type": "str",
+                "value": "1.2.29"
+              },
+              "kind": "value_changed",
+              "path": [
+                "packages",
+                "",
+                "version"
+              ],
+              "pointer": "/packages//version"
+            },
+            {
+              "after": {
+                "characters": 6,
+                "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                "type": "str",
+                "value": "1.2.32"
+              },
+              "before": {
+                "characters": 6,
+                "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                "type": "str",
+                "value": "1.2.29"
+              },
+              "kind": "value_changed",
+              "path": [
+                "version"
+              ],
+              "pointer": "/version"
+            }
+          ],
+          "everyPackageEntry": {
+            "changedEntries": [
+              {
+                "differences": [
+                  {
+                    "after": {
+                      "characters": 6,
+                      "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                      "type": "str",
+                      "value": "1.2.32"
+                    },
+                    "before": {
+                      "characters": 6,
+                      "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                      "type": "str",
+                      "value": "1.2.29"
+                    },
+                    "kind": "value_changed",
+                    "path": [
+                      "version"
+                    ],
+                    "pointer": "/version"
+                  }
+                ],
+                "packagePath": ""
+              }
+            ],
+            "changedFieldCounts": {
+              "version": 1
+            },
+            "dependenciesChanged": 0,
+            "equalNonRootEntries": 917,
+            "integrityChanged": 0,
+            "leftEntries": 918,
+            "packagePathSetEqual": true,
+            "resolvedChanged": 0,
+            "rightEntries": 918
+          },
+          "onlyRootVersionTokenReplacementReproducesBytes": true,
+          "semanticEqual": false
+        },
+        "candidate_to_live": {
+          "bytesEqual": false,
+          "changedLineCount": 2,
+          "differences": [
+            {
+              "after": {
+                "characters": 6,
+                "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                "type": "str",
+                "value": "1.2.32"
+              },
+              "before": {
+                "characters": 6,
+                "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                "type": "str",
+                "value": "1.2.29"
+              },
+              "kind": "value_changed",
+              "path": [
+                "packages",
+                "",
+                "version"
+              ],
+              "pointer": "/packages//version"
+            },
+            {
+              "after": {
+                "characters": 6,
+                "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                "type": "str",
+                "value": "1.2.32"
+              },
+              "before": {
+                "characters": 6,
+                "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                "type": "str",
+                "value": "1.2.29"
+              },
+              "kind": "value_changed",
+              "path": [
+                "version"
+              ],
+              "pointer": "/version"
+            }
+          ],
+          "everyPackageEntry": {
+            "changedEntries": [
+              {
+                "differences": [
+                  {
+                    "after": {
+                      "characters": 6,
+                      "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                      "type": "str",
+                      "value": "1.2.32"
+                    },
+                    "before": {
+                      "characters": 6,
+                      "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                      "type": "str",
+                      "value": "1.2.29"
+                    },
+                    "kind": "value_changed",
+                    "path": [
+                      "version"
+                    ],
+                    "pointer": "/version"
+                  }
+                ],
+                "packagePath": ""
+              }
+            ],
+            "changedFieldCounts": {
+              "version": 1
+            },
+            "dependenciesChanged": 0,
+            "equalNonRootEntries": 917,
+            "integrityChanged": 0,
+            "leftEntries": 918,
+            "packagePathSetEqual": true,
+            "resolvedChanged": 0,
+            "rightEntries": 918
+          },
+          "onlyRootVersionTokenReplacementReproducesBytes": true,
+          "semanticEqual": false
+        }
+      },
+      "sources": {
+        "baseline": {
+          "bytes": 460435,
+          "crlf": 0,
+          "gitBlobSha1": "3039716d62a82000d7a49701f4fda4eb50625235",
+          "lf": 12409,
+          "loneCr": 0,
+          "semanticSha256": "766446665a73fdd1c877cabc11bf4f6773da364b677779845c1ff9c84e347d63",
+          "sha256": "f1077992933347c42aa9bc25b3f2489d9b8ac8cf87d8f97fa67c384ff1cbc7d1",
+          "trailingNewlineBytes": 1,
+          "trailingNewlineHex": "0a",
+          "utf8Bom": false
+        },
+        "candidate": {
+          "bytes": 460435,
+          "crlf": 0,
+          "gitBlobSha1": "3039716d62a82000d7a49701f4fda4eb50625235",
+          "lf": 12409,
+          "loneCr": 0,
+          "semanticSha256": "766446665a73fdd1c877cabc11bf4f6773da364b677779845c1ff9c84e347d63",
+          "sha256": "f1077992933347c42aa9bc25b3f2489d9b8ac8cf87d8f97fa67c384ff1cbc7d1",
+          "trailingNewlineBytes": 1,
+          "trailingNewlineHex": "0a",
+          "utf8Bom": false
+        },
+        "live": {
+          "bytes": 460435,
+          "crlf": 0,
+          "gitBlobSha1": "369847eb546dc6f294567a26a66ad8f243dbe23e",
+          "lf": 12409,
+          "loneCr": 0,
+          "semanticSha256": "25f04e52e9f5b11e2effe43d060690ee0e6339e9912e28ece6bdf7a5c675e5b8",
+          "sha256": "ad7ae28502e1fdf93541bb313ea13f0b946f6db53219099360f8a01c42cabf96",
+          "trailingNewlineBytes": 1,
+          "trailingNewlineHex": "0a",
+          "utf8Bom": false
+        }
+      }
+    },
+    "package.json": {
+      "comparisons": {
+        "baseline_to_candidate": {
+          "bytesEqual": true,
+          "changedLineCount": 0,
+          "differences": [],
+          "onlyRootVersionTokenReplacementReproducesBytes": true,
+          "semanticEqual": true
+        },
+        "baseline_to_live": {
+          "bytesEqual": false,
+          "changedLineCount": 1,
+          "differences": [
+            {
+              "after": {
+                "characters": 6,
+                "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                "type": "str",
+                "value": "1.2.32"
+              },
+              "before": {
+                "characters": 6,
+                "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                "type": "str",
+                "value": "1.2.29"
+              },
+              "kind": "value_changed",
+              "path": [
+                "version"
+              ],
+              "pointer": "/version"
+            }
+          ],
+          "onlyRootVersionTokenReplacementReproducesBytes": true,
+          "semanticEqual": false
+        },
+        "candidate_to_live": {
+          "bytesEqual": false,
+          "changedLineCount": 1,
+          "differences": [
+            {
+              "after": {
+                "characters": 6,
+                "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+                "type": "str",
+                "value": "1.2.32"
+              },
+              "before": {
+                "characters": 6,
+                "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+                "type": "str",
+                "value": "1.2.29"
+              },
+              "kind": "value_changed",
+              "path": [
+                "version"
+              ],
+              "pointer": "/version"
+            }
+          ],
+          "onlyRootVersionTokenReplacementReproducesBytes": true,
+          "semanticEqual": false
+        }
+      },
+      "sources": {
+        "baseline": {
+          "bytes": 10730,
+          "crlf": 0,
+          "gitBlobSha1": "951ea4b4688dc4d31fe677147c9546c853ddc985",
+          "lf": 192,
+          "loneCr": 0,
+          "semanticSha256": "faee4873e4281464cf1f5a13c7ef06614535353ecfa2d58330242f60b726baa3",
+          "sha256": "7df1c5e3ea06d9f6bd7667d889a520bfd6bf1b617ee5fe49b576ee98d353f672",
+          "trailingNewlineBytes": 1,
+          "trailingNewlineHex": "0a",
+          "utf8Bom": false
+        },
+        "candidate": {
+          "bytes": 10730,
+          "crlf": 0,
+          "gitBlobSha1": "951ea4b4688dc4d31fe677147c9546c853ddc985",
+          "lf": 192,
+          "loneCr": 0,
+          "semanticSha256": "faee4873e4281464cf1f5a13c7ef06614535353ecfa2d58330242f60b726baa3",
+          "sha256": "7df1c5e3ea06d9f6bd7667d889a520bfd6bf1b617ee5fe49b576ee98d353f672",
+          "trailingNewlineBytes": 1,
+          "trailingNewlineHex": "0a",
+          "utf8Bom": false
+        },
+        "live": {
+          "bytes": 10730,
+          "crlf": 0,
+          "gitBlobSha1": "4bb9a8e9600de27ecd874b315fff37e0e54cd2cb",
+          "lf": 192,
+          "loneCr": 0,
+          "semanticSha256": "137a5a3dc081fcb395bdf1490074b794f1e6514f902a281845d1ca22166e2a66",
+          "sha256": "3c344dec6cfe8217f8d43385652a1536024d268f9b0e0e835ce82226bde4a9e4",
+          "trailingNewlineBytes": 1,
+          "trailingNewlineHex": "0a",
+          "utf8Bom": false
+        }
+      }
+    }
+  },
+  "generator": {
+    "file": "clearledger/scripts/compare-support-source-packages.py",
+    "sha256": "7f28daed6876e26a1a91045483f5ea106142f14eeac59cba0d24c72e6b28227d"
+  },
+  "kind": "source-only-support-package-baseline",
+  "limits": {
+    "gitSeconds": 30,
+    "inputBytes": 2097152,
+    "jsonDepth": 64,
+    "jsonNodes": 200000,
+    "lockEntries": 10000,
+    "outputBytes": 1048576,
+    "semanticDiffRows": 10000,
+    "sourceFileBytes": 524288,
+    "wallSeconds": 60
+  },
+  "liveEvidence": {
+    "container": {
+      "id": "5ad8c51dbe69d52b4ee3aaa9c133b94f13fde20b07be72f1db41d9c815c51ebe",
+      "image": "sha256:759a2db4d7a8bc5dd98c14f4fba98121696cc0c1cee7dec81d7425e38e3127b8",
+      "started": "2026-10-25T22:55:42.016479959Z"
+    },
+    "node": "v22.23.2",
+    "observedUTC": "2026-10-31T00:27:12.432003+00:00",
+    "processFile": "support-package-bodies-process.json",
+    "processSha256": "fa48fd24136c18ea12298d01698d92c036f46f5b101de5077e076b6df1ba75cd",
+    "scope": "Only package.json/package-lock.json literal source files; no app/SQL/runtime state/env/logs/credentials",
+    "snapshotFile": "support-package-bodies-snapshot.json",
+    "snapshotSha256": "8f25dc18c789d279e73ec1028cde775bfbfef3f64a133338d60c43f285865fa8"
+  },
+  "releaseMechanismEvidence": {
+    "assessment": "Matching mechanism, execution provenance unproven; no ship command executed",
+    "file": "elsy-deploy/scripts/ship-support.sh",
+    "lines": [
+      43,
+      46
+    ],
+    "observedCommand": "npm version patch --no-git-tag-version",
+    "sha256": "5730221f4e47a8e9786ed734299e7789130c10c3372aed964f20c312ee4b859f"
+  },
+  "rootMetadata": {
+    "baseline": {
+      "fields": {
+        "dependencies": {
+          "entries": 67,
+          "present": true,
+          "semanticSha256": "76ef3d7e03df17dd41797707f237f46b1c773fea7db628e0ea43c37e1fc5d841",
+          "type": "dict"
+        },
+        "devDependencies": {
+          "entries": 12,
+          "present": true,
+          "semanticSha256": "1b0ca0a8eaf830039ceb9ff3e5f6fda793e23f93dd22db8467658f2b4bf6fc81",
+          "type": "dict"
+        },
+        "engines": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "name": {
+          "characters": 8,
+          "present": true,
+          "semanticSha256": "dbb603c9835f3cb2741c0031cb913e954d547909a8a2a6d12cbbee7228ded3b9",
+          "type": "str"
+        },
+        "optionalDependencies": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "overrides": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "peerDependencies": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "scripts": {
+          "entries": 101,
+          "present": true,
+          "semanticSha256": "d43487d31fdedc5b4c5e78f3f84bd31c4fc1970ae2b9a2624b838325e9b0fb1b",
+          "type": "dict"
+        }
+      },
+      "lockPackages": 918,
+      "lockRootMetadata": {
+        "entries": 4,
+        "semanticSha256": "ea98c3767fe5896de653c42a66fc30c5d28c184482f571bb535f416bfc252dc8",
+        "type": "dict"
+      },
+      "lockVersion": {
+        "semanticSha256": "fec924de08a42e0486dc2e15853434f59e70b25babac45498480347f01cbd771",
+        "type": "number",
+        "value": "3"
+      },
+      "nonRootPackages": 917,
+      "version": {
+        "characters": 6,
+        "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+        "type": "str",
+        "value": "1.2.29"
+      },
+      "withIntegrity": 917,
+      "withResolved": 917
+    },
+    "candidate": {
+      "fields": {
+        "dependencies": {
+          "entries": 67,
+          "present": true,
+          "semanticSha256": "76ef3d7e03df17dd41797707f237f46b1c773fea7db628e0ea43c37e1fc5d841",
+          "type": "dict"
+        },
+        "devDependencies": {
+          "entries": 12,
+          "present": true,
+          "semanticSha256": "1b0ca0a8eaf830039ceb9ff3e5f6fda793e23f93dd22db8467658f2b4bf6fc81",
+          "type": "dict"
+        },
+        "engines": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "name": {
+          "characters": 8,
+          "present": true,
+          "semanticSha256": "dbb603c9835f3cb2741c0031cb913e954d547909a8a2a6d12cbbee7228ded3b9",
+          "type": "str"
+        },
+        "optionalDependencies": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "overrides": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "peerDependencies": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "scripts": {
+          "entries": 101,
+          "present": true,
+          "semanticSha256": "d43487d31fdedc5b4c5e78f3f84bd31c4fc1970ae2b9a2624b838325e9b0fb1b",
+          "type": "dict"
+        }
+      },
+      "lockPackages": 918,
+      "lockRootMetadata": {
+        "entries": 4,
+        "semanticSha256": "ea98c3767fe5896de653c42a66fc30c5d28c184482f571bb535f416bfc252dc8",
+        "type": "dict"
+      },
+      "lockVersion": {
+        "semanticSha256": "fec924de08a42e0486dc2e15853434f59e70b25babac45498480347f01cbd771",
+        "type": "number",
+        "value": "3"
+      },
+      "nonRootPackages": 917,
+      "version": {
+        "characters": 6,
+        "semanticSha256": "63f08f248b76ee420b614d476149040fe3cfffca4d1e5377eb81f89741635abb",
+        "type": "str",
+        "value": "1.2.29"
+      },
+      "withIntegrity": 917,
+      "withResolved": 917
+    },
+    "live": {
+      "fields": {
+        "dependencies": {
+          "entries": 67,
+          "present": true,
+          "semanticSha256": "76ef3d7e03df17dd41797707f237f46b1c773fea7db628e0ea43c37e1fc5d841",
+          "type": "dict"
+        },
+        "devDependencies": {
+          "entries": 12,
+          "present": true,
+          "semanticSha256": "1b0ca0a8eaf830039ceb9ff3e5f6fda793e23f93dd22db8467658f2b4bf6fc81",
+          "type": "dict"
+        },
+        "engines": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "name": {
+          "characters": 8,
+          "present": true,
+          "semanticSha256": "dbb603c9835f3cb2741c0031cb913e954d547909a8a2a6d12cbbee7228ded3b9",
+          "type": "str"
+        },
+        "optionalDependencies": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "overrides": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "peerDependencies": {
+          "present": false,
+          "semanticSha256": "c8914a5205ced702f208f15b0ef09c15d23b98996e5434df65c61c8da397829a",
+          "type": "NoneType",
+          "value": null
+        },
+        "scripts": {
+          "entries": 101,
+          "present": true,
+          "semanticSha256": "d43487d31fdedc5b4c5e78f3f84bd31c4fc1970ae2b9a2624b838325e9b0fb1b",
+          "type": "dict"
+        }
+      },
+      "lockPackages": 918,
+      "lockRootMetadata": {
+        "entries": 4,
+        "semanticSha256": "2fbe9600878bb7b563db2b94bf5b49d5d84d8ed8ff9de01bccc7fd307d251e99",
+        "type": "dict"
+      },
+      "lockVersion": {
+        "semanticSha256": "fec924de08a42e0486dc2e15853434f59e70b25babac45498480347f01cbd771",
+        "type": "number",
+        "value": "3"
+      },
+      "nonRootPackages": 917,
+      "version": {
+        "characters": 6,
+        "semanticSha256": "5a8d4e6b994354f8470737815647fae0cc5c9f0b3459af70554803dd35666407",
+        "type": "str",
+        "value": "1.2.32"
+      },
+      "withIntegrity": 917,
+      "withResolved": 917
+    }
+  },
+  "schemaVersion": 1,
+  "selectedSourceCoverage": {
+    "coverage": "Selected tracked scripts JS/MJS/CJS and package files only; shared/frontend/runtime-only/untracked and installed dependencies unknown",
+    "existingPaths": 450,
+    "fullCandidateGitDelta": [
+      {
+        "paths": [
+          "db/init/197_ticket_create_receipts.sql"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "docs/m13-support-create-command.md"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "docs/m17-support-create-client.md"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "e2e/support-create-client.check.mjs"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "scripts/lib/support-create-client.test.js"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "scripts/lib/ticket-commands.js"
+        ],
+        "status": "M"
+      },
+      {
+        "paths": [
+          "scripts/lib/ticket-create.js"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "scripts/lib/ticket-create.test.js"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "scripts/routes/v1/tickets.js"
+        ],
+        "status": "M"
+      },
+      {
+        "paths": [
+          "scripts/routes/v2/sdk-tickets.js"
+        ],
+        "status": "M"
+      },
+      {
+        "paths": [
+          "scripts/test/ticket-create-fixture.mjs"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "scripts/test/ticket-create-integration.mjs"
+        ],
+        "status": "A"
+      },
+      {
+        "paths": [
+          "src/pages/partner/NewTicketPage.tsx"
+        ],
+        "status": "M"
+      },
+      {
+        "paths": [
+          "src/services/sdkService.ts"
+        ],
+        "status": "M"
+      },
+      {
+        "paths": [
+          "src/types/sdk.ts"
+        ],
+        "status": "M"
+      }
+    ],
+    "observedUTC": "2026-10-30T22:43:00.989761+00:00",
+    "proofs": [
+      {
+        "file": "rushydro-support-source-snapshot.json",
+        "sha256": "c0261e194337a364ea81183c1dfbf18215181e8816e08763fd5ad3e511b54dd2"
+      },
+      {
+        "file": "support-source-parity.json",
+        "sha256": "bc289460f8f29c9753d597c043ff9764ac0df061660fca7374ec7460f0835206"
+      },
+      {
+        "file": "support-source-process.json",
+        "sha256": "70993a7de862413de81c02324421da8cd395b1da8904568afcbf05af8496b6ce"
+      }
+    ],
+    "recomputedParity": {
+      "09c221c4b5135984173e3a924fd38f65cc208637": {
+        "different": [
+          "package-lock.json",
+          "package.json"
+        ],
+        "equal": 448,
+        "missingOrNotInReference": [
+          "scripts/lib/support-create-client.test.js",
+          "scripts/lib/ticket-create.js",
+          "scripts/lib/ticket-create.test.js",
+          "scripts/test/ticket-create-fixture.mjs",
+          "scripts/test/ticket-create-integration.mjs"
+        ]
+      },
+      "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df": {
+        "different": [
+          "package-lock.json",
+          "package.json",
+          "scripts/lib/ticket-commands.js",
+          "scripts/routes/v1/tickets.js",
+          "scripts/routes/v2/sdk-tickets.js"
+        ],
+        "equal": 445,
+        "missingOrNotInReference": [
+          "scripts/lib/support-create-client.test.js",
+          "scripts/lib/ticket-create.js",
+          "scripts/lib/ticket-create.test.js",
+          "scripts/test/ticket-create-fixture.mjs",
+          "scripts/test/ticket-create-integration.mjs"
+        ]
+      }
+    },
+    "selectedPaths": 455,
+    "totalBytes": 5783116
+  },
+  "sourcePins": {
+    "baseline": "09c221c4b5135984173e3a924fd38f65cc208637",
+    "candidate": "a6a109c9d0ce573f55d18a6c1bf36bb4adfbd5df"
+  },
+  "unknowns": [
+    "Installed node_modules/dependency behavior unknown; lock is source evidence only",
+    "Selected scripts/package proof excludes shared/frontend/runtime-only files; not full Support correspondence",
+    "No app/server/router imported; actual composition/ACL/WS/SSE conformance remains unknown",
+    "Future release must reconcile live higher version baseline explicitly; no manifest/source rewrite here",
+    "M00/M13/M01/fullCI/release and full M00-M19+11 criteria remain open"
+  ]
+}
