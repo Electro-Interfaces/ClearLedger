@@ -130,11 +130,11 @@ async def run_once() -> int:
             return 0
         try:
             for cid, name in await _companies_due(db):
-                # Импорт здесь: роутер тянет за собой пол-приложения, а модуль
-                # должен подниматься даже когда «Пульс» в стеке не включён.
+                # Локальный импорт общего query owner: модуль должен подниматься
+                # даже когда «Пульс» в стеке не включён.
                 # Считаем ровно тот же экран, что видит человек, — второй набор
                 # правил для писем разошёлся бы с экраном за месяц.
-                from app.routers.pulse_router import pulse_day_data
+                from app.services.pulse_day import pulse_day_data
 
                 day = await pulse_day_data(db, cid)
                 cards, as_of = day["cards"], day["as_of"]
