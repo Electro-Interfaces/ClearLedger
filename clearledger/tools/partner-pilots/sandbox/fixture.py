@@ -9,7 +9,7 @@ async def seed(factory, upload):
     from app.auth import hash_password
     from app.models import (Company, User, UserCompany, ServiceLocation, Counterparty, Organization,
         Contract, ContractLocation, EzsEquipmentUnit, ChargeSession, DocKind, DocCard,
-        DocVersion, SourceFile)
+        DocVersion, SourceFile, DocRelation)
     from app.services.charge_visits import recompute_visits
     upload.mkdir(mode=0o700, parents=True, exist_ok=True)
     async with factory() as db:
@@ -30,7 +30,7 @@ async def seed(factory, upload):
         db.add_all(users)
         await db.flush()
         owner, employee = users
-        points = [ServiceLocation(id='pilot-object-'+str(i), company_id=cid, code='SYN-'+str(i),
+        points = [ServiceLocation(id=(' Точка Ё pilot ' if i == 1 else 'pilot-object-'+str(i)), company_id=cid, code='SYN-'+str(i),
             name='Вымышленная ЭЗС '+str(i), type='ev_charging', status='active') for i in range(3)]
         foreign = ServiceLocation(id='pilot-foreign-object', company_id=foreign_cid, code='SYN-FOREIGN',
             name='Чужая вымышленная ЭЗС', type='ev_charging', status='active')
@@ -44,6 +44,8 @@ async def seed(factory, upload):
         await db.flush()
         contracts = [Contract(id=uuid.uuid4(), company_id=p.company_id, number='SYN-'+str(i),
             date='2026-10-29', type='service', counterparty_id=p.id,
+            type_code=(' Pilot Unknown Ё ', '', 'pilot-hidden-only', 'pilot-foreign-only')[i],
+            valid_until=('31.12.2030', None, '', '2026-02-30')[i],
             organization_id=organizations[1 if i==3 else 0].id,scope_type='locations')
             for i,p in enumerate(parties)]
         db.add_all(contracts)
@@ -51,6 +53,10 @@ async def seed(factory, upload):
         all_points=[*points,foreign]
         db.add_all([ContractLocation(company_id=c.company_id, contract_id=c.id, location_id=all_points[i].id)
             for i,c in enumerate(contracts)])
+        # Deliberate synthetic foreign/hidden links test independent child ACL.
+        # Contract 0 keeps its existing point 0 and adds exactly these associations.
+        db.add_all([ContractLocation(company_id=cid, contract_id=contracts[0].id, location_id=p.id)
+            for p in (points[1], points[2], foreign)])
         equipment = [EzsEquipmentUnit(id=uuid.uuid4(), company_id=p.company_id, kind='station', vendor='Synthetic',
             model='Fixture', current_location_id=p.id, state='in_operation') for p in all_points]
         db.add_all(equipment)
@@ -79,8 +85,20 @@ async def seed(factory, upload):
             DocCard(id=uuid.uuid4(),company_id=foreign_cid,kind_id=kinds[1].id,
             title='Чужой вымышленный документ',confidentiality='company',
             object_id=foreign.id,current_revision=1)])
+        # A readable company card outside the existing document resource SET.
+        docs.append(DocCard(id=uuid.uuid4(), company_id=cid, kind_id=kinds[0].id,
+            title='Вымышленный документ вне grant', confidentiality='company',
+            author_id=owner.id, object_id=points[0].id, current_revision=1))
+        docs[0].subject_ref = 'contract:'+str(contracts[0].id)
         db.add_all(docs)
         await db.flush()
+        # One subject card per parent; two graph kinds on that same card must
+        # not duplicate its row. Tenant/native ACL/resource ceilings stay live.
+        relation_ref = 'contract:'+str(contracts[0].id)
+        db.add_all([DocRelation(company_id=cid, doc_id=docs[0].id, kind=kind, target_ref=relation_ref)
+            for kind in ('basis', 'annex_of')])
+        db.add_all([DocRelation(company_id=cid, doc_id=doc.id, kind='related', target_ref=relation_ref)
+            for doc in docs[1:]])
         versions=[]
         for i,doc in enumerate(docs):
             data = b'SYNTHETIC PARTNER PILOT DOCUMENT '+str(i).encode()+b'\n'
@@ -105,6 +123,33 @@ async def seed(factory, upload):
             'counterparties':vector(parties),'contracts':vector(contracts),
             'documents':{'allowed':[str(docs[i].id) for i in (0,2)],
                 'foreign':[str(docs[3].id)],'ungranted':[str(docs[1].id)]}}
+        # Explicit scenario inputs, never inferred from ALL or raw company inventory.
+        # No OAuth scopes, grants, memberships or server admission guards change.
+        def contract_expectation(i):
+            return {'id':str(contracts[i].id), 'number':'SYN-'+str(i), 'date':'2026-10-29',
+                'typeCode':(' Pilot Unknown Ё ', '')[i], 'validUntil':('31.12.2030', None)[i],
+                'title':None, 'isClosed':False, 'scopeType':'locations',
+                'counterpartyId':str(parties[i].id)}
+        parent_boundaries = {'hiddenParents':[str(contracts[2].id)],
+            'foreignParents':[str(contracts[3].id)]}
+        relations = {
+            'rental':{**parent_boundaries, 'contracts':[
+                {'expected':contract_expectation(0),
+                 'metadata':{'typeCode':' Pilot Unknown Ё ', 'label':None,
+                    'gkBasis':None, 'direction':None, 'isActive':None},
+                 'objects':{'contractId':str(contracts[0].id), 'scopeType':'locations',
+                    'allowed':[points[0].id, points[1].id], 'hidden':[points[2].id, foreign.id]}},
+                {'expected':contract_expectation(1), 'metadata':None,
+                 'objects':{'contractId':str(contracts[1].id), 'scopeType':'locations',
+                    'allowed':[points[1].id], 'hidden':[]}}]},
+            # Conditional expectations only: current documents profile lacks
+            # contracts:read and its contracts resource grant is EMPTY => 403.
+            # A future positive run requires separate profile authorization.
+            'documents':{**parent_boundaries, 'contracts':[
+                {'contractId':str(contracts[0].id),
+                 'allowed':[str(docs[0].id), str(docs[2].id)],
+                 'hidden':[str(docs[i].id) for i in (1,3,4)]},
+                {'contractId':str(contracts[1].id), 'allowed':[], 'hidden':[]}]}}
         return {'companyId':str(cid), 'foreignCompanyId':str(foreign_cid),
             'owner':{'email':owner.email,'password':password,'userId':str(owner.id)},
             'employee':{'email':employee.email,'password':password,'userId':str(employee.id)},
@@ -116,4 +161,4 @@ async def seed(factory, upload):
             'deniedContent':[{'docId':str(docs[i].id),'versionId':str(versions[i].id)} for i in (1,3)],
             'expectedDocumentHashes':{str(d.id):v.sha256 for d,v in zip(docs,versions)},
             'objectObservationDays':{p.id:day for p,day in zip(points,['2026-10-29','2026-10-28','2026-10-30'])},
-            'asOf':'2026-10-29'}
+            'asOf':'2026-10-29', 'relations':relations}
