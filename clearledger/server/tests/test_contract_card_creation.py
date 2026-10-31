@@ -143,11 +143,11 @@ async def test_shared_values_preserve_null_zero_false_and_empty_strings(world, c
     else:
         # The primitive receives prepared scalars: only the native adapter owns
         # _req_val's empty-to-null conversion. No second normalizer belongs here.
-        values = replace(values, number="", date="", type="", type_code="", kind="", currency="",
+        values = replace(values, number="", date="", type="", kind="", currency="",
                          valid_until="", vat_rate="", settlement_kind="", comment="", basis="",
                          signed_at="", igk="", signer_our="", signer_our_position="",
                          signer_cp="", signer_cp_position="", signer_cp_basis="")
-        expected = {"number": "", "date": "", "type": "", "type_code": "", "kind": "", "currency": "",
+        expected = {"number": "", "date": "", "type": "", "type_code": w.active, "kind": "", "currency": "",
                     "valid_until": "", "vat_rate": "", "settlement_kind": "", "comment": "", "basis": "",
                     "signed_at": "", "igk": "", "signer_our": "", "signer_our_position": "",
                     "signer_cp": "", "signer_cp_position": "", "signer_cp_basis": ""}
