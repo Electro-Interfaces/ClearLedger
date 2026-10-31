@@ -134,49 +134,473 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
             openapi_extra={"x-elsy-owner": resource, "x-elsy-access-class": "partner",
                 "x-elsy-resource-policy": f"{resource}:{action}", "x-elsy-readiness": "candidate"}, **kwargs)
 
-    @operation("/objects", "objects", "listObjects", dto.Page[dto.Object])
+    @operation("/objects", "objects", "listObjects", dto.Page[dto.Object],
+               summary='List authorized service points',
+               description=(
+                   'User or approved service principal with objects:read and object resource '
+                   'grants. q searches name with case-insensitive ILIKE; % and _ are wildcards. '
+                   'ObjectId is an exact opaque Unicode string (1..40, no NUL), not necessarily a '
+                   'UUID; never normalize it. Only servicePoint level is exposed. Fixed ascending '
+                   'created_at, id; no custom sort or offset. dateFrom/dateTo filter created_at '
+                   'inclusively in UTC, not business dates. Cursor pagination is live, not a '
+                   'snapshot; total is the current visible filtered count before cursor. Keep '
+                   'pageSize (default 50, 1..200), filters and authorization context fixed across '
+                   'pages; pass nextCursor unchanged and URL-encoded until null. A changed binding '
+                   'requires a fresh traversal. Application refusals before streaming use '
+                   'application/problem+json: 400 invalid_cursor (bad or differently bound cursor), '
+                   '401 invalid_credentials, 403 access_denied, 404 not_found (absent or hidden '
+                   'resource), 422 invalid_request, 429 rate_limited for the opt-in quota or '
+                   'internal_error for generic injected HTTP429, 500 internal_error, 503 '
+                   'api_unavailable. Known-path unsupported methods use 405 method_not_allowed with '
+                   'Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a '
+                   'Bearer challenge. Quota 429 supplies Retry-After; generic 429/503 supplies it '
+                   'only when available. Proxy errors and errors after streaming headers are '
+                   'outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'items': [
+                                               {
+                                                   'id': '20000000-0000-4000-8000-000000000001',
+                                                   'level': 'servicePoint',
+                                                   'code': 'DEMO-001',
+                                                   'name': 'Учебная ЭЗС',
+                                                   'type': 'ezs',
+                                                   'status': 'active',
+                                                   'address': 'Учебный адрес, 1',
+                                                   'latitude': 55.75,
+                                                   'longitude': 37.61
+                                               }
+                                           ],
+                                           'nextCursor': None,
+                                           'total': 1
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def objects(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("objects", params)
 
-    @operation("/objects/{objectId}", "objects", "getObject", dto.Object)
+    @operation("/objects/{objectId}", "objects", "getObject", dto.Object,
+               summary='Read an authorized service point',
+               description=(
+                   'User or approved service principal with objects:read and object resource '
+                   'grants. Preserve the exact opaque Unicode ObjectId (1..40, no NUL); URL-encode '
+                   'the path segment. UUID examples do not constrain native identity. Path '
+                   'transport addressability is separate. Site/EVSE/connector levels are not '
+                   'exposed. Application refusals before streaming use application/problem+json: '
+                   '400 invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, '
+                   '403 access_denied, 404 not_found (absent or hidden resource), 422 '
+                   'invalid_request, 429 rate_limited for the opt-in quota or internal_error for '
+                   'generic injected HTTP429, 500 internal_error, 503 api_unavailable. Known-path '
+                   'unsupported methods use 405 method_not_allowed with Allow: GET. Cache-Control: '
+                   'no-store and X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 '
+                   'supplies Retry-After; generic 429/503 supplies it only when available. Proxy '
+                   'errors and errors after streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'id': '20000000-0000-4000-8000-000000000001',
+                                           'level': 'servicePoint',
+                                           'code': 'DEMO-001',
+                                           'name': 'Учебная ЭЗС',
+                                           'type': 'ezs',
+                                           'status': 'active',
+                                           'address': 'Учебный адрес, 1',
+                                           'latitude': 55.75,
+                                           'longitude': 37.61
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def object_detail(objectId: dto.ObjectId, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("objects", [await query.detail("objects", objectId)]))[0]
 
     @operation("/objects/{objectId}/monitoring", "objects", "getObjectMonitoring", dto.Monitoring,
-               extra_scopes={monitoring.SCOPE}, tags=[MONITORING_TAG], summary="Read object charging status",
-               description="Energy profile only. Current catalog status; object-scoped observed data boundary. "
-                   "Inclusive MSK interval [asOf - days, asOf], days 1..366. asOf date caps the endpoint at "
-                   "23:59:59.999999 MSK, or earlier observed data. Successful visit: any attempt energy > 0. "
-                   "No financial, ticket, customer or raw session data.")
+               extra_scopes={monitoring.SCOPE},
+               tags=[MONITORING_TAG],
+               summary='Read object charging status',
+               description=(
+                   'Energy profile only. User or approved service principal needs objects:read AND '
+                   'monitoring:read and an independently authorized object. Current catalog status; '
+                   'object-scoped observed data boundary. Inclusive MSK interval [asOf - days, '
+                   'asOf], days 1..366. asOf date caps the endpoint at 23:59:59.999999 MSK, or '
+                   'earlier observed data. Without asOf use the latest object boundary, or current '
+                   'MSK time if unknown. dataThrough is the latest object observation (possibly '
+                   'later than requestedDate); dataLagHours is its lag to current time, not to the '
+                   'selected date. Unknown dataThrough/dataLagHours/lastSeenAt remain null, not '
+                   'zero. Sessions count attempts, visits group native visit keys, successful visit '
+                   'means any attempt energy_kwh > 0, energyKwh is kWh summed before rounding to '
+                   'one decimal. Current status/catalog are not reconstructed history. No '
+                   'financial, ticket, customer or raw session data. Application refusals before '
+                   'streaming use application/problem+json: 400 invalid_cursor (bad or differently '
+                   'bound cursor), 401 invalid_credentials, 403 access_denied, 404 not_found '
+                   '(absent or hidden resource), 422 invalid_request, 429 rate_limited for the '
+                   'opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'pointId': '20000000-0000-4000-8000-000000000001',
+                                           'status': 'working',
+                                           'window': {
+                                               'days': 1,
+                                               'start': '2026-10-30T10:00:00+03:00',
+                                               'end': '2026-10-31T10:00:00+03:00',
+                                               'timeZone': 'Europe/Moscow',
+                                               'interval': 'inclusive'
+                                           },
+                                           'totals': {
+                                               'sessions': 3,
+                                               'visits': 2,
+                                               'successfulVisits': 1,
+                                               'unsuccessfulVisits': 1,
+                                               'energyKwh': 12.5
+                                           },
+                                           'lastSeenAt': '2026-10-31T10:00:00+03:00',
+                                           'provenance': {
+                                               'asOf': '2026-10-31T10:00:00+03:00',
+                                               'dataThrough': '2026-10-31T10:00:00+03:00',
+                                               'dataLagHours': 0.0,
+                                               'requestedDate': '2026-10-31',
+                                               'catalogMode': 'current',
+                                               'snapshotNote': 'Сессии — на выбранный день (МСК). Состав парка и паспортные статусы — текущие; история состава не восстановлена.',
+                                               'boundaryScope': 'object',
+                                               'source': 'charge_sessions',
+                                               'visitSuccess': 'any attempt energy_kwh > 0'
+                                           }
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def object_monitoring(objectId: dto.ObjectId, params: Annotated[dto.MonitoringQuery, QueryParams()],
                                 query: Query = Depends(query_dependency)):
         return await monitoring.detail(query, objectId, params)
 
-    @operation("/equipment", "equipment", "listEquipment", dto.Page[dto.Equipment])
+    @operation("/equipment", "equipment", "listEquipment", dto.Page[dto.Equipment],
+               summary='List authorized station equipment',
+               description=(
+                   'User or approved service principal with equipment:read and equipment resource '
+                   'grants. Only kind=station is exposed. q searches serial_number with ILIKE (% '
+                   'and _ wildcards). powerKw is kW. Link IDs are independently authorized; null '
+                   'means absent or hidden. An authorized card does not grant access to linked '
+                   'resources. Disclosing objectId additionally requires objects:read and an '
+                   'independent object grant. Fixed ascending created_at, id; no custom sort or '
+                   'offset. dateFrom/dateTo filter created_at inclusively in UTC, not business '
+                   'dates. Cursor pagination is live, not a snapshot; total is the current visible '
+                   'filtered count before cursor. Keep pageSize (default 50, 1..200), filters and '
+                   'authorization context fixed across pages; pass nextCursor unchanged and '
+                   'URL-encoded until null. A changed binding requires a fresh traversal. '
+                   'Application refusals before streaming use application/problem+json: 400 '
+                   'invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, 403 '
+                   'access_denied, 404 not_found (absent or hidden resource), 422 invalid_request, '
+                   '429 rate_limited for the opt-in quota or internal_error for generic injected '
+                   'HTTP429, 500 internal_error, 503 api_unavailable. Known-path unsupported '
+                   'methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and '
+                   'X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 supplies '
+                   'Retry-After; generic 429/503 supplies it only when available. Proxy errors and '
+                   'errors after streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'items': [
+                                               {
+                                                   'id': '30000000-0000-4000-8000-000000000001',
+                                                   'level': 'station',
+                                                   'vendor': 'Учебный изготовитель',
+                                                   'model': 'Пример 50',
+                                                   'serialNumber': 'DEMO-0001',
+                                                   'powerKw': 50.0,
+                                                   'state': 'working',
+                                                   'objectId': '20000000-0000-4000-8000-000000000001'
+                                               }
+                                           ],
+                                           'nextCursor': None,
+                                           'total': 1
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def equipment(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("equipment", params)
 
-    @operation("/equipment/{equipmentId}", "equipment", "getEquipment", dto.Equipment)
+    @operation("/equipment/{equipmentId}", "equipment", "getEquipment", dto.Equipment,
+               summary='Read authorized station equipment',
+               description=(
+                   'User or approved service principal with equipment:read and equipment resource '
+                   'grants. Only station level; powerKw is kW. Link IDs are independently '
+                   'authorized; null means absent or hidden. An authorized card does not grant '
+                   'access to linked resources. Disclosing objectId additionally requires '
+                   'objects:read and an independent object grant. Application refusals before '
+                   'streaming use application/problem+json: 400 invalid_cursor (bad or differently '
+                   'bound cursor), 401 invalid_credentials, 403 access_denied, 404 not_found '
+                   '(absent or hidden resource), 422 invalid_request, 429 rate_limited for the '
+                   'opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'id': '30000000-0000-4000-8000-000000000001',
+                                           'level': 'station',
+                                           'vendor': 'Учебный изготовитель',
+                                           'model': 'Пример 50',
+                                           'serialNumber': 'DEMO-0001',
+                                           'powerKw': 50.0,
+                                           'state': 'working',
+                                           'objectId': '20000000-0000-4000-8000-000000000001'
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def equipment_detail(equipmentId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("equipment", [await query.detail("equipment", equipmentId)]))[0]
 
-    @operation("/counterparties", "counterparties", "listCounterparties", dto.Page[dto.Counterparty])
+    @operation("/counterparties", "counterparties", "listCounterparties", dto.Page[dto.Counterparty],
+               summary='List authorized counterparties',
+               description=(
+                   'User or approved service principal with counterparties:read and counterparty '
+                   'resource grants. q searches name using ILIKE (% and _ wildcards), not INN/KPP. '
+                   'Fixed ascending created_at, id; no custom sort or offset. dateFrom/dateTo '
+                   'filter created_at inclusively in UTC, not business dates. Cursor pagination is '
+                   'live, not a snapshot; total is the current visible filtered count before '
+                   'cursor. Keep pageSize (default 50, 1..200), filters and authorization context '
+                   'fixed across pages; pass nextCursor unchanged and URL-encoded until null. A '
+                   'changed binding requires a fresh traversal. Application refusals before '
+                   'streaming use application/problem+json: 400 invalid_cursor (bad or differently '
+                   'bound cursor), 401 invalid_credentials, 403 access_denied, 404 not_found '
+                   '(absent or hidden resource), 422 invalid_request, 429 rate_limited for the '
+                   'opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'items': [
+                                               {
+                                                   'id': '40000000-0000-4000-8000-000000000001',
+                                                   'name': 'Учебный контрагент',
+                                                   'inn': None,
+                                                   'kpp': None
+                                               }
+                                           ],
+                                           'nextCursor': None,
+                                           'total': 1
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def counterparties(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("counterparties", params)
 
-    @operation("/counterparties/{counterpartyId}", "counterparties", "getCounterparty", dto.Counterparty)
+    @operation("/counterparties/{counterpartyId}", "counterparties", "getCounterparty", dto.Counterparty,
+               summary='Read an authorized counterparty',
+               description=(
+                   'User or approved service principal with counterparties:read and counterparty '
+                   'resource grants. Nullable native INN/KPP are not inferred from the name. '
+                   'Application refusals before streaming use application/problem+json: 400 '
+                   'invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, 403 '
+                   'access_denied, 404 not_found (absent or hidden resource), 422 invalid_request, '
+                   '429 rate_limited for the opt-in quota or internal_error for generic injected '
+                   'HTTP429, 500 internal_error, 503 api_unavailable. Known-path unsupported '
+                   'methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and '
+                   'X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 supplies '
+                   'Retry-After; generic 429/503 supplies it only when available. Proxy errors and '
+                   'errors after streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'id': '40000000-0000-4000-8000-000000000001',
+                                           'name': 'Учебный контрагент',
+                                           'inn': None,
+                                           'kpp': None
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def counterparty_detail(counterpartyId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("counterparties", [await query.detail("counterparties", counterpartyId)]))[0]
 
-    @operation("/contracts", "contracts", "listContracts", dto.Page[dto.Contract])
+    @operation("/contracts", "contracts", "listContracts", dto.Page[dto.Contract],
+               summary='List authorized contracts',
+               description=(
+                   'User or approved service principal with contracts:read and contract resource '
+                   'grants. q searches number using ILIKE (% and _ wildcards). typeCode is an exact '
+                   'case/whitespace-sensitive source filter, not a global enum. validUntil is a '
+                   'nullable raw source string up to 20 characters, not an ISO-date guarantee; null '
+                   'means unknown, not perpetual. Link IDs are independently authorized; null means '
+                   'absent or hidden. An authorized card does not grant access to linked resources. '
+                   'counterpartyId requires independent counterparty authorization. Fixed ascending '
+                   'created_at, id; no custom sort or offset. dateFrom/dateTo filter created_at '
+                   'inclusively in UTC, not business dates. Cursor pagination is live, not a '
+                   'snapshot; total is the current visible filtered count before cursor. Keep '
+                   'pageSize (default 50, 1..200), filters and authorization context fixed across '
+                   'pages; pass nextCursor unchanged and URL-encoded until null. A changed binding '
+                   'requires a fresh traversal. Application refusals before streaming use '
+                   'application/problem+json: 400 invalid_cursor (bad or differently bound cursor), '
+                   '401 invalid_credentials, 403 access_denied, 404 not_found (absent or hidden '
+                   'resource), 422 invalid_request, 429 rate_limited for the opt-in quota or '
+                   'internal_error for generic injected HTTP429, 500 internal_error, 503 '
+                   'api_unavailable. Known-path unsupported methods use 405 method_not_allowed with '
+                   'Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a '
+                   'Bearer challenge. Quota 429 supplies Retry-After; generic 429/503 supplies it '
+                   'only when available. Proxy errors and errors after streaming headers are '
+                   'outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'items': [
+                                               {
+                                                   'typeCode': 'fictional-type',
+                                                   'validUntil': None,
+                                                   'id': '50000000-0000-4000-8000-000000000001',
+                                                   'number': 'DEMO-001',
+                                                   'date': '2026-10-01',
+                                                   'title': 'Учебный договор',
+                                                   'isClosed': False,
+                                                   'scopeType': 'locations',
+                                                   'counterpartyId': '40000000-0000-4000-8000-000000000001'
+                                               }
+                                           ],
+                                           'nextCursor': None,
+                                           'total': 1
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def contracts(params: Annotated[dto.ContractListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("contracts", params)
 
     @operation("/contract-types", "contracts", "getContractTypeMetadata", dto.ContractTypeMetadata,
-               summary="Read classifier metadata for an independently visible contract code",
-               description="Exact source code. A currently visible contract is required before global catalog lookup. "
-                   "Unknown catalog codes retain nullable metadata; inactive historical labels remain readable. "
-                   "Does not enumerate global or hidden contract types.")
+               summary='Read classifier metadata for an independently visible contract code',
+               description=(
+                   'Exact source code. User or approved service principal needs contracts:read and '
+                   'contract resource grants. A currently visible contract with the exact '
+                   'case/whitespace-sensitive typeCode is required before global catalog lookup; '
+                   'otherwise 404. Unknown catalog codes retain all nullable metadata keys; '
+                   'inactive historical labels remain readable. Does not enumerate global or hidden '
+                   'contract types or infer legal classification. Application refusals before '
+                   'streaming use application/problem+json: 400 invalid_cursor (bad or differently '
+                   'bound cursor), 401 invalid_credentials, 403 access_denied, 404 not_found '
+                   '(absent or hidden resource), 422 invalid_request, 429 rate_limited for the '
+                   'opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'typeCode': 'fictional-type',
+                                           'label': None,
+                                           'gkBasis': None,
+                                           'direction': None,
+                                           'isActive': None
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def contract_type_metadata(params: Annotated[dto.ContractTypeMetadataQuery, QueryParams()],
                                      request: Request, query: Query = Depends(query_dependency)):
         async for chunk in request.stream():
@@ -184,15 +608,100 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                 raise HTTPException(422, "Request body is not accepted")
         return await query.contract_type_metadata(params)
 
-    @operation("/contracts/{contractId}", "contracts", "getContract", dto.Contract)
+    @operation("/contracts/{contractId}", "contracts", "getContract", dto.Contract,
+               summary='Read an authorized contract',
+               description=(
+                   'User or approved service principal with contracts:read and contract resource '
+                   'grants. typeCode is an open source string, including unknown/empty values. '
+                   'validUntil is a nullable raw source string up to 20 characters, not a validated '
+                   'ISO date; null means unknown, not perpetual. Link IDs are independently '
+                   'authorized; null means absent or hidden. An authorized card does not grant '
+                   'access to linked resources. counterpartyId requires independent counterparty '
+                   'authorization. Application refusals before streaming use '
+                   'application/problem+json: 400 invalid_cursor (bad or differently bound cursor), '
+                   '401 invalid_credentials, 403 access_denied, 404 not_found (absent or hidden '
+                   'resource), 422 invalid_request, 429 rate_limited for the opt-in quota or '
+                   'internal_error for generic injected HTTP429, 500 internal_error, 503 '
+                   'api_unavailable. Known-path unsupported methods use 405 method_not_allowed with '
+                   'Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a '
+                   'Bearer challenge. Quota 429 supplies Retry-After; generic 429/503 supplies it '
+                   'only when available. Proxy errors and errors after streaming headers are '
+                   'outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'typeCode': 'fictional-type',
+                                           'validUntil': None,
+                                           'id': '50000000-0000-4000-8000-000000000001',
+                                           'number': 'DEMO-001',
+                                           'date': '2026-10-01',
+                                           'title': 'Учебный договор',
+                                           'isClosed': False,
+                                           'scopeType': 'locations',
+                                           'counterpartyId': '40000000-0000-4000-8000-000000000001'
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def contract_detail(contractId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("contracts", [await query.detail("contracts", contractId)]))[0]
 
     @operation("/contracts/{contractId}/objects", "contracts", "listContractObjects", dto.ContractObjects,
-               extra_scopes={access.READ_SCOPES["objects"]}, summary="Read explicit contract object associations",
-               description="Only current explicit links to independently authorized service points. Requires both "
-                   "contracts and objects resource grants. Company/unassigned scope returns no explicit links; "
-                   "no implied legal coverage or historical interpretation. Live cursor pagination.")
+               extra_scopes={access.READ_SCOPES["objects"]},
+               summary='Read explicit contract object associations',
+               description=(
+                   'Only current explicit links to independently authorized service points. User or '
+                   'approved service principal needs contracts:read AND objects:read and both '
+                   'resource grants. Company/unassigned scope returns no explicit links; no implied '
+                   'legal coverage or historical interpretation. Only pageSize/cursor query '
+                   'parameters, no q/date/typeCode. Fixed ascending linked object created_at,id; '
+                   'live cursor pagination, not a snapshot. total is the visible count before '
+                   'cursor; keep pageSize and context fixed, pass nextCursor unchanged until null. '
+                   'Application refusals before streaming use application/problem+json: 400 '
+                   'invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, 403 '
+                   'access_denied, 404 not_found (absent or hidden resource), 422 invalid_request, '
+                   '429 rate_limited for the opt-in quota or internal_error for generic injected '
+                   'HTTP429, 500 internal_error, 503 api_unavailable. Known-path unsupported '
+                   'methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and '
+                   'X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 supplies '
+                   'Retry-After; generic 429/503 supplies it only when available. Proxy errors and '
+                   'errors after streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'contractId': '50000000-0000-4000-8000-000000000001',
+                                           'scopeType': 'locations',
+                                           'items': [
+                                               {
+                                                   'objectId': '20000000-0000-4000-8000-000000000001'
+                                               }
+                                           ],
+                                           'total': 1,
+                                           'nextCursor': None
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def contract_objects(contractId: dto.Id, params: Annotated[dto.ContractObjectsQuery, QueryParams()],
                                request: Request, query: Query = Depends(query_dependency)):
         async for chunk in request.stream():
@@ -201,11 +710,51 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
         return await query.contract_objects(contractId, params)
 
     @operation("/contracts/{contractId}/documents", "documents", "listContractDocuments", dto.ContractDocuments,
-               extra_scopes={access.READ_SCOPES["contracts"]}, summary="Read explicit contract document associations",
-               description="Current subject and explicit document graph links to an independently authorized contract. "
-                   "Requires delegated user consent, contracts:read AND documents:read and both resource grants. "
-                   "Document visibility is checked independently before count and pagination. No file access is granted. "
-                   "Live cursor pagination.")
+               extra_scopes={access.READ_SCOPES["contracts"]},
+               summary='Read explicit contract document associations',
+               description=(
+                   'Current subject and explicit document graph links to an independently '
+                   'authorized contract. Requires delegated user consent, contracts:read AND '
+                   'documents:read and both resource grants; service principals are denied. '
+                   'Document visibility is checked independently before count and pagination. No '
+                   'file access is granted. Only pageSize/cursor query parameters, no '
+                   'q/date/typeCode. Fixed ascending linked document created_at,id; live cursor '
+                   'pagination, not a snapshot. total is the visible count before cursor; keep '
+                   'pageSize and context fixed, pass nextCursor unchanged until null. Application '
+                   'refusals before streaming use application/problem+json: 400 invalid_cursor (bad '
+                   'or differently bound cursor), 401 invalid_credentials, 403 access_denied, 404 '
+                   'not_found (absent or hidden resource), 422 invalid_request, 429 rate_limited '
+                   'for the opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'contractId': '50000000-0000-4000-8000-000000000001',
+                                           'items': [
+                                               {
+                                                   'documentId': '60000000-0000-4000-8000-000000000001'
+                                               }
+                                           ],
+                                           'total': 1,
+                                           'nextCursor': None
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def contract_documents(contractId: dto.Id, params: Annotated[dto.ContractDocumentsQuery, QueryParams()],
                                  request: Request, query: Query = Depends(query_dependency)):
         async for chunk in request.stream():
@@ -213,11 +762,118 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                 raise HTTPException(422, "Request body is not accepted")
         return await query.contract_documents(contractId, params)
 
-    @operation("/documents", "documents", "listDocuments", dto.Page[dto.Document])
+    @operation("/documents", "documents", "listDocuments", dto.Page[dto.Document],
+               summary='List authorized document cards',
+               description=(
+                   'Delegated user only, documents:read plus document resource grant and native '
+                   'user document ACL; service principals are denied. q searches title using ILIKE '
+                   '(% and _ wildcards). No file access is granted. Link IDs are independently '
+                   'authorized; null means absent or hidden. An authorized card does not grant '
+                   'access to linked resources. Fixed ascending created_at, id; no custom sort or '
+                   'offset. dateFrom/dateTo filter created_at inclusively in UTC, not business '
+                   'dates. Cursor pagination is live, not a snapshot; total is the current visible '
+                   'filtered count before cursor. Keep pageSize (default 50, 1..200), filters and '
+                   'authorization context fixed across pages; pass nextCursor unchanged and '
+                   'URL-encoded until null. A changed binding requires a fresh traversal. '
+                   'Application refusals before streaming use application/problem+json: 400 '
+                   'invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, 403 '
+                   'access_denied, 404 not_found (absent or hidden resource), 422 invalid_request, '
+                   '429 rate_limited for the opt-in quota or internal_error for generic injected '
+                   'HTTP429, 500 internal_error, 503 api_unavailable. Known-path unsupported '
+                   'methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and '
+                   'X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 supplies '
+                   'Retry-After; generic 429/503 supplies it only when available. Proxy errors and '
+                   'errors after streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'items': [
+                                               {
+                                                   'id': '60000000-0000-4000-8000-000000000001',
+                                                   'title': 'Учебный документ',
+                                                   'status': 'draft',
+                                                   'registrationNumber': None,
+                                                   'registrationDate': None,
+                                                   'currentRevision': 1,
+                                                   'objectId': None,
+                                                   'counterpartyId': None
+                                               }
+                                           ],
+                                           'nextCursor': None,
+                                           'total': 1
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def documents(params: Annotated[dto.ListQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return await query.listing("documents", params)
 
-    @operation("/documents/{docId}", "documents", "getDocument", dto.DocumentDetail)
+    @operation("/documents/{docId}", "documents", "getDocument", dto.DocumentDetail,
+               summary='Read a document and capped current-version metadata',
+               description=(
+                   'Delegated user only, documents:read plus document resource grant and native '
+                   'user document ACL; service principals are denied. At most 200 current, '
+                   'non-tombstoned, non-purged versions, ordered by revision,id. '
+                   'versionsTruncated=true means more eligible current versions exist; do not claim '
+                   'a complete archive. Historical version listing is not exposed. Download '
+                   'requires separate scope and native file ACL; MIME/size metadata is not '
+                   'permission. Link IDs are independently authorized; null means absent or hidden. '
+                   'An authorized card does not grant access to linked resources. Application '
+                   'refusals before streaming use application/problem+json: 400 invalid_cursor (bad '
+                   'or differently bound cursor), 401 invalid_credentials, 403 access_denied, 404 '
+                   'not_found (absent or hidden resource), 422 invalid_request, 429 rate_limited '
+                   'for the opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': 'Complete fictional 200 JSON; all required nullable keys are included. Not a captured runtime response.',
+                       'content': {
+                           'application/json': {
+                               'examples': {
+                                   'fictional': {
+                                       'summary': 'Fictional authorized response',
+                                       'value': {
+                                           'id': '60000000-0000-4000-8000-000000000001',
+                                           'title': 'Учебный документ',
+                                           'status': 'draft',
+                                           'registrationNumber': None,
+                                           'registrationDate': None,
+                                           'currentRevision': 1,
+                                           'objectId': None,
+                                           'counterpartyId': None,
+                                           'versions': [
+                                               {
+                                                   'id': '70000000-0000-4000-8000-000000000001',
+                                                   'revision': 1,
+                                                   'role': 'main',
+                                                   'fileName': 'example.txt',
+                                                   'mimeType': 'text/plain',
+                                                   'sizeBytes': 15
+                                               }
+                                           ],
+                                           'versionsTruncated': False
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               })
     async def document_detail(docId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         from app.models import DocVersion
         row = await query.detail("documents", docId)
@@ -230,8 +886,41 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
             id=str(v.id), revision=v.revision, role=v.role, file_name=v.file_name, mime_type=v.mime,
             size_bytes=v.size_bytes) for v in versions[:200]], versions_truncated=len(versions) > 200)
 
-    @operation("/documents/{docId}/versions/{versionId}/content", "documents", "downloadDocumentVersion", action="download",
-               responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
+    @operation("/documents/{docId}/versions/{versionId}/content", "documents", "downloadDocumentVersion",
+               action="download",
+               summary='Download authorized document-version bytes',
+               description=(
+                   'Delegated user only. Requires documents:read AND documents.files:download, '
+                   'document resource grant, native user download/file ACL and the same-company '
+                   'document/version/source chain. Service principals are denied. Missing, '
+                   'tombstoned, purged, hidden or cross-domain shared source files are not exposed; '
+                   'successful metadata does not promise bytes. Output is application/octet-stream '
+                   'bytes even when version mimeType is text/plain. No JSON body, upload, '
+                   'historical listing, Range/resume or checksum contract is introduced. Failure '
+                   'after streaming starts cannot become a Problem response. Application refusals '
+                   'before streaming use application/problem+json: 400 invalid_cursor (bad or '
+                   'differently bound cursor), 401 invalid_credentials, 403 access_denied, 404 '
+                   'not_found (absent or hidden resource), 422 invalid_request, 429 rate_limited '
+                   'for the opt-in quota or internal_error for generic injected HTTP429, 500 '
+                   'internal_error, 503 api_unavailable. Known-path unsupported methods use 405 '
+                   'method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id '
+                   'apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; '
+                   'generic 429/503 supplies it only when available. Proxy errors and errors after '
+                   'streaming headers are outside this Problem contract.'
+               ),
+               responses={
+                   200: {
+                       'description': "Fictional 200: raw ASCII bytes Fictional file +LF (15 bytes), not a JSON string. Example headers: Content-Type: application/octet-stream; Content-Disposition: attachment; filename*=UTF-8''example.txt; X-Content-Type-Options: nosniff; Cache-Control: no-store; X-Request-Id: 80000000-0000-4000-8000-000000000001. No actual file is generated.",
+                       'content': {
+                           'application/octet-stream': {
+                               'schema': {
+                                   'type': 'string',
+                                   'format': 'binary'
+                               }
+                           }
+                       }
+                   }
+               })
     async def document_content(docId: dto.Id, versionId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()],
                                request: Request, query: Query = Depends(query_dependency)):
         return await files.content(query, docId, versionId, request.app.state.product_settings.upload_dir)
