@@ -438,3 +438,30 @@ async def test_access_legacy_error_order(store, member_exists, superadmin, raw_r
         assert exc.value.status_code == code
         await db.rollback()
     assert not store.audits
+
+
+
+@pytest.mark.asyncio
+async def test_access_rechecks_target_superadmin_between_preflight_and_discovery(store, monkeypatch):
+    real_prepare = users_router.prepare_native_write
+    calls = []
+    async def promote_then_prepare(db, actor, **kwargs):
+        # Deterministic preflight/discovery gap, without replacing the real
+        # adapter or lock acquisition. Before/after discovery both see True.
+        async with store.factory() as other:
+            (await other.get(User, U)).is_superadmin = True
+            await other.commit()
+        calls.append("promoted")
+        return await real_prepare(db, actor, **kwargs)
+    monkeypatch.setattr(users_router, "prepare_native_write", promote_then_prepare)
+    async with store.factory() as db:
+        actor = await db.get(User, A)
+        payload = SimpleNamespace(company_id=str(C), mode="custom", role_id=None, modules=[])
+        with native_claims_context(CLAIMS, None), pytest.raises(Exception) as exc:
+            await users_router.set_member_access(str(U), payload, db, actor)
+        assert exc.value.status_code == 403 and calls == ["promoted"]
+        await db.rollback()
+    async with store.factory() as verify:
+        member = await verify.get(UserCompany, (U, C))
+        assert member.role_id == R1 and member.modules is None
+    assert not store.audits

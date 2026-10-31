@@ -384,8 +384,13 @@ async def set_member_access(
     # Preserve the legacy admin branch: it ignores even malformed role_id.
     new_role_id = (uuid.UUID(payload.role_id)
                    if m.role != "admin" and payload.mode == "role" and payload.role_id else None)
-    await prepare_native_write(db, current_user, company_id=cid, target_id=uid,
-                               new_role_id=new_role_id, expected_member=(m.role_id, m.role))
+    prepared = await prepare_native_write(db, current_user, company_id=cid, target_id=uid,
+                                          new_role_id=new_role_id, expected_member=(m.role_id, m.role))
+    target = prepared.target
+    # The account may have become superadmin before discovery started. Repeat
+    # the legacy forbidden branch against the locked, refreshed target too.
+    if target is not None and target.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя ограничивать суперадмина")
     if m.role == "admin":
         m.role_id = None
         m.modules = None
