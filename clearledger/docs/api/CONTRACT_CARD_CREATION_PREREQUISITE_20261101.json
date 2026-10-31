@@ -1,0 +1,999 @@
+{
+  "format": "elsy.contract-card.source-prerequisite.v1",
+  "status": "SOURCE_FROZEN_LOCAL_INDEPENDENT_REVIEW_COMPLETE_MAIN_REVIEW_PENDING",
+  "repo": "Electro-Interfaces/ClearLedger",
+  "base": "675654298f9a7cde30f3ab8097935478bb534088",
+  "branch": "MagLook/contract-create-workflow-20261101",
+  "run": "run_1e4d8306c273",
+  "authority": {
+    "message": "msg_08dfd013e919",
+    "scope": "ROOT explicitly confirmed B prerequisite. H01 incomplete; common-policy seam remains separate ROOT ownership, scoped locks only preparation direction; no write/issuance/schema permission extension.",
+    "decision": "msg_e719c3a4bb5d"
+  },
+  "scope": [
+    "clearledger/server/app/services/contract_card_creation.py",
+    "clearledger/server/app/services/native_contract_commands.py",
+    "clearledger/server/tests/test_contract_card_creation.py",
+    "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.md",
+    "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.json"
+  ],
+  "runtimeExecutions": 0,
+  "compilation": "NOTRUN",
+  "projectImports": "NONE",
+  "newTests": "AUTHORED_NOTRUN",
+  "existingNativeStaticCases": 55,
+  "newStaticCases": 10,
+  "testCollectionExecuted": false,
+  "nativeBehaviorSourceStatus": "REVERSE_AST_EQUAL_ON_FROZEN_RAW_SOURCE",
+  "fullCreateWorkflow": "NOT_IMPLEMENTED_DEPENDS_ON_H01",
+  "partnerSDKCreate": "NOT_PUBLISHED_NOT_GENERATED",
+  "sourceFiles": [
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "bytes": 4136,
+      "lines": 109,
+      "sha256": "9a18628d5e6f701dab13c30fced65ef711ce8aa3d7fef4a0ae51ecf8cf5b4158",
+      "GitBlobEqualsWorkingAndAuthor": true
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "bytes": 3555,
+      "lines": 76,
+      "sha256": "9a8f88d0b5bb539a19c596a374e786d5f00be672f489625be4066557a71f49e4",
+      "GitBlobEqualsWorkingAndAuthor": true
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "bytes": 12086,
+      "lines": 199,
+      "sha256": "4dd129e23d0317a31d1446900aeed259c664c1c3c5be596d79a057e82716cbf2",
+      "GitBlobEqualsWorkingAndAuthor": true
+    }
+  ],
+  "sourcePlaces": [
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "symbol": "ContractCardValues",
+      "lineStart": 16,
+      "lineEnd": 51,
+      "rawSpanSha256": "1725b4e9e247fe4e0c94bf91dbd9125cedf7a92a3c8078b7a164c5d0636f122a",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "symbol": "find_contract_card_duplicates",
+      "lineStart": 54,
+      "lineEnd": 68,
+      "rawSpanSha256": "4d8d15bfdb2287b5918d9324aa2ab567a8938ef4c9c2d10080f8f46f20c1909f",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "symbol": "create_contract_card",
+      "lineStart": 71,
+      "lineEnd": 109,
+      "rawSpanSha256": "ebc46a502b377c7b2897bb76b8cd277b4b78d281b5fba02e8f6a46b0722a9861",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "symbol": "create_native_contract",
+      "lineStart": 26,
+      "lineEnd": 76,
+      "rawSpanSha256": "d3a553fb2ed6bab5226706ccaefe34b1e071965d7453bfd3bab59cf18489fda7",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "symbol": "card_values",
+      "lineStart": 43,
+      "lineEnd": 57,
+      "rawSpanSha256": "92b901dba55436049f38cd9a8cb7c8e8c5825829d303c9c15aff2e4640ea2e6a",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "symbol": "test_shared_flush_waits_for_caller_commit_and_maps_all_columns",
+      "lineStart": 60,
+      "lineEnd": 95,
+      "rawSpanSha256": "f6cd5dbb9965bec517687b712595e596e2d6e692dbbe3a6de03bda6fdffe9e12",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "symbol": "test_shared_flushed_card_disappears_on_caller_rollback",
+      "lineStart": 98,
+      "lineEnd": 108,
+      "rawSpanSha256": "65017ed60cfd2072acf923bbe46cfef2d62734cf9c767897ecbefc18401b4465",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "symbol": "test_shared_flush_failure_propagates_without_partial_card",
+      "lineStart": 111,
+      "lineEnd": 119,
+      "rawSpanSha256": "05c1fbdaf63c2383facfdfa7d9ac7347b58d6e990fe5d73e45305e826d26d69f",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "symbol": "test_shared_values_preserve_null_zero_false_and_empty_strings",
+      "lineStart": 122,
+      "lineEnd": 164,
+      "rawSpanSha256": "6bb3ade3b4737446c94dc7f3a37a746ca93381c1c84d1e19dcec4ee16bfd4605",
+      "classification": "подтверждено исходниками"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "symbol": "test_shared_duplicates_use_exact_company_parties_and_existing_identity",
+      "lineStart": 167,
+      "lineEnd": 199,
+      "rawSpanSha256": "2a23c3cd093edfd28e5f70cdda9881979da0a861ec02bbbb73d46beb4b5b490b",
+      "classification": "подтверждено исходниками"
+    }
+  ],
+  "upstreamHandoff": {
+    "format": "elsy.contract-create.upstream-handoff-requirement.v1",
+    "base": "675654298f9a7cde30f3ab8097935478bb534088",
+    "run": "run_1e4d8306c273",
+    "sourceTask": "msg_08dfd013e919",
+    "question": "msg_aab27824ca59",
+    "status": "ANSWERED_B_PREREQUISITE_H01_STILL_INCOMPLETE",
+    "singleDependency": "H01 frozen CREATE admission handoff from ROOT/Core/Identity",
+    "requiredFields": [
+      "Selected lock protocol and exact participating writer scope/owners with preserved order and no implicit broad edit authority.",
+      "Explicit opt-in typed named database receipt permission at both actual guards; base scopes unchanged, R3 base-only and repeat indexed predicate in query transaction.",
+      "Accepted schema head/manifest SHA and allocated next ordinal/implementer plus success-history retention/current policy generation owner; no implicit0004 reservation.",
+      "Actual registered CREATE/options canonical operation manifest and separate ROOT offline official generation authority; no invented working POST/handwritten wire type."
+    ],
+    "independentCodeScope": [
+      "clearledger/server/app/services/contract_card_creation.py",
+      "clearledger/server/app/services/native_contract_commands.py",
+      "clearledger/server/tests/test_contract_card_creation.py"
+    ],
+    "runtime0": true,
+    "fullCreateImplemented": false,
+    "evidence": [
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/server/app/services/native_contract_commands.py",
+        "symbol": "create_native_contract",
+        "lineStart": 23,
+        "lineEnd": 79,
+        "fileSha256": "36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4",
+        "rawSpanSha256": "2bfcef36f43dd6664ce39efd2a8ae4ecb4a1e39a57485e70fa562b980c677c97",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/server/app/product_api/access.py",
+        "symbol": "resolve",
+        "lineStart": 67,
+        "lineEnd": 152,
+        "fileSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+        "rawSpanSha256": "68786294d4e9af3f631fa0c167b4770dc61f7c269f455352c6446ce8171a5db3",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/server/app/api_contracts/routing.py",
+        "symbol": "authorize",
+        "lineStart": 88,
+        "lineEnd": 103,
+        "fileSha256": "131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0",
+        "rawSpanSha256": "6084859b17524c8d4f698fe982752c2efdbaa0ca49e6201a1d3890bcbc49a91f",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/server/app/product_api/queries.py",
+        "symbol": "Query.contract_domain",
+        "lineStart": 49,
+        "lineEnd": 60,
+        "fileSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+        "rawSpanSha256": "22563a384bdc248d600ab3359a6780536a08d8b4b40cd796009b1be3ef33f146",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/server/app/product_api/queries.py",
+        "symbol": "Query.conditions",
+        "lineStart": 70,
+        "lineEnd": 101,
+        "fileSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+        "rawSpanSha256": "753684a75a9cc17d2cdf5a77a8647cdc72f5203ec378298708ecdf137e592f35",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/server/app/product_api/queries.py",
+        "symbol": "Query.contract_type_metadata",
+        "lineStart": 175,
+        "lineEnd": 186,
+        "fileSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+        "rawSpanSha256": "3b8788cc8a52f22d62412116b4d1dd875ace938c09fd6fa14224dff105751488",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md",
+        "symbol": "UNSELECTED lock gate",
+        "lineStart": 1,
+        "lineEnd": 22,
+        "fileSha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef",
+        "rawSpanSha256": "fed2c6be4ee19480bfff04ddfe436facedc528714ac146fac43867b1dc62adea",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md",
+        "symbol": "Indexed receipts and named common-policy seam",
+        "lineStart": 120,
+        "lineEnd": 169,
+        "fileSha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef",
+        "rawSpanSha256": "c45d1e72a391bb0270b6f7216a5679a7e73a5b9d4a76c426e403cebc7f8f5003",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md",
+        "symbol": "Core schema ordinal handoff",
+        "lineStart": 173,
+        "lineEnd": 187,
+        "fileSha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef",
+        "rawSpanSha256": "8070733f65237d34e52a4f0dc4280d411ac3096cb73a5618844096507ed680cb",
+        "classification": "подтверждено исходниками"
+      },
+      {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+        "path": "clearledger/tools/partner-api-types/generate.mjs",
+        "symbol": "Exact15 GET operation manifest",
+        "lineStart": 16,
+        "lineEnd": 45,
+        "fileSha256": "549d7f05625af2906b4cd44b44f571b5c935ea195490d52d530da5e08fe53817",
+        "rawSpanSha256": "470b0307ae8847d663b84034a4bd5fc65464a0c138cb58364997986b27734228",
+        "classification": "подтверждено исходниками"
+      }
+    ],
+    "mainDecision": {
+      "message": "msg_e719c3a4bb5d",
+      "thread": "msg_aab27824ca59",
+      "independentCode": "B confirmed: finish shared owner/native adapter with exact reverse AST; not complete CREATE.",
+      "lockDirection": "Scoped keys B chosen for preparation; global F not chosen. Writer closure/namespace acceptance still pending.",
+      "commonPolicyOwner": "ROOT separate package: default-empty named database permission seam, unchanged old policies, no active route opt-in, no fake SET/ALL.",
+      "schema": "No ordinal0004/profile tables reservation; registration head/ordinal/owner handoff pending.",
+      "writeAndIssuance": "CLOSED_UNTIL_FROZEN_HANDOFF",
+      "newUserPermissionRequired": false
+    },
+    "mainCommonPolicyPackage": {
+      "message": "msg_5d2c02e3c2d5",
+      "owner": "ROOT author/reviewer, not this Run",
+      "base": "675654298f9a7cde30f3ab8097935478bb534088",
+      "sourceScope": [
+        "clearledger/server/app/api_contracts/context.py",
+        "clearledger/server/app/api_contracts/routing.py"
+      ],
+      "additionalScope": "one targeted test and two short docs, exact names not received",
+      "status": "ROOT_REPORTED_STARTING; FROZEN_REVIEWED_HANDOFF_PENDING",
+      "contractDirection": "default-empty DatabaseResourcePermission/AccessContext.database_permissions/RoutePolicy accepted named kinds; no active policy opt-in/old scope semantic change, no endpoint/scope/schema publication",
+      "nonOverlapWithOurThreePaths": true
+    }
+  },
+  "original_program": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "original_program_source_pin": {
+    "path": "/home/mag/orca/workspaces/ecosystem-deploy/parallel-ownership-audit-20261031/docs/api/execution-20261029/parallel-ownership-audit-20261031/support-f07-pg-acceptance/ORIGINAL-PROGRAM.json",
+    "bytes": 11555,
+    "sha256": "84f8dd31e6e047bf6fc647f4e601c1c89783dc8ebbeb4fe324814d51a7fb2ba1"
+  },
+  "original_program_semantic_equal": true,
+  "global_completion_asserted": false,
+  "ownership": {
+    "author": {
+      "task": "task_95e88cd7a340",
+      "dispatch": "ctx_4ca6303522bf",
+      "scope": "exact3 Python paths",
+      "state": "succeeded/released",
+      "done": "msg_71bb61ace5fa"
+    },
+    "reviewer": {
+      "task": "task_8b1160ffff6b",
+      "dispatch": "ctx_e7b428469854",
+      "scope": "source-only independent review after actual diff; private MD/JSON",
+      "state": "succeeded/released",
+      "done": "msg_06c3f16ab15f"
+    },
+    "coordinator": "two NEW docs, source integration/draftPR/preview/H01 main handoff"
+  },
+  "limitations": [
+    "Only filesystem/Git/stdlib AST/hash/JSON; no compile, imports/exec, pytest/collection, project helper/validator, DB/SQL, Node/codegen, compiler/PoC, SSH/Docker/network/browser/install/build/CI.",
+    "Module guards precede local test app imports, but general pytest conftest loads earlier. A separately reviewed ROOT runner/DB fixture is required; no safe direct pytest command or automatic authorization by old helper is claimed.",
+    "Exact source AST extraction parity is not actual DB/concurrency/auth behavior proof.",
+    "No second matcher/transport/writer: native is current caller of shared model constructor; imported producer remains unchanged; future partner must reuse this owner after explicit admission contract.",
+    "Full 144 new CREATE cases +55native+7R3 design and all20M/11 remain future/unproven; the10 prerequisite tests do not replace206 proposed cases or complete CREATE/SDK/partner onboarding."
+  ],
+  "sourceFreeze": {
+    "authorCommit": "7d7b56379ba558d09faa94ab9e47e32a17c9e221",
+    "integrationCodeCommit": "761fbf3f8884f8c7fb742c02ef501bae9b70d871",
+    "parent": "675654298f9a7cde30f3ab8097935478bb534088",
+    "exactCodePaths": 3,
+    "immutable": true
+  },
+  "preservedFiles": [
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "bytes": 8885,
+      "lines": 199,
+      "sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/services/reference_validation.py",
+      "bytes": 2558,
+      "lines": 56,
+      "sha256": "fec7fca58c47db80683e8bd39bc0394377c1be35d832061e1d0a004b98192d7b"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/services/contract_commands.py",
+      "bytes": 1681,
+      "lines": 35,
+      "sha256": "bb1fefc9f3a8fa0024c7354f463a17ccc70cb16a8b89f81ff92cc65fda998a6d"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/schemas.py",
+      "bytes": 64151,
+      "lines": 1657,
+      "sha256": "561493cfd444ad27f0ee673fb3dd96156d891966451bcd7345e609bcb31cbe7d"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/models.py",
+      "bytes": 966529,
+      "lines": 14447,
+      "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/tests/test_native_contract_create.py",
+      "bytes": 24288,
+      "lines": 468,
+      "sha256": "bf4cf2d7c22d478c2235aaead82e208bab84a4c31be3c95524c200c089152408"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/tests/native_contract_create_approved.py",
+      "bytes": 6245,
+      "lines": 116,
+      "sha256": "8039807560e81c4ea12cad4be18bab143daf2ca081afb66f88664dcd5f7ecb04"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/tests/test_contract_import_create.py",
+      "bytes": 20680,
+      "lines": 406,
+      "sha256": "cdc8feee5789e28cbe416e7094ec211e0477401558cfb96d865a1da901a2788f"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/product_api/access.py",
+      "bytes": 7959,
+      "lines": 152,
+      "sha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/app/api_contracts/routing.py",
+      "bytes": 14602,
+      "lines": 293,
+      "sha256": "131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/server/schema_migrations/manifest.json",
+      "bytes": 2460,
+      "lines": 50,
+      "sha256": "6fa42ed6f411e493a05904c5df46b8fa0fb56fabd0d52d82750b92a15d3ed016"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/tools/partner-api-types/generate.mjs",
+      "bytes": 6274,
+      "lines": 114,
+      "sha256": "549d7f05625af2906b4cd44b44f571b5c935ea195490d52d530da5e08fe53817"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/src/generated/partner-api.d.ts",
+      "bytes": 147510,
+      "lines": 3522,
+      "sha256": "570c4f648a31626a83bfcb79f74c4995e761b5ba12f17ae161a8ec158c959abb"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_ADMISSION_20261031.md",
+      "bytes": 47200,
+      "lines": 215,
+      "sha256": "fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1"
+    },
+    {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "675654298f9a7cde30f3ab8097935478bb534088",
+      "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md",
+      "bytes": 64172,
+      "lines": 244,
+      "sha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef"
+    }
+  ],
+  "newTestsStatic": [
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_flush_waits_for_caller_commit_and_maps_all_columns",
+      "line": 60,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_flushed_card_disappears_on_caller_rollback",
+      "line": 98,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_flush_failure_propagates_without_partial_card",
+      "line": 111,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_values_preserve_null_zero_false_and_empty_strings[null]",
+      "line": 123,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_values_preserve_null_zero_false_and_empty_strings[zero-false]",
+      "line": 123,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_values_preserve_null_zero_false_and_empty_strings[empty-strings]",
+      "line": 123,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_duplicates_use_exact_company_parties_and_existing_identity[same]",
+      "line": 168,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_duplicates_use_exact_company_parties_and_existing_identity[different-number]",
+      "line": 168,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_duplicates_use_exact_company_parties_and_existing_identity[different-date]",
+      "line": 168,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    },
+    {
+      "staticID": "clearledger/server/tests/test_contract_card_creation.py::test_shared_duplicates_use_exact_company_parties_and_existing_identity[different-type]",
+      "line": 168,
+      "classification": "подтверждено исходниками",
+      "status": "AUTHORED_NOTRUN",
+      "collected": false,
+      "executed": false
+    }
+  ],
+  "sourceParity": {
+    "classification": "подтверждено исходниками",
+    "exactFunctionAstReconstructed": true,
+    "constructorFields": [
+      "company_id",
+      "creation_key",
+      "creation_actor_id",
+      "creation_request_hash",
+      "number",
+      "date",
+      "counterparty_id",
+      "organization_id",
+      "type",
+      "type_code",
+      "amount_limit",
+      "kind",
+      "currency",
+      "valid_until",
+      "vat_rate",
+      "amount_incl_vat",
+      "settlement_kind",
+      "comment",
+      "basis",
+      "is_closed",
+      "scope_type",
+      "signed",
+      "signed_at",
+      "payment_term_days",
+      "is_state_contract",
+      "igk",
+      "responsible_id",
+      "signer_our",
+      "signer_our_position",
+      "signer_cp",
+      "signer_cp_position",
+      "signer_cp_basis"
+    ],
+    "constructorFieldCount": 32,
+    "nativeArgExpressionsAndOrderExact": true,
+    "duplicatePredicateAndIdentityExact": true,
+    "sharedAddFlushReturnExact": true,
+    "ASTSerialization": {
+      "coordinatorPython": "3.11.2",
+      "authorPython": "3.13.7",
+      "coordinatorFunctionAstSha256": "0375240115ea2cd1c27705dfbcb8681fcba7f0eb6a893254bc6e30265dc673cf",
+      "authorFunctionAstSha256": "f5d691cfba94f29010cbdfacfefbf14ac1454420dd49c778071fb3a57651e76d",
+      "authorModuleAstSha256": "dbada576d6af67528f21587d57463954ebe35946069294f8e8eec760b130ecf9",
+      "reason": "ast.dump serialization differs across Python versions (3.13 omits empty fields by default). Each base==reconstructed proof uses one version; raw source file SHA is the cross-version identity anchor.",
+      "authorSerializedModuleVerifiedUsingPython3_13": true
+    },
+    "method": "stdlib AST only, no compile/exec/import of target or tests. Inlined exact duplicate body; verified record arg expressions against old Contract, exhaustive scalar projection against class32 fields and req map; spliced real add/flush/return; entire function AST equality.",
+    "limitations": [
+      "AST extraction parity is not execution/DB/concurrency/isolation proof.",
+      "Trusted stdlib dataclass record adds an allocation/call boundary; no new business validation, defaults, ACL or commit."
+    ]
+  },
+  "sourceAcceptance": "READY_FOR_MAIN_REVIEW_AS_B_PREREQUISITE_ONLY",
+  "originalNativeCaseInventory": {
+    "staticFunctions": 16,
+    "staticCases": 55,
+    "path": "clearledger/server/tests/test_native_contract_create.py",
+    "sha256": "bf4cf2d7c22d478c2235aaead82e208bab84a4c31be3c95524c200c089152408",
+    "status": "UNCHANGED_NOTRUN",
+    "collectionExecuted": false
+  },
+  "currentProductSurface": {
+    "classification": "подтверждено исходниками",
+    "staticGETDeclarations": 15,
+    "newPOSTRegistered": false,
+    "newScopesIssued": false,
+    "newSchemaCreated": false,
+    "SDKTypesGenerated": false,
+    "liveObserved": false
+  },
+  "proofReceipts": {
+    "baseline.json": {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/baseline.json",
+      "bytes": 5225,
+      "sha256": "9960a5a6609e9c0b5ee20287ee15b5fefe2d473da921d71d94203945530efc9a"
+    },
+    "coordinator-ast-parity.json": {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/coordinator-ast-parity.json",
+      "bytes": 3385,
+      "sha256": "15e5639a79ecca1875d7e628317b59a0506cef65ac9de24170f13da851b64a7d"
+    },
+    "native-existing-case-inventory.json": {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/native-existing-case-inventory.json",
+      "bytes": 5514,
+      "sha256": "4531839153fa8525d838c563462fc8c849200cf00ac27709cb8839d32db18ffe"
+    },
+    "existing-product-operations.json": {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/existing-product-operations.json",
+      "bytes": 3086,
+      "sha256": "de3e47eb930be0e567d0276f4e9ebd0486b593ec644b3e76236b33137a70eff8"
+    },
+    "upstream-handoff-requirement.json": {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/upstream-handoff-requirement.json",
+      "bytes": 8132,
+      "sha256": "4bba937d464d457e521d09e8758605719b245b7e7eba252f64b4571baa63fa31"
+    }
+  },
+  "authorReceipts": [
+    {
+      "path": "/srv/projects/preview/contract-card-creation-author-20261101/author-source.md",
+      "bytes": 5399,
+      "sha256": "575af1be188cdfd8a8aae3bf63e091c26cd8a0886e1fba397f0cb6f45767abaa"
+    },
+    {
+      "path": "/srv/projects/preview/contract-card-creation-author-20261101/author-source.json",
+      "bytes": 1271593,
+      "sha256": "03205acad930f794a1c13b67114e5800dd8b893af24ea599c62fa340907307a6"
+    }
+  ],
+  "nextPlan": [
+    {
+      "priority": "P0",
+      "owner": "ROOT/Core/Identity",
+      "layer": "upstream contract",
+      "work": "Завершить H01: направление scoped keys B выбрано, но нужны точные writer closure/namespaces и их приёмка. ROOT отдельно владеет default-empty permission seam без active route opt-in; schema head/ordinal, history retention и policy-generation owner ещё не переданы."
+    },
+    {
+      "priority": "P1",
+      "owner": "Contract command author + independent reviewer",
+      "layer": "implementation",
+      "work": "После H01 реализовать user И machine CREATE/options через тот же предметный примитив: current authority/revoke, атомарные card+links+intent/receipt+audit, replay/null/scope/deny и indexed EXISTS/count+page. Второй matcher/writer не добавлять."
+    },
+    {
+      "priority": "P1",
+      "owner": "API/SDK owner + ROOT offline generation",
+      "layer": "contract/client",
+      "work": "Зафиксировать canonical OpenAPI фактически реализованных17 операций, затем выполнить отдельно разрешённую официальную generation и typed workflow на существующем transport. До реализации сохранять15GET; generated types вручную не писать."
+    },
+    {
+      "priority": "P1",
+      "owner": "ROOT isolated verification",
+      "layer": "future verification",
+      "work": "Отдельно зафиксировать source/helper/plugins/env и exact synthetic DB до imports/conftest: прежние55 и новые10 prerequisite случаев, затем исходные144 CREATE и7R3, concurrency/revoke/unknown-COMMIT negatives. Здесь всё NOTRUN."
+    },
+    {
+      "priority": "P2",
+      "owner": "Product/partner acceptance",
+      "layer": "documentation/pilot",
+      "work": "В принятом installed составе выполнить документированные onboarding/create/read связей/разрешённое скачивание/company-switch/deny/revoke на штатном generated client. Source extraction не закрывает20M/11 или внешний пилот."
+    }
+  ],
+  "independentSourceReview": {
+    "task": "task_8b1160ffff6b",
+    "dispatch": "ctx_e7b428469854",
+    "done": "msg_06c3f16ab15f",
+    "outcome": "succeeded",
+    "resource": "released",
+    "verdict": "SOURCE_REVIEW_COMPLETE_NO_MATERIAL_FINDINGS",
+    "materialFindings": 0,
+    "validatedSymbolRawSpans": 10,
+    "wholeNativeFunctionAndModuleReconstructed": true,
+    "sourceChecks": [
+      {
+        "id": "DUPLICATE-OWNER",
+        "status": "SOURCE_CONFIRMED",
+        "spans": [
+          "contract_card_creation.py:54-68",
+          "native_contract_commands.py:47-51"
+        ],
+        "detail": "One extracted tenant + counterparty + organization SELECT and existing contract_identity(number,date,type); all duplicates returned, caller alone decides HTTP409 and sorted str(id). No new matcher/first-wins/limit or policy."
+      },
+      {
+        "id": "PRIMITIVE-BOUNDARY",
+        "status": "SOURCE_CONFIRMED",
+        "spans": [
+          "contract_card_creation.py:6-13",
+          "contract_card_creation.py:16-51",
+          "contract_card_creation.py:71-109"
+        ],
+        "detail": "Prepared scalar frozen kw_only record and literal Contract/add/flush; no User/native DTO/Request facade, transport/writer framework, callback dictionary, HTTP errors, validation/default normalization, commit/rollback or ContractLocation."
+      },
+      {
+        "id": "NATIVE-ORDER",
+        "status": "SOURCE_CONFIRMED",
+        "spans": [
+          "native_contract_commands.py:29-46",
+          "native_contract_commands.py:47-75",
+          "auth.py:317-368",
+          "reference_validation.py:47-56"
+        ],
+        "detail": "Unchanged membership/visit/superadmin rules and same-company UUID parties precede hash/advisory; exact key+actor+hash replay before duplicate and active type; duplicate before active type; native sorted-ID409 unchanged. Native policy does not imply future partner authority."
+      },
+      {
+        "id": "VALUES",
+        "status": "SOURCE_CONFIRMED",
+        "spans": [
+          "native_contract_commands.py:52-75",
+          "contract_card_creation.py:20-51",
+          "contract_card_creation.py:73-106",
+          "reference_validation.py:21-33",
+          "schemas.py:876-906",
+          "models.py:1346-1454"
+        ],
+        "detail": "All32 fields/types match current ORM annotations and prepared/native DTO bindings. No new defaults or validators. Native defaults/hash, _req_val blank/null/responsible UUID, zero/False and incomplete identity branch unchanged; valid_until remains nullable string and scope_type locations does not create links."
+      },
+      {
+        "id": "TRANSACTION",
+        "status": "SOURCE_CONFIRMED_NOT_RUNTIME",
+        "spans": [
+          "contract_card_creation.py:107-109",
+          "references_router.py:829-835",
+          "database.py:5593-5601"
+        ],
+        "detail": "Primitive only add+await flush+return; caller retains transaction completion and serialization. No new lock or selected A/B protocol. Runtime rollback/commit/concurrency not measured."
+      }
+    ],
+    "qualification": "Exact3 code/tests reviewed; final coordinator report envelope/synthesis is not claimed separately independently reviewed."
+  },
+  "reviewerReceipts": [
+    {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/independent-review.md",
+      "bytes": 14102,
+      "sha256": "a6bfcbe67ce727bbbd5eb15be3f091347d9bf012c03c18bf9096886fd69a691c"
+    },
+    {
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/independent-review.json",
+      "bytes": 143843,
+      "sha256": "505f9cb6b9f66028d9e13da37b350168ba7e59be05bd461348b77c548f690fab"
+    }
+  ],
+  "workerCleanup": {
+    "author": "released",
+    "reviewer": "released",
+    "currentWaveActive": 0,
+    "reclaimable": 0
+  },
+  "markdown": {
+    "path": "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.md",
+    "bytes": 26699,
+    "sha256": "fbe295e31c83f5536cfaf6073e932a4b24e933f98558f7c63ed769047b9ca2f3"
+  }
+}

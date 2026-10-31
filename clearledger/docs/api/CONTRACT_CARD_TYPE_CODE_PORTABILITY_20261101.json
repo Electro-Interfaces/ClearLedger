@@ -1,0 +1,145 @@
+{
+  "base_commit": "2e1a96d5fbee291c93e2b3869028af01d6c40a57",
+  "new_head_binding": "Exact3-path commit containing this document; exact OID is supplied by the external coordinator sourcefreeze status, avoiding a self-referential commit/hash.",
+  "result_test_git_blob": "ab898463858ab6a16734fda81805b6da5587db8a",
+  "scope": [
+    "clearledger/server/tests/test_contract_card_creation.py",
+    "clearledger/docs/api/CONTRACT_CARD_TYPE_CODE_PORTABILITY_20261101.md",
+    "clearledger/docs/api/CONTRACT_CARD_TYPE_CODE_PORTABILITY_20261101.json"
+  ],
+  "root_instruction": "msg_684881805510",
+  "reason": "Test portability: narrow metadata declares no Contract.type_code FK, while ROOT plus independent crossreview report installed shared-Core contracts_type_code_fkey. Retain the fixture-approved active catalog code in the empty-string scalar test.",
+  "schema_claim_boundary": {
+    "source_found": "app/database.py:3610 declares REFERENCES contract_types(code); models.py:1405-1410 explicitly omits ORM FK.",
+    "installed_named_constraint": "ROOT/crossreview claim, not a runtime observation by this worker.",
+    "actual_runtime": "UNKNOWN / NOTRUN",
+    "if_not_exists_limit": "ADD COLUMN IF NOT EXISTS is source evidence of the declaration, not proof of an installed FK nor a repair of preexisting columns."
+  },
+  "native_boundary": "reference_validation.py:36-44 returns None for falsy code; native_contract_commands.py:62 calls that owner. No production regression claimed; no production code change.",
+  "test": {
+    "path": "clearledger/server/tests/test_contract_card_creation.py",
+    "before_sha256": "4dd129e23d0317a31d1446900aeed259c664c1c3c5be596d79a057e82716cbf2",
+    "after_sha256": "9e869985cb574f2dd26ced6d63377b715d1ce7e64618fb41b5333c4f514f20d6",
+    "changed_lines": [
+      146,
+      150
+    ],
+    "old_new_lines": [
+      {
+        "line": 146,
+        "before": "        values = replace(values, number=\"\", date=\"\", type=\"\", type_code=\"\", kind=\"\", currency=\"\",",
+        "after": "        values = replace(values, number=\"\", date=\"\", type=\"\", kind=\"\", currency=\"\","
+      },
+      {
+        "line": 150,
+        "before": "        expected = {\"number\": \"\", \"date\": \"\", \"type\": \"\", \"type_code\": \"\", \"kind\": \"\", \"currency\": \"\",",
+        "after": "        expected = {\"number\": \"\", \"date\": \"\", \"type\": \"\", \"type_code\": w.active, \"kind\": \"\", \"currency\": \"\","
+      }
+    ],
+    "counts": {
+      "functions": 5,
+      "cases": 10,
+      "status": "STATIC_ONLY_NOTRUN_NO_COLLECTION"
+    },
+    "preserved": "card_values, fixture/guard/helper/imports, null/zero/False/other empty fields, 32-column expectations and all remaining tests are byte/AST-exact outside two authorized substitutions."
+  },
+  "source_proof": {
+    "status": "SOURCE_ONLY_PASS",
+    "method": "Apply only remove(type_code=\"\") at empty branch replace call and literal expected.type_code empty->w.active to a copy of entire parent test AST; require equality to current module AST, then reverse those exact nodes and require equality to parent. Independently require exact two byte-line replacements and no other tracked change.",
+    "old_module_ast_sha256": "dac89be4135ed2b9a3e51c8a3a7d9b843d1e2104c7f7511a1357b8d712638f93",
+    "new_module_ast_sha256": "914f2cce53760e7183c2d61770fec81c84bd64c060c940c810f793e12210f99f",
+    "restored_module_ast_sha256": "dac89be4135ed2b9a3e51c8a3a7d9b843d1e2104c7f7511a1357b8d712638f93",
+    "whole_forward_and_reverse_equal": true,
+    "all_other_tracked_paths_equal_parent": "Git diff source check; no new repository audit/manifest."
+  },
+  "old_native_tests": {
+    "functions": 16,
+    "cases": 55,
+    "status": "STATIC_ONLY_NOTRUN_NO_COLLECTION"
+  },
+  "unchanged_frozen_pins": {
+    "clearledger/server/app/services/contract_card_creation.py": "9a18628d5e6f701dab13c30fced65ef711ce8aa3d7fef4a0ae51ecf8cf5b4158",
+    "clearledger/server/app/services/native_contract_commands.py": "9a8f88d0b5bb539a19c596a374e786d5f00be672f489625be4066557a71f49e4",
+    "clearledger/server/tests/test_native_contract_create.py": "bf4cf2d7c22d478c2235aaead82e208bab84a4c31be3c95524c200c089152408"
+  },
+  "source_evidence": [
+    {
+      "path": "clearledger/server/app/services/reference_validation.py",
+      "start_line": 36,
+      "end_line": 44,
+      "file_sha256": "fec7fca58c47db80683e8bd39bc0394377c1be35d832061e1d0a004b98192d7b",
+      "span_sha256": "8117cca960dc1aaddfbfd819f49a57ee12c237b5f7a0d9a01a0c6bf803e11989",
+      "source": "async def _check_type_code(db: AsyncSession, code: str | None) -> str | None:\n    \"\"\"Вид договора — только из справочника contract_types.\"\"\"\n    if not code:\n        return None\n    from sqlalchemy import text as _t\n    ok = (await db.execute(_t(\"SELECT 1 FROM contract_types WHERE code = :c AND is_active\"), {\"c\": code})).first()\n    if not ok:\n        raise HTTPException(status_code=422, detail=f\"Неизвестный вид договора: {code}\")\n    return code\n"
+    },
+    {
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "start_line": 62,
+      "end_line": 62,
+      "file_sha256": "9a8f88d0b5bb539a19c596a374e786d5f00be672f489625be4066557a71f49e4",
+      "span_sha256": "69922ea3d1ace078cd8e15bc69dea2ab4ce943ad93ddc9b3119103a1114fcec2",
+      "source": "        type_code=await _check_type_code(db, body.typeCode),\n"
+    },
+    {
+      "path": "clearledger/server/app/models.py",
+      "start_line": 1405,
+      "end_line": 1410,
+      "file_sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+      "span_sha256": "b7a9cc9b3eb83a01889e5535f2486e51a4cfa7283c215f22575422b7147609bd",
+      "source": "    # Вид договора по справочнику `contract_types` (rent, energy_supply, works…).\n    # Колонка живёт с v2.30 и заполняется разбором `type`, но в ORM её не было:\n    # запросы через модель падали с AttributeError, хотя в базе поле есть.\n    # Без ForeignKey: сам справочник заведён сырым DDL и в метаданных ORM его нет,\n    # а FK на неизвестную таблицу уронил бы create_all.\n    type_code: Mapped[str | None] = mapped_column(Text, nullable=True)\n"
+    },
+    {
+      "path": "clearledger/server/app/database.py",
+      "start_line": 3610,
+      "end_line": 3610,
+      "file_sha256": "556154faef73b11ca6efbfbe581a098d32a159d8b7f3e8ae2f862e0853014628",
+      "span_sha256": "fa092f587182d40b843e0eadabd14a742351ed5669602d1490172e41e6804c62",
+      "source": "            \"ALTER TABLE contracts ADD COLUMN IF NOT EXISTS type_code TEXT REFERENCES contract_types(code)\",\n"
+    },
+    {
+      "path": "clearledger/server/tests/test_native_contract_create.py",
+      "start_line": 105,
+      "end_line": 109,
+      "file_sha256": "bf4cf2d7c22d478c2235aaead82e208bab84a4c31be3c95524c200c089152408",
+      "span_sha256": "09a8dc90b20763b6cc7f67cdabdaaf9995d22f483ba23a161ea07aa058bf7f51",
+      "source": "    active, inactive = f\"native-active-{token}\", f\"native-inactive-{token}\"\n    await db.execute(text(\"INSERT INTO contract_types(code,label,is_active) VALUES \"\n                          \"(:active,'Синтетический вид',true),(:inactive,'Неактивный синтетический вид',false)\"),\n                     {\"active\": active, \"inactive\": inactive})\n    w = SimpleNamespace(db=db, factory=async_sessionmaker(db.bind, expire_on_commit=False),\n"
+    },
+    {
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "start_line": 43,
+      "end_line": 57,
+      "file_sha256": "9e869985cb574f2dd26ced6d63377b715d1ce7e64618fb41b5333c4f514f20d6",
+      "span_sha256": "92b901dba55436049f38cd9a8cb7c8e8c5825829d303c9c15aff2e4640ea2e6a",
+      "source": "def card_values(w) -> ContractCardValues:\n    \"\"\"Explicit domain input; no native DTO, defaults or normalization helper.\"\"\"\n    return ContractCardValues(\n        company_id=w.cid, creation_key=None, creation_actor_id=None,\n        creation_request_hash=None, number=\"Shared-1\", date=\"2026-01-01\",\n        counterparty_id=w.cp_id, organization_id=w.org_id, type=\"Синтетическая аренда\",\n        type_code=w.active, amount_limit=125.5, kind=\"СПоставщиком\", currency=\"RUB\",\n        valid_until=\"без даты\", vat_rate=\"20\", amount_incl_vat=True,\n        settlement_kind=\"Синтетический расчёт\", comment=\"Синтетический комментарий\",\n        basis=\"договор\", is_closed=True, scope_type=\"locations\", signed=True,\n        signed_at=\"2026-01-02\", payment_term_days=7, is_state_contract=True,\n        igk=\"synthetic-igk\", responsible_id=w.member_id, signer_our=\"Подписант 1\",\n        signer_our_position=\"Должность 1\", signer_cp=\"Подписант 2\",\n        signer_cp_position=\"Должность 2\", signer_cp_basis=\"Синтетическое основание\",\n    )\n"
+    },
+    {
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "start_line": 143,
+      "end_line": 154,
+      "file_sha256": "9e869985cb574f2dd26ced6d63377b715d1ce7e64618fb41b5333c4f514f20d6",
+      "span_sha256": "0bfc53c3edcc0687f0bc2a68b237840f240f142de3a20eb82b09bd1ac1e1340d",
+      "source": "    else:\n        # The primitive receives prepared scalars: only the native adapter owns\n        # _req_val's empty-to-null conversion. No second normalizer belongs here.\n        values = replace(values, number=\"\", date=\"\", type=\"\", kind=\"\", currency=\"\",\n                         valid_until=\"\", vat_rate=\"\", settlement_kind=\"\", comment=\"\", basis=\"\",\n                         signed_at=\"\", igk=\"\", signer_our=\"\", signer_our_position=\"\",\n                         signer_cp=\"\", signer_cp_position=\"\", signer_cp_basis=\"\")\n        expected = {\"number\": \"\", \"date\": \"\", \"type\": \"\", \"type_code\": w.active, \"kind\": \"\", \"currency\": \"\",\n                    \"valid_until\": \"\", \"vat_rate\": \"\", \"settlement_kind\": \"\", \"comment\": \"\", \"basis\": \"\",\n                    \"signed_at\": \"\", \"igk\": \"\", \"signer_our\": \"\", \"signer_our_position\": \"\",\n                    \"signer_cp\": \"\", \"signer_cp_position\": \"\", \"signer_cp_basis\": \"\"}\n    async with w.factory() as transaction:\n"
+    }
+  ],
+  "full_program_references": [
+    {
+      "path": "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.md",
+      "sha256": "fbe295e31c83f5536cfaf6073e932a4b24e933f98558f7c63ed769047b9ca2f3"
+    },
+    {
+      "path": "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.json",
+      "sha256": "324a459fa5bf191d488c45425a72c7c6f760de6e2e981eb9b12be7b1eda203d0"
+    }
+  ],
+  "full_program_status": "Frozen PR95 M00-M19 and 11 shared requirements remain unchanged/unclosed; follow-up neither replaces nor closes them.",
+  "execution": {
+    "runtime": "NOTRUN",
+    "application_helper_test_imports": 0,
+    "tests_collection": 0,
+    "tests_execution": 0,
+    "SQL_DB": 0,
+    "Node_codegen_compile_build_CI": 0,
+    "network_SSH_Docker_browser_install": 0,
+    "push_PR_merge_deploy": 0
+  },
+  "future_execution": "Only separately reviewed ROOT runner before conftest/application imports; module opt-ins do not authorize ordinary pytest."
+}
