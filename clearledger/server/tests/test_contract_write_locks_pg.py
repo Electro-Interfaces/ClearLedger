@@ -600,3 +600,346 @@ def test_actual_outer_rollback_allows_new_db_root_on_same_connection(engine, par
         finally:
             if outer.is_active:
                 outer.rollback()
+
+
+# OptionEngine successor specifications. All NOTRUN by this author. Existing
+# specifications above remain byte-exact; the new instrumentation targets the
+# Connection class, never the broken OptionEngine Connection instance path.
+def option_engine(engine, depth):
+    selected = engine
+    for _ in range(depth):
+        selected = selected.execution_options(schema_translate_map={"core": "public"})
+    return selected
+
+
+@contextmanager
+def option_connection_sql(connection):
+    statements = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if conn is connection:
+            statements.append(statement)
+
+    # Class registration does not enable this existing Connection's own gate.
+    # Only the production helper may do that in these specifications.
+    event.listen(locks.Connection, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(locks.Connection, "before_cursor_execute", record)
+
+
+@contextmanager
+def option_connection_events(connection):
+    observed, listeners = [], []
+    for name in ("commit", "rollback", "savepoint", "rollback_savepoint", "release_savepoint"):
+        def record(conn, *args, event_name=name):
+            if conn is connection:
+                observed.append((event_name, conn, conn.get_transaction()))
+
+        event.listen(locks.Connection, name, record)
+        listeners.append((name, record))
+    try:
+        yield observed
+    finally:
+        for name, record in listeners:
+            event.remove(locks.Connection, name, record)
+
+
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_option_engine_enrollment_preserves_actual_connection_and_root(engine, depth):
+    selected = option_engine(engine, depth)
+    declaration = plan(locks.CompanyKey(C1))
+    with Session(selected) as issuer, engine.connect() as observer:
+        connection = issuer.connection()  # Real Connection predates enrollment.
+        orm_root, db_root = issuer.get_transaction(), connection.get_transaction()
+        owner_pid = pid(issuer)
+        assert connection.engine is selected
+        if depth:
+            assert connection.get_execution_options()["schema_translate_map"] == {"core": "public"}
+        with option_connection_sql(connection) as statements:
+            cap = locks.acquire_scoped_locks(issuer, declaration)
+            assert issuer.connection() is connection
+            assert issuer.get_transaction() is orm_root and orm_root.is_active
+            assert connection.get_transaction() is db_root and db_root.is_active
+            assert all(record[0] is connection and record[1] is db_root
+                       for record in orm_root._connections.values())
+            assert connection._has_events is True
+            assert sum("pg_advisory_xact_lock_shared" in sql for sql in statements) == 1
+            assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+            locks.require_scoped_locks(issuer, cap, declaration.requests)
+            issuer.rollback()
+            assert not db_root.is_active
+            assert not any(row.pid == owner_pid for row in lock_rows(observer, declaration.locks[0]))
+
+
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_precreated_connection_observes_late_class_install_and_deduplicates(engine, depth):
+    # Isolate only the helper's five supported event registrations, using public
+    # event APIs. No dispatch patch, fake engine, flag override or test ordering.
+    listener, names = locks._connection_lifetime_changed, locks._CONNECTION_EVENTS
+    previous = [name for name in names if event.contains(locks.Connection, name, listener)]
+    for name in previous:
+        event.remove(locks.Connection, name, listener)
+    declaration = plan(locks.CompanyKey(C1))
+    selected = option_engine(engine, depth)
+    try:
+        with selected.connect() as connection, engine.connect() as observer:
+            outer = connection.begin()
+            assert connection._has_events is False
+            assert not selected._has_events and not engine._has_events
+            assert all(not event.contains(locks.Connection, name, listener) for name in names)
+            # Force the joined listener chain to exist while its local class
+            # deque is still empty; late registration must reach this chain.
+            cached_savepoint_dispatch = connection.dispatch.savepoint
+            with option_connection_events(connection) as observed:
+                with Session(connection, join_transaction_mode="rollback_only") as issuer:
+                    cap = locks.acquire_scoped_locks(issuer, declaration)
+                    owner_pid = pid(issuer)
+                    assert all(sum(callback is listener for callback in getattr(connection.dispatch, name)) == 1
+                               for name in names)
+                    assert connection._has_events is True
+                    assert not selected._has_events and not engine._has_events
+                    assert connection.dispatch.savepoint is cached_savepoint_dispatch
+                    assert issuer.connection() is connection and connection.get_transaction() is outer
+                    nested = connection.begin_nested()
+                    nested.rollback()
+                    assert connection.get_nested_transaction() is None and outer.is_active
+                    assert [entry[0] for entry in observed] == ["savepoint", "rollback_savepoint"]
+                    assert all(conn is connection and root is outer for _, conn, root in observed)
+                    assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+                    with pytest.raises(locks.ScopedLockError):
+                        locks.require_scoped_locks(issuer, cap, declaration.requests)
+                    issuer.close()  # rollback_only keeps the same actual DB root.
+                    assert connection.get_transaction() is outer and outer.is_active
+                outer.rollback()
+                assert not any(row.pid == owner_pid for row in lock_rows(observer, declaration.locks[0]))
+                fresh = connection.begin()
+                try:
+                    with Session(connection, join_transaction_mode="rollback_only") as replacement:
+                        replacement_cap = locks.acquire_scoped_locks(replacement, declaration)
+                        locks.require_scoped_locks(replacement, replacement_cap, declaration.requests)
+                        assert replacement.connection() is connection
+                        assert connection.get_transaction() is fresh and fresh is not outer
+                        # No accumulating callbacks for another acquire/root.
+                        assert all(sum(callback is listener for callback in getattr(connection.dispatch, name)) == 1
+                                   for name in names)
+                finally:
+                    fresh.rollback()
+    finally:
+        for name in names:
+            if event.contains(locks.Connection, name, listener):
+                event.remove(locks.Connection, name, listener)
+        for name in previous:
+            event.listen(locks.Connection, name, listener)
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("api", ["session", "connection"])
+@pytest.mark.parametrize("ending", ["commit", "rollback"])
+def test_option_engine_managed_end_invalidates_exact_lifetime(engine, depth, api, ending):
+    declaration = plan(locks.UserKey(C1))
+    with Session(option_engine(engine, depth)) as issuer, engine.connect() as observer:
+        cap = locks.acquire_scoped_locks(issuer, declaration)
+        connection, orm_root = issuer.connection(), issuer.get_transaction()
+        db_root, owner_pid = connection.get_transaction(), pid(issuer)
+        with option_connection_events(connection) as observed:
+            getattr(issuer if api == "session" else connection, ending)()
+            assert observed == [(ending, connection, db_root)]
+            assert not db_root.is_active and connection.get_transaction() is None
+            assert not any(row.pid == owner_pid for row in lock_rows(observer, declaration.locks[0]))
+            with pytest.raises(locks.ScopedLockError):
+                locks.require_scoped_locks(issuer, cap, declaration.requests)
+            if api == "connection":
+                assert issuer.get_transaction() is orm_root and orm_root.is_active
+                with pytest.raises(locks.ScopedLockError):
+                    locks.acquire_scoped_locks(issuer, declaration)
+            else:
+                assert issuer.get_transaction() is None and not orm_root.is_active
+                replacement = locks.acquire_scoped_locks(issuer, declaration)
+                assert issuer.get_transaction() is not orm_root
+                assert issuer.connection().get_transaction() is not db_root
+                locks.require_scoped_locks(issuer, replacement, declaration.requests)
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("api", ["session", "connection"])
+@pytest.mark.parametrize("ending", ["commit", "rollback"])
+def test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1(engine, depth, api, ending):
+    declaration = plan(locks.MemberKey(C1, C2))
+    with option_engine(engine, depth).connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer:
+                cap = locks.acquire_scoped_locks(issuer, declaration)
+                orm_root, owner_pid = issuer.get_transaction(), pid(issuer)
+                with option_connection_events(connection) as observed:
+                    source = issuer if api == "session" else connection
+                    nested = source.begin_nested()
+                    source.scalar(text("SELECT 1"))  # Materialize a Session SAVEPOINT too.
+                    getattr(nested, ending)()
+                    expected = "release_savepoint" if ending == "commit" else "rollback_savepoint"
+                    assert [entry[0] for entry in observed] == ["savepoint", expected]
+                    assert all(conn is connection and root is outer for _, conn, root in observed)
+                assert issuer.get_transaction() is orm_root and orm_root.is_active
+                assert issuer.get_nested_transaction() is None
+                assert connection.get_nested_transaction() is None
+                assert issuer.connection() is connection
+                assert connection.get_transaction() is outer and outer.is_active
+                with pytest.raises(locks.ScopedLockError):
+                    locks.require_scoped_locks(issuer, cap, declaration.requests)
+                with option_connection_sql(connection) as statements:
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(issuer, declaration)
+                    with Session(connection, join_transaction_mode="rollback_only") as foreign:
+                        with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                            locks.acquire_scoped_locks(foreign, plan(locks.AppKey(C1), X))
+                    assert statements == []
+                assert connection.get_transaction() is outer and outer.is_active
+                assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+        finally:
+            outer.rollback()
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("ending", ["commit", "close"])
+@pytest.mark.parametrize("interruption", ["error", "cancel"])
+def test_option_engine_partial_failure_keeps_actual_attempt_until_db_end(engine, depth, ending, interruption):
+    class Cancelled(BaseException):
+        pass
+
+    failure = RuntimeError if interruption == "error" else Cancelled
+    declaration = locks.LockPlan((locks.LockRequest(locks.AppKey(C1), S),
+                                  locks.LockRequest(locks.CompanyKey(C1), S)))
+    with option_engine(engine, depth).connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer:
+                owner_pid = pid(issuer)
+                count = 0
+
+                def interrupt(conn, cursor, statement, parameters, context, executemany):
+                    nonlocal count
+                    if conn is connection and "pg_advisory_xact_lock" in statement:
+                        count += 1
+                        if count == 2:
+                            raise failure("interrupted second real acquisition")
+
+                event.listen(locks.Connection, "before_cursor_execute", interrupt)
+                try:
+                    with pytest.raises(failure):
+                        locks.acquire_scoped_locks(issuer, declaration)
+                finally:
+                    event.remove(locks.Connection, "before_cursor_execute", interrupt)
+                assert count == 2
+                assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+                assert not any(row.pid == owner_pid for row in lock_rows(observer, declaration.locks[1]))
+                orm_root = issuer.get_transaction()
+                with option_connection_sql(connection) as statements:
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(issuer, declaration)
+                    assert statements == []
+                    getattr(issuer, ending)()
+                    assert issuer.get_transaction() is None and not orm_root.is_active
+                    assert issuer.connection() is connection  # Fresh ORM root, same DB root.
+                    assert issuer.get_transaction() is not orm_root
+                    assert connection.get_transaction() is outer and outer.is_active
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(issuer, declaration)
+                    with Session(connection, join_transaction_mode="rollback_only") as foreign:
+                        with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                            locks.acquire_scoped_locks(foreign, declaration)
+                    assert statements == []
+            assert connection.get_transaction() is outer and outer.is_active
+            outer.rollback()
+            for actual in declaration.locks:
+                assert not any(row.pid == owner_pid for row in lock_rows(observer, actual))
+            fresh = connection.begin()
+            try:
+                with Session(connection, join_transaction_mode="rollback_only") as replacement:
+                    with option_connection_sql(connection) as statements:
+                        cap = locks.acquire_scoped_locks(replacement, declaration)
+                        locks.require_scoped_locks(replacement, cap, declaration.requests)
+                        assert replacement.connection() is connection
+                        assert connection.get_transaction() is fresh and fresh is not outer
+                        assert sum("pg_advisory_xact_lock" in sql for sql in statements) == 2
+                        for actual in declaration.locks:
+                            assert (owner_pid, "ShareLock", True) in lock_rows(observer, actual)
+            finally:
+                fresh.rollback()
+        finally:
+            if outer.is_active:
+                outer.rollback()
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("foreign_enrolled", [False, True])
+def test_option_engine_foreign_connection_events_do_not_poison_issuer(engine, depth, foreign_enrolled):
+    selected = option_engine(engine, depth)
+    declaration = plan(locks.CompanyKey(C1))
+    with Session(selected) as issuer, Session(selected) as foreign, engine.connect() as observer:
+        cap = locks.acquire_scoped_locks(issuer, declaration)
+        connection, orm_root = issuer.connection(), issuer.get_transaction()
+        db_root, owner_pid = connection.get_transaction(), pid(issuer)
+        other = foreign.connection()
+        other_root, other_pid = other.get_transaction(), pid(foreign)
+        assert other is not connection and other_root is not db_root and other_pid != owner_pid
+        if foreign_enrolled:
+            foreign_cap = locks.acquire_scoped_locks(foreign, plan(locks.UserKey(C2)))
+        with pytest.raises(locks.ScopedLockError, match="not issued"):
+            locks.require_scoped_locks(foreign, cap, declaration.requests)
+
+        def engine_observer(conn):
+            pass
+
+        # Public registration on the plain Engine enables real events also for
+        # an unregistered foreign Connection through the nested OptionEngine.
+        event.listen(engine, "begin", engine_observer)
+        try:
+            with option_connection_events(other) as observed:
+                nested = other.begin_nested()
+                nested.commit()
+                other.commit()
+                other.begin()
+                other.rollback()
+                assert [entry[0] for entry in observed] == [
+                    "savepoint", "release_savepoint", "commit", "rollback",
+                ]
+                assert all(conn is other for _, conn, _ in observed)
+            if foreign_enrolled:
+                with pytest.raises(locks.ScopedLockError):
+                    locks.require_scoped_locks(foreign, foreign_cap, plan(locks.UserKey(C2)).requests)
+            assert issuer.connection() is connection and issuer.get_transaction() is orm_root
+            assert connection.get_transaction() is db_root and db_root.is_active
+            assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+            locks.require_scoped_locks(issuer, cap, declaration.requests)
+        finally:
+            event.remove(engine, "begin", engine_observer)
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+def test_option_engine_authorized_dirty_and_normal_flush_child_stay_live(engine, depth):
+    with option_engine(engine, depth).connect() as connection:
+        connection.execute(text("CREATE TEMP TABLE contract_scoped_lock_probe (id integer PRIMARY KEY, label text)"))
+        connection.execute(text("INSERT INTO contract_scoped_lock_probe VALUES (1, 'original')"))
+        connection.commit()
+        try:
+            with Session(connection) as issuer:
+                declaration = plan(locks.CompanyKey(C1))
+                cap = locks.acquire_scoped_locks(issuer, declaration)
+                orm_root, db_root = issuer.get_transaction(), connection.get_transaction()
+                row = issuer.get(Probe, 1)
+                row.label = "authorized option engine"
+                assert issuer.dirty
+                locks.require_scoped_locks(issuer, cap, declaration.requests)
+                with option_connection_events(connection) as observed:
+                    issuer.flush()
+                    assert observed == []  # Internal non-nested ORM child only.
+                assert issuer.connection() is connection and issuer.get_transaction() is orm_root
+                assert connection.get_transaction() is db_root and db_root.is_active
+                assert connection.scalar(text("SELECT label FROM contract_scoped_lock_probe WHERE id = 1")) == row.label
+                locks.require_scoped_locks(issuer, cap, declaration.requests)
+        finally:
+            connection.rollback()
+            connection.execute(text("DROP TABLE contract_scoped_lock_probe"))
+            connection.commit()

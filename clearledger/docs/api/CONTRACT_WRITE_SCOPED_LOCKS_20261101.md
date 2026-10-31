@@ -1,15 +1,90 @@
 # Scoped contract write locks: frozen helper API
 
-01.11.2026. B1 follow-up: ровно helper, PG specifications и эти MD/JSON.
-Exact follow-up base `c9e841c48ddf4864eb258e6bd5ddd7401a3833ea`;
+01.11.2026. OptionEngine successor: ровно helper, PG specifications и эти MD/JSON.
+Exact successor base `18d9061f5a9fa6671c128f3ad97d77490360f3cc` (PR98 helper+B1).
+Исторический B1 follow-up base `c9e841c48ddf4864eb258e6bd5ddd7401a3833ea`;
 исходный implementation base `d71e4f3754efce7c911cc95cb46eb22707e8efbc`
 (PR95/96 + H01). Unit module сохранён byte-exact относительно c9.
 ROOT `msg_b211505b113a` разрешает первую implementation ступень B; это не
 новый общий аудит, не доказательство writer closure и не включение CREATE.
-Все runtime/testcases **NOTRUN**, включая imports/collection. Только чтение,
+Собственные runtime/testcases **NOTRUN**, включая imports/collection. Только чтение,
 stdlib literal hashing/JSON, AST и in-memory compile без exec.
 
-## B1: область DB root вместо области Session
+## OptionEngine: SOURCE follow-up после фактического ROOT FAIL
+
+ROOT сообщил два отдельных прогона прежнего состава: minimal helper suite
+**99 PASS** на composition `a065c557`; actual native four-table PG suite на
+`326457edd0b8029b2739cf5563c492f4f8169a10` — **27 cases: 18 FAIL / 9 PASS**.
+Из них 16 FAIL локализованы на helper `event.listen(connection, 'commit', …)`:
+`InvalidRequestError: No such event 'commit' for … Connection` с
+`Engine.execution_options(schema_translate_map=…)`; два AST-oracle FAIL
+принадлежат другому owner. Эти числа получены **от ROOT**, автор здесь не
+запускал и не импортировал ни helper, ни SQLAlchemy, ни tests. Безопасный
+ROOT artifact reference: `.artifacts/native-user-role-pg-20261101-fa0a460dc22a`;
+его DSN/env/секреты не читались. Успех minimal suite не заменяет native suite.
+
+Authority: ROOT `msg_8d9ef1e3552f`, `msg_2f6f20e1a57f`; author task
+`task_d6890656878b` / dispatch `ctx_c0ef2f5caaa8`. Старые c9/148/18 snapshots
+сохранены. Это новый SOURCE fix, **не RUNTIME PASS** и не waiver; смены библиотеки,
+исключений для OptionEngine и замены native fixture обычным Engine нет.
+
+Первичный installed SQLAlchemy 2.0.36 показывает цепочку:
+`engine/base.py:164–175` присоединяет engine dispatch к Connection;
+`:3320–3343` добавляет ещё joined dispatch при каждом OptionEngine;
+`event/base.py:376–400` принимает instance только при подходящем **одном**
+parent. Поэтому nested joined parent не проходит instance acceptance.
+Class target `Connection` проходит через descriptor `event/base.py:425–455`.
+
+Новая регистрация: пять фиксированных callbacks через публичные
+`event.contains/listen(Connection, …)`, с коротким stdlib Lock вокруг
+contains/listen для dedup при одновременных acquisitions. Фильтр берёт только
+exact watched Connection в `_CONNECTION_WATCHES`: weak Connection key →
+weak `_Entrance` value, затем проверяет `entrance.connection is connection`.
+Callback не замыкает Session, Connection, ORM/DB root; на acquire не добавляется
+новая closure. На той же Connection новый actual root заменяет weak entry;
+GC key удаляет entry, dead value не удерживает владельцев. Глобальные callbacks
+живут с модулем, их число постоянно, посторонние Connection не poison issuer.
+`_ATTEMPTS` и все прежние identity/coverage/liveness guards сохранены byte-exact.
+
+**Позднее включение обязательно:** `Connection.__init__` сохраняет собственный
+`_has_events=False`; class registration меняет class flag, собственный False
+его скрывает. Все пять managed API gates читают `self._has_events or
+self.engine._has_events` (`engine/base.py:1113–1169`). Поэтому helper ставит
+`connection._has_events=True` только у наблюдаемого объекта. Это узкое
+version-pinned integration field, аналогичное собственным существующим
+`_connections`/`_is_autocommit_isolation`; third-party library и dispatcher
+не меняются. `engine/events.py:138–154` показывает штатное включение этого же
+поля регистрацией событий. `event/attr.py:177–220,325–330,374–378` доказывает,
+что уже существующий local listener держит **живую class deque**, а не копию;
+`:490–497,605–631` проводит её через любой joined listener. Следовательно,
+включённая precreated Connection получает поздний class listener, даже если
+joined event attribute уже был закеширован до установки. Это SOURCE-доказательство,
+реальный driver/runtime ещё должен проверить ROOT.
+
+Добавлены **7 PG test functions**: ordinary/one/nested OptionEngine; real
+Connection до enrollment; cold Connection до реального удаления/поздней
+переустановки только пяти helper listeners публичным event API, cached dispatch,
+отсутствие Engine flag и однократная регистрация на двух DB roots; Session и
+direct Connection commit/rollback; материализованная Session/direct SAVEPOINT
+история commit/rollback; RuntimeError/BaseException после первого настоящего
+lock, rollback_only commit/close и B1 на same/new Session; enrolled/unrelated
+foreign Connection events; authorized dirty + normal flush child. Новая
+инструментация использует class listeners с exact Connection filter, не
+`event.listen(option_connection, …)` и не принудительное включение её flag.
+Oracles проверяют actual same Connection/root, настоящие `pg_locks`, release
+после actual DB end и отсутствие нового SQL при denied second plan. Нет
+fake True, NullPool или sleep race. Старый PG prefix/21 definitions и весь
+9-function unit module сохранены byte-exact. Итого **9 unit + 28 PG = 37 test
+functions, все NOTRUN**, parameterized case count UNKNOWN без collection.
+Никаких imports/collection/execution, SQL/DB или dynamic SQLAlchemy experiments.
+Guard conftest limitation ниже сохраняется; следующий runtime принадлежит ROOT.
+
+JSON содержит exact changed source SHA256, primary raw source pins/spans и
+проверки сохранности; четыре финальных raw hashes и HEAD передаются в Orca,
+без рекурсивного self hash JSON. M00–M19/11 и пять parent pins неизменны;
+full B, CREATE и schema4 acceptance **OPEN**; CREATE/активация по-прежнему OFF.
+
+## История B1: область DB root вместо области Session
 
 Независимое SOURCE-ревью c9 нашло один P1 B1: прежний Session registry
 разрешал второй план после смены Session/ORM root, когда внешний DB root
@@ -151,7 +226,8 @@ Validator допускает authorized pending ORM writes, не требует 
 
 Per-Session `after_transaction_create/end` сохраняют invalidation при nested
 истории и завершении root; `after_begin` отвергает другой connection. На
-конкретной Connection commit/rollback/savepoint/rollback_savepoint/release_savepoint
+конкретной наблюдаемой Connection class-filtered события
+commit/rollback/savepoint/rollback_savepoint/release_savepoint
 сразу poison state. После begin_nested→rollback/release прежняя active root
 и исчезнувший nested объект **не восстанавливают** capability. Обычный internal
 flush child с `nested=False` не инвалидирует cap. Любой `BaseException` во время
