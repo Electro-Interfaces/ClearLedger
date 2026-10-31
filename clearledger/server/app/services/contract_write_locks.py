@@ -198,6 +198,14 @@ class _Entrance:
 # issuance registry; copying a capability/Session.info cannot manufacture one.
 _ENTRANCES: weakref.WeakKeyDictionary[Session, _Entrance] = weakref.WeakKeyDictionary()
 
+# A rollback_only Session can end its ORM root while the borrowed DB root
+# keeps every acquired lock. Reserve the actual DB root independently of
+# issuance, before lock SQL. Neither key nor value retains a Session/DB root;
+# in particular, storing _Entrance here would retain the weak key indirectly.
+_ATTEMPTS: weakref.WeakKeyDictionary[
+    RootTransaction, weakref.ReferenceType[Connection]
+] = weakref.WeakKeyDictionary()
+
 
 def _transaction_created(session: Session, transaction: SessionTransaction) -> None:
     state = _ENTRANCES.get(session)
@@ -260,6 +268,7 @@ def _single_connection(root: SessionTransaction, connection: Connection) -> bool
 
 def _live(session: Session, state: _Entrance, phase: str) -> None:
     root, connection, transaction = state.root(), state.connection, state.transaction
+    attempt = _ATTEMPTS.get(transaction) if transaction is not None else None
     if (state.issuer() is not session or state.phase != phase or not session.is_active or root is None
             or session.get_transaction() is not root or not root.is_active
             or root.parent is not None or root.nested or session.in_nested_transaction()
@@ -267,6 +276,7 @@ def _live(session: Session, state: _Entrance, phase: str) -> None:
             or connection.get_nested_transaction() is not None
             or transaction is None or type(transaction) is not RootTransaction
             or not transaction.is_active or connection.get_transaction() is not transaction
+            or attempt is None or attempt() is not connection
             or connection._is_autocommit_isolation()
             or not _single_connection(root, connection)):
         state.phase = "poisoned"
@@ -321,6 +331,12 @@ def acquire_scoped_locks(session: Session, plan: LockPlan) -> ScopedLockCapabili
             connection = session.connection()
             state.connection = connection
             state.transaction = connection.get_transaction()
+            transaction = state.transaction
+            if type(transaction) is not RootTransaction or not transaction.is_active:
+                _reject("Active DB root required")
+            if transaction in _ATTEMPTS:
+                _reject("This DB root already attempted a scoped plan")
+            _ATTEMPTS[transaction] = weakref.ref(connection)
             _watch_connection(state)
             if connection.dialect.name != "postgresql":
                 _reject("PostgreSQL connection required")

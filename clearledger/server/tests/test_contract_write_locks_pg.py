@@ -390,3 +390,213 @@ def test_async_uses_actual_sync_session_and_same_capability_protocol():
             await database.dispose()
 
     asyncio.run(exercise())
+
+
+@contextmanager
+def record_connection_sql(connection):
+    """Observe real cursor dispatch, including any unexpected non-lock SQL."""
+    statements = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(connection, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(connection, "before_cursor_execute", record)
+
+
+@pytest.mark.parametrize("second_kind", ["upgrade", "numeric_reverse"])
+def test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan(engine, second_kind):
+    first = plan(locks.CompanyKey(C1))
+    second = (plan(locks.CompanyKey(C1), X) if second_kind == "upgrade"
+              else plan(locks.AppKey(C1), X))
+    with engine.connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer, \
+                    Session(connection, join_transaction_mode="rollback_only") as other:
+                with record_connection_sql(connection) as statements:
+                    cap = locks.acquire_scoped_locks(issuer, first)
+                    owner_pid = pid(issuer)
+                    assert pid(other) == owner_pid
+                    assert issuer.get_transaction() is not other.get_transaction()
+                    assert issuer.connection() is other.connection() is connection
+                    assert connection.get_transaction() is outer and outer.is_active
+                    before = tuple(statements)
+                    with pytest.raises(locks.ScopedLockError, match="not issued"):
+                        locks.require_scoped_locks(other, cap, first.requests)
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(other, second)
+                    assert tuple(statements) == before
+                    # Rejecting another Session's entrance does not revoke the issuer.
+                    locks.require_scoped_locks(issuer, cap, first.requests)
+                    assert connection.get_transaction() is outer and outer.is_active
+                    assert (owner_pid, "ShareLock", True) in lock_rows(observer, first.locks[0])
+                    assert not any(row.pid == owner_pid and row.mode == "ExclusiveLock"
+                                   for row in lock_rows(observer, second.locks[0]))
+        finally:
+            outer.rollback()
+
+
+@pytest.mark.parametrize("reuse_session", [True, False])
+def test_rollback_only_commit_keeps_attempt_across_orm_roots(engine, reuse_session):
+    declaration = plan(locks.CompanyKey(C1))
+    with engine.connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer, \
+                    Session(connection, join_transaction_mode="rollback_only") as other:
+                with record_connection_sql(connection) as statements:
+                    cap = locks.acquire_scoped_locks(issuer, declaration)
+                    orm_root, owner_pid = issuer.get_transaction(), pid(issuer)
+                    issuer.commit()
+                    assert issuer.get_transaction() is None and not orm_root.is_active
+                    assert connection.get_transaction() is outer and outer.is_active
+                    with pytest.raises(locks.ScopedLockError):
+                        locks.require_scoped_locks(issuer, cap, declaration.requests)
+                    target = issuer if reuse_session else other
+                    before = tuple(statements)
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(target, plan(locks.CompanyKey(C1), X))
+                    assert tuple(statements) == before
+                    assert target.get_transaction() is not orm_root
+                    assert target.connection().get_transaction() is outer
+                    assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+        finally:
+            outer.rollback()
+
+
+@pytest.mark.parametrize("reuse_session", [True, False])
+def test_rollback_only_close_keeps_attempt_across_orm_roots(engine, reuse_session):
+    declaration = plan(locks.CompanyKey(C1))
+    with engine.connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer, \
+                    Session(connection, join_transaction_mode="rollback_only") as other:
+                with record_connection_sql(connection) as statements:
+                    cap = locks.acquire_scoped_locks(issuer, declaration)
+                    orm_root, owner_pid = issuer.get_transaction(), pid(issuer)
+                    issuer.close()
+                    assert issuer.get_transaction() is None and not orm_root.is_active
+                    assert connection.get_transaction() is outer and outer.is_active
+                    with pytest.raises(locks.ScopedLockError):
+                        locks.require_scoped_locks(issuer, cap, declaration.requests)
+                    target = issuer if reuse_session else other
+                    before = tuple(statements)
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(target, plan(locks.AppKey(C1), X))
+                    assert tuple(statements) == before
+                    assert target.get_transaction() is not orm_root
+                    assert target.connection().get_transaction() is outer
+                    assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+        finally:
+            outer.rollback()
+
+
+@pytest.mark.parametrize("ending", ["commit", "close"])
+@pytest.mark.parametrize("reuse_session", [True, False])
+def test_partial_attempt_survives_rollback_only_orm_root_replacement(engine, ending, reuse_session):
+    class Interrupted(BaseException):
+        pass
+
+    declaration = locks.LockPlan((locks.LockRequest(locks.AppKey(C1), S),
+                                  locks.LockRequest(locks.CompanyKey(C1), S)))
+    with engine.connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer, \
+                    Session(connection, join_transaction_mode="rollback_only") as other:
+                count = 0
+
+                def interrupt(conn, cursor, statement, parameters, context, executemany):
+                    nonlocal count
+                    if "pg_advisory_xact_lock" in statement:
+                        count += 1
+                        if count == 2:
+                            raise Interrupted()
+
+                owner_pid = pid(issuer)
+                with record_connection_sql(connection) as statements:
+                    event.listen(connection, "before_cursor_execute", interrupt)
+                    try:
+                        with pytest.raises(Interrupted):
+                            locks.acquire_scoped_locks(issuer, declaration)
+                    finally:
+                        event.remove(connection, "before_cursor_execute", interrupt)
+                    assert count == 2
+                    assert (owner_pid, "ShareLock", True) in lock_rows(observer, declaration.locks[0])
+                    assert not any(row.pid == owner_pid
+                                   for row in lock_rows(observer, declaration.locks[1]))
+                    orm_root = issuer.get_transaction()
+                    getattr(issuer, ending)()
+                    assert issuer.get_transaction() is None and not orm_root.is_active
+                    assert connection.get_transaction() is outer and outer.is_active
+                    target = issuer if reuse_session else other
+                    before = tuple(statements)
+                    with pytest.raises(locks.ScopedLockError, match="already attempted"):
+                        locks.acquire_scoped_locks(target, declaration)
+                    assert tuple(statements) == before
+                    assert target.get_transaction() is not orm_root
+                    assert target.connection().get_transaction() is outer
+                    assert outer.is_active
+        finally:
+            outer.rollback()
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_actual_outer_rollback_allows_new_db_root_on_same_connection(engine, partial):
+    class Interrupted(BaseException):
+        pass
+
+    declaration = locks.LockPlan((locks.LockRequest(locks.AppKey(C1), S),
+                                  locks.LockRequest(locks.CompanyKey(C1), S)))
+    with engine.connect() as connection, engine.connect() as observer:
+        outer = connection.begin()
+        try:
+            with Session(connection, join_transaction_mode="rollback_only") as issuer:
+                owner_pid = pid(issuer)
+                if partial:
+                    count = 0
+
+                    def interrupt(conn, cursor, statement, parameters, context, executemany):
+                        nonlocal count
+                        if "pg_advisory_xact_lock" in statement:
+                            count += 1
+                            if count == 2:
+                                raise Interrupted()
+
+                    event.listen(connection, "before_cursor_execute", interrupt)
+                    try:
+                        with pytest.raises(Interrupted):
+                            locks.acquire_scoped_locks(issuer, declaration)
+                    finally:
+                        event.remove(connection, "before_cursor_execute", interrupt)
+                    assert count == 2
+                else:
+                    cap = locks.acquire_scoped_locks(issuer, declaration)
+                    locks.require_scoped_locks(issuer, cap, declaration.requests)
+                issuer.close()
+                assert connection.get_transaction() is outer and outer.is_active
+            outer.rollback()
+            assert not outer.is_active and connection.get_transaction() is None
+            for actual in declaration.locks:
+                assert not any(row.pid == owner_pid for row in lock_rows(observer, actual))
+            fresh = connection.begin()
+            try:
+                assert fresh is not outer and fresh.is_active
+                with Session(connection, join_transaction_mode="rollback_only") as replacement:
+                    with record_connection_sql(connection) as statements:
+                        new_cap = locks.acquire_scoped_locks(replacement, declaration)
+                        locks.require_scoped_locks(replacement, new_cap, declaration.requests)
+                        assert connection.get_transaction() is fresh
+                        assert sum("pg_advisory_xact_lock" in sql for sql in statements) == len(declaration.locks)
+                        for actual in declaration.locks:
+                            assert (owner_pid, "ShareLock", True) in lock_rows(observer, actual)
+            finally:
+                fresh.rollback()
+        finally:
+            if outer.is_active:
+                outer.rollback()
