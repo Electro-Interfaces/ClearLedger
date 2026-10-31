@@ -41,6 +41,7 @@ from app.schemas import (
     UserCreate,
 )
 from app.services.station_roster import enqueue_station_roster, refresh_company_rosters
+from app.services.native_user_role_locks import assert_native_clean, prepare_native_write
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,7 @@ async def create_user(
     current_user: User = Depends(get_current_user),
 ):
     """Создать пользователя в компании (или добавить существующего по email)."""
+    assert_native_clean(db)
     cid = await require_company_admin(payload.company_id, current_user, db)
 
     # Принадлежность и организация — часть создания: партнёра заводят сразу партнёром.
@@ -208,6 +210,11 @@ async def create_user(
     existing = (
         await db.execute(select(User).where(User.email == payload.email))
     ).scalar_one_or_none()
+    new_uid = uuid.uuid4() if existing is None else existing.id
+    await prepare_native_write(
+        db, current_user, company_id=cid, target_id=new_uid,
+        account=existing is None, email_pointer=(payload.email, existing.id if existing else None),
+    )
     if existing is not None:
         # Пользователь уже есть — выдаём членство в этой компании с ролью.
         if not await _is_member(existing.id, cid, db):
@@ -221,6 +228,7 @@ async def create_user(
         return await _resp(existing, db, scope_cid=cid)
 
     user = User(
+        id=new_uid,
         email=payload.email,
         password_hash=hash_password(payload.password),
         name=payload.name,
@@ -250,16 +258,21 @@ async def update_user(
 ):
     """Изменить имя / роль пользователя. С company_id — админ компании в её
     контексте; без company_id — суперадмин (любой пользователь)."""
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     if payload.company_id:
         cid = await require_company_admin(payload.company_id, current_user, db)
+        await prepare_native_write(db, current_user, company_id=cid, target_id=uid,
+                                   account=payload.name is not None)
         target = await db.get(User, uid)
         if target is None or not await _is_member(uid, cid, db):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
     elif current_user.is_superadmin:
+        await prepare_native_write(db, current_user, company_id=None, target_id=uid,
+                                   account=payload.name is not None)
         target = await db.get(User, uid)
         if target is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
@@ -328,11 +341,13 @@ async def set_member_modules(
 ):
     """Назначить члену компании набор модулей доступа (RBAC).
     modules=null → полный доступ. Требует прав админа компании."""
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     cid = await require_company_admin(payload.company_id, current_user, db)
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
     membership = await db.get(UserCompany, (uid, cid))
     if membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
@@ -354,6 +369,7 @@ async def set_member_access(
     current_user: User = Depends(get_current_user),
 ):
     """Назначить доступ члену: именованная роль (mode=role) ИЛИ ad-hoc модули (mode=custom)."""
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
@@ -365,12 +381,19 @@ async def set_member_access(
     target = await db.get(User, uid)
     if target is not None and target.is_superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя ограничивать суперадмина")
+    # Preserve the legacy admin branch: it ignores even malformed role_id.
+    new_role_id = (uuid.UUID(payload.role_id)
+                   if m.role != "admin" and payload.mode == "role" and payload.role_id else None)
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid,
+                               new_role_id=new_role_id, expected_member=(m.role_id, m.role))
     if m.role == "admin":
         m.role_id = None
         m.modules = None
         detail = "администратор — полный доступ"
     elif payload.mode == "role":
-        role = await db.get(CompanyRole, uuid.UUID(payload.role_id)) if payload.role_id else None
+        role = (await db.execute(select(CompanyRole).where(
+            CompanyRole.company_id == cid, CompanyRole.id == new_role_id)
+            .execution_options(populate_existing=True))).scalar_one_or_none() if new_role_id else None
         if role is None or role.company_id != cid:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Роль не найдена")
         m.role_id = role.id
@@ -399,11 +422,13 @@ async def set_member_scope(
     эту ручку нельзя: такой доступ отбирают ролью, а не скоупом, и молчаливая
     пустота выглядела бы как сломанные экраны.
     """
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     cid = await require_company_admin(payload.company_id, current_user, db)
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
     m = await db.get(UserCompany, (uid, cid))
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
@@ -452,11 +477,13 @@ async def set_member_business_grants(
     current_user: User = Depends(get_current_user),
 ):
     """Назначить бизнес-роли Магазина. Права нескольких grant складываются."""
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     cid = await require_company_admin(payload.company_id, current_user, db)
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
     membership = await db.get(UserCompany, (uid, cid))
     target = await db.get(User, uid)
     if membership is None or target is None:
@@ -513,11 +540,13 @@ async def set_station_pin(
     Пустой pin снимает PIN. После изменения ростеры станций компании
     переспускаются, чтобы новый bcrypt-хеш доехал до касс.
     """
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     cid = await require_company_admin(payload.company_id, current_user, db)
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid, account=True)
     if await db.get(UserCompany, (uid, cid)) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
     target = await db.get(User, uid)
@@ -571,11 +600,13 @@ async def set_member_contracts(
     вопрос «на каком основании этот человек здесь». Поэтому пустой список законен и
     означает «основание не указано», а не «доступа нет».
     """
+    assert_native_clean(db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     cid = await require_company_admin(payload.company_id, current_user, db)
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
     m = await db.get(UserCompany, (uid, cid))
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
@@ -611,11 +642,13 @@ async def reset_sessions(
 
     Для случая «пароль утёк» или «потерял телефон»: удалять из компании не нужно.
     """
+    assert_native_clean(db)
     cid = await require_company_admin(company_id, current_user, db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid, account=True)
     user = await db.get(User, uid)
     if user is None or not await _is_member(uid, cid, db):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
@@ -636,11 +669,13 @@ async def reset_2fa(
 ):
     """Снять второй фактор (потерян телефон). Входы при этом тоже гаснут: войти —
     паролем, а второй фактор человек настроит заново."""
+    assert_native_clean(db)
     cid = await require_company_admin(company_id, current_user, db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid, account=True)
     user = await db.get(User, uid)
     if user is None or not await _is_member(uid, cid, db):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
@@ -675,11 +710,13 @@ async def issue_reset_link(
     (он уже член компании), а письмо «вы запросили восстановление пароля» врёт —
     он ничего не запрашивал.
     """
+    assert_native_clean(db)
     cid = await require_company_admin(company_id, current_user, db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid, account=True)
     user = await db.get(User, uid)
     if user is None or not await _is_member(uid, cid, db):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
@@ -742,6 +779,7 @@ async def remove_user(
 ):
     """Убрать пользователя из компании (отзыв членства). Если членств не
     осталось и это не суперадмин — удаляем запись пользователя."""
+    assert_native_clean(db)
     cid = await require_company_admin(company_id, current_user, db)
     try:
         uid = uuid.UUID(user_id)
@@ -749,6 +787,7 @@ async def remove_user(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     if uid == current_user.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нельзя удалить самого себя")
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid, account=True)
     target = await db.get(User, uid)
     if target is None or not await _is_member(uid, cid, db):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
@@ -780,11 +819,13 @@ async def grant_company(
     current_user: User = Depends(get_current_user),
 ):
     """Выдать пользователю членство в компании (админ этой компании / суперадмин)."""
+    assert_native_clean(db)
     cid = await require_company_admin(payload.company_id, current_user, db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
     target = await db.get(User, uid)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
@@ -802,11 +843,13 @@ async def revoke_company(
     current_user: User = Depends(get_current_user),
 ):
     """Отозвать членство пользователя в компании (без удаления самой записи)."""
+    assert_native_clean(db)
     cid = await require_company_admin(company_id, current_user, db)
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
     target = await db.get(User, uid)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
