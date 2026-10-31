@@ -478,5 +478,229 @@
     }
   ],
   "markdownSha256": "e100899808500c5ede6d97533e5901af0af8f9dae0f843144684b2b05324cfee",
-  "jsonSelfHashPolicy": "No recursive self hash; final Git commit and external handoff/preview manifest identify complete JSON bytes"
+  "jsonSelfHashPolicy": "No recursive self hash; final Git commit and external handoff/preview manifest identify complete JSON bytes",
+  "fourPathSourceFollowup20261031": {
+    "date": "2026-10-31",
+    "status": "SOURCE_UPDATED_STATIC_ONLY; EXTERNAL_ROOT_UNIT_OBSERVATION_RECORDED",
+    "exactBaseCommit": "21f33b0fa51029aab02799e85a5e8bd63f00948f",
+    "branch": "MagLook/partner-pilot-relation-unit-command-20261031",
+    "ownership": [
+      "clearledger/tools/partner-pilots/clients/package.json",
+      "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.md",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
+    ],
+    "authorization": {
+      "existingUserMessage": "msg_f141e959f608",
+      "narrowRootInstruction": "ROOTmsg_983fd9c05a6f",
+      "newApproval": "NOT_REQUIRED"
+    },
+    "originalPr86Freeze": {
+      "commit": "21f33b0fa51029aab02799e85a5e8bd63f00948f",
+      "recordScope": "Every pre-existing top-level record is historical original PR86 preparation, including status/NOTRUN, provenance currentSha256, packageSourceManifest, markdownSha256, coordinatorReview and futureVerification; none is relabelled as current follow-up bytes.",
+      "markdownSha256": "e100899808500c5ede6d97533e5901af0af8f9dae0f843144684b2b05324cfee",
+      "jsonSha256": "7b65cca116b196908489b9886b0dc2b589bad0bfcb05d81594a9d0812cc2e102",
+      "preservation": "Markdown exact original prefix and all original JSON top-level values preserved; JSON extension adds the required separator comma before its new top-level object.",
+      "oldPr86BranchAndWorktree": "UNTOUCHED"
+    },
+    "changes": {
+      "package": {
+        "path": "clearledger/tools/partner-pilots/clients/package.json",
+        "key": "scripts.test:unit",
+        "old": "node --experimental-strip-types --test guards.test.ts",
+        "new": "node --experimental-strip-types --test guards.test.ts relations.test.ts",
+        "allOtherBytes": "UNCHANGED; all other JSON keys/dependencies/engines/scripts verbatim"
+      },
+      "relationsTests": {
+        "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+        "replacementCount": 10,
+        "testTitles": 9,
+        "introductoryComments": 1,
+        "preserved": "pure scripted typed mocks label; bodies, inputs, assertions, imports and all other source bytes",
+        "exactStringReplacements": [
+          {
+            "old": "// NOTRUN proposal: pure scripted typed mocks, no OAuth, SDK initialization, server,",
+            "new": "// proposal: pure scripted typed mocks, no OAuth, SDK initialization, server,"
+          },
+          {
+            "old": "NOTRUN rental flow consumes typed metadata/objects and preserves exact raw values",
+            "new": "rental flow consumes typed metadata/objects and preserves exact raw values"
+          },
+          {
+            "old": "NOTRUN delegated document flow uses independent effective children; terminal null ends without another read",
+            "new": "delegated document flow uses independent effective children; terminal null ends without another read"
+          },
+          {
+            "old": "NOTRUN current document profile and each missing scope/grant fail closed independently",
+            "new": "current document profile and each missing scope/grant fail closed independently"
+          },
+          {
+            "old": "NOTRUN independent scope/grant denial is a scripted expected403, not a server ACL test",
+            "new": "independent scope/grant denial is a scripted expected403, not a server ACL test"
+          },
+          {
+            "old": "NOTRUN walker rejects duplicated IDs even if subject/graph would repeat them",
+            "new": "walker rejects duplicated IDs even if subject/graph would repeat them"
+          },
+          {
+            "old": "NOTRUN walker rejects hidden child and globally counted total",
+            "new": "walker rejects hidden child and globally counted total"
+          },
+          {
+            "old": "NOTRUN walker rejects wrong parent, premature null, repeated cursor and empty nonterminal page",
+            "new": "walker rejects wrong parent, premature null, repeated cursor and empty nonterminal page"
+          },
+          {
+            "old": "NOTRUN native company scope has no explicit object expansion",
+            "new": "native company scope has no explicit object expansion"
+          },
+          {
+            "old": "NOTRUN unknown type null metadata and raw validUntil cannot be guessed or normalized",
+            "new": "unknown type null metadata and raw validUntil cannot be guessed or normalized"
+          }
+        ]
+      },
+      "reports": "Append dated follow-up and external ROOT acceptance note; preserve original freeze records."
+    },
+    "newSourceManifest": [
+      {
+        "path": "clearledger/tools/partner-pilots/clients/package.json",
+        "parentSha256": "5d7e8e6b5ee1f746eb02294b29547a1bfffea33f8f146ad034f0802e9dcfa20e",
+        "sha256": "013c45d61f2145a42e46467db0b793f22981a937e8f40b7d0a3179ac0245181a",
+        "bytes": 539
+      },
+      {
+        "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+        "parentSha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1",
+        "sha256": "340126967c51545f105ff739dbcf7c784a46e63a1706dd33ff955e2bf8cb7a5c",
+        "bytes": 11528
+      }
+    ],
+    "staticEvidence": {
+      "packageExactSingleReplacement": "PASS_STATIC_BYTES; inverse replacement restores exact parent bytes",
+      "relationsExactTenReplacements": "PASS_STATIC_BYTES; inverse of 9 expected title strings and 1 introductory comment restores exact parent bytes",
+      "typescriptParsingFormattingOrExecution": "NONE",
+      "method": "Python stdlib readtext/bytes/JSON/hash and read-only Git source comparison; no source imports or execution"
+    },
+    "externalRootAcceptanceReceipt": {
+      "messageId": "ROOTmsg_983fd9c05a6f",
+      "timestampUtc": "2026-10-31T17:24:29Z",
+      "sender": "codex_22b96a77_7ffb_487a_84d2_880f88417089",
+      "provenance": "External ROOT observation transmitted in task instructions; not a run by this worker or coordinator.",
+      "reportedObservedOutcome": {
+        "runtime": "Node",
+        "unitPassed": 16,
+        "guardsPassed": 7,
+        "relationsPassed": 9
+      },
+      "rawArtifact": "UNKNOWN; not supplied",
+      "nodeVersion": "UNKNOWN; not supplied",
+      "exactCommand": "UNKNOWN; not supplied",
+      "sourceIntegrationCommits": [
+        {
+          "reported": "eca5791c43ef8eb915415028426d423b0593b24e",
+          "exactGitResolved": "eca5791c43ef8eb915415028426d423b0593b24e"
+        },
+        {
+          "reported": "ab30202e2b0f0045affcc39caa55e1bfeb0680fb",
+          "exactGitResolved": "ab30202e2b0f0045affcc39caa55e1bfeb0680fb"
+        },
+        {
+          "reported": "6e893817a9f4741eee555f9190d6977b73ffb4bc",
+          "exactGitResolved": "6e893817a9f4741eee555f9190d6977b73ffb4bc"
+        }
+      ],
+      "limits": "Does not establish execution of new package command on this follow-up, TypeScript success, real HTTP/OAuth/SQL, server ACL acceptance or program/gate completion."
+    },
+    "separateRootSyntheticServerDependency": {
+      "reported": "230b508e",
+      "exactGitResolved": "230b508e81b514e091bb597ee369728aa3becca5",
+      "path": "clearledger/tools/partner-pilots/sandbox/server.py",
+      "scope": "Source known separately; not included or changed in this four-path follow-up; no PR86 amendment for status."
+    },
+    "localExecution": {
+      "newPackageCommand": "NOTRUN",
+      "typescriptTypecheck": "NOTRUN",
+      "nodeOrNpmTestsOrCollection": "NOTRUN",
+      "realHttp": "NOTRUN",
+      "oauth": "NOTRUN",
+      "sql": "NOTRUN",
+      "actualPilot": "NOTRUN"
+    },
+    "futureRootVerification": "ROOT later runs npm run test:unit and tsc on pinned combined composition; NOTRUN here.",
+    "unchanged": [
+      "guards",
+      "generated/schema",
+      "server",
+      "transport",
+      "OAuth",
+      "lockfile",
+      "dependencies"
+    ],
+    "program": {
+      "milestones": "M00-M19 (20)",
+      "gates": 11,
+      "status": "UNCHANGED; no readiness, completion or gate credit"
+    },
+    "reportHashPolicy": "No recursive report self hash; complete four-path SHA256 and final commit are supplied in external worker handoff.",
+    "rootEvidenceUpdate20261031": {
+      "messageId": "msg_b72babd54bd8",
+      "messageTimestampUtc": "2026-10-31T17:29:25Z",
+      "kind": "EXTERNAL_ROOT_OBSERVATION; COORDINATOR_READ_ARTIFACTS_WITHOUT_REEXECUTION",
+      "clarifiesUnknownFieldsInInitialReceipt": true,
+      "testedHead": "6e893817a9f4741eee555f9190d6977b73ffb4bc",
+      "testedUTCFromReceipt": "2026-10-31T17:24:44.419988+00:00",
+      "nodeVersion": "v22.23.2",
+      "cwdRelativeToRootWorktree": "clearledger/tools/partner-pilots/clients",
+      "unit": {
+        "command": "node --experimental-strip-types --test guards.test.ts relations.test.ts",
+        "exitReported": 0,
+        "tests": 16,
+        "pass": 16,
+        "fail": 0,
+        "skip": 0,
+        "durationMsFromTap": "325.223827",
+        "scope": "7 guards+9 pure mocked relation cases; not server ACL/OAuth/HTTP/SQL"
+      },
+      "typecheck": {
+        "command": "./node_modules/.bin/tsc -p tsconfig.json",
+        "exitReported": 0,
+        "outputReported": ""
+      },
+      "artifacts": [
+        {
+          "rootWorktree": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029",
+          "path": ".artifacts/pr86-root-review-20261031/source.json",
+          "sha256": "0812c6271395fa37e30b9a63e324bf3947352d6c71cca526bd916aa6c1954007",
+          "bytes": 1988
+        },
+        {
+          "rootWorktree": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029",
+          "path": ".artifacts/pr86-root-review-20261031/unit.tap",
+          "sha256": "878408802c3a83a6e8cd14af90da20729f151749af0e1f3b54551dd7605a878a",
+          "bytes": 3716,
+          "summaryLines": "98-106"
+        }
+      ],
+      "artifactReadingChecks": [
+        "source receipt unit.rawSHA256 equals actual TAP SHA256",
+        "TAP summary tests/pass16 fail0 skip0 and duration matches ROOT message",
+        "Node version, tested HEAD and tsc result read from source receipt; not observed by executing coordinator commands"
+      ],
+      "humanRootReport": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "8cb892b99f88f95bc1753b2776a4461009f34437",
+        "path": "clearledger/docs/api/PARTNER_PILOT_RELATION_ROOT_VERIFICATION_20261031.md"
+      },
+      "newFollowupNpmCommand": "NOTRUN by worker/coordinator; ROOT rerun pending",
+      "coordinatorExecution": 0,
+      "realHttpOAuthSqlSeedPilot": "NOTRUN; unit/TSC receipt gives no such acceptance"
+    },
+    "coordinatorStaticReview": {
+      "method": "Exact byte normalization read, single scripts.test:unit replacement and ten NOTRUN prefix removals; JSON/Git/hash and read-only ROOT artifact inspection",
+      "workerAuthoredCommit": "033eabe87597892e5a0131f12c43c638446e137f",
+      "sourceChangesAfterWorkerCommit": "NONE; coordinator updates only2reports with later ROOT evidence and precise JSON preservation wording",
+      "nodeNpmTscOrTestsExecuted": false
+    }
+  }
 }

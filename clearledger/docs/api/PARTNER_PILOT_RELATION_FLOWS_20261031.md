@@ -44,3 +44,37 @@ Pure mock с четырьмя одинаковыми ответами403 не п
 Сводный source freeze четырёх файлов: `20daebf1d51700b7d61161ecc8b48d8193350c26`. Клиентская часть A `ae679dbf5fe4881738e11c034a8afa1efc1894a7` интегрирована как `20daebf1d51700b7d61161ecc8b48d8193350c26`; fixture B `1457df337055f83e048ad7a17bef254ce58f454e` — как `ac88cccd7f051413b0e85a5507478efe97b5d11b`. На этом составе отдельно сверены SHA всех четырёх исходников с прочитанными исполнителями байтами, сохранение порядка 14 прежних имён проверок run.ts и побайтное равенство тела operationsScenario. Это сравнение исходного текста. TypeScript compiler, Node tests и фактический pilot не запускались.
 
 Критерий следующей приёмки: ROOT фиксирует совместный состав этого пакета и своего server.py, проверяет TypeScript и оба unit-файла, затем отдельно подтверждает реальные OAuth/HTTP сценарии на вымышленных данных с исходными guards. Требуются наблюдённые положительные связи, отказы и неизменные redaction assertions; mock outcomes не заменяют эти доказательства. Пакет закрывает только подготовку исходников для части M12/M18, не сами этапы и не общую приёмку API.
+
+
+## SOURCE follow-up из четырёх путей · 31.10.2026
+
+Этот раздел дополняет original PR86 freeze на exact immutable HEAD `21f33b0fa51029aab02799e85a5e8bd63f00948f`. Весь текст выше, включая исходные NOTRUN, базу `2a8128dfc59aaf9195d5113e7ab10d67061caf19`, source freeze и package-source records, сохранён как историческая запись подготовки PR86. Он не описывает текущие package/test bytes после этого follow-up. Старые PR86 branch/worktree не изменены; допуск к исходникам, документации и тестам в отдельных ветках остаётся `msg_f141e959f608`, узкое поручение: `ROOTmsg_983fd9c05a6f`.
+
+Изменены ровно четыре существующих пути: `clearledger/tools/partner-pilots/clients/package.json`, `clearledger/tools/partner-pilots/clients/relations.test.ts` и эти два отчёта `.md/.json`. В package изменено только `scripts.test:unit`: `node --experimental-strip-types --test guards.test.ts relations.test.ts`; все остальные байты, keys, dependencies, engines и scripts сохранены. Lockfile не изменён. В relations.test.ts удалён только строковый префикс `NOTRUN ` из девяти названий тестов и вводного комментария, метка `pure scripted typed mocks` сохранена. Тела, inputs, assertions, imports и весь остальной исходный текст сохранены побайтно.
+
+Статическое доказательство: package равен exact parent bytes после единственной указанной замены; relations.test.ts равен exact parent bytes после ровно десяти ожидаемых строковых замен (9 titles + 1 comment), обратная замена восстанавливает parent целиком. Это текстовое сравнение, без Node, TS parser, formatter, imports, collection или исполнения тестов.
+
+Новые source SHA256 относительно exact PR86 HEAD:
+
+| Путь | SHA256 follow-up |
+|---|---|
+| `clearledger/tools/partner-pilots/clients/package.json` | `013c45d61f2145a42e46467db0b793f22981a937e8f40b7d0a3179ac0245181a` |
+| `clearledger/tools/partner-pilots/clients/relations.test.ts` | `340126967c51545f105ff739dbcf7c784a46e63a1706dd33ff955e2bf8cb7a5c` |
+
+Исторический Markdown PR86 до добавления этого раздела: SHA256 `e100899808500c5ede6d97533e5901af0af8f9dae0f843144684b2b05324cfee`. Поле JSON `markdownSha256` и все прежние `packageSourceManifest`, provenance/currentSha256, review и NOTRUN records относятся к original PR86 freeze; новая запись JSON `fourPathSourceFollowup20261031` отделяет follow-up от них. SHA отчётов после follow-up передаются внешним handoff вместе с итоговым commit, без рекурсивного self hash.
+
+### Внешнее наблюдение ROOT · 31.10.2026 17:24:29 UTC
+
+Acceptance note получена через `ROOTmsg_983fd9c05a6f`, sender `codex_22b96a77_7ffb_487a_84d2_880f88417089`: ROOT сообщает наблюдённые **unit 16 PASS = 7 guards + 9 relations на Node**. Это внешнее наблюдение ROOT, переданное в поручении; исполнитель этого follow-up и координатор его здесь не воспроизводили. В исходном сообщении raw artifact, Node version и exact command не были переданы; поля первого receipt сохранены как исторические UNKNOWN. Последующее уточнение и чтение доказательств описаны ниже. Наблюдение не подтверждает исполнение новой package-команды на этом follow-up и не является доказательством real HTTP/OAuth/SQL или серверного ACL.
+
+Reported source integration commits разрешены локальным Git до exact commits без исполнения кода: `eca5791c43ef8eb915415028426d423b0593b24e`, `ab30202e2b0f0045affcc39caa55e1bfeb0680fb`, `6e893817a9f4741eee555f9190d6977b73ffb4bc`. Это provenance внешнего receipt, не приписывание этих commits новой четырёхфайловой ветке. Отдельная synthetic server dependency ROOT известна как `230b508e`, Git-resolved `230b508e81b514e091bb597ee369728aa3becca5`; `sandbox/server.py` сюда не включён, PR86 ради этого статуса не изменяется.
+
+Локально новая package-команда и TypeScript typecheck: **NOTRUN**. Real HTTP, OAuth, SQL и actual pilot: **NOTRUN**. ROOT позже сам выполняет `npm run test:unit` и tsc на зафиксированном combined composition. Guards, generated/schema, server, transport, OAuth, dependencies и lockfile неизменны относительно exact PR86 HEAD. M00–M19 (20 этапов) и 11 gates сохранены, кредит готовности не добавлен.
+
+### Уточнение ROOT и чтение доказательств · 31.10.2026 17:29:25 UTC
+
+Сообщение `msg_b72babd54bd8` уточняет внешний прогон на HEAD `6e893817a9f4741eee555f9190d6977b73ffb4bc`: Node `v22.23.2`, cwd `clearledger/tools/partner-pilots/clients`; `node --experimental-strip-types --test guards.test.ts relations.test.ts` завершился с exit0, 16 PASS / 0 FAIL / 0 SKIP, duration `325.223827ms`. Отдельный `./node_modules/.bin/tsc -p tsconfig.json` завершился с exit0, без вывода. Это прежний состав с исходными именами тестов, а не новый `npm run test:unit` из текущей ветки.
+
+Координатор прочитал файлы ROOT `.artifacts/pr86-root-review-20261031/source.json` и `unit.tap` без исполнения. SHA256 source receipt: `0812c6271395fa37e30b9a63e324bf3947352d6c71cca526bd916aa6c1954007`; SHA256 TAP: `878408802c3a83a6e8cd14af90da20729f151749af0e1f3b54551dd7605a878a`. TAP:98–106 содержит итог 16/16, 0 fail, 0 skip и длительность; его SHA совпал с `unit.rawSHA256` в receipt. Данные Node/tsc прочитаны из receipt и сообщения ROOT; собственный запуск не выполнялся. Датировка receipt `testedUTC` — `2026-10-31T17:24:44.419988+00:00`.
+
+Проверяемый отчёт ROOT: [PARTNER_PILOT_RELATION_ROOT_VERIFICATION_20261031.md](https://github.com/Electro-Interfaces/ClearLedger/blob/8cb892b99f88f95bc1753b2776a4461009f34437/clearledger/docs/api/PARTNER_PILOT_RELATION_ROOT_VERIFICATION_20261031.md), commit `8cb892b99f88f95bc1753b2776a4461009f34437`. Успех pure mocks и TypeScript не заменяет OAuth/HTTP/SQL, выполнение Python seed, actual pilot или общую приёмку API.
