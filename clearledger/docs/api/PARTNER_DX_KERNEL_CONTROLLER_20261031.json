@@ -2146,7 +2146,9 @@
     "canonicalBytes": "ASCII sorted compact JSON with exactly one LF; independent raw SHA required",
     "arbitraryArgvEnvAllowed": false,
     "physicalStorageSupport": "one verified local block-backed storage; no fake multi-store coverage",
-    "imageProvisioning": "independently prepared minimal RO rootfs, all mount targets already present, loader/NSS/UID/HOME compatibility NOTRUN"
+    "imageProvisioning": "independently prepared minimal RO rootfs, all mount targets already present, loader/NSS/UID/HOME compatibility NOTRUN",
+    "admissionCreation": "Supply only empty candidate-owned0700 admission parent; controller exclusively creates0400 placeholder; precreated file rejects",
+    "nonceJournalLifecycle": "Durable reusable root-owned0700; retain all prior successful/failed claims, never reset/delete to prepare a run; final/archive alone initially empty"
   },
   "staticChecks": {
     "pythonASTAndInMemoryCompile": "PASS_WITHOUT_EXEC",
@@ -2178,7 +2180,17 @@
   },
   "markdown": {
     "path": "clearledger/docs/api/PARTNER_DX_KERNEL_CONTROLLER_20261031.md",
-    "bytes": 25623,
-    "sha256": "1103d90f2364f6d2d1f4cc80c3a42f822f5ab34ff6c4bc980045c47b7ef173c3"
-  }
+    "bytes": 26231,
+    "sha256": "a03962bcda92c3263941dfcc97cff3939791336a9850e2ece38d3dddd5e68063"
+  },
+  "documentationCorrections": [
+    {
+      "id": "D1",
+      "sourceMessage": "msg_59cc8ff9b03b",
+      "problem": "Preparation wording incorrectly precreated admission and implied resetting nonce journal",
+      "resolution": "Admission parent alone empty; controller exclusive file creation; nonce journal durable; final/archive empty per run",
+      "status": "CORRECTED_DESCRIPTION_ONLY_NO_SOURCE_CHANGE",
+      "runtime": "NOTRUN"
+    }
+  ]
 }
