@@ -2,6 +2,7 @@
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Iterable
+from uuid import UUID
 
 
 class PrincipalKind(str, Enum):
@@ -9,6 +10,14 @@ class PrincipalKind(str, Enum):
     PARTNER = "partner"
     SERVICE = "service"
     PUBLIC = "public"
+
+
+class DatabaseAuthorityKind(str, Enum):
+    PARTNER_CONTRACT_RECEIPT_V1 = "partner-contract-receipt-v1"
+
+
+class PartnerContractReceiptEvidence(str, Enum):
+    CURRENT_ELIGIBLE_RECEIPT_EXISTS = "current-eligible-receipt-exists"
 
 
 class ScopeMode(str, Enum):
@@ -119,6 +128,79 @@ class ResourcePermission:
 
 
 @dataclass(frozen=True)
+class PartnerContractReceiptBinding:
+    """Independent current server binding; never unverified HTTP authority input."""
+    app_id: UUID
+    create_profile_id: UUID
+    policy_generation: int
+
+    def __post_init__(self):
+        if (type(self.app_id) is not UUID or type(self.create_profile_id) is not UUID
+                or type(self.policy_generation) is not int or self.policy_generation <= 0):
+            raise ValueError("Exact app/profile UUIDs and positive policy generation required")
+
+
+@dataclass(frozen=True)
+class DatabaseResourcePermission:
+    """Named server evidence, with no resource IDs, SQL callback or bearer encoding.
+
+    This admits only an explicitly opted-in guard. It is not SQL authority:
+    the query owner must revalidate current receipt eligibility in its transaction.
+    """
+    authority_kind: DatabaseAuthorityKind
+    company_id: str
+    principal: Principal
+    policy_version: str
+    binding: PartnerContractReceiptBinding
+    evidence: PartnerContractReceiptEvidence
+    resource_type: str = "contracts"
+    action: str = "read"
+
+    def __post_init__(self):
+        if (type(self.authority_kind) is not DatabaseAuthorityKind
+                or self.authority_kind is not DatabaseAuthorityKind.PARTNER_CONTRACT_RECEIPT_V1
+                or type(self.evidence) is not PartnerContractReceiptEvidence
+                or self.evidence is not PartnerContractReceiptEvidence.CURRENT_ELIGIBLE_RECEIPT_EXISTS
+                or type(self.principal) is not Principal
+                or type(self.principal.kind) is not PrincipalKind
+                or self.principal.kind not in (PrincipalKind.PARTNER, PrincipalKind.SERVICE)
+                or type(self.binding) is not PartnerContractReceiptBinding
+                or type(self.resource_type) is not str or self.resource_type != "contracts"
+                or type(self.action) is not str or self.action != "read"):
+            raise ValueError("Exact named contracts-read receipt evidence required")
+        self.binding.__post_init__()
+        values = (self.company_id, self.policy_version, self.principal.subject,
+                  self.principal.client_id, self.principal.installation_id, self.principal.grant_id)
+        if any(type(value) is not str or not value.strip() for value in values):
+            raise ValueError("Complete server identity and original grant binding required")
+
+    def matches(self, context: "AccessContext", resource_type: str, action: str) -> bool:
+        # Recheck shape as well as equality; string-enums/bools/subclasses cannot
+        # masquerade as typed evidence, even in a malformed server-built object.
+        try:
+            if (type(self) is not DatabaseResourcePermission
+                    or type(context.receipt_read_binding) is not PartnerContractReceiptBinding
+                    or type(context.principal) is not Principal
+                    or type(resource_type) is not str or type(action) is not str):
+                return False
+            current_values = (context.company_id, context.policy_version, context.principal.subject,
+                              context.principal.client_id, context.principal.installation_id,
+                              context.principal.grant_id)
+            if any(type(value) is not str or not value.strip() for value in current_values):
+                return False
+            self.__post_init__()
+            context.receipt_read_binding.__post_init__()
+        except (ValueError, TypeError, AttributeError):
+            return False
+        return ((resource_type, action) == (self.resource_type, self.action)
+                and self.company_id == context.company_id
+                and type(context.principal) is Principal
+                and type(context.principal.kind) is PrincipalKind and self.principal == context.principal
+                and self.policy_version == context.policy_version
+                and self.binding == context.receipt_read_binding)
+
+
+@dataclass(frozen=True)
 class AccessContext:
     principal: Principal
     company_id: str | None
@@ -126,6 +208,8 @@ class AccessContext:
     scopes: frozenset[str] = frozenset()
     permissions: tuple[ResourcePermission, ...] = ()
     valid: bool = False
+    database_permissions: tuple[DatabaseResourcePermission, ...] = ()
+    receipt_read_binding: PartnerContractReceiptBinding | None = None
 
     def __post_init__(self):
         if type(self.principal) is not Principal or type(self.valid) is not bool:
@@ -140,11 +224,32 @@ class AccessContext:
         keys = [(item.resource_type, item.action) for item in self.permissions]
         if len(keys) != len(set(keys)):
             raise ValueError("Ambiguous duplicate resource action")
+        if self.receipt_read_binding is not None:
+            if type(self.receipt_read_binding) is not PartnerContractReceiptBinding:
+                raise ValueError("Exact current receipt binding required")
+            self.receipt_read_binding.__post_init__()
+        object.__setattr__(self, "database_permissions", tuple(self.database_permissions))
+        if any(type(item) is not DatabaseResourcePermission for item in self.database_permissions):
+            raise ValueError("Exact DatabaseResourcePermission required")
+        for item in self.database_permissions:
+            item.__post_init__()
+        database_keys = [(item.authority_kind, item.resource_type, item.action)
+                         for item in self.database_permissions]
+        if len(database_keys) != len(set(database_keys)):
+            raise ValueError("Ambiguous duplicate database authority")
 
     def permission(self, resource_type: str, action: str) -> ResourcePermission:
         return next((item for item in self.permissions
                      if (item.resource_type, item.action) == (resource_type, action)),
                     ResourcePermission(resource_type, action))
+
+    def permits_database_authority(self, accepted_kinds: frozenset[DatabaseAuthorityKind],
+                                   resource_type: str, action: str) -> bool:
+        if not accepted_kinds:
+            return False
+        return any(type(item) is DatabaseResourcePermission
+                   and item.matches(self, resource_type, action)
+                   and item.authority_kind in accepted_kinds for item in self.database_permissions)
 
     def intersect(self, other: "AccessContext") -> "AccessContext":
         # Identity/grant substitution needs an explicit delegation protocol.
@@ -156,12 +261,18 @@ class AccessContext:
         own = {(item.resource_type, item.action): item for item in self.permissions}
         ceiling = {(item.resource_type, item.action): item for item in other.permissions}
         permissions = tuple(own[key].intersect(ceiling[key]) for key in sorted(own.keys() & ceiling.keys()))
+        binding = self.receipt_read_binding if self.receipt_read_binding == other.receipt_read_binding else None
+        database_permissions = tuple(item for item in self.database_permissions
+                                     if binding is not None and item in other.database_permissions)
         return replace(self, scopes=self.scopes & other.scopes, permissions=permissions,
-                       valid=self.valid and other.valid)
+                       valid=self.valid and other.valid, database_permissions=database_permissions,
+                       receipt_read_binding=binding)
 
     def select(self, resource_type: str, action: str, selection: ResourceScope) -> "AccessContext":
         permission = self.permission(resource_type, action)
         narrowed = replace(permission, resources=permission.resources.intersect(selection))
         return replace(self, permissions=tuple(
             narrowed if (item.resource_type, item.action) == (resource_type, action) else item
-            for item in self.permissions))
+            for item in self.permissions), database_permissions=tuple(
+                item for item in self.database_permissions
+                if (item.resource_type, item.action) != (resource_type, action)))

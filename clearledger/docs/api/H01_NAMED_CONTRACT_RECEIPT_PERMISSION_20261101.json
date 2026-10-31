@@ -1,0 +1,1570 @@
+{
+  "status": "SOURCE_F1_SUCCESSOR_FROZEN_PENDING_INDEPENDENT_REVIEW_RUNTIME_NOT_EXECUTED",
+  "base": "675654298f9a7cde30f3ab8097935478bb534088",
+  "branch": "MagLook/contract-receipt-policy",
+  "scope": "H01 named contracts-read common-policy seam; full 20M11 user+service target preserved",
+  "root_binding_decision": "Blocking orchestration ask approved exact UUID app/profile + positive int generation (bool rejected), no new file or product_access edits",
+  "freeze_commit": "Exact new successor HEAD reported through worker_done; immutable parent 5325 retained; no amend/rebase",
+  "changed_paths": [
+    "clearledger/server/app/api_contracts/context.py",
+    "clearledger/server/app/api_contracts/routing.py",
+    "clearledger/server/tests/test_named_contract_receipt_permission.py",
+    "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.md",
+    "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.json"
+  ],
+  "runtime": {
+    "app_imports": 0,
+    "helpers_executed": 0,
+    "tests_executed": 0,
+    "sql": 0,
+    "http": 0,
+    "network": 0,
+    "node": 0,
+    "docker": 0,
+    "ssh": 0
+  },
+  "source_manifest": [
+    {
+      "path": "clearledger/server/app/api_contracts/context.py",
+      "base_sha256": "050bc438db8bd36794b59cb741000b7745edad2a33787a00a4663f159f467154",
+      "parent_sha256": "f39dba78cab8fad9572a3f974b046ee8d134520ed5c83173b887902a0928bb62",
+      "current_sha256": "6ab6a7edd80dc33e6e865f4a394e534c6e5dad7434b79559e7a930b81fdd7ccf",
+      "byte_equal_to_base": false,
+      "byte_equal_to_parent": false
+    },
+    {
+      "path": "clearledger/server/app/api_contracts/routing.py",
+      "base_sha256": "131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0",
+      "parent_sha256": "66ae09a5155af33add8810f677ac156ef50eda1b41b206694694547c210d0aa4",
+      "current_sha256": "86c0ecc2b86b6b4d44ff0e230c16e015dc02de8a3c3e331d8e9c104af06be862",
+      "byte_equal_to_base": false,
+      "byte_equal_to_parent": false
+    },
+    {
+      "path": "clearledger/server/app/api_contracts/__init__.py",
+      "base_sha256": "41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b",
+      "parent_sha256": "41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b",
+      "current_sha256": "41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/app/product_api/access.py",
+      "base_sha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+      "parent_sha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+      "current_sha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/app/product_api/queries.py",
+      "base_sha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+      "parent_sha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+      "current_sha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/app/product_api/app.py",
+      "base_sha256": "c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774",
+      "parent_sha256": "c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774",
+      "current_sha256": "c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/tests/test_api_contracts_context.py",
+      "base_sha256": "9b3710e16e409b0c3115615dec483f3fb5f87acd037edd1165fc5ce6e5a82c69",
+      "parent_sha256": "9b3710e16e409b0c3115615dec483f3fb5f87acd037edd1165fc5ce6e5a82c69",
+      "current_sha256": "9b3710e16e409b0c3115615dec483f3fb5f87acd037edd1165fc5ce6e5a82c69",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/tests/test_api_contracts_http.py",
+      "base_sha256": "f2e14cc84bfc878dd2f12d0174cbb2276f5a0cc6f87746861e45baf1d053edc6",
+      "parent_sha256": "f2e14cc84bfc878dd2f12d0174cbb2276f5a0cc6f87746861e45baf1d053edc6",
+      "current_sha256": "f2e14cc84bfc878dd2f12d0174cbb2276f5a0cc6f87746861e45baf1d053edc6",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/tests/test_policy_lifespan_compatibility.py",
+      "base_sha256": "813d80d31aa44eba805f46742b622b2f778a05a206558822b865f566a23039cb",
+      "parent_sha256": "813d80d31aa44eba805f46742b622b2f778a05a206558822b865f566a23039cb",
+      "current_sha256": "813d80d31aa44eba805f46742b622b2f778a05a206558822b865f566a23039cb",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "base_sha256": null,
+      "parent_sha256": null,
+      "current_sha256": null,
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "base_sha256": "36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4",
+      "parent_sha256": "36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4",
+      "current_sha256": "36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/server/tests/test_contract_card_creation.py",
+      "base_sha256": null,
+      "parent_sha256": null,
+      "current_sha256": null,
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md",
+      "base_sha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef",
+      "parent_sha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef",
+      "current_sha256": "9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    },
+    {
+      "path": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_ADMISSION_20261031.md",
+      "base_sha256": "fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1",
+      "parent_sha256": "fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1",
+      "current_sha256": "fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1",
+      "byte_equal_to_base": true,
+      "byte_equal_to_parent": true
+    }
+  ],
+  "static_checks": [
+    {
+      "check": "whole_module_ast_equals_parent_after_restoring_one_method",
+      "path": "clearledger/server/app/api_contracts/context.py",
+      "changed_method": "DatabaseResourcePermission.matches",
+      "passed": true,
+      "parent_method_sha256": "bb90162b28193d55ec7cd784b443a9b4e25081c5eb3013b950f798037dbeee54",
+      "successor_method_sha256": "3ab15b13b7e9c026865d6e7311a0ac83f845807016bd2e44e9a79394ba1c2ba8",
+      "successor_method_source": "    def matches(self, context: \"AccessContext\", resource_type: str, action: str) -> bool:\n        # Recheck shape as well as equality; string-enums/bools/subclasses cannot\n        # masquerade as typed evidence, even in a malformed server-built object.\n        try:\n            if (type(self) is not DatabaseResourcePermission\n                    or type(context.receipt_read_binding) is not PartnerContractReceiptBinding\n                    or type(context.principal) is not Principal\n                    or type(resource_type) is not str or type(action) is not str):\n                return False\n            current_values = (context.company_id, context.policy_version, context.principal.subject,\n                              context.principal.client_id, context.principal.installation_id,\n                              context.principal.grant_id)\n            if any(type(value) is not str or not value.strip() for value in current_values):\n                return False\n            self.__post_init__()\n            context.receipt_read_binding.__post_init__()\n        except (ValueError, TypeError, AttributeError):\n            return False\n        return ((resource_type, action) == (self.resource_type, self.action)\n                and self.company_id == context.company_id\n                and type(context.principal) is Principal\n                and type(context.principal.kind) is PrincipalKind and self.principal == context.principal\n                and self.policy_version == context.policy_version\n                and self.binding == context.receipt_read_binding)\n"
+    },
+    {
+      "check": "all_other_functions_methods_byte_equal_parent",
+      "path": "clearledger/server/app/api_contracts/context.py",
+      "definitions": [
+        {
+          "name": "_names",
+          "sha256": "8322d601504e42b6d95ee20ff75c3110da718896ce852c78fe09e16f6e734a2b"
+        },
+        {
+          "name": "ResourceScope.__post_init__",
+          "sha256": "e1575fe26b94395bbacace1d71de0047941d8c5ad56f1d53a792d6fa53c898d1"
+        },
+        {
+          "name": "ResourceScope.all",
+          "sha256": "aaded2950537bcc1e34e0c3fe8d8998590b661a1a564552d9e27d218e2d63e42"
+        },
+        {
+          "name": "ResourceScope.selected",
+          "sha256": "e1e1204e93b428918a31c1a7c7ad4b9f64598736bcfc44c7ab3a23dc441c84cb"
+        },
+        {
+          "name": "ResourceScope.empty",
+          "sha256": "2c27a2b6a9f5606681f1f8416878376e071e4bbe2cc1177489b7520836b302e8"
+        },
+        {
+          "name": "ResourceScope.contains",
+          "sha256": "eacb4971c3e40ebf673fa3dede58ab1e1cc4f51603b2f566fe46e5f4578c08b3"
+        },
+        {
+          "name": "ResourceScope.intersect",
+          "sha256": "800c65a2b4c8df0ff49d1f16ee556682f869c6303c7aa5331cfacdc272780da1"
+        },
+        {
+          "name": "Principal.__post_init__",
+          "sha256": "a14dac44ffed78ba0c73fc7dcfecb70443d7d10bfe6828f9ceca637fd29c9746"
+        },
+        {
+          "name": "ResourcePermission.__post_init__",
+          "sha256": "18e4b0ec666d697860fc80e1066e97deb9cbaf2ad300f6fb24bcd834c4f325fb"
+        },
+        {
+          "name": "ResourcePermission.intersect",
+          "sha256": "bae379c4866d13d101fcb3669378841f7930387a2292a639069b86d03a3e673b"
+        },
+        {
+          "name": "PartnerContractReceiptBinding.__post_init__",
+          "sha256": "5fc01c16c355b16a648dcc4033c56eccaa02324ddfbd7da6c58a9cad8d371b85"
+        },
+        {
+          "name": "DatabaseResourcePermission.__post_init__",
+          "sha256": "bc2a85fcc7728fc0dd907bbd86dfd51ab93e63ac6785fe12b4cca9e3444ef530"
+        },
+        {
+          "name": "AccessContext.__post_init__",
+          "sha256": "f01872b2eb14ab12d015668ed63026239de81d1d2739cab492c10715344969f5"
+        },
+        {
+          "name": "AccessContext.permission",
+          "sha256": "667178e93f2d7ea4f4a4382817f0ab76bf01a68199d664597596319406c3e15a"
+        },
+        {
+          "name": "AccessContext.permits_database_authority",
+          "sha256": "5c9b8f6cbfa0d731be70d3532ac3c511d18c496927e82618c69ec4f60b9ecd0a"
+        },
+        {
+          "name": "AccessContext.intersect",
+          "sha256": "73e8166559812726449dab435ed635ddb59e9a63841e95384e42cb651d57ab98"
+        },
+        {
+          "name": "AccessContext.select",
+          "sha256": "6a4df306a07242b00658164b600803d72f40f331bfb9d33889d9e58e33608761"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "check": "whole_module_ast_equals_parent_after_restoring_one_method",
+      "path": "clearledger/server/app/api_contracts/routing.py",
+      "changed_method": "RoutePolicy.__post_init__",
+      "passed": true,
+      "parent_method_sha256": "2524d3d00c61e29836deb127a5650e561c771182084abdfa596be95eb883f898",
+      "successor_method_sha256": "5d00f2054a46af9c5a77244698120b5130c62950525283c7fd3b00cd5979f141",
+      "successor_method_source": "    def __post_init__(self):\n        _names([self.owner, self.resource_type, self.action, self.policy_version])\n        object.__setattr__(self, \"accepted_kinds\", frozenset(self.accepted_kinds))\n        object.__setattr__(self, \"required_scopes\", _names(self.required_scopes))\n        object.__setattr__(self, \"required_fields\", _names(self.required_fields))\n        object.__setattr__(self, \"accepted_database_authority_kinds\",\n                           frozenset(self.accepted_database_authority_kinds))\n        if any(type(kind) is not DatabaseAuthorityKind\n               for kind in self.accepted_database_authority_kinds):\n            raise PolicyConfigurationError(\"Explicit database authority kind required\")\n        if self.accepted_database_authority_kinds and (\n                type(self.resource_type) is not str or type(self.action) is not str\n                or (self.resource_type, self.action) != (\"contracts\", \"read\")\n                or not self.tenant_required\n                or not self.accepted_kinds <= {PrincipalKind.PARTNER, PrincipalKind.SERVICE}\n                or \"contracts:read\" not in self.required_scopes):\n            raise PolicyConfigurationError(\"Receipt authority requires a private contracts-read policy\")\n        if (not self.accepted_kinds\n                or any(type(kind) is not PrincipalKind for kind in self.accepted_kinds)\n                or type(self.tenant_required) is not bool):\n            raise PolicyConfigurationError(\"Explicit kinds and tenant requirement required\")\n        if PrincipalKind.PUBLIC in self.accepted_kinds:\n            if self.accepted_kinds != {PrincipalKind.PUBLIC}:\n                raise PolicyConfigurationError(\"Public and authenticated contracts must be separate\")\n            if self.required_scopes or self.security_scheme:\n                raise PolicyConfigurationError(\"Public operation cannot claim authenticated scopes\")\n        elif not self.required_scopes or not self.security_scheme:\n            raise PolicyConfigurationError(\"Private operation requires scopes and security scheme\")\n        if self.security_scheme is not None:\n            _names([self.security_scheme])\n"
+    },
+    {
+      "check": "all_other_functions_methods_byte_equal_parent",
+      "path": "clearledger/server/app/api_contracts/routing.py",
+      "definitions": [
+        {
+          "name": "RoutePolicy.public",
+          "sha256": "14e4839ee9d2824e49763ae61b387138609b0e4d0d14e5df9b94fa77a72fc1ed"
+        },
+        {
+          "name": "RoutePolicy.metadata",
+          "sha256": "2fd247c74d3b0adc9165240a5d77524f012c103fc579e64b44a60117aca31a8a"
+        },
+        {
+          "name": "_call",
+          "sha256": "3092fc1ae343a5ce460cc7a0783133296c759615b1de5f5df742c3092ad1452e"
+        },
+        {
+          "name": "authorize",
+          "sha256": "680c3e45d65b73512fa50fa8b68f2160ce40270d9aae7936446e4482a6490dad"
+        },
+        {
+          "name": "get_access_context",
+          "sha256": "f6fef207b680732d67790118609994e639120773f8e56c3ba9666ea05d6855f9"
+        },
+        {
+          "name": "_validate_extra",
+          "sha256": "5491351af3d48798a93c9e2c464f458bdaa395645a3a683e62fd2a298ac421c4"
+        },
+        {
+          "name": "PolicyRoute.__init__",
+          "sha256": "006a8ce4d30f97967ed6287e1e0decb49fc1dd3100fa924c1224df55eddd9183"
+        },
+        {
+          "name": "PolicyRoute.get_route_handler",
+          "sha256": "5b8f58804726b8f4ded04de7e5d578ed8614621142ba6d7369b12007a62dbbf7"
+        },
+        {
+          "name": "PolicyRouter.__init__",
+          "sha256": "d78d4f330dfa0dfde372bbc03d3a2736111ba04c23b6258afade7b009bcd0bf9"
+        },
+        {
+          "name": "PolicyRouter.operation",
+          "sha256": "19f9c16576d6b38cb611cfeb7737ccfd6de77e1003c9a0db6fba3c1f322c4d2b"
+        },
+        {
+          "name": "PolicyRouter.add_api_route",
+          "sha256": "ab545561050500cc3da06a9f82fe8296eee8e3449dd3631a407f62859d210ed0"
+        },
+        {
+          "name": "PolicyRouter.include_router",
+          "sha256": "0f13e4a2fcdf5ce39e9649182454ea80512b435e9413c6edf064464eec25325d"
+        },
+        {
+          "name": "PolicyRouter.add_route",
+          "sha256": "b59368cfacb65d52a05c22412b4b72a1a69a6d846c219a8aea7ddf11f4651d18"
+        },
+        {
+          "name": "PolicyRouter.add_api_websocket_route",
+          "sha256": "30c36a6722274d6a4b921d57188794ed787935d8f1535984c5c336003b0d8d4b"
+        },
+        {
+          "name": "PolicyRouter.add_websocket_route",
+          "sha256": "957adddf17460ab0fb60e3ca8fa491c336663c597a6c43057cb9a5b190571be8"
+        },
+        {
+          "name": "PolicyRouter.mount",
+          "sha256": "fff24314faa8c4ec4dbc84766d03aea8b54783d812f148176b9fbf22f52b46ab"
+        },
+        {
+          "name": "policy_registry",
+          "sha256": "13f0c0938b1ad4cb01f77258324f5ae2a54cc2167106ca50c2262c57aa502e86"
+        },
+        {
+          "name": "create_policy_app",
+          "sha256": "c2988ec64d0acffc39906b0e308792ffaf62fff26ff14b2efbec4b4807df2e6c"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "check": "legacy_definition_byte_equal_base_and_parent",
+      "name": "PrincipalKind",
+      "sha256": "d16983bce7dd86b12997f4252c92c1a5b04eb7bc3e7f3bad9c5d611b4e02fe95",
+      "passed": true
+    },
+    {
+      "check": "legacy_definition_byte_equal_base_and_parent",
+      "name": "ScopeMode",
+      "sha256": "c86f2a706e1ffd53a7b38377f738ed037aca6a1b7946295f6e520057676b78ee",
+      "passed": true
+    },
+    {
+      "check": "legacy_definition_byte_equal_base_and_parent",
+      "name": "_names",
+      "sha256": "8322d601504e42b6d95ee20ff75c3110da718896ce852c78fe09e16f6e734a2b",
+      "passed": true
+    },
+    {
+      "check": "legacy_definition_byte_equal_base_and_parent",
+      "name": "ResourceScope",
+      "sha256": "146f5c3b84333a2ead5b7ee518a28ff7110fc90cfb12b191f491505a4b419c88",
+      "passed": true
+    },
+    {
+      "check": "legacy_definition_byte_equal_base_and_parent",
+      "name": "Principal",
+      "sha256": "d6567f0e33504dab0521bb30faba7082966a38ffb72bde71186c64eb19de12cf",
+      "passed": true
+    },
+    {
+      "check": "legacy_definition_byte_equal_base_and_parent",
+      "name": "ResourcePermission",
+      "sha256": "091b8c7a207cf6d9230c68aa5892939d7d76c851f8753483358b893c54cacde5",
+      "passed": true
+    },
+    {
+      "check": "parent_test_module_is_exact_prefix",
+      "parent_bytes": 19210,
+      "parent_sha256": "9b9fa4f565b19e1aabb51de9f0a57ec549e13b667f558ebef8ac052edbf83dc2",
+      "passed": true
+    },
+    {
+      "check": "ast_parse_and_in_memory_compile_without_exec",
+      "passed": true,
+      "files": [
+        "clearledger/server/app/api_contracts/context.py",
+        "clearledger/server/app/api_contracts/routing.py",
+        "clearledger/server/tests/test_named_contract_receipt_permission.py"
+      ]
+    },
+    {
+      "check": "current_exact_nonempty_identity_guard_before_unchanged_comparison_return",
+      "passed": true,
+      "guard_source": "if any((type(value) is not str or not value.strip() for value in current_values)):\n    return False"
+    },
+    {
+      "check": "policy_exact_label_checks_only_under_nonempty_optin_and_before_old_constraint",
+      "passed": true
+    },
+    {
+      "check": "authorize_router_selector_and_metadata_methods_unchanged_from_parent",
+      "passed": true
+    },
+    {
+      "check": "defaults_unchanged",
+      "passed": true,
+      "defaults": {
+        "AccessContext.database_permissions": "()",
+        "AccessContext.receipt_read_binding": "None",
+        "RoutePolicy.accepted_database_authority_kinds": "frozenset()"
+      }
+    }
+  ],
+  "caller_trace": [
+    {
+      "path": "clearledger/server/app/product_api/access.py",
+      "line": 146,
+      "source": "AccessContext(principal, str(cid), POLICY_VERSION, token.scopes, permissions, valid=True)"
+    },
+    {
+      "path": "clearledger/server/tests/test_api_contracts_context.py",
+      "line": 13,
+      "source": "AccessContext(\n        principal, \"company-a\", \"policy-1\", scopes if scopes is not None else {\"documents.read\"},\n        (ResourcePermission(\"document\", \"read\", resources or ResourceScope.all(),\n                            fields or ResourceScope.all()),), valid=valid,\n    )"
+    },
+    {
+      "path": "clearledger/server/tests/test_api_contracts_context.py",
+      "line": 108,
+      "source": "AccessContext({\"id\": \"admin\", \"is_superadmin\": True}, \"company-a\", \"policy-1\")"
+    },
+    {
+      "path": "clearledger/server/tests/test_policy_lifespan_compatibility.py",
+      "line": 25,
+      "source": "AccessContext(Principal(PrincipalKind.PARTNER, \"subject\", \"client\", \"install\", \"grant\"),\n                         \"tenant-a\", \"policy-1\", {\"documents.read\"},\n                         (ResourcePermission(\"document\", \"read\", ResourceScope.selected([\"a\"]),\n                                             ResourceScope.selected([\"title\"])),), valid=True)"
+    }
+  ],
+  "authored_tests": {
+    "path": "clearledger/server/tests/test_named_contract_receipt_permission.py",
+    "functions": 31,
+    "static_cases": 174,
+    "new_f1_functions": 6,
+    "new_f1_static_cases": 42,
+    "names": [
+      "test_default_empty_policies_preserve_historical_resource_gate",
+      "test_historical_metadata_literal_is_unchanged_and_opt_in_is_explicit",
+      "test_named_kind_cannot_be_declared_for_other_resources_actions_or_actors",
+      "test_declaration_without_evidence_preserves_empty_resource_denial",
+      "test_defaults_preserve_immutable_copies_and_existing_selection_identity",
+      "test_only_matching_named_opt_in_evidence_admits_synthetic_empty_read",
+      "test_evidence_without_policy_declaration_and_r3_metadata_policy_deny",
+      "test_every_current_binding_dimension_is_independent_and_cannot_be_substituted",
+      "test_current_policy_version_match_does_not_hide_stale_evidence",
+      "test_named_evidence_never_replaces_field_gate",
+      "test_route_kind_gate_is_not_replaced_by_matching_evidence",
+      "test_receipt_evidence_does_not_extend_any_other_resource",
+      "test_receipt_evidence_cannot_authorize_other_contract_actions",
+      "test_selector_cannot_spend_receipt_authority",
+      "test_existing_selector_remains_limited_by_base_scope_with_evidence_present",
+      "test_context_selection_and_intersection_never_transfer_receipt_authority",
+      "test_exact_frozen_receipt_classes_and_copied_collections",
+      "test_binding_malformed_values_are_not_coerced",
+      "test_permission_malformed_values_and_untyped_evidence_fail_closed",
+      "test_permission_binding_principal_and_evidence_subclasses_fail_closed",
+      "test_native_or_public_principal_cannot_be_receipt_evidence",
+      "test_uuid_subclass_and_resource_permission_substitution_are_rejected",
+      "test_incomplete_principal_cannot_produce_receipt_evidence",
+      "test_malformed_exact_class_object_cannot_pass_the_named_guard",
+      "test_empty_exact_class_object_and_malformed_current_generation_fail_closed",
+      "test_named_match_rejects_hostile_current_identity_text",
+      "test_named_match_keeps_benign_exact_current_strings",
+      "test_named_policy_rejects_hashable_hostile_scalar_labels",
+      "test_direct_named_match_rejects_hashable_hostile_scalar_labels",
+      "test_default_empty_policy_keeps_legacy_scalar_label_validation",
+      "test_default_empty_policy_keeps_legacy_current_identity_validation"
+    ],
+    "executed": false,
+    "collected": false,
+    "inventory_source_only": [
+      {
+        "name": "test_default_empty_policies_preserve_historical_resource_gate",
+        "line_start": 49,
+        "line_end": 65,
+        "static_cases": 8,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'resources,allowed'",
+            "source_values": [
+              "(ResourceScope.all(), True)",
+              "(ResourceScope.selected(['a']), True)",
+              "(ResourceScope.empty(), False)",
+              "(ResourceScope(), False)"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_historical_metadata_literal_is_unchanged_and_opt_in_is_explicit",
+        "line_start": 68,
+        "line_end": 74,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_named_kind_cannot_be_declared_for_other_resources_actions_or_actors",
+        "line_start": 77,
+        "line_end": 90,
+        "static_cases": 16,
+        "parameters_source_only": [
+          {
+            "names": "'change'",
+            "source_values": [
+              "{'accepted_database_authority_kinds': {'partner-contract-receipt-v1'}}",
+              "{'accepted_database_authority_kinds': {True}}",
+              "{'accepted_database_authority_kinds': {'other-authority'}}",
+              "{'resource_type': 'documents'}",
+              "{'resource_type': 'objects'}",
+              "{'resource_type': 'counterparties'}",
+              "{'resource_type': 'equipment'}",
+              "{'resource_type': 'contract_types'}",
+              "{'resource_type': 'source_file'}",
+              "{'action': 'download'}",
+              "{'action': 'create'}",
+              "{'action': 'metadata'}",
+              "{'accepted_kinds': {PrincipalKind.USER}}",
+              "{'accepted_kinds': {PrincipalKind.PUBLIC}}",
+              "{'tenant_required': False}",
+              "{'required_scopes': {'documents.read'}}"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_declaration_without_evidence_preserves_empty_resource_denial",
+        "line_start": 93,
+        "line_end": 100,
+        "static_cases": 4,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'resources'",
+            "source_values": [
+              "ResourceScope.empty()",
+              "ResourceScope()"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_defaults_preserve_immutable_copies_and_existing_selection_identity",
+        "line_start": 103,
+        "line_end": 111,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_only_matching_named_opt_in_evidence_admits_synthetic_empty_read",
+        "line_start": 114,
+        "line_end": 123,
+        "static_cases": 4,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'resources'",
+            "source_values": [
+              "ResourceScope.empty()",
+              "ResourceScope()"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_evidence_without_policy_declaration_and_r3_metadata_policy_deny",
+        "line_start": 126,
+        "line_end": 134,
+        "static_cases": 2,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_every_current_binding_dimension_is_independent_and_cannot_be_substituted",
+        "line_start": 137,
+        "line_end": 169,
+        "static_cases": 28,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'dimension'",
+            "source_values": [
+              "'tenant'",
+              "'principal'",
+              "'actor-kind'",
+              "'client'",
+              "'install'",
+              "'grant'",
+              "'app'",
+              "'profile'",
+              "'generation'",
+              "'policy'",
+              "'missing-binding'",
+              "'missing-evidence'",
+              "'scopes'",
+              "'invalid-context'"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_current_policy_version_match_does_not_hide_stale_evidence",
+        "line_start": 172,
+        "line_end": 177,
+        "static_cases": 2,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_named_evidence_never_replaces_field_gate",
+        "line_start": 180,
+        "line_end": 192,
+        "static_cases": 10,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'fields,allowed'",
+            "source_values": [
+              "(ResourceScope.all(), True)",
+              "(ResourceScope.selected(['number']), True)",
+              "(ResourceScope.selected(['secret']), False)",
+              "(ResourceScope.empty(), False)",
+              "(ResourceScope(), False)"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_route_kind_gate_is_not_replaced_by_matching_evidence",
+        "line_start": 195,
+        "line_end": 201,
+        "static_cases": 2,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_receipt_evidence_does_not_extend_any_other_resource",
+        "line_start": 204,
+        "line_end": 211,
+        "static_cases": 7,
+        "parameters_source_only": [
+          {
+            "names": "'resource'",
+            "source_values": [
+              "'objects'",
+              "'equipment'",
+              "'counterparties'",
+              "'documents'",
+              "'source_file'",
+              "'contract_types'",
+              "'foreign-counterparty'"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_receipt_evidence_cannot_authorize_other_contract_actions",
+        "line_start": 214,
+        "line_end": 219,
+        "static_cases": 4,
+        "parameters_source_only": [
+          {
+            "names": "'action'",
+            "source_values": [
+              "'create'",
+              "'edit'",
+              "'download'",
+              "'metadata'"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_selector_cannot_spend_receipt_authority",
+        "line_start": 222,
+        "line_end": 231,
+        "static_cases": 4,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'resources'",
+            "source_values": [
+              "ResourceScope.empty()",
+              "ResourceScope()"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_existing_selector_remains_limited_by_base_scope_with_evidence_present",
+        "line_start": 234,
+        "line_end": 244,
+        "static_cases": 3,
+        "parameters_source_only": [
+          {
+            "names": "'resources,identifier,allowed'",
+            "source_values": [
+              "(ResourceScope.all(), 'a', True)",
+              "(ResourceScope.selected(['a']), 'a', True)",
+              "(ResourceScope.selected(['a']), 'outside', False)"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_context_selection_and_intersection_never_transfer_receipt_authority",
+        "line_start": 247,
+        "line_end": 259,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_exact_frozen_receipt_classes_and_copied_collections",
+        "line_start": 262,
+        "line_end": 278,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_binding_malformed_values_are_not_coerced",
+        "line_start": 281,
+        "line_end": 289,
+        "static_cases": 10,
+        "parameters_source_only": [
+          {
+            "names": "'change'",
+            "source_values": [
+              "{'app_id': str(APP_ID)}",
+              "{'app_id': None}",
+              "{'create_profile_id': str(PROFILE_ID)}",
+              "{'create_profile_id': None}",
+              "{'policy_generation': True}",
+              "{'policy_generation': False}",
+              "{'policy_generation': 0}",
+              "{'policy_generation': -1}",
+              "{'policy_generation': '7'}",
+              "{'policy_generation': 7.0}"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_permission_malformed_values_and_untyped_evidence_fail_closed",
+        "line_start": 292,
+        "line_end": 302,
+        "static_cases": 15,
+        "parameters_source_only": [
+          {
+            "names": "'change'",
+            "source_values": [
+              "{'authority_kind': 'partner-contract-receipt-v1'}",
+              "{'authority_kind': 'other-kind'}",
+              "{'authority_kind': True}",
+              "{'evidence': True}",
+              "{'evidence': 'current-eligible-receipt-exists'}",
+              "{'evidence': None}",
+              "{'resource_type': 'documents'}",
+              "{'resource_type': 'contract'}",
+              "{'action': 'download'}",
+              "{'action': 'create'}",
+              "{'company_id': ''}",
+              "{'policy_version': ''}",
+              "{'binding': None}",
+              "{'binding': {'app_id': APP_ID}}",
+              "{'principal': {'subject': 'subject'}}"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_permission_binding_principal_and_evidence_subclasses_fail_closed",
+        "line_start": 305,
+        "line_end": 329,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_native_or_public_principal_cannot_be_receipt_evidence",
+        "line_start": 332,
+        "line_end": 335,
+        "static_cases": 2,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.USER",
+              "PrincipalKind.PUBLIC"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_uuid_subclass_and_resource_permission_substitution_are_rejected",
+        "line_start": 338,
+        "line_end": 348,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_incomplete_principal_cannot_produce_receipt_evidence",
+        "line_start": 351,
+        "line_end": 355,
+        "static_cases": 3,
+        "parameters_source_only": [
+          {
+            "names": "'field'",
+            "source_values": [
+              "'client_id'",
+              "'installation_id'",
+              "'grant_id'"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_malformed_exact_class_object_cannot_pass_the_named_guard",
+        "line_start": 358,
+        "line_end": 367,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_empty_exact_class_object_and_malformed_current_generation_fail_closed",
+        "line_start": 370,
+        "line_end": 380,
+        "static_cases": 1,
+        "parameters_source_only": []
+      },
+      {
+        "name": "test_named_match_rejects_hostile_current_identity_text",
+        "line_start": 394,
+        "line_end": 409,
+        "static_cases": 12,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'field'",
+            "source_values": [
+              "'company_id'",
+              "'policy_version'",
+              "'subject'",
+              "'client_id'",
+              "'installation_id'",
+              "'grant_id'"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_named_match_keeps_benign_exact_current_strings",
+        "line_start": 412,
+        "line_end": 420,
+        "static_cases": 2,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_named_policy_rejects_hashable_hostile_scalar_labels",
+        "line_start": 423,
+        "line_end": 429,
+        "static_cases": 4,
+        "parameters_source_only": [
+          {
+            "names": "'field,text'",
+            "source_values": [
+              "('resource_type', 'contracts')",
+              "('resource_type', 'documents')",
+              "('action', 'read')",
+              "('action', 'create')"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_direct_named_match_rejects_hashable_hostile_scalar_labels",
+        "line_start": 432,
+        "line_end": 441,
+        "static_cases": 8,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'field,text'",
+            "source_values": [
+              "('resource_type', 'contracts')",
+              "('resource_type', 'documents')",
+              "('action', 'read')",
+              "('action', 'create')"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_default_empty_policy_keeps_legacy_scalar_label_validation",
+        "line_start": 444,
+        "line_end": 450,
+        "static_cases": 4,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'field,text'",
+            "source_values": [
+              "('resource_type', 'document')",
+              "('action', 'read')"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "test_default_empty_policy_keeps_legacy_current_identity_validation",
+        "line_start": 453,
+        "line_end": 465,
+        "static_cases": 12,
+        "parameters_source_only": [
+          {
+            "names": "'kind'",
+            "source_values": [
+              "PrincipalKind.PARTNER",
+              "PrincipalKind.SERVICE"
+            ]
+          },
+          {
+            "names": "'field'",
+            "source_values": [
+              "'company_id'",
+              "'policy_version'",
+              "'subject'",
+              "'client_id'",
+              "'installation_id'",
+              "'grant_id'"
+            ]
+          }
+        ]
+      }
+    ],
+    "helpers": [
+      "tests.test_api_contracts_context.context",
+      "tests.test_api_contracts_http.contract",
+      "tests.test_api_contracts_http.fixture_api"
+    ]
+  },
+  "artifact_sha256": [
+    {
+      "path": "clearledger/server/app/api_contracts/context.py",
+      "sha256": "6ab6a7edd80dc33e6e865f4a394e534c6e5dad7434b79559e7a930b81fdd7ccf"
+    },
+    {
+      "path": "clearledger/server/app/api_contracts/routing.py",
+      "sha256": "86c0ecc2b86b6b4d44ff0e230c16e015dc02de8a3c3e331d8e9c104af06be862"
+    },
+    {
+      "path": "clearledger/server/tests/test_named_contract_receipt_permission.py",
+      "sha256": "214e2e8d6ed8e0f3b8e5c30c65c9142f91bf75cac1ee123f185bc24352715ea1"
+    },
+    {
+      "path": "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.md",
+      "sha256": "f186871476aafeedfb8de2cd7139f24102e0c355c9c36323c27bd2133c1cd0ae"
+    }
+  ],
+  "old_policy_evidence": "All legacy definitions unchanged globally; default-empty RoutePolicy gains no exact string validation; unchanged old test module prefix plus new source-authored legacy-subclass acceptance cases; no existing production constructor or policy opts in",
+  "unknowns": [
+    "F1 successor independent SOURCE review pending; no runtime proof",
+    "schema handoff and next ordinal remain ROOT-owned; 0004 not reserved",
+    "receipt SQL/issuance/current eligibility and independent current binding population",
+    "reviewed list/detail/parent opt-in must explicitly exclude actual contracts/read R3",
+    "scoped B writer closure; global F not selected",
+    "isolated ROOT runner/source/env/fixtures and runtime acceptance; full20M/11 OPEN, no overall percentage"
+  ],
+  "parent": "5325fd74f84fa838ac2cab2f8eee3530ad418a1a",
+  "current_task": {
+    "task_id": "task_ad8518675011",
+    "dispatch_id": "ctx_5329896e035b"
+  },
+  "parent_to_successor_manifest": [
+    {
+      "path": "clearledger/server/app/api_contracts/context.py",
+      "parent_sha256": "f39dba78cab8fad9572a3f974b046ee8d134520ed5c83173b887902a0928bb62",
+      "parent_blob_sha1": "2f3f99e2f873ab92dad6abf6cbbd86b015ae6e30",
+      "current_sha256": "6ab6a7edd80dc33e6e865f4a394e534c6e5dad7434b79559e7a930b81fdd7ccf",
+      "base_sha256": "050bc438db8bd36794b59cb741000b7745edad2a33787a00a4663f159f467154"
+    },
+    {
+      "path": "clearledger/server/app/api_contracts/routing.py",
+      "parent_sha256": "66ae09a5155af33add8810f677ac156ef50eda1b41b206694694547c210d0aa4",
+      "parent_blob_sha1": "744cdae10aae223552f6c3dc90e3adfd7762c1f7",
+      "current_sha256": "86c0ecc2b86b6b4d44ff0e230c16e015dc02de8a3c3e331d8e9c104af06be862",
+      "base_sha256": "131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0"
+    },
+    {
+      "path": "clearledger/server/tests/test_named_contract_receipt_permission.py",
+      "parent_sha256": "9b9fa4f565b19e1aabb51de9f0a57ec549e13b667f558ebef8ac052edbf83dc2",
+      "parent_blob_sha1": "f3eee503e7455988e7a5861def7de43c6616b8b3",
+      "current_sha256": "214e2e8d6ed8e0f3b8e5c30c65c9142f91bf75cac1ee123f185bc24352715ea1",
+      "base_sha256": null
+    },
+    {
+      "path": "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.md",
+      "parent_sha256": "c280bd18dccff12ff964b941f7de9c77499ef3162162a3092a553185bbfad064",
+      "parent_blob_sha1": "fd1be15c7a0a640c7b3a88d177e67cb313a0d3c3",
+      "current_sha256": "f186871476aafeedfb8de2cd7139f24102e0c355c9c36323c27bd2133c1cd0ae",
+      "base_sha256": null
+    },
+    {
+      "path": "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.json",
+      "parent_sha256": "9528b8123f6eabbc74f3cdb6e656ef48bb17e0b0b7483beb1c31ae76e45147e8",
+      "parent_blob_sha1": "333d4d404fe972121ec532e98e26f2d7a7c52efd",
+      "current_sha256": "reported externally after JSON freeze",
+      "base_sha256": null
+    }
+  ],
+  "historical_5325": {
+    "date": "2026-11-01",
+    "commit": "5325fd74f84fa838ac2cab2f8eee3530ad418a1a",
+    "classification": "DATED_AUTHOR_SOURCE_CLAIMS_BEFORE_F1_NOT_CURRENT_ACCEPTANCE_OR_RUNTIME_PASS",
+    "qualification": "Independent F1 P2 blocks unconditional exact-type acceptance of the old named seam; old claims below are historical, not retroactively approved",
+    "report_json_sha256": "9528b8123f6eabbc74f3cdb6e656ef48bb17e0b0b7483beb1c31ae76e45147e8",
+    "report_md_sha256": "c280bd18dccff12ff964b941f7de9c77499ef3162162a3092a553185bbfad064",
+    "report_json_raw": "{\n  \"status\": \"SOURCE_FROZEN_RUNTIME_NOT_EXECUTED\",\n  \"base\": \"675654298f9a7cde30f3ab8097935478bb534088\",\n  \"branch\": \"MagLook/contract-receipt-policy\",\n  \"scope\": \"H01 named contracts-read common-policy seam; full 20M11 user+service target preserved\",\n  \"root_binding_decision\": \"Blocking orchestration ask approved exact UUID app/profile + positive int generation (bool rejected), no new file or product_access edits\",\n  \"freeze_commit\": \"Exact HEAD reported through worker_done; no self-referential document hash\",\n  \"changed_paths\": [\n    \"clearledger/server/app/api_contracts/context.py\",\n    \"clearledger/server/app/api_contracts/routing.py\",\n    \"clearledger/server/tests/test_named_contract_receipt_permission.py\",\n    \"clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.md\",\n    \"clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.json\"\n  ],\n  \"runtime\": {\n    \"app_imports\": 0,\n    \"helpers_executed\": 0,\n    \"tests_executed\": 0,\n    \"sql\": 0,\n    \"http\": 0,\n    \"network\": 0,\n    \"node\": 0,\n    \"docker\": 0,\n    \"ssh\": 0\n  },\n  \"source_manifest\": [\n    {\n      \"path\": \"clearledger/server/app/api_contracts/context.py\",\n      \"base_sha256\": \"050bc438db8bd36794b59cb741000b7745edad2a33787a00a4663f159f467154\",\n      \"current_sha256\": \"f39dba78cab8fad9572a3f974b046ee8d134520ed5c83173b887902a0928bb62\",\n      \"byte_equal\": false\n    },\n    {\n      \"path\": \"clearledger/server/app/api_contracts/routing.py\",\n      \"base_sha256\": \"131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0\",\n      \"current_sha256\": \"66ae09a5155af33add8810f677ac156ef50eda1b41b206694694547c210d0aa4\",\n      \"byte_equal\": false\n    },\n    {\n      \"path\": \"clearledger/server/app/api_contracts/__init__.py\",\n      \"base_sha256\": \"41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b\",\n      \"current_sha256\": \"41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/app/product_api/access.py\",\n      \"base_sha256\": \"f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2\",\n      \"current_sha256\": \"f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/app/product_api/queries.py\",\n      \"base_sha256\": \"cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713\",\n      \"current_sha256\": \"cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/app/product_api/app.py\",\n      \"base_sha256\": \"c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774\",\n      \"current_sha256\": \"c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_api_contracts_context.py\",\n      \"base_sha256\": \"9b3710e16e409b0c3115615dec483f3fb5f87acd037edd1165fc5ce6e5a82c69\",\n      \"current_sha256\": \"9b3710e16e409b0c3115615dec483f3fb5f87acd037edd1165fc5ce6e5a82c69\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_api_contracts_http.py\",\n      \"base_sha256\": \"f2e14cc84bfc878dd2f12d0174cbb2276f5a0cc6f87746861e45baf1d053edc6\",\n      \"current_sha256\": \"f2e14cc84bfc878dd2f12d0174cbb2276f5a0cc6f87746861e45baf1d053edc6\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_policy_lifespan_compatibility.py\",\n      \"base_sha256\": \"813d80d31aa44eba805f46742b622b2f778a05a206558822b865f566a23039cb\",\n      \"current_sha256\": \"813d80d31aa44eba805f46742b622b2f778a05a206558822b865f566a23039cb\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/app/services/contract_card_creation.py\",\n      \"base_sha256\": null,\n      \"current_sha256\": null,\n      \"byte_equal\": true,\n      \"absent_in_base\": true\n    },\n    {\n      \"path\": \"clearledger/server/app/services/native_contract_commands.py\",\n      \"base_sha256\": \"36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4\",\n      \"current_sha256\": \"36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_contract_card_creation.py\",\n      \"base_sha256\": null,\n      \"current_sha256\": null,\n      \"byte_equal\": true,\n      \"absent_in_base\": true\n    },\n    {\n      \"path\": \"clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md\",\n      \"base_sha256\": \"9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef\",\n      \"current_sha256\": \"9f552d24c68b7c0ea30ed37fa1f552ca1d74f674c6d033d4d0a8a7496c9da8ef\",\n      \"byte_equal\": true\n    },\n    {\n      \"path\": \"clearledger/docs/api/CONTRACT_PARTNER_WRITE_ADMISSION_20261031.md\",\n      \"base_sha256\": \"fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1\",\n      \"current_sha256\": \"fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1\",\n      \"byte_equal\": true\n    }\n  ],\n  \"static_checks\": [\n    {\n      \"check\": \"unchanged_context_definition\",\n      \"name\": \"PrincipalKind\",\n      \"sha256\": \"d16983bce7dd86b12997f4252c92c1a5b04eb7bc3e7f3bad9c5d611b4e02fe95\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_context_definition\",\n      \"name\": \"ScopeMode\",\n      \"sha256\": \"c86f2a706e1ffd53a7b38377f738ed037aca6a1b7946295f6e520057676b78ee\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_context_definition\",\n      \"name\": \"_names\",\n      \"sha256\": \"8322d601504e42b6d95ee20ff75c3110da718896ce852c78fe09e16f6e734a2b\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_context_definition\",\n      \"name\": \"ResourceScope\",\n      \"sha256\": \"146f5c3b84333a2ead5b7ee518a28ff7110fc90cfb12b191f491505a4b419c88\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_context_definition\",\n      \"name\": \"Principal\",\n      \"sha256\": \"d6567f0e33504dab0521bb30faba7082966a38ffb72bde71186c64eb19de12cf\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_context_definition\",\n      \"name\": \"ResourcePermission\",\n      \"sha256\": \"091b8c7a207cf6d9230c68aa5892939d7d76c851f8753483358b893c54cacde5\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"_Binding\",\n      \"sha256\": \"425042d2b7a475dd19cbad0a23f8d776b9eeb13047ebed1dbb5810878d36dc7d\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"_call\",\n      \"sha256\": \"3092fc1ae343a5ce460cc7a0783133296c759615b1de5f5df742c3092ad1452e\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"get_access_context\",\n      \"sha256\": \"f6fef207b680732d67790118609994e639120773f8e56c3ba9666ea05d6855f9\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"_validate_extra\",\n      \"sha256\": \"5491351af3d48798a93c9e2c464f458bdaa395645a3a683e62fd2a298ac421c4\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"PolicyRoute\",\n      \"sha256\": \"542f9bf1b5606d437b941144e96938acefa2e2a49a1fc63d94593f8541afd17f\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"PolicyRouter\",\n      \"sha256\": \"325f3eec4bc130918cf1e24e0c2e79477b7076a0963034ebd680faa262f43fc3\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"policy_registry\",\n      \"sha256\": \"13f0c0938b1ad4cb01f77258324f5ae2a54cc2167106ca50c2262c57aa502e86\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"unchanged_routing_definition\",\n      \"name\": \"create_policy_app\",\n      \"sha256\": \"c2988ec64d0acffc39906b0e308792ffaf62fff26ff14b2efbec4b4807df2e6c\",\n      \"byte_equal\": true\n    },\n    {\n      \"check\": \"authorize_all_statements_except_empty_condition_ast_equal\",\n      \"passed\": true,\n      \"preserved\": [\n        \"context-valid\",\n        \"policy-version\",\n        \"principal-kind\",\n        \"tenant\",\n        \"scopes\",\n        \"base-permission-lookup\",\n        \"resource-denial-response\",\n        \"field-gate\"\n      ]\n    },\n    {\n      \"check\": \"ast_parse_and_in_memory_compile_without_exec\",\n      \"passed\": true,\n      \"files\": [\n        \"clearledger/server/app/api_contracts/context.py\",\n        \"clearledger/server/app/api_contracts/routing.py\",\n        \"clearledger/server/tests/test_named_contract_receipt_permission.py\"\n      ]\n    },\n    {\n      \"check\": \"new_field_defaults_source\",\n      \"passed\": true,\n      \"defaults\": {\n        \"AccessContext.database_permissions\": \"()\",\n        \"AccessContext.receipt_read_binding\": \"None\",\n        \"RoutePolicy.accepted_database_authority_kinds\": \"frozenset()\"\n      }\n    }\n  ],\n  \"caller_trace\": [\n    {\n      \"path\": \"clearledger/server/app/product_api/access.py\",\n      \"line\": 146,\n      \"source\": \"AccessContext(principal, str(cid), POLICY_VERSION, token.scopes, permissions, valid=True)\"\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_api_contracts_context.py\",\n      \"line\": 13,\n      \"source\": \"AccessContext(\\n        principal, \\\"company-a\\\", \\\"policy-1\\\", scopes if scopes is not None else {\\\"documents.read\\\"},\\n        (ResourcePermission(\\\"document\\\", \\\"read\\\", resources or ResourceScope.all(),\\n                            fields or ResourceScope.all()),), valid=valid,\\n    )\"\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_api_contracts_context.py\",\n      \"line\": 108,\n      \"source\": \"AccessContext({\\\"id\\\": \\\"admin\\\", \\\"is_superadmin\\\": True}, \\\"company-a\\\", \\\"policy-1\\\")\"\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_policy_lifespan_compatibility.py\",\n      \"line\": 25,\n      \"source\": \"AccessContext(Principal(PrincipalKind.PARTNER, \\\"subject\\\", \\\"client\\\", \\\"install\\\", \\\"grant\\\"),\\n                         \\\"tenant-a\\\", \\\"policy-1\\\", {\\\"documents.read\\\"},\\n                         (ResourcePermission(\\\"document\\\", \\\"read\\\", ResourceScope.selected([\\\"a\\\"]),\\n                                             ResourceScope.selected([\\\"title\\\"])),), valid=True)\"\n    }\n  ],\n  \"authored_tests\": {\n    \"path\": \"clearledger/server/tests/test_named_contract_receipt_permission.py\",\n    \"functions\": 25,\n    \"names\": [\n      \"test_default_empty_policies_preserve_historical_resource_gate\",\n      \"test_historical_metadata_literal_is_unchanged_and_opt_in_is_explicit\",\n      \"test_named_kind_cannot_be_declared_for_other_resources_actions_or_actors\",\n      \"test_declaration_without_evidence_preserves_empty_resource_denial\",\n      \"test_defaults_preserve_immutable_copies_and_existing_selection_identity\",\n      \"test_only_matching_named_opt_in_evidence_admits_synthetic_empty_read\",\n      \"test_evidence_without_policy_declaration_and_r3_metadata_policy_deny\",\n      \"test_every_current_binding_dimension_is_independent_and_cannot_be_substituted\",\n      \"test_current_policy_version_match_does_not_hide_stale_evidence\",\n      \"test_named_evidence_never_replaces_field_gate\",\n      \"test_route_kind_gate_is_not_replaced_by_matching_evidence\",\n      \"test_receipt_evidence_does_not_extend_any_other_resource\",\n      \"test_receipt_evidence_cannot_authorize_other_contract_actions\",\n      \"test_selector_cannot_spend_receipt_authority\",\n      \"test_existing_selector_remains_limited_by_base_scope_with_evidence_present\",\n      \"test_context_selection_and_intersection_never_transfer_receipt_authority\",\n      \"test_exact_frozen_receipt_classes_and_copied_collections\",\n      \"test_binding_malformed_values_are_not_coerced\",\n      \"test_permission_malformed_values_and_untyped_evidence_fail_closed\",\n      \"test_permission_binding_principal_and_evidence_subclasses_fail_closed\",\n      \"test_native_or_public_principal_cannot_be_receipt_evidence\",\n      \"test_uuid_subclass_and_resource_permission_substitution_are_rejected\",\n      \"test_incomplete_principal_cannot_produce_receipt_evidence\",\n      \"test_malformed_exact_class_object_cannot_pass_the_named_guard\",\n      \"test_empty_exact_class_object_and_malformed_current_generation_fail_closed\"\n    ],\n    \"executed\": false,\n    \"helpers\": [\n      \"tests.test_api_contracts_context.context\",\n      \"tests.test_api_contracts_http.contract\",\n      \"tests.test_api_contracts_http.fixture_api\"\n    ]\n  },\n  \"artifact_sha256\": [\n    {\n      \"path\": \"clearledger/server/app/api_contracts/context.py\",\n      \"sha256\": \"f39dba78cab8fad9572a3f974b046ee8d134520ed5c83173b887902a0928bb62\"\n    },\n    {\n      \"path\": \"clearledger/server/app/api_contracts/routing.py\",\n      \"sha256\": \"66ae09a5155af33add8810f677ac156ef50eda1b41b206694694547c210d0aa4\"\n    },\n    {\n      \"path\": \"clearledger/server/tests/test_named_contract_receipt_permission.py\",\n      \"sha256\": \"9b9fa4f565b19e1aabb51de9f0a57ec549e13b667f558ebef8ac052edbf83dc2\"\n    },\n    {\n      \"path\": \"clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.md\",\n      \"sha256\": \"c280bd18dccff12ff964b941f7de9c77499ef3162162a3092a553185bbfad064\"\n    }\n  ],\n  \"old_policy_evidence\": \"Declaration defaults empty; no existing route/constructor/resolver changed; old metadata literal authored test, unchanged PolicyRoute selector and ResourceScope/ResourcePermission definitions\",\n  \"unknowns\": [\n    \"schema handoff and next ordinal remain ROOT-owned; 0004 not reserved\",\n    \"receipt SQL/issuance/current eligibility and independent current binding population\",\n    \"reviewed list/detail/parent opt-in; R3 stays base-only\",\n    \"scoped B writer closure; global F not selected\",\n    \"independent review and runtime validation\"\n  ]\n}\n",
+    "report_md_raw": "# H01: named contract receipt permission\n\nSOURCE prerequisite на базе `675654298f9a7cde30f3ab8097935478bb534088`, ветка\n`MagLook/contract-receipt-policy`. Runtime AUTHOR0: приложения, helpers и тесты\nне запускались. Это не разрешение CREATE и не доказательство writer closure.\nЦель полного пакета 20M11 сохраняет delegated user и service, 17 операций.\nВыбранное ROOT направление B требует отдельного доказательства scoped locks;\nглобальный F не выбран. Schema ordinal, SQL, issuance и production routes здесь\nне меняются; `0004` не резервируется.\n\n## Frozen source contract\n\nВсе новые типы определены в `api_contracts/context.py`; exports package не\nменяются. ROOT подтвердил независимый binding через blocking orchestration ask.\n\n| Тип | Frozen поля / допустимые значения |\n|---|---|\n| `DatabaseAuthorityKind` | единственный enum member `PARTNER_CONTRACT_RECEIPT_V1 = partner-contract-receipt-v1` |\n| `PartnerContractReceiptEvidence` | единственный enum member `CURRENT_ELIGIBLE_RECEIPT_EXISTS` |\n| `PartnerContractReceiptBinding` | `app_id: UUID`, `create_profile_id: UUID`, `policy_generation: int > 0`; exact UUID/int, bool/string/subclass отвергаются |\n| `DatabaseResourcePermission` | `authority_kind`, `company_id: str`, exact frozen `principal: Principal`, `policy_version: str`, exact `binding`, exact `evidence`, `resource_type='contracts'`, `action='read'` |\n| `AccessContext` добавления | `database_permissions: tuple[DatabaseResourcePermission, ...] = ()`; независимый `receipt_read_binding: PartnerContractReceiptBinding \\| None = None` |\n| `RoutePolicy` добавление | `accepted_database_authority_kinds: frozenset[DatabaseAuthorityKind] = frozenset()` |\n\nPermission связывает company, kind/subject/client/install/original grant из\nPrincipal, policy version и app/profile/current generation. В ней нет Contract\nUUID/allowset, SQL/callback или trusted bool. Enum evidence означает конкретный\nположительный server-produced current EXISTS result; **сам enum не доказывает\nисполнение SQL**. None/negative/no eligible receipt означает отсутствие evidence.\n\n`authorize` меняет только EMPTY/UNINITIALIZED gate: требуется объявленный exact\nkind и полное совпадение permission с независимыми текущими полями контекста.\nСтарые context-valid/version/kind/tenant/OAuth и field gates сохраняются.\nSET/ALL не меняются; base independently approved доступ не зависит от receipt.\nOpt-in декларация допустима только для private contracts/read с contracts:read\nи PARTNER/SERVICE. Новых production деклараций нет. Metadata key\n`databaseAuthorityKinds` выводится только при непустом opt-in; для старых policy\nсловарь сохраняет все прежние ключи/значения.\n\n`intersect` сохраняет только одинаковую authority обеих сторон и одинаковый\nindependent binding; иначе receipt часть исчезает. `select` удаляет receipt\npermission выбранного resource/action. Исходный PolicyRoute selector по-прежнему\nпроверяет base.contains(selection.ids) до select и не принимает receipt UUID.\nResourceScope/ResourcePermission/Principal/_names сохранены byte-exact как\nотдельные definitions, включая прежние exact checks. Сам context.py изменён;\nего byte equality не заявляется.\n\n## Фактический caller trace\n\n`product_api.app._policy` создаёт все существующие product RoutePolicy без\ndatabase-authority opt-in. `access.resolve` проверяет current verified token,\nOAuth/kind и base resource grants, затем строит Principal и AccessContext.\nDelegated user отображается в `PrincipalKind.PARTNER`, machine в SERVICE;\nnative USER не подменяет ни одного из них. Единственный production constructor\nAccessContext находится в `product_api/access.py`; ещё два constructor helpers\nнаходятся в `test_api_contracts_context.py` и\n`test_policy_lifespan_compatibility.py`.\n\n`PolicyRoute.guarded` вызывает resolver → authorize → tenant selector → resource\nselector → повторный authorize → handler. `Query` использует отдельную session,\nпоэтому данные resolver после quota await не доказывают текущую SQL authority.\nR3 `Query.contract_type_metadata` вызывает прежние `conditions('contracts')`;\nэти функции и `contract_domain` остаются исходными.\n\n## Следующие владельцы и непроверенное\n\nВ исходном AccessContext нет app/profile/generation. Verifier имеет app_id,\nно `access.resolve` его не переносит; current create profile/generation/receipt\nissuance ещё отсутствуют. Добавленные поля остаются None/empty на всех прежних\nconstructor calls. Новый typed binding не должен заполняться из HTTP,\nclaims клиента, serialized bearer или предварительного EXISTS без live checks.\nНи один существующий resolver не начинает выдавать receipt permission этим diff.\n\nSQL owner обязан заново проверить current identity, profile/allowset, все\ncreated refs и ceilings, original grant и eligibility в той же query transaction\nпод reviewed B guards. Одно предварительное EXISTS не заменяет коррелированный\npredicate списка/detail/count/replay; никаких receipt UUID arrays в Python.\nList/detail/parent opt-in назначается отдельным reviewed owner. Selectors,\nR3 metadata, files/documents, foreign CP и другие resource types receipt не\nразрешает. Положительный synthetic guard не доказывает наличие durable receipt.\n\nRuntime review/изолированное исполнение принадлежат ROOT; текущий результат\nограничен source diff, authored tests, AST/JSON/compile/hash evidence.\nТочный manifest base/current SHA256, caller line trace и AST-инварианты находятся\nв соседнем JSON. Новый единственный test module переиспользует текущие helpers\n`context`, `contract`, `fixture_api`; positive cases synthetic и только для\ncommon guard, production R3/list/detail/query authority ими не доказывается.\nFreeze commit передаётся точным HEAD в `worker_done`; push/PR/merge/deploy нет.\n",
+    "authored_case_inventory_computed_from_frozen_source_now": {
+      "functions": 25,
+      "static_cases": 132,
+      "inventory": [
+        {
+          "name": "test_default_empty_policies_preserve_historical_resource_gate",
+          "line_start": 49,
+          "line_end": 65,
+          "static_cases": 8,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            },
+            {
+              "names": "'resources,allowed'",
+              "source_values": [
+                "(ResourceScope.all(), True)",
+                "(ResourceScope.selected(['a']), True)",
+                "(ResourceScope.empty(), False)",
+                "(ResourceScope(), False)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_historical_metadata_literal_is_unchanged_and_opt_in_is_explicit",
+          "line_start": 68,
+          "line_end": 74,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_named_kind_cannot_be_declared_for_other_resources_actions_or_actors",
+          "line_start": 77,
+          "line_end": 90,
+          "static_cases": 16,
+          "parameters_source_only": [
+            {
+              "names": "'change'",
+              "source_values": [
+                "{'accepted_database_authority_kinds': {'partner-contract-receipt-v1'}}",
+                "{'accepted_database_authority_kinds': {True}}",
+                "{'accepted_database_authority_kinds': {'other-authority'}}",
+                "{'resource_type': 'documents'}",
+                "{'resource_type': 'objects'}",
+                "{'resource_type': 'counterparties'}",
+                "{'resource_type': 'equipment'}",
+                "{'resource_type': 'contract_types'}",
+                "{'resource_type': 'source_file'}",
+                "{'action': 'download'}",
+                "{'action': 'create'}",
+                "{'action': 'metadata'}",
+                "{'accepted_kinds': {PrincipalKind.USER}}",
+                "{'accepted_kinds': {PrincipalKind.PUBLIC}}",
+                "{'tenant_required': False}",
+                "{'required_scopes': {'documents.read'}}"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_declaration_without_evidence_preserves_empty_resource_denial",
+          "line_start": 93,
+          "line_end": 100,
+          "static_cases": 4,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            },
+            {
+              "names": "'resources'",
+              "source_values": [
+                "ResourceScope.empty()",
+                "ResourceScope()"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_defaults_preserve_immutable_copies_and_existing_selection_identity",
+          "line_start": 103,
+          "line_end": 111,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_only_matching_named_opt_in_evidence_admits_synthetic_empty_read",
+          "line_start": 114,
+          "line_end": 123,
+          "static_cases": 4,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            },
+            {
+              "names": "'resources'",
+              "source_values": [
+                "ResourceScope.empty()",
+                "ResourceScope()"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_evidence_without_policy_declaration_and_r3_metadata_policy_deny",
+          "line_start": 126,
+          "line_end": 134,
+          "static_cases": 2,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_every_current_binding_dimension_is_independent_and_cannot_be_substituted",
+          "line_start": 137,
+          "line_end": 169,
+          "static_cases": 28,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            },
+            {
+              "names": "'dimension'",
+              "source_values": [
+                "'tenant'",
+                "'principal'",
+                "'actor-kind'",
+                "'client'",
+                "'install'",
+                "'grant'",
+                "'app'",
+                "'profile'",
+                "'generation'",
+                "'policy'",
+                "'missing-binding'",
+                "'missing-evidence'",
+                "'scopes'",
+                "'invalid-context'"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_current_policy_version_match_does_not_hide_stale_evidence",
+          "line_start": 172,
+          "line_end": 177,
+          "static_cases": 2,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_named_evidence_never_replaces_field_gate",
+          "line_start": 180,
+          "line_end": 192,
+          "static_cases": 10,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            },
+            {
+              "names": "'fields,allowed'",
+              "source_values": [
+                "(ResourceScope.all(), True)",
+                "(ResourceScope.selected(['number']), True)",
+                "(ResourceScope.selected(['secret']), False)",
+                "(ResourceScope.empty(), False)",
+                "(ResourceScope(), False)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_route_kind_gate_is_not_replaced_by_matching_evidence",
+          "line_start": 195,
+          "line_end": 201,
+          "static_cases": 2,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_receipt_evidence_does_not_extend_any_other_resource",
+          "line_start": 204,
+          "line_end": 211,
+          "static_cases": 7,
+          "parameters_source_only": [
+            {
+              "names": "'resource'",
+              "source_values": [
+                "'objects'",
+                "'equipment'",
+                "'counterparties'",
+                "'documents'",
+                "'source_file'",
+                "'contract_types'",
+                "'foreign-counterparty'"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_receipt_evidence_cannot_authorize_other_contract_actions",
+          "line_start": 214,
+          "line_end": 219,
+          "static_cases": 4,
+          "parameters_source_only": [
+            {
+              "names": "'action'",
+              "source_values": [
+                "'create'",
+                "'edit'",
+                "'download'",
+                "'metadata'"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_selector_cannot_spend_receipt_authority",
+          "line_start": 222,
+          "line_end": 231,
+          "static_cases": 4,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.PARTNER",
+                "PrincipalKind.SERVICE"
+              ]
+            },
+            {
+              "names": "'resources'",
+              "source_values": [
+                "ResourceScope.empty()",
+                "ResourceScope()"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_existing_selector_remains_limited_by_base_scope_with_evidence_present",
+          "line_start": 234,
+          "line_end": 244,
+          "static_cases": 3,
+          "parameters_source_only": [
+            {
+              "names": "'resources,identifier,allowed'",
+              "source_values": [
+                "(ResourceScope.all(), 'a', True)",
+                "(ResourceScope.selected(['a']), 'a', True)",
+                "(ResourceScope.selected(['a']), 'outside', False)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_context_selection_and_intersection_never_transfer_receipt_authority",
+          "line_start": 247,
+          "line_end": 259,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_exact_frozen_receipt_classes_and_copied_collections",
+          "line_start": 262,
+          "line_end": 278,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_binding_malformed_values_are_not_coerced",
+          "line_start": 281,
+          "line_end": 289,
+          "static_cases": 10,
+          "parameters_source_only": [
+            {
+              "names": "'change'",
+              "source_values": [
+                "{'app_id': str(APP_ID)}",
+                "{'app_id': None}",
+                "{'create_profile_id': str(PROFILE_ID)}",
+                "{'create_profile_id': None}",
+                "{'policy_generation': True}",
+                "{'policy_generation': False}",
+                "{'policy_generation': 0}",
+                "{'policy_generation': -1}",
+                "{'policy_generation': '7'}",
+                "{'policy_generation': 7.0}"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_permission_malformed_values_and_untyped_evidence_fail_closed",
+          "line_start": 292,
+          "line_end": 302,
+          "static_cases": 15,
+          "parameters_source_only": [
+            {
+              "names": "'change'",
+              "source_values": [
+                "{'authority_kind': 'partner-contract-receipt-v1'}",
+                "{'authority_kind': 'other-kind'}",
+                "{'authority_kind': True}",
+                "{'evidence': True}",
+                "{'evidence': 'current-eligible-receipt-exists'}",
+                "{'evidence': None}",
+                "{'resource_type': 'documents'}",
+                "{'resource_type': 'contract'}",
+                "{'action': 'download'}",
+                "{'action': 'create'}",
+                "{'company_id': ''}",
+                "{'policy_version': ''}",
+                "{'binding': None}",
+                "{'binding': {'app_id': APP_ID}}",
+                "{'principal': {'subject': 'subject'}}"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_permission_binding_principal_and_evidence_subclasses_fail_closed",
+          "line_start": 305,
+          "line_end": 329,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_native_or_public_principal_cannot_be_receipt_evidence",
+          "line_start": 332,
+          "line_end": 335,
+          "static_cases": 2,
+          "parameters_source_only": [
+            {
+              "names": "'kind'",
+              "source_values": [
+                "PrincipalKind.USER",
+                "PrincipalKind.PUBLIC"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_uuid_subclass_and_resource_permission_substitution_are_rejected",
+          "line_start": 338,
+          "line_end": 348,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_incomplete_principal_cannot_produce_receipt_evidence",
+          "line_start": 351,
+          "line_end": 355,
+          "static_cases": 3,
+          "parameters_source_only": [
+            {
+              "names": "'field'",
+              "source_values": [
+                "'client_id'",
+                "'installation_id'",
+                "'grant_id'"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "test_malformed_exact_class_object_cannot_pass_the_named_guard",
+          "line_start": 358,
+          "line_end": 367,
+          "static_cases": 1,
+          "parameters_source_only": []
+        },
+        {
+          "name": "test_empty_exact_class_object_and_malformed_current_generation_fail_closed",
+          "line_start": 370,
+          "line_end": 380,
+          "static_cases": 1,
+          "parameters_source_only": []
+        }
+      ],
+      "executed": false,
+      "collected": false
+    }
+  },
+  "f1": {
+    "finding_id": "F1",
+    "severity": "P2 SOURCE exact-type contract deficiency",
+    "review_pins": [
+      {
+        "path": "/srv/projects/preview/contract-receipt-policy-review-20261101/review.md",
+        "bytes": 5121,
+        "sha256": "0003cdd5e4927623cc833abdeaed463fe309aafa46ee2af8494fa3f15da9f73b",
+        "read_only": true
+      },
+      {
+        "path": "/srv/projects/preview/contract-receipt-policy-review-20261101/review.json",
+        "bytes": 37597,
+        "sha256": "a12e4bf933d72311472d128298bb9ac15ae2a4f563446e7ddac6524e8942f7b0",
+        "read_only": true
+      }
+    ],
+    "original_review_finding": [
+      {
+        "id": "F1",
+        "severity": "P2",
+        "qualification": "Source-level exact-type hardening defect; no demonstrated production or HTTP exploit; blocks unconditional exact-type acceptance of this prerequisite only.",
+        "trigger": "Server builds exact AccessContext/Principal, but subject (or another current identity string) is a str subclass with nonempty different text, __eq__ returning True and explicit str.__hash__; valid matching named evidence remains an exact DatabaseResourcePermission with exact strings. Source shape only, never instantiated by reviewer. Second independent shape: exact named RoutePolicy with exact contracts resource and a hashable str-subclass action whose text is create but equality returns True, with otherwise well-formed current context/evidence; no target object constructed.",
+        "before": "Base EMPTY/UNINITIALIZED permission always denied; existing _names accepted str subclasses but had no receipt-evidence equality bypass.",
+        "actual_trace": "_names accepts isinstance(str); Principal and AccessContext retain original scalar strings. matches validates evidence-side strings exactly, validates only current outer Principal and kind, then uses overloaded == for company/policy/Principal field equality. Python subtype equality can report different current subject equal to exact evidence subject, so the new named gate can admit otherwise-empty authority. The same asymmetry exists for policy resource/action: routing.py:41–56 calls permissive _names then tuple equality against contracts/read; context.permission:234–237 and matches:188 compare these scalar labels by equality. A hostile action label can therefore be treated as read while metadata:78 retains that original label.",
+        "consequence": "Exact outer frozen classes do not establish exact current company/subject/client/install/original-grant/version binding for malformed server-built context. No current resolver emits this authority; trust-boundary reachability from HTTP is unproven. A malformed server-authored named policy may similarly masquerade another resource/action as contracts/read; no currently registered route was changed.",
+        "evidence": [
+          "clearledger/server/app/api_contracts/context.py:30-36",
+          "clearledger/server/app/api_contracts/context.py:86-108",
+          "clearledger/server/app/api_contracts/context.py:159-193",
+          "clearledger/server/app/api_contracts/context.py:207-223",
+          "clearledger/server/app/api_contracts/routing.py:107-124",
+          "clearledger/server/app/api_contracts/context.py:234-245",
+          "clearledger/server/app/api_contracts/routing.py:41-56"
+        ],
+        "proposed_acceptance": "Within named matches only, require exact nonempty str current company_id/policy_version and current Principal subject/client_id/installation_id/grant_id before equality; retain legacy classes/default behavior. Source-author negative contracts should cover each scalar str subclass with hostile equality/hash as well as existing exact-class malformed cases; ROOT owns any later isolated execution. For nonempty named policy only, also require exact str resource_type/action before the contracts/read constraint; include source-authored hostile subclass cases for both labels.",
+        "runtime_proof": false
+      }
+    ],
+    "change_status": "AUTHOR_SOURCE_CORRECTION_PENDING_SAME_INDEPENDENT_REVIEWER_AND_ROOT_RUNTIME_DECISION",
+    "current_fields_exact_nonempty": [
+      "company_id",
+      "policy_version",
+      "principal.subject",
+      "principal.client_id",
+      "principal.installation_id",
+      "principal.grant_id"
+    ],
+    "direct_match_label_types": "type(resource_type) is str and type(action) is str before comparison",
+    "policy_label_types": "exact str resource_type/action only if named opt-in nonempty, before contracts/read tuple comparison",
+    "legacy_global_validation_changed": false,
+    "hostile_objects_instantiated_during_authoring": false,
+    "http_exploit_or_runtime_failure_proven": false
+  },
+  "r3_qualification": {
+    "actual_metadata_operation": "/contract-types / getContractTypeMetadata",
+    "actual_policy_resource_action": [
+      "contracts",
+      "read"
+    ],
+    "current_default_empty_safe": true,
+    "intrinsic_metadata_hard_ban": false,
+    "common_seam_uses_owner_path_operation_id": false,
+    "future_ownership": "Reviewed list/detail/parent policy owner and separate resolver/SQL owner must explicitly exclude R3 and retain its base-only admission/predicate",
+    "existing_negative_test_scope": "Only policy without opt-in; not a universal ban on future metadata opt-in",
+    "product_access_queries_routes_changed": false
+  }
+}

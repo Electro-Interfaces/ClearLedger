@@ -10,7 +10,9 @@ from fastapi.routing import APIRoute
 from starlette.concurrency import run_in_threadpool
 from starlette.routing import Mount
 
-from .context import AccessContext, PrincipalKind, ResourceScope, ScopeMode, _names
+from .context import (
+    AccessContext, DatabaseAuthorityKind, PrincipalKind, ResourceScope, ScopeMode, _names,
+)
 
 
 class PolicyConfigurationError(ValueError):
@@ -34,12 +36,25 @@ class RoutePolicy:
     tenant_required: bool
     security_scheme: str | None = None
     required_fields: frozenset[str] = frozenset()
+    accepted_database_authority_kinds: frozenset[DatabaseAuthorityKind] = frozenset()
 
     def __post_init__(self):
         _names([self.owner, self.resource_type, self.action, self.policy_version])
         object.__setattr__(self, "accepted_kinds", frozenset(self.accepted_kinds))
         object.__setattr__(self, "required_scopes", _names(self.required_scopes))
         object.__setattr__(self, "required_fields", _names(self.required_fields))
+        object.__setattr__(self, "accepted_database_authority_kinds",
+                           frozenset(self.accepted_database_authority_kinds))
+        if any(type(kind) is not DatabaseAuthorityKind
+               for kind in self.accepted_database_authority_kinds):
+            raise PolicyConfigurationError("Explicit database authority kind required")
+        if self.accepted_database_authority_kinds and (
+                type(self.resource_type) is not str or type(self.action) is not str
+                or (self.resource_type, self.action) != ("contracts", "read")
+                or not self.tenant_required
+                or not self.accepted_kinds <= {PrincipalKind.PARTNER, PrincipalKind.SERVICE}
+                or "contracts:read" not in self.required_scopes):
+            raise PolicyConfigurationError("Receipt authority requires a private contracts-read policy")
         if (not self.accepted_kinds
                 or any(type(kind) is not PrincipalKind for kind in self.accepted_kinds)
                 or type(self.tenant_required) is not bool):
@@ -59,13 +74,18 @@ class RoutePolicy:
         return self.accepted_kinds == {PrincipalKind.PUBLIC}
 
     def metadata(self) -> dict:
-        return {
+        metadata = {
             "owner": self.owner, "principalKinds": sorted(kind.value for kind in self.accepted_kinds),
             "resourceType": self.resource_type, "action": self.action,
             "scopes": sorted(self.required_scopes), "policyVersion": self.policy_version,
             "tenantRequired": self.tenant_required, "fields": sorted(self.required_fields),
             "securityScheme": self.security_scheme,
         }
+        # Keep the existing metadata keys and values for default-empty policies.
+        if self.accepted_database_authority_kinds:
+            metadata["databaseAuthorityKinds"] = sorted(
+                kind.value for kind in self.accepted_database_authority_kinds)
+        return metadata
 
 
 @dataclass(frozen=True)
@@ -97,7 +117,9 @@ def authorize(context: AccessContext, policy: RoutePolicy) -> None:
     if not policy.required_scopes <= context.scopes:
         raise HTTPException(403, "Required scope is not granted")
     permission = context.permission(policy.resource_type, policy.action)
-    if permission.resources.mode in (ScopeMode.EMPTY, ScopeMode.UNINITIALIZED):
+    if (permission.resources.mode in (ScopeMode.EMPTY, ScopeMode.UNINITIALIZED)
+            and not context.permits_database_authority(
+                policy.accepted_database_authority_kinds, policy.resource_type, policy.action)):
         raise HTTPException(403, "Resource access is not granted")
     if policy.required_fields and not permission.fields.contains(policy.required_fields):
         raise HTTPException(403, "Field access is not granted")
