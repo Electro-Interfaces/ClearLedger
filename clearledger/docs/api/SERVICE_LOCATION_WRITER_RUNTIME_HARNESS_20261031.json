@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "SOURCE_ONLY_FUTURE_ROOT_HARNESS_NOTRUN",
+  "status": "SOURCE_DIAGNOSTICS_ONLY_NOT_EXECUTION_APPROVED",
   "base_commit": "3ffe5ba27e694da4924df3a360fbb9bb02f9bb76",
   "FinalCompositionRepinPending": true,
   "source_freeze": {
@@ -28,9 +28,8 @@
     "fixture_source_owned_by": "A only; read/hash/AST/in-memory compile, no copy or modification by B",
     "final_composition": "FinalCompositionRepinPending; immutable PR83 exact snapshot remains enforced"
   },
-  "execution_owner": "ROOT alone; worker and coordinator no runtime",
+  "execution_owner": "ROOT alone after separate kernel/external deadline/source acceptance; current artifact NOT_EXECUTION_APPROVED",
   "ownership_B_exact_new_files": [
-    "clearledger/server/tests/service_location_writer_convergence_approved.py",
     "clearledger/docs/api/SERVICE_LOCATION_WRITER_RUNTIME_HARNESS_20261031.md",
     "clearledger/docs/api/SERVICE_LOCATION_WRITER_RUNTIME_HARNESS_20261031.json"
   ],
@@ -5049,6 +5048,56 @@
     {
       "case": "unexpected dotenv/.vault entry must fail before pre-import source/SITE hash content read; checkedset reused",
       "runtime": "NOTRUN"
+    },
+    {
+      "case": "closed read allowlist outside source/SITE/stdlib/explicit-input/output",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "raw posix.open, saved os.open/builtins/io aliases and FileIO provenance",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "dir_fd/int/O_DIRECTORY/O_PATH/implicit directory and stdio descriptors",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "native FD read/reuse and exact lease read-only flock capability",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "native thread creation incl start_joinable_thread and profile/thread hook replacement",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "alternative builtin.__call__ dispatch: PARTIAL, ROOT observation not reproduced",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "deadline covers preflight/cleanup/postflight/evidence; local-only, external harddeadline mandatory",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "describe exception after provisional success resets ok=False",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "JUnit exact classname/name/order/unique80/totals and nested/extra rejection",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
+    },
+    {
+      "case": "missing/partial final evidence or external kernel proof must fail/UNKNOWN",
+      "runtime": "NOTRUN",
+      "scope": "SOURCE_DIAGNOSTICS_ONLY; no complete native closure claimed"
     }
   ],
   "sendmsg16_metadata_design": [
@@ -5088,7 +5137,9 @@
     "HTTP_SSH_Docker_Node_browser_build_install": "NOTRUN",
     "global_acceptance": "NOTRUN",
     "green": false,
-    "source_describe": "NOTRUN"
+    "source_describe": "NOTRUN",
+    "kernel_namespace_external_supervisor": "NOTRUN",
+    "candidate_attack_negative_controls": "NOTRUN"
   },
   "preserved_limits": [
     {
@@ -5510,7 +5561,7 @@
       "Own independent21 tables458 columns46FK24orderedSQL match frozen A constants",
       "Exact80 AST-derived IDs in code/report equal source parametrize/order",
       "Full original PR83 app504/tests396/schema24 counts/digests match",
-      "7 protected PR83 files Git diff zero; only3 own new files",
+      "7 protected PR83 files Git diff zero; current B scope exactly two existing reports",
       "Source-only describe call graph excludes actual framework/network paths",
       "Every enumerated entry forbidden-path check precedes read/hash; source_tree reuses checkedset",
       "Original61+16 version constants retained; no distribution import/execute",
@@ -5519,12 +5570,641 @@
     ]
   },
   "file_freeze_sha256": {
-    "clearledger/server/tests/service_location_writer_convergence_approved.py": "1d66daa245d91895e3003ac755ff22f93ea25765b9c249c49481f2c9dc4b08a8",
-    "clearledger/docs/api/SERVICE_LOCATION_WRITER_RUNTIME_HARNESS_20261031.md": "8d1b90d1e8a6d23a85721c5d3b3236b4d503996afe4de84c4a3e1c158b5d1e6f"
+    "clearledger/server/tests/service_location_writer_convergence_approved.py": "c0e76a61bc1e6220c8bbda4e6c89067ec2eb9946110ad6eea88c2c5e10ece187",
+    "clearledger/docs/api/SERVICE_LOCATION_WRITER_RUNTIME_HARNESS_20261031.md": "1e39d0cccd7e162b27502804d549bbc1914c79c76256f6238cb3d621d8b33368"
   },
   "required_UID_before_import": 0,
   "required_EUID_before_import": 0,
   "original_program_canonical_json_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
   "original_program_hash_scope": "Canonical inner original_program object JSON: ensure_ascii=False,sort_keys=True,separators=(comma,colon); not the PR83 report file SHA",
-  "original_PR83_report_file_sha256": "8629c09c9c01c06c84639b7fc432591b010e01bbc8e3d19612e2ecb2d61f25f7"
+  "original_PR83_report_file_sha256": "8629c09c9c01c06c84639b7fc432591b010e01bbc8e3d19612e2ecb2d61f25f7",
+  "fs_hardening_review": {
+    "status": "SOURCE_DIAGNOSTICS_ONLY",
+    "execution_approval": "NOT_EXECUTION_APPROVED",
+    "final_freeze": "INDEPENDENT_FINAL_SOURCE_AST_HASH_VERIFIED_NOTRUN",
+    "current_wave_base_commit": "c348f9f0addefef6653547a3e33978c5c19edb2e",
+    "authority": [
+      "msg_8ce2f7512461",
+      "msg_a4b5fcbd21d0",
+      "msg_8d0309a6f5d1"
+    ],
+    "contract_version": 3,
+    "v1_v2_complete_native_closure_superseded": true,
+    "native_dispatch_coverage": "PARTIAL",
+    "SRC01": "NOT_FULLY_CLOSED",
+    "SRC02": "NOT_FULLY_CLOSED",
+    "scope": "Direct reviewed pinned Python chains addressed; no universal native-code sandbox or OS boundary proved",
+    "parent_helper_only": {
+      "sha256": "1d66daa245d91895e3003ac755ff22f93ea25765b9c249c49481f2c9dc4b08a8",
+      "bytes": 67566,
+      "lines": 1066,
+      "not_child_freeze": true
+    },
+    "reviewed_logic_freeze": {
+      "sha256": "9a670cce66f6eac6a18692519385964aecf8b1cad6265c67b76101d78a7d1d87",
+      "bytes": 86313,
+      "lines": 1459,
+      "runtime": "NOTRUN"
+    },
+    "ROOT_reported_observation": {
+      "source": "msg_ce67ef5bbefa, relay msg_5ab1dd8660fe",
+      "claim": "builtin.__call__ may not produce the same c_call identity",
+      "reproduced_by_B": false,
+      "candidate_attack": "NOT_CREATED_NOTRUN",
+      "native_FD_thread_timer_bypass": "SOURCE_INFERENCE_NOT_VALIDATED_CANDIDATE_EXPLOIT"
+    },
+    "independent_source_preservation": {
+      "test_functions": 25,
+      "exact_ordered_test_ids": 80,
+      "fixture_inputs_hashed": 11,
+      "global_tables": 316,
+      "selected_tables": 21,
+      "columns": 458,
+      "foreign_keys": 46,
+      "ordered_DDL_literal_or_substrings": 24,
+      "app_files": 504,
+      "test_files": 396,
+      "schema_files": 24,
+      "runtime_tools": 77,
+      "original_program_canonical_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+      "runtime": "NOTRUN"
+    },
+    "protected_parent_JSON_objects_unchanged": [
+      "fixture_source_proof",
+      "original77",
+      "expected_ids",
+      "original_program",
+      "original20M11_acceptance",
+      "resource_budget_source_proposal",
+      "preserved_limits",
+      "source_freeze",
+      "runtime_cases"
+    ],
+    "mandatory_external_boundary_before_ANY_mode": {
+      "owner": "ROOT separate independent verifier",
+      "includes_source_describe": true,
+      "implemented_by_this_work": false,
+      "runtime": "NOTRUN",
+      "requirements": [
+        "fresh disposable kernel process/mount/network namespace or reviewed equivalent container",
+        "UID0 only inside isolated boundary",
+        "exact pinned source/SITE/stdlib/interpreter/explicit inputs mounted read-only",
+        "minimal mounts: no host home/vault/env/socket/credentials; read-only root alone does not protect secret reads",
+        "safe stdio and minimal self-only proc view",
+        "separate empty owned writable roots; no Docker socket or host networking",
+        "describe kernel network deny; provision/actual80 only own isolated synthetic PG preserving localhost33547/DB/lease/OIDs",
+        "external supervisor wall-clock <=600s from interpreter start across preflight/execution/cleanup/evidence; terminate only owned execution boundary",
+        "independent before/after source/deps/mount/network/resource/lease/PG/PID/exit evidence"
+      ],
+      "fake_boolean_or_local_receipt_is_kernel_proof": false
+    },
+    "deadline": {
+      "status": "LOCAL_DIAGNOSTIC_ONLY_NOT_AUTHORITATIVE_HARDDEADLINE",
+      "main_first_operation": "install_absolute_deadline",
+      "seconds": 600,
+      "same_checker_all_three_modes": true,
+      "no_disarm_or_reset": true,
+      "fatal_timeout_exit": 124,
+      "fatal_profile_exit": 126,
+      "native_dispatch_and_signal_delivery_limits": "PARTIAL_UNKNOWN",
+      "missing_or_partial_evidence": "FAIL_OR_UNKNOWN",
+      "external_harddeadline_required": true,
+      "runtime": "NOTRUN"
+    },
+    "junit": {
+      "function": "exact_junit80",
+      "root": "testsuites name=pytest tests; one direct suite; any supplied root totals exact",
+      "suite": "testsuite name=pytest; tests80/errors0/failures0/skipped0; exactly80 direct testcase children",
+      "classname": "TEST_FILE.removesuffix(.py).replace(/,.)",
+      "IDs": "TEST_FILE::testcase.name exactly EXPECTED_IDS in order, unique80",
+      "rejects": [
+        "wrong classname/name",
+        "missing/extra/reordered/duplicate case",
+        "bad totals",
+        "failure/error/skipped",
+        "nested suite/case ambiguity"
+      ],
+      "collection_and_execution": "NOTRUN"
+    },
+    "lease_source": {
+      "fixture_external_lease": "os.open(O_RDONLY|O_NOFOLLOW) -> fstat -> os.read(65537) -> os.close",
+      "fixture_has_flock": false,
+      "parent_helper_has_flock": false,
+      "new_locking_introduced": false,
+      "diagnostic_flock_wrapper": "exact registered read-only lease FD and finite approved lock flags; no generic fcntl/ioctl",
+      "availability": "UNKNOWN_NOTRUN"
+    },
+    "availability_risks": [
+      "profile/audit reentrancy and overhead",
+      "importlib open_code/FileIO and native dependency imports",
+      "postflight os.walk/scandir/listdir/readers and metadata probes",
+      "asyncio self-pipe/signals/cleanup",
+      "fatal exit may prevent final JSON",
+      "external mount layout must preserve exact source/interpreter/stdlib/SITE paths"
+    ],
+    "unresolved_gaps": [
+      "complete native c_call dispatch closure not proved",
+      "native extensions can bypass Python audit/profile",
+      "inherited stdio stream/native-method content access not a complete guarded model",
+      "native FS TOCTOU/races need external minimal mounts/read-only isolation",
+      "local timer cannot enforce authoritative wall-clock deadline",
+      "kernel/network/process/mount supervision not implemented by this exact3 package",
+      "final composition repin and independent ROOT source acceptance pending"
+    ],
+    "all_runtime_and_negative_cases": "NOTRUN",
+    "controls_created_or_executed": false,
+    "green": false,
+    "contract": {
+      "path": "/home/mag/orca/workspaces/ecosystem-deploy/parallel-ownership-audit-20261031/docs/api/execution-20261029/parallel-ownership-audit-20261031/core-b02-fs-hardening/FS-CONTRACT.md",
+      "sha256": "c1718e352ce19d097a31cdcfb81628b1053fcd4485535d7de26b6bd4d36da79b",
+      "version": 3,
+      "proposal_path": "/home/mag/orca/workspaces/ecosystem-deploy/parallel-ownership-audit-20261031/docs/api/execution-20261029/parallel-ownership-audit-20261031/core-b02-fs-hardening/BOUNDARY-PROPOSAL-V3.md",
+      "proposal_sha256": "93b0d5532330d53251bb3cf0a84326894da66fac1c9ffd2b7769aac5fa011b75"
+    },
+    "final_helper": {
+      "path": "/home/mag/orca/workspaces/ledger-app/service-location-fs-guard-fix-20261031/clearledger/server/tests/service_location_writer_convergence_approved.py",
+      "composition_path": "clearledger/server/tests/service_location_writer_convergence_approved.py",
+      "sha256": "c0e76a61bc1e6220c8bbda4e6c89067ec2eb9946110ad6eea88c2c5e10ece187",
+      "bytes": 87847,
+      "lines": 1480,
+      "authority": "coordinator msg_f22e11dccb41 relays A msg_7a043ae190a6; independently read/hash/AST/compile in memory",
+      "runtime": "NOTRUN",
+      "local_B_helper_remains_parent_unmodified": true
+    },
+    "logic_to_v3_final_proof": {
+      "method": "In-memory reverse replacement of exactly module/deadline/FS docstrings and one comment reconstructs exact reviewed9a bytes/SHA; no helper exec/import",
+      "reconstructed_sha256": "9a670cce66f6eac6a18692519385964aecf8b1cad6265c67b76101d78a7d1d87",
+      "reconstructed_bytes": 86313,
+      "reconstructed_lines": 1459,
+      "only_docstrings_and_comment_since_logic_freeze": true
+    },
+    "AST_symbol_proof": {
+      "method": "CPython3.13.7 stdlib ast.dump(include_attributes=False) SHA256; in-memory compile without exec/import",
+      "all_existing_top_level_assignments_unchanged": true,
+      "assignment_count": 29,
+      "assignment_AST_sha256": {
+        "SERVER": "7f8fb39de6340a8ec3997fa304e15a196e4f2cbe09bb4e818ba14d982eca3c5b",
+        "ROOT_LEASE_RUN_ID": "bc174b2ab059d5aac18f2664f7e16a5054a526202380b6c42e3c0de96ff77886",
+        "BASE_COMMIT": "8c983929baeb150d6be77e22bc95755a03fee18f138aa332162eba980d5c5865",
+        "PORT": "4c881e7f5028006be1a97f94958c3fd02f36a2e6809777977a14b0974efee2d4",
+        "DATABASE": "8e4da2ef0ddf68b2e5d6b389ec460e908702927c5cf2b92fe502705f9d28847c",
+        "DATABASE_USER": "4f8864bffa8196a576f2a2baffaad3dd281136b9595910c1da7765030345438b",
+        "DATABASE_PASSWORD": "ceb0469620c5f7e79a328e2028453ae7b1970361eb493c34e20f402d8c55d32b",
+        "FIXTURE": "31f8df83d96582c50d5da745908132f17e78bbf3819f831baf8b3686124ab833",
+        "FIXTURE_SHA256": "8a451120bebbf4b57ec1a4e9a6cf626418b8363ab495a9178b1e1e1a16a057a0",
+        "SELF_NAME": "e6f28a67de675b0f837a12c0835d97b49e4c01ec1d7e0f041246cedf98e5969c",
+        "TEST_FILE": "b3e4169fe4ebc4969b79f4f37fa0e07af7614e201788cb677eeaaa2a6bf2e39d",
+        "ORIGINAL_JSON": "0c66ece643cee18660715da5e45ac3bbc469f45d75a303d6075923c8b6e69bf0",
+        "DESCRIBE_OPTIN": "1bd10b30c939fdeb53fedeaa6d6f6ef4a9d40dcdda12c702c05ef1be18960e2f",
+        "ROOT_OPTIN": "50ec335f760278fbddd9ca97242d99baa9a4cf762dc43222c44b0434ed7a7fb6",
+        "TEST_OPTIN": "8dc708cd3f1805c9c41c96275bf028e6ecdba4b798fb74d7d5c73c634fc57af7",
+        "READY_OPTIN": "6e2abe7ab69448870499a97afb756ae71a6f0a6095ba63b693ebd97b3d33e83f",
+        "MAX_FILES": "9af7554eda4a33b8f9ad613dcf7cdbdcca63852334ee7f7eda3b7d381a91d9e9",
+        "MAX_BLOB": "739ea5f50bc042a67268bdec02859fc1cf431abd7535f3f5ab379dcf7b902a1b",
+        "MAX_TREE": "52202f4ac1cbaa3961b4a99ba3e6b0e80027c6a052610c125c1dbfa0c5968a2e",
+        "MAX_SECONDS": "5f436601bf73a8efe82bdfee76d4d4f2b574f4ccb700c7836926ae8d1e5d3ec9",
+        "MAX_CAPTURE_EVENTS": "8e99e77f1e49d11fdf0d221e8b441b13c2352119d4fa3d8516a1bd25c3cb25b9",
+        "LIMIT_SCRATCH": "c8d473d77b78915bcbbeeb32b4da3142c57f910021ff7b833275165bd19b2c78",
+        "MAX_CONNECTIONS": "f95c5d1940a0206434812243777123b857c093cdac6c9306083bbc1b733b1b85",
+        "MAX_CONNECTIONS_TOTAL": "b29dbe6bb7c1d372f27709101953beb58bd4117e744b71f84303139f6710df33",
+        "RUNTIME": "ef444af8bf32e0f7bc755270a2bcf51fa629852c3e0860fdb3e67098623d40aa",
+        "TOOLS": "7e4da00a3f967c307239a8367816e9ffa5cdfdf7e6d8e6bed330f776476d1b83",
+        "SOURCE_TREES": "32d05144a61860eb2b0584a092924ea3b5e84b26a46f124f76cb2c5351380766",
+        "SUPPORT_FILES": "1b823c8321b8d437305b65e473baadcf578ca8c25d6a94e7d9cb75612ec8fc43",
+        "EXPECTED_IDS": "d00d1945e1bd5d8c68498210343a0349ea847d3fa8056912d57b282a97b940fa"
+      },
+      "changed_existing_top_level": {
+        "describe_main": {
+          "parent_AST_sha256": "9afa70aaf841be41819c2bde82ae40404f4ff4fb2ce70f3e16da4cf4a9ccb032",
+          "final_AST_sha256": "5b3760024054bca0c9ea05721560a35ef15b9a5e467b317869ec6e33e46ae66d",
+          "final_line": 1425,
+          "final_end_line": 1476
+        },
+        "install_boundaries": {
+          "parent_AST_sha256": "1cd36389645443b316709191f0ac8c0a621e07c7a229221f1beac53bcf5b936d",
+          "final_AST_sha256": "2ae0af324666d5caa96ccbca6c891d963b2c25d34ac0b15f9a2095f748fc98bb",
+          "final_line": 887,
+          "final_end_line": 1051
+        },
+        "install_describe_boundaries": {
+          "parent_AST_sha256": "8da926286e71a39f71772725ee489781880d77776361efd78825cf1673051946",
+          "final_AST_sha256": "b027abc90b2325d6db9d849d6bc77a4b8deddce81f1213cba0e8f09d5b3e8e2b",
+          "final_line": 1381,
+          "final_end_line": 1422
+        },
+        "main": {
+          "parent_AST_sha256": "9e04fcfbd82799e82d3a6283b66e6442c89caa409eba8aff0b367bafcba923ac",
+          "final_AST_sha256": "d8d2cd39601398a932a7b64347ba65a58b675c15c22e2d60261801f7d960b56e",
+          "final_line": 1258,
+          "final_end_line": 1335
+        },
+        "run_actual80": {
+          "parent_AST_sha256": "0d59e93603f73aac19e5f4bb1464abc35d363968797618928097c4f050cd9f6b",
+          "final_AST_sha256": "4ebe32e03eb4d1600157914eda1840455a8acfad3f74bd41c88edf4ba745a3ab",
+          "final_line": 1179,
+          "final_end_line": 1232
+        },
+        "verify_approval": {
+          "parent_AST_sha256": "bafe6bb0bb07d208ec111417f3325902bad441ba89174caf9014f2178b4bf980",
+          "final_AST_sha256": "001c4323a90b165680564b3a25bcffffbd30fa5cc16e66aff2a13f1e980d6a66",
+          "final_line": 767,
+          "final_end_line": 874
+        },
+        "verify_describe_approval": {
+          "parent_AST_sha256": "2eeb8fbb028679e1c85373af38401abee97cb61ebfd9a499e56dc4251d66d2a6",
+          "final_AST_sha256": "ea720ac8013b6c88272dc1dfccb82be7ce4a8214efa02a806172d4b623b5db30",
+          "final_line": 1338,
+          "final_end_line": 1378
+        }
+      },
+      "added_top_level": {
+        "exact_junit80": {
+          "final_AST_sha256": "2d19e8a9c175f064809dc7f9ea7d17b53eead13d7ed128cc29a001fa25fba0e2",
+          "final_line": 1154,
+          "final_end_line": 1176
+        },
+        "fresh_process_descriptors": {
+          "final_AST_sha256": "1ee3b3457711c601990abdab051a9affaa00f6893c9f1850dd58b02492c592a8",
+          "final_line": 276,
+          "final_end_line": 302
+        },
+        "install_absolute_deadline": {
+          "final_AST_sha256": "e05d793e330fff55c974740f88f28c5c259c4f53fb60719cdba26b5cb7d5db01",
+          "final_line": 305,
+          "final_end_line": 327
+        },
+        "install_filesystem_boundary": {
+          "final_AST_sha256": "9ec59b3787ef0bf0386b118e3b7a012b6803aa62f850d2e64afa2cc850572fe2",
+          "final_line": 330,
+          "final_end_line": 764
+        }
+      },
+      "unchanged_existing_top_level": {
+        "async_schema_stage": "ec6a628f9af8f3c6c8c74a1f2ceaecdfc6381ce01b8acad3f856868069bd6f45",
+        "bounded_tree": "469a157d14cb33b4e512ca8be3ad70447226c3ca2a7d86da8ab073c6670f8a48",
+        "canonical_sha": "2878f9ffbbde9f8aec9f89461bd5948b01f9fe37f0458c5a0ea9b90c681639c5",
+        "cleanup_owned": "1c394aaabcc7c0116f7805df74fb8ef8ec963e69826f528dc5283b36603ff927",
+        "fixture_approval": "bcd67ef43dec59a5991d86ffeb1618cd5f57eb6ccd399bbb5eb6e746d5f4f0a1",
+        "guard_private_roots": "48fd3686542c37bec684948799fcfd4c97be0e47f0ec895b060a21a55b44c5c2",
+        "install_import_boundary": "61a70dfc830203db814e9b1f8a6b59f067438a1b3e4b9baf9bcbe5a8e04ec189",
+        "inventory": "19ed3ba915874b3063a75f27853124c813221fcd0ca7c29c207fee19f12f7a7f",
+        "load_fixture": "7e838de7e74a1c7306beab43c96da68f756cb816287269c336c6a15aa890075a",
+        "no_links": "b9ac133588f0cc92e423226298c0722a82c526f819bfa6f55ed4d000fcd937af",
+        "pg_sendmsg_metadata_allowed": "727073a937c93b0da722ca6fa46d505eb823be3bace2596fd06dc9f24a871ffa",
+        "private_directory": "7bc6671d287a45107b9b10eda111e709dd88405ab7126354172ae3c562af3e6c",
+        "private_json": "0427185580fffa2795f3582e46d3710d5491c1070027e00227803f4117e2a867",
+        "refuse": "d56604b713affd92597bfb7c379e64e7701eaed7692118cbbaef40977396d6d7",
+        "save_evidence": "369663cafd51b4f84e1513f5db27be00283eca39800e737c5773be2d07af102f",
+        "sha": "dea095f888fc12e5f2187d68be78584a748cff0db26ee4e55397ba1469cd00bf",
+        "source_tree": "b707354f1f86d51b100588bc8d77d8e77ed55737f5f11cf76ae14920865455c1",
+        "sources_unchanged": "dd2c2f57147b194a22867e55dd21a0d5f1356a67aa6d9fd538c6fadb7fc1972a",
+        "verify_inputs": "a308e0ddd075b4c7b4fb636d6aa1c5f056ebe73088b349fa9c3a26bb525ab3a8"
+      },
+      "changed_existing_nested": [
+        "install_boundaries.audit",
+        "install_describe_boundaries.audit"
+      ],
+      "removed_nested": [
+        "install_boundaries.check_fd",
+        "install_boundaries.denied_fd_operation",
+        "install_boundaries.guarded_fd_write",
+        "install_boundaries.guarded_fd_write.write",
+        "install_boundaries.guarded_file_open",
+        "install_boundaries.guarded_file_open.opened",
+        "install_boundaries.guarded_os_close",
+        "install_boundaries.guarded_os_open",
+        "install_boundaries.register",
+        "main.execution_deadline"
+      ],
+      "added_qualified": [
+        "exact_junit80",
+        "fresh_process_descriptors",
+        "install_absolute_deadline",
+        "install_absolute_deadline.check",
+        "install_absolute_deadline.fatal_timeout",
+        "install_filesystem_boundary",
+        "install_filesystem_boundary.after_close",
+        "install_filesystem_boundary.after_file_open",
+        "install_filesystem_boundary.audit",
+        "install_filesystem_boundary.before_access",
+        "install_filesystem_boundary.before_directory",
+        "install_filesystem_boundary.before_file_open",
+        "install_filesystem_boundary.before_flock",
+        "install_filesystem_boundary.before_handler",
+        "install_filesystem_boundary.before_metadata",
+        "install_filesystem_boundary.before_os_open",
+        "install_filesystem_boundary.bind",
+        "install_filesystem_boundary.bind.guarded",
+        "install_filesystem_boundary.checked_path",
+        "install_filesystem_boundary.fatal_profile",
+        "install_filesystem_boundary.fd_before",
+        "install_filesystem_boundary.fd_before.before",
+        "install_filesystem_boundary.fd_cap",
+        "install_filesystem_boundary.file_set",
+        "install_filesystem_boundary.lexical",
+        "install_filesystem_boundary.metadata_path",
+        "install_filesystem_boundary.open_code",
+        "install_filesystem_boundary.owned_path",
+        "install_filesystem_boundary.profile",
+        "install_filesystem_boundary.register",
+        "install_filesystem_boundary.valid_permit"
+      ],
+      "module_changes": "diagnostic v3 docstring plus import time; no existing assignment change",
+      "wrapper_closure_code_object": [
+        {
+          "qualname": "install_filesystem_boundary.<locals>.bind.<locals>.guarded",
+          "freevars": [
+            "active",
+            "after",
+            "before",
+            "binding",
+            "deadline",
+            "guarded",
+            "native",
+            "native_getframe",
+            "token"
+          ],
+          "locals": [
+            "args",
+            "kwargs",
+            "state",
+            "permit",
+            "previous",
+            "result"
+          ]
+        }
+      ],
+      "code_objects_executed": false
+    },
+    "negative_case_source_proof": [
+      {
+        "id": "FS-CLOSED-READS",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Exact frozen/source/SITE/stdlib/input/output set; pre-content secret/no-links/type/flag checks; external minimal mounts needed for native internals",
+        "symbols": {
+          "install_filesystem_boundary.file_set": {
+            "line": 367,
+            "end_line": 382,
+            "AST_sha256": "39594c65ea6cc97907f9a9e51469c78bdfec9252fdde7ac99f548e4dccbacc4c"
+          },
+          "install_filesystem_boundary.lexical": {
+            "line": 418,
+            "end_line": 433,
+            "AST_sha256": "578a65a2d46041a64c646a0bd30006e31fbe6167a44010664ac76f4b9810aadb"
+          },
+          "install_filesystem_boundary.checked_path": {
+            "line": 454,
+            "end_line": 478,
+            "AST_sha256": "55b6f9645d1e81dea1480f5531d93da7e754b161c7620bcd1d6e068f99162c93"
+          }
+        }
+      },
+      {
+        "id": "FS-NATIVE-OPEN-PROVENANCE",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Direct raw/saved alias/FileIO chains diagnosed using identity/frame/code/globals/token/native and independent audit; alternate native dispatch PARTIAL",
+        "symbols": {
+          "install_filesystem_boundary.bind": {
+            "line": 494,
+            "end_line": 515,
+            "AST_sha256": "bd61b2818a3d299d6a6db1bb076a2a0d76c94765196b41c7c735ab02fbadab32"
+          },
+          "install_filesystem_boundary.valid_permit": {
+            "line": 480,
+            "end_line": 492,
+            "AST_sha256": "0f128f816a7a6037b0951c6e998fd8ad327685fb14322c9504cc707740e45916"
+          },
+          "install_filesystem_boundary.profile": {
+            "line": 696,
+            "end_line": 712,
+            "AST_sha256": "fac25af0400c79ce5f01386147e4b0b1ca15d97bf04f5739dc08a5f5aca83fb5"
+          },
+          "install_filesystem_boundary.audit": {
+            "line": 714,
+            "end_line": 754,
+            "AST_sha256": "7bb70af7f1d0e99c600f9aed58f90d0259f769fb996af6a73864c59ddecca631"
+          }
+        }
+      },
+      {
+        "id": "FS-DIRFD-INT-FLAGS",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Explicit dir_fd/int/O_DIRECTORY/O_PATH and implicit regular-file checks; transient iterator descriptors not a kernel capability proof",
+        "symbols": {
+          "install_filesystem_boundary.before_os_open": {
+            "line": 547,
+            "end_line": 554,
+            "AST_sha256": "e228ff688475a2bf7e22168f31b495a70493c1e3dab62c8f96546a8297e680eb"
+          },
+          "install_filesystem_boundary.before_file_open": {
+            "line": 558,
+            "end_line": 577,
+            "AST_sha256": "c257f13328c9204b801fa634c0e3a918c7d0c34e06cf220123fec88dda15f504"
+          },
+          "install_filesystem_boundary.before_metadata": {
+            "line": 589,
+            "end_line": 592,
+            "AST_sha256": "814c6272189620fbedc35c0e034e13499091ec92e706901c9ea75ebdab08b655"
+          },
+          "install_filesystem_boundary.before_directory": {
+            "line": 612,
+            "end_line": 621,
+            "AST_sha256": "56fd1367ade354dcc2a5a7dc5d44520ed736d7abe4261da27789467ea5d922b3"
+          }
+        }
+      },
+      {
+        "id": "FS-STDIO-FOREIGN-FD",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Each FD0–2 fstat valid/non-directory and no live inheritedFD>2; no full inherited-stream-content/native-method closure",
+        "symbols": {
+          "fresh_process_descriptors": {
+            "line": 276,
+            "end_line": 302,
+            "AST_sha256": "1ee3b3457711c601990abdab051a9affaa00f6893c9f1850dd58b02492c592a8"
+          }
+        }
+      },
+      {
+        "id": "FS-FDREAD-REUSE",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Direct wrapper capability/inode/read-write/reuse checks; native dispatch/internal coverage PARTIAL",
+        "symbols": {
+          "install_filesystem_boundary.register": {
+            "line": 517,
+            "end_line": 528,
+            "AST_sha256": "81ff1503b8842aa9bd3e8e3ae6a8642adee78da895415a7ab06c207b409912e4"
+          },
+          "install_filesystem_boundary.fd_cap": {
+            "line": 530,
+            "end_line": 545,
+            "AST_sha256": "ec7c858e0c3cca6d62fa0a2ad0af1e19f9a9f9057391fbeda891f21e3085fe96"
+          },
+          "install_filesystem_boundary.fd_before": {
+            "line": 629,
+            "end_line": 635,
+            "AST_sha256": "e0b1d285609ae85dfadac0a855cef4aa23a4b13d0fb27d10dd1ba3102e839da0"
+          }
+        }
+      },
+      {
+        "id": "FS-LEASE-FLOCK",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Frozen fixture open/read/close preserved; no existing flock/new locking; narrow exact read-only lease FD capability",
+        "symbols": {
+          "install_filesystem_boundary.before_flock": {
+            "line": 652,
+            "end_line": 660,
+            "AST_sha256": "c2f38a5696776b61402692e4bb0821a940c8fa21220c78782998e98673a0a0c2"
+          },
+          "install_filesystem_boundary.fd_cap": {
+            "line": 530,
+            "end_line": 545,
+            "AST_sha256": "ec7c858e0c3cca6d62fa0a2ad0af1e19f9a9f9057391fbeda891f21e3085fe96"
+          }
+        }
+      },
+      {
+        "id": "FS-THREAD-HOOKS",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Native/Python census and direct start_new/start_joinable hooks; c_call dispatch coverage PARTIAL; no runtime proof",
+        "symbols": {
+          "fresh_process_descriptors": {
+            "line": 276,
+            "end_line": 302,
+            "AST_sha256": "1ee3b3457711c601990abdab051a9affaa00f6893c9f1850dd58b02492c592a8"
+          },
+          "install_filesystem_boundary.profile": {
+            "line": 696,
+            "end_line": 712,
+            "AST_sha256": "fac25af0400c79ce5f01386147e4b0b1ca15d97bf04f5739dc08a5f5aca83fb5"
+          },
+          "install_filesystem_boundary.audit": {
+            "line": 714,
+            "end_line": 754,
+            "AST_sha256": "7bb70af7f1d0e99c600f9aed58f90d0259f769fb996af6a73864c59ddecca631"
+          }
+        }
+      },
+      {
+        "id": "FS-LIFETIME-FATAL",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Permanent FS patches/profile/audit outside ExitStack; fatal profile126 may omit evidence, NOTPASS",
+        "symbols": {
+          "install_filesystem_boundary.fatal_profile": {
+            "line": 690,
+            "end_line": 694,
+            "AST_sha256": "6738375a2d282946d2450a689f54b98c5af21961ea8a124ae1d66a46fe02db9b"
+          },
+          "install_filesystem_boundary.profile": {
+            "line": 696,
+            "end_line": 712,
+            "AST_sha256": "fac25af0400c79ce5f01386147e4b0b1ca15d97bf04f5739dc08a5f5aca83fb5"
+          },
+          "install_filesystem_boundary": {
+            "line": 330,
+            "end_line": 764,
+            "AST_sha256": "9ec59b3787ef0bf0386b118e3b7a012b6803aa62f850d2e64afa2cc850572fe2"
+          }
+        }
+      },
+      {
+        "id": "LOCAL-DEADLINE",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "One main-first timer/checker, no disarm/reset, fatal124; Python-only diagnostic, external wall-clock mandatory",
+        "symbols": {
+          "install_absolute_deadline": {
+            "line": 305,
+            "end_line": 327,
+            "AST_sha256": "e05d793e330fff55c974740f88f28c5c259c4f53fb60719cdba26b5cb7d5db01"
+          },
+          "main": {
+            "line": 1258,
+            "end_line": 1335,
+            "AST_sha256": "d8d2cd39601398a932a7b64347ba65a58b675c15c22e2d60261801f7d960b56e"
+          },
+          "describe_main": {
+            "line": 1425,
+            "end_line": 1476,
+            "AST_sha256": "5b3760024054bca0c9ea05721560a35ef15b9a5e467b317869ec6e33e46ae66d"
+          },
+          "install_filesystem_boundary.before_handler": {
+            "line": 674,
+            "end_line": 677,
+            "AST_sha256": "ffe0e8733d060aaef387d8bbe4776a9a4c9720dfd66e460c8fca3dd2d2dc3d07"
+          }
+        }
+      },
+      {
+        "id": "DESCRIBE-FAILURE",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Explicit ok=False in exception/postflight/evidence failures after provisional success",
+        "symbols": {
+          "describe_main": {
+            "line": 1425,
+            "end_line": 1476,
+            "AST_sha256": "5b3760024054bca0c9ea05721560a35ef15b9a5e467b317869ec6e33e46ae66d"
+          }
+        }
+      },
+      {
+        "id": "JUNIT-EXACT80",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Exact root/suite/directcase structure, IDs/classname/name/order/unique80/totals; complete80 conjunction, NOTRUN",
+        "symbols": {
+          "exact_junit80": {
+            "line": 1154,
+            "end_line": 1176,
+            "AST_sha256": "2d19e8a9c175f064809dc7f9ea7d17b53eead13d7ed128cc29a001fa25fba0e2"
+          },
+          "run_actual80": {
+            "line": 1179,
+            "end_line": 1232,
+            "AST_sha256": "4ebe32e03eb4d1600157914eda1840455a8acfad3f74bd41c88edf4ba745a3ab"
+          }
+        }
+      },
+      {
+        "id": "POSTFLIGHT-AVAILABILITY",
+        "status": "SOURCE_REVIEWED_DIRECT_CHAINS_NATIVE_COVERAGE_PARTIAL",
+        "runtime": "NOTRUN",
+        "proof": "Readers/scandir/import/signal/native compatibility UNKNOWN, full ROOT source acceptance and external evidence pending",
+        "symbols": {
+          "verify_inputs": {
+            "line": 1085,
+            "end_line": 1090,
+            "AST_sha256": "a308e0ddd075b4c7b4fb636d6aa1c5f056ebe73088b349fa9c3a26bb525ab3a8"
+          },
+          "guard_private_roots": {
+            "line": 1076,
+            "end_line": 1082,
+            "AST_sha256": "48fd3686542c37bec684948799fcfd4c97be0e47f0ec895b060a21a55b44c5c2"
+          },
+          "cleanup_owned": {
+            "line": 1235,
+            "end_line": 1247,
+            "AST_sha256": "1c394aaabcc7c0116f7805df74fb8ef8ec963e69826f528dc5283b36603ff927"
+          },
+          "save_evidence": {
+            "line": 1250,
+            "end_line": 1255,
+            "AST_sha256": "369663cafd51b4f84e1513f5db27be00283eca39800e737c5773be2d07af102f"
+          }
+        }
+      }
+    ],
+    "independent_source_acceptance": "PENDING_ROOT; B review is source evidence only, no full closure/runtime acceptance"
+  },
+  "file_freeze_scope": "Target exact3 composition after coordinator byte-copy; local B helper is parent only, final helper reviewed at fs_hardening_review.final_helper.path; own JSON SHA detached"
 }

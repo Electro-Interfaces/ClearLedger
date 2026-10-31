@@ -1,6 +1,18 @@
-"""ROOT-only writer harness. Workers review source; all runtime remains NOTRUN.
+"""SOURCE_DIAGNOSTICS_ONLY / NOT_EXECUTION_APPROVED; runtime remains NOTRUN.
 
-Provision and actual80 require separate fresh guarded processes and ROOT receipts.
+SRC01/SRC02 are NOT FULLY CLOSED. Native FD/thread/timer dispatch coverage is
+PARTIAL: ROOT reported a builtin.__call__ gap; workers did not reproduce it.
+These reviewed-code Python diagnostics are neither an OS sandbox nor proof of
+a hard deadline, safe hostile native code, import compatibility or performance.
+
+Before ANY future mode, INCLUDING source-describe, ROOT must independently
+prove a separate kernel read-only/minimal-mounts/network/process boundary and
+an external wall-clock deadline <=600 seconds covering interpreter start through
+cleanup/evidence. No host home/vault/env/socket exposure or host networking;
+only empty owned output roots may be writable. Provision/actual80 additionally
+require the exact isolated synthetic PG endpoint/lease and ROOT receipts.
+No boolean in this helper proves that external boundary. Fatal/partial/missing
+JSON, unproven isolation, or absent exit/postflight evidence means FAIL/UNKNOWN.
 """
 from __future__ import annotations
 
@@ -21,6 +33,7 @@ import socket
 import stat
 import sys
 import sysconfig
+import time
 from urllib.parse import urlsplit
 import weakref
 import uuid
@@ -260,6 +273,497 @@ def inventory(candidate, expected_files):
     return site, installed, freeze
 
 
+def fresh_process_descriptors():
+    """Reject inherited capabilities before preflight, and again before fencing."""
+    import _thread
+    import threading
+    # Check all three individually: absent descriptors are also a refusal.
+    for fd in range(3):
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            refuse("missing inherited standard descriptor")
+        if stat.S_ISDIR(info.st_mode):
+            refuse("inherited standard directory descriptor")
+    for entry in os.listdir("/proc/self/fd"):
+        fd = int(entry)
+        if fd > 2:
+            try:
+                os.fstat(fd)
+            except OSError:
+                # listdir's own directory descriptor must already be CLOSED.
+                continue
+            refuse("inherited foreign descriptor present")
+    if (len(os.listdir("/proc/self/task")) != 1 or len(sys._current_frames()) != 1
+            or _thread._count() != 0 or threading.active_count() != 1
+            or threading.current_thread() is not threading.main_thread()
+            or sys.getprofile() is not None or sys.gettrace() is not None
+            or threading.getprofile() is not None or threading.gettrace() is not None):
+        refuse("fresh single native/Python thread without foreign hooks required")
+
+
+def install_absolute_deadline():
+    """One local sticky/fatal timer DIAGNOSTIC, not the external harddeadline.
+
+    Native timer/thread/FD dispatch coverage is PARTIAL (__call__ gap reported
+    by ROOT, not reproduced here), and native code may defer signal delivery.
+    Before ANY mode ROOT must prove kernel isolation with minimal read-only
+    mounts/network/process separation and an external <=600s process verifier.
+    Missing final JSON/exit/postflight evidence is FAIL/UNKNOWN, never success.
+    """
+    started = time.monotonic()
+    expires = started + MAX_SECONDS
+    native_exit = os._exit
+
+    def fatal_timeout(*_):
+        native_exit(124)
+
+    def check():
+        if time.monotonic() >= expires:
+            fatal_timeout()
+
+    signal.signal(signal.SIGALRM, fatal_timeout)
+    signal.setitimer(signal.ITIMER_REAL, max(0.000001, expires - time.monotonic()))
+    return check
+
+
+def install_filesystem_boundary(context, deny):
+    """Shared permanent FS DIAGNOSTICS for reviewed pinned Python in all modes.
+
+    SRC01/SRC02 NOT FULLY CLOSED: native FD/thread/timer dispatch is PARTIAL
+    (__call__ gap ROOT-reported, not reproduced here). Before ANY mode, including
+    describe, ROOT must independently prove separate kernel read-only/minimal
+    mounts/network/process isolation and an external <=600s wall-clock budget.
+    No fake boolean/receipt can prove that boundary. SOURCE/AST inspection only;
+    native-extension internals/external races are not sandboxed by this code.
+    Import compatibility/performance and all runtime acceptance remain NOTRUN.
+    A profile exception would REMOVE CPython's profile hook, so any exception
+    inside that hook exits fatally instead, possibly without final evidence.
+    """
+    import _io
+    import _signal
+    import _thread
+    import builtins
+    import fcntl
+    import io
+    import posix
+    import threading
+
+    fresh_process_descriptors()
+    deadline = context["deadline"]
+    deadline()
+    cwd = context["directories"][0]
+    roots = context["directories"][1:]
+    describe = context["stage"] == "describe"
+    target = roots[0] / "source-description.json" if describe else None
+    stdlib = no_links(Path(sysconfig.get_paths()["stdlib"]).absolute())
+    site = context["site"]
+    if (site == stdlib or stdlib.is_relative_to(site)
+            or any(p in {"site-packages", "dist-packages"} for p in stdlib.parts)):
+        deny("noncanonical-stdlib-root")
+
+    inventory_directories = set()
+
+    def file_set(root, *, canonical_stdlib=False):
+        result = set()
+        for directory, dirs, names in os.walk(no_links(root), followlinks=False):
+            inventory_directories.add(no_links(Path(directory)))
+            if canonical_stdlib:
+                # Never let a stdlib prefix admit another dependency tree.
+                dirs[:] = [d for d in dirs if d not in {"site-packages", "dist-packages"}]
+            for name in dirs + names:
+                path = no_links(Path(directory) / name)
+                info = path.lstat()
+                if stat.S_ISDIR(info.st_mode):
+                    continue
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    deny("nonregular-read-inventory")
+                result.add(path)
+        return result
+
+    read_files = set()
+    for name in SOURCE_TREES:
+        read_files.update(file_set(SERVER / name))
+    read_files.update({no_links(SERVER / SELF_NAME), no_links(SERVER / FIXTURE)})
+    for name in SUPPORT_FILES:
+        read_files.add(no_links(SERVER.parent / name[3:] if name.startswith("../") else SERVER / name))
+    read_files.update(file_set(site))
+    read_files.update(file_set(stdlib, canonical_stdlib=True))
+    read_files.update(no_links(Path(value)) for value in context["inputs"])
+    # Immutable exact sets, not a read permission on their directory prefixes.
+    read_files = frozenset(read_files)
+    directories = frozenset(p for file in read_files for p in file.parents)
+    inventory_directories = frozenset(inventory_directories | {SERVER})
+    metadata_roots = (SERVER, site, stdlib)
+    # Import machinery probes nonexistent candidates and canonical sys.path
+    # entries (e.g. python313.zip). Metadata permission never grants content.
+    search_entries = frozenset(no_links(Path(value).absolute()) for value in sys.path if value)
+    directory_anchors = {p: (p.lstat().st_dev, p.lstat().st_ino) for p in context["directories"]}
+    native_fstat = os.fstat
+    native_exit = os._exit
+    native_getframe = sys._getframe
+    native_open = os.open
+    native_file_open = io.open
+    native_lstat = os.lstat
+    native_stat = os.stat
+    active = [None]
+    bindings = []
+    guarded_natives = []
+    forbidden_natives = []
+    fd_caps = {}
+    writing_mask = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+    forbidden_flags = os.O_DIRECTORY | os.O_PATH | getattr(os, "O_TMPFILE", 0)
+    lease_path = (no_links(Path(context["approval"]["lease_path"])) if not describe else None)
+
+    def lexical(value):
+        if not isinstance(value, (str, bytes, os.PathLike)):
+            deny("integer-or-invalid-path")
+        path = Path(os.fsdecode(value))
+        if ".." in path.parts:
+            deny("parent-traversal")
+        if not path.is_absolute():
+            if Path.cwd() != cwd:
+                deny("relative-path-cwd-changed")
+            path = cwd / path
+        # Secret components are checked BEFORE lstat or any content open.
+        if (any(p == ".env" or p.startswith(".env.") for p in path.parts)
+                or {".ssh", ".vault", ".claude", ".aws", ".gnupg", ".postgresql",
+                    ".pgpass", ".config"} & set(path.parts)):
+            deny("secret-or-dotenv-path")
+        return path
+
+    def owned_path(path):
+        for root in context["directories"]:
+            info = root.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700
+                    or (info.st_dev, info.st_ino) != directory_anchors[root]):
+                deny("owned-root-identity-changed")
+        return any(path != root and path.is_relative_to(root) for root in roots)
+
+    def metadata_path(value):
+        path = lexical(value)
+        stdlib_spill = (path.is_relative_to(stdlib) and any(
+            part in {"site-packages", "dist-packages"} for part in path.relative_to(stdlib).parts)
+            and not path.is_relative_to(site))
+        if stdlib_spill or (path not in read_files and path not in directories and path not in search_entries
+                and not any(path == root or path.is_relative_to(root)
+                            for root in (*metadata_roots, *context["directories"]))):
+            deny("metadata-outside-closed-inventory")
+        return path
+
+    def checked_path(value, flags):
+        if type(flags) is not int or flags < 0 or flags & forbidden_flags:
+            deny("directory-or-invalid-open-flags")
+        path = no_links(lexical(value))
+        writing = bool(flags & writing_mask)
+        if writing:
+            if (not owned_path(path) or (describe and (path != target or not flags & os.O_EXCL
+                                                       or not flags & os.O_CREAT))):
+                deny("write-outside-owned-regular-files")
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if not writing or not flags & os.O_CREAT:
+                raise
+            info = None
+        # Missing import-cache candidates must retain FileNotFoundError for
+        # SourceLoader's frozen .py fallback; no native content open occurred.
+        if not writing and path not in read_files and not owned_path(path):
+            deny("read-outside-closed-inventory")
+        if info is not None and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                                 or (writing and info.st_uid != 0)):
+            deny("nonregular-or-unowned-open")
+        return {"path": path, "flags": flags, "writing": writing,
+                "readable": (flags & os.O_ACCMODE) != os.O_WRONLY,
+                "identity": (info.st_dev, info.st_ino) if info is not None else None}
+
+    def valid_permit(frame, native, permit):
+        if permit is None or frame is not permit["frame"] or native is not permit["native"]:
+            return False
+        wrapper, code, namespace, token, bound_native, before, after = permit["binding"]
+        local = frame.f_locals
+        return (any(permit["binding"] is binding for binding in bindings)
+                and frame.f_code is code and wrapper.__code__ is code
+                and frame.f_globals is namespace and wrapper.__globals__ is namespace
+                and frame.f_globals is globals() and local.get("guarded") is wrapper
+                and bound_native is native
+                and local.get("token") is token and local.get("native") is native
+                and local.get("before") is before and local.get("after") is after
+                and local.get("permit") is permit)
+
+    def bind(native, before, after=None):
+        # Code/name alone is insufficient: each binding has a distinct closure
+        # token and native identity, and each invocation a distinct exact frame.
+        token = object()
+
+        def guarded(*args, **kwargs):
+            deadline()
+            args, kwargs, state = before(args, kwargs)
+            permit = {"frame": native_getframe(), "native": native, "binding": binding,
+                      "wrapper": guarded, "token": token, "state": state, "c_seen": False, "audited": False}
+            previous = active[0]
+            active[0] = permit
+            try:
+                result = native(*args, **kwargs)
+            finally:
+                active[0] = previous
+            return after(result, state) if after is not None else result
+
+        binding = (guarded, guarded.__code__, guarded.__globals__, token, native, before, after)
+        bindings.append(binding)
+        guarded_natives.append(native)
+        return guarded
+
+    def register(fd, state):
+        info = native_fstat(fd)
+        path = no_links(state["path"])
+        current = path.lstat()
+        identity = (info.st_dev, info.st_ino)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or identity != (current.st_dev, current.st_ino)
+                or (state["identity"] is not None and identity != state["identity"])
+                or (state["writing"] and info.st_uid != 0)):
+            deny("opened-descriptor-identity-or-type")
+        fd_caps[fd] = (identity, path, state["readable"], state["writing"])
+        return fd
+
+    def fd_cap(fd, *, write=False, read=False, lease=False):
+        if type(fd) is not int or fd <= 2:
+            deny("inherited-or-invalid-file-descriptor")
+        cap = fd_caps.get(fd)
+        info = native_fstat(fd)
+        if (cap is None or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or cap[0] != (info.st_dev, info.st_ino)):
+            deny("foreign-reused-or-directory-descriptor")
+        path = no_links(cap[1])
+        current = path.lstat()
+        if (cap[0] != (current.st_dev, current.st_ino) or (read and not cap[2])
+                or (write and (not cap[3] or not owned_path(path)))
+                or (read and path not in read_files and not owned_path(path))
+                or (lease and (path != lease_path or cap[3] or not cap[2]))):
+            deny("descriptor-access-or-path-changed")
+        return cap
+
+    def before_os_open(args, kwargs):
+        if len(args) not in (2, 3) or kwargs.get("dir_fd") is not None or set(kwargs) - {"dir_fd"}:
+            deny("dir-fd-or-noncanonical-open")
+        path, flags = args[:2]
+        state = checked_path(path, flags)
+        flags |= os.O_NOFOLLOW | os.O_CLOEXEC
+        state["flags"] = flags
+        return (str(state["path"]), flags, *args[2:]), {}, state
+
+    guarded_os_open = bind(native_open, before_os_open, register)
+
+    def before_file_open(args, kwargs):
+        if not 1 <= len(args) <= 8 or set(kwargs) - {"mode", "buffering", "encoding", "errors", "newline", "closefd", "opener"}:
+            deny("noncanonical-stream-open")
+        if (len(args) > 7 or kwargs.get("opener") is not None or kwargs.get("closefd", True) is not True
+                or (len(args) > 6 and args[6] is not True)):
+            deny("custom-opener-or-inherited-stream")
+        mode = args[1] if len(args) > 1 else kwargs.get("mode", "r")
+        if (type(mode) is not str or not mode or any(c not in "rwaxbt+" for c in mode)
+                or sum(mode.count(c) for c in "rwax") != 1):
+            deny("noncanonical-stream-mode")
+        flags = (os.O_RDWR if "+" in mode else os.O_WRONLY if any(c in mode for c in "wax") else os.O_RDONLY)
+        if "w" in mode:
+            flags |= os.O_CREAT | os.O_TRUNC
+        if "a" in mode:
+            flags |= os.O_CREAT | os.O_APPEND
+        if "x" in mode:
+            flags |= os.O_CREAT | os.O_EXCL
+        state = checked_path(args[0], flags)
+        kwargs = dict(kwargs, opener=guarded_os_open)
+        return (str(state["path"]), *args[1:]), kwargs, state
+
+    def after_file_open(stream, state):
+        register(stream.fileno(), state)
+        return stream
+
+    opened = bind(native_file_open, before_file_open, after_file_open)
+
+    def open_code(path):
+        # Do not delegate to native open_code (no O_NOFOLLOW opener support).
+        return opened(path, "rb")
+
+    def before_metadata(args, kwargs):
+        if not args or len(args) > 1 or kwargs.get("dir_fd") is not None or set(kwargs) - {"dir_fd", "follow_symlinks"}:
+            deny("dir-fd-or-invalid-metadata-call")
+        return (str(metadata_path(args[0])),), {k: v for k, v in kwargs.items() if k != "dir_fd"}, None
+
+    # lstat is used by no_links, so this metadata-only layer must not recurse
+    # through no_links itself. Content opens independently check every ancestor.
+    os.lstat = bind(native_lstat, before_metadata)
+    os.stat = bind(native_stat, before_metadata)
+    # Frozen importlib refers to the posix MODULE, not the os facade. Route its
+    # metadata calls through the same wrappers; posix.open stays a denied native.
+    posix.lstat, posix.stat = os.lstat, os.stat
+
+    def before_access(args, kwargs):
+        if (len(args) != 2 or kwargs.get("dir_fd") is not None
+                or set(kwargs) - {"dir_fd", "effective_ids", "follow_symlinks"}):
+            deny("dir-fd-or-invalid-access")
+        return (str(no_links(metadata_path(args[0]))), args[1]), {
+            k: v for k, v in kwargs.items() if k != "dir_fd"}, None
+
+    os.access = bind(os.access, before_access)
+    posix.access = os.access
+
+    def before_directory(args, kwargs):
+        if len(args) > 1 or kwargs:
+            deny("directory-fd-or-invalid-enumeration")
+        path = no_links(metadata_path(args[0] if args else cwd))
+        if path not in inventory_directories and not any(
+                path == root or path.is_relative_to(root) for root in context["directories"]):
+            deny("enumeration-outside-reviewed-directories")
+        if not stat.S_ISDIR(path.lstat().st_mode):
+            deny("non-directory-enumeration")
+        return (str(path),), {}, None
+
+    # These iterators own transient internal descriptors, never a returned FD
+    # capability. fwalk/open-directory/int paths and descriptor reuse are closed.
+    os.listdir = bind(os.listdir, before_directory)
+    os.scandir = bind(os.scandir, before_directory)
+    posix.listdir, posix.scandir = os.listdir, os.scandir
+
+    def fd_before(*, write=False, read=False, closing=False):
+        def before(args, kwargs):
+            if not args or kwargs:
+                deny("noncanonical-fd-operation")
+            fd_cap(args[0], write=write, read=read)
+            return args, {}, args[0] if closing else None
+        return before
+
+    def after_close(result, fd):
+        fd_caps.pop(fd, None)
+        return result
+
+    for name in ("read", "readv", "pread", "preadv"):
+        if hasattr(os, name):
+            setattr(os, name, bind(getattr(os, name), fd_before(read=True)))
+    for name in ("write", "writev", "pwrite", "pwritev", "ftruncate", "posix_fallocate"):
+        if hasattr(os, name):
+            setattr(os, name, bind(getattr(os, name), fd_before(write=True)))
+    for name in ("lseek", "fsync", "fdatasync", "posix_fadvise"):
+        if hasattr(os, name):
+            setattr(os, name, bind(getattr(os, name), fd_before()))
+    os.close = bind(os.close, fd_before(closing=True), after_close)
+
+    def before_flock(args, kwargs):
+        if len(args) != 2 or kwargs or type(args[1]) is not int:
+            deny("noncanonical-lease-flock")
+        fd_cap(args[0], read=True, lease=True)
+        flags = args[1]
+        if flags not in {fcntl.LOCK_UN, fcntl.LOCK_SH, fcntl.LOCK_EX,
+                         fcntl.LOCK_SH | fcntl.LOCK_NB, fcntl.LOCK_EX | fcntl.LOCK_NB}:
+            deny("invalid-lease-lock-flags")
+        return args, {}, None
+
+    # The frozen fixture currently does not flock. Preserve this narrow legal
+    # capability without adding locking or admitting fcntl duplication/ioctl.
+    fcntl.flock = bind(fcntl.flock, before_flock)
+    for module, names in ((os, ("dup", "dup2", "dup3", "closerange", "close_range", "fchmod", "fchown",
+                               "sendfile", "copy_file_range", "splice", "fchdir", "chroot", "pipe", "pipe2",
+                               "eventfd", "memfd_create", "pidfd_open", "openpty", "mkfifo", "mknod", "readlink")),
+                          (fcntl, ("fcntl", "ioctl", "lockf")),
+                          (_thread, ("start_new_thread", "start_new", "start_joinable_thread")),
+                          (_io, ("open_code",)),
+                          (_signal, ("alarm", "setitimer", "pthread_sigmask", "sigwait", "sigwaitinfo", "sigtimedwait"))):
+        forbidden_natives.extend(getattr(module, name) for name in names if hasattr(module, name))
+
+    def before_handler(args, kwargs):
+        if len(args) != 2 or kwargs or args[0] == signal.SIGALRM:
+            deny("absolute-deadline-handler-mutation")
+        return args, {}, None
+
+    _signal.signal = bind(_signal.signal, before_handler)
+    if hasattr(_signal, "siginterrupt"):
+        _signal.siginterrupt = bind(_signal.siginterrupt, before_handler)
+    hook_codes = tuple(getattr(threading, name).__code__ for name in
+                       ("setprofile", "setprofile_all_threads", "settrace", "settrace_all_threads")
+                       if hasattr(threading, name))
+    forbidden_natives.extend((sys.setprofile, sys.settrace))
+    guarded_natives = tuple(guarded_natives)
+    forbidden_natives = tuple(forbidden_natives)
+    bindings = tuple(bindings)
+
+    def fatal_profile(event):
+        try:
+            deny(event)
+        finally:
+            native_exit(126)
+
+    def profile(frame, event, native):
+        try:
+            deadline()
+            if event == "call" and frame.f_code in hook_codes:
+                fatal_profile("thread-hook-replacement")
+            if event != "c_call":
+                return
+            if any(native is value for value in forbidden_natives):
+                fatal_profile("raw-native-capability-or-hook")
+            if any(native is value for value in guarded_natives):
+                permit = active[0]
+                if not valid_permit(frame, native, permit) or permit["c_seen"]:
+                    fatal_profile("native-call-without-exact-wrapper")
+                permit["c_seen"] = True
+        except BaseException:
+            # Never let a profiling callback exception silently remove the hook.
+            native_exit(126)
+
+    def audit(event, args):
+        deadline()
+        if event in {"sys.setprofile", "sys.settrace"}:
+            deny("guard-hook-replacement")
+        if event == "open":
+            permit = active[0]
+            frame = native_getframe(1)
+            if (permit is None or not valid_permit(frame, permit["native"], permit)
+                    or permit["native"] not in (native_open, native_file_open)
+                    or not permit["c_seen"] or permit["audited"]):
+                # Covers FileIO/type constructors even when no c_call is sent.
+                deny("audit-open-without-exact-native-permit")
+            flags = args[2] if len(args) == 3 else None
+            state = checked_path(args[0], flags)
+            expected = permit["state"]
+            if (state["path"] != expected["path"] or state["writing"] != expected["writing"]
+                    or state["readable"] != expected["readable"]
+                    or (flags & ~(os.O_CLOEXEC | os.O_NOFOLLOW)) !=
+                       (expected["flags"] & ~(os.O_CLOEXEC | os.O_NOFOLLOW))):
+                deny("audit-open-path-or-flags-changed")
+            permit["audited"] = True
+        elif event in {"os.listdir", "os.scandir"}:
+            if args:
+                no_links(metadata_path(args[0]))
+        elif event == "import" and len(args) > 1 and args[1] is not None:
+            checked_path(args[1], os.O_RDONLY)
+        elif event in {"os.mkdir", "os.remove", "os.rmdir", "os.utime", "os.rename"}:
+            if describe:
+                deny("describe-filesystem-mutation")
+            signatures = {"os.mkdir": (3, 2), "os.remove": (2, 1), "os.rmdir": (2, 1), "os.utime": (4, 3)}
+            if event == "os.rename":
+                if len(args) != 4 or args[2:] != (-1, -1):
+                    deny("dir-fd-rename")
+                values = args[:2]
+            else:
+                length, index = signatures[event]
+                if len(args) != length or args[index] != -1:
+                    deny("dir-fd-mutation")
+                values = args[:1]
+            if any(not owned_path(no_links(lexical(value))) for value in values):
+                deny("mutation-outside-owned-roots")
+
+    # Install profile before the irreversible audit hook. Reviewed direct
+    # replacements are diagnosed; native dispatch coverage is PARTIAL (above).
+    # Patches are permanent, deliberately NOT ExitStack.
+    os.open = guarded_os_open
+    builtins.open = io.open = _io.open = opened
+    io.open_code = _io.open_code = open_code
+    sys.setprofile(profile)
+    sys.addaudithook(audit)
+    deadline()
+
+
 def verify_approval():
     mode = sys.argv[1:] or []
     if mode not in (["--provision-approved-service-location-writer-schema"],
@@ -271,16 +775,7 @@ def verify_approval():
             or any(m in sys.modules for m in ("pytest", "app", "site", "sqlalchemy", "asyncpg"))
             or any("site-packages" in p or p in {"", str(SERVER)} for p in sys.path)):
         refuse("fresh unoptimized CPython3.13.7 -I -S -B required")
-    # ROOT must launch with foreign descriptors closed; proc directory scan's
-    # own transient descriptor may already have disappeared by fstat.
-    for entry in os.listdir("/proc/self/fd"):
-        fd = int(entry)
-        if fd > 2:
-            try:
-                os.fstat(fd)
-            except OSError:
-                continue
-            refuse("inherited foreign descriptor present")
+    fresh_process_descriptors()
     flags = (ROOT_OPTIN, "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTHONDONTWRITEBYTECODE")
     if any(os.environ.get(name) != "1" for name in flags):
         refuse("ROOT unique opt-in required")
@@ -455,17 +950,6 @@ def install_boundaries(context, counters, stack):
                        "subprocess.Popen", "os.system", "os.posix_spawn", "os.exec", "os.fork", "os.forkpty",
                        "os.kill", "os.killpg", "os.symlink", "os.link", "os.truncate", "os.chown", "os.chmod", "os.chdir"}:
             deny(event)
-        elif event == "open":
-            value = args[0]
-            flags = args[2] if len(args) > 2 and type(args[2]) is int else 0
-            if isinstance(value, (str, bytes, os.PathLike)):
-                path = Path(os.path.abspath(os.fsdecode(value)))
-                if (path.name == ".env" or path.name.startswith(".env.")
-                        or {".ssh", ".vault", ".claude", ".aws", ".gnupg", ".postgresql", ".pgpass", ".config"} & set(path.parts)):
-                    deny("secret-or-dotenv-read")
-                no_links(path)
-            if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
-                writable(value)
         elif event in {"os.mkdir", "os.remove", "os.rmdir", "os.utime"}:
             # dir_fd mutations are forbidden; no ambient relative capabilities.
             signatures = {"os.mkdir": (3, 2), "os.remove": (2, 1), "os.rmdir": (2, 1), "os.utime": (4, 3)}
@@ -480,80 +964,8 @@ def install_boundaries(context, counters, stack):
             writable(args[1])
 
     sys.addaudithook(audit)
+    install_filesystem_boundary(context, deny)
     from unittest.mock import patch
-    # Low-level descriptor operations have no complete Python audit coverage.
-    # Capture capabilities only on files this process opens inside owned roots;
-    # inherited/duplicated descriptors never acquire write permission.
-    import builtins
-    import io
-    fd_caps = {}
-    native_os_open, native_os_close, native_fstat = os.open, os.close, os.fstat
-    native_builtin_open, native_io_open = builtins.open, io.open
-
-    def register(fd, path):
-        info = native_fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1:
-            deny("unowned-write-descriptor")
-        fd_caps[fd] = (info.st_dev, info.st_ino, str(path))
-
-    def check_fd(fd):
-        try:
-            info = native_fstat(fd)
-            cap = fd_caps.get(fd)
-            if cap is None or cap[:2] != (info.st_dev, info.st_ino):
-                deny("inherited-or-reused-write-fd")
-            writable(cap[2])
-        except (OSError, TypeError):
-            deny("closed-write-fd")
-
-    def guarded_os_open(path, flags, mode=0o777, *, dir_fd=None):
-        if dir_fd is not None:
-            deny("dir-fd-open")
-        writing = flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND)
-        if writing:
-            writable(path)
-        fd = native_os_open(path, flags, mode)
-        if writing:
-            register(fd, Path(os.path.abspath(os.fsdecode(path))))
-        return fd
-
-    def guarded_file_open(native):
-        def opened(file, mode="r", *args, **kwargs):
-            writing = any(char in mode for char in "wax+")
-            if type(file) is int:
-                # Reject even fd reads: no ambient inherited file capability.
-                check_fd(file)
-            elif writing:
-                writable(file)
-            stream = native(file, mode, *args, **kwargs)
-            if writing and type(file) is not int:
-                register(stream.fileno(), Path(os.path.abspath(os.fsdecode(file))))
-            return stream
-        return opened
-
-    def guarded_os_close(fd):
-        fd_caps.pop(fd, None)
-        return native_os_close(fd)
-
-    def guarded_fd_write(native):
-        def write(fd, *args, **kwargs):
-            check_fd(fd)
-            return native(fd, *args, **kwargs)
-        return write
-
-    def denied_fd_operation(*args, **kwargs):
-        deny("unapproved-fd-mutation-or-duplication")
-
-    stack.enter_context(patch.object(os, "open", guarded_os_open))
-    stack.enter_context(patch.object(os, "close", guarded_os_close))
-    stack.enter_context(patch.object(builtins, "open", guarded_file_open(native_builtin_open)))
-    stack.enter_context(patch.object(io, "open", guarded_file_open(native_io_open)))
-    for name in ("write", "writev", "pwrite", "pwritev", "ftruncate"):
-        if hasattr(os, name):
-            stack.enter_context(patch.object(os, name, guarded_fd_write(getattr(os, name))))
-    for name in ("dup", "dup2", "fchmod", "fchown", "sendfile", "copy_file_range", "splice"):
-        if hasattr(os, name):
-            stack.enter_context(patch.object(os, name, denied_fd_operation))
     stack.enter_context(patch.object(socket.socket, "sendmsg", exact_sendmsg))
     stack.enter_context(patch.object(socket.socket, "listen", lambda *a, **k: deny("socket.listen")))
     # Same reviewed import-only urllib3 probe suppression as both references.
@@ -739,6 +1151,31 @@ def async_schema_stage(context, fixture, manifest_sha):
         return runner.run(stage())
 
 
+def exact_junit80(xml):
+    """Validate JUnit identities independently of pytest's collection receipt."""
+    from xml.etree import ElementTree
+    root = ElementTree.parse(xml).getroot()
+    totals = {"tests": "80", "errors": "0", "failures": "0", "skipped": "0"}
+    if (root.tag != "testsuites" or root.get("name") != "pytest tests" or len(root) != 1
+            or any(root.get(key) != value for key, value in totals.items() if key in root.attrib)):
+        return False
+    suite = root[0]
+    if (suite.tag != "testsuite" or suite.get("name") != "pytest"
+            or any(suite.get(key) != value for key, value in totals.items())
+            or len(suite) != 80 or any(case.tag != "testcase" for case in suite)):
+        return False
+    classname = TEST_FILE.removesuffix(".py").replace("/", ".")
+    actual = []
+    for case in suite:
+        if (case.get("classname") != classname or not case.get("name")
+                or any(child.tag not in {"properties", "system-out", "system-err"} for child in case)
+                or any(node.tag in {"failure", "error", "skipped", "testsuites", "testsuite", "testcase"}
+                       for child in case for node in child.iter())):
+            return False
+        actual.append(TEST_FILE + "::" + case.get("name"))
+    return actual == EXPECTED_IDS and len(set(actual)) == 80
+
+
 def run_actual80(context):
     if any(name in sys.modules for name in ("app.config", "app.main")):
         refuse("verify_schema must remain ORM/app-import-free before original test import")
@@ -777,22 +1214,20 @@ def run_actual80(context):
         "-p", "pytest_asyncio.plugin", "-p", "no:cacheprovider", "-vv", "--tb=short", "--capture=sys",
         "--basetemp=" + str(scratch / "pytest-test"), "--log-file=" + str(evidence / "pytest.log"),
         "--junitxml=" + str(evidence / "service-location-writer-actual80.xml"), str(SERVER / TEST_FILE)], plugins=[plugin]))
-    from xml.etree import ElementTree
     xml = evidence / "service-location-writer-actual80.xml"
-    cases = list(ElementTree.parse(xml).getroot().iter("testcase")) if xml.is_file() else []
+    junit_exact = exact_junit80(xml) if xml.is_file() else False
     records = {}
     for record in plugin.records:
         # With explicit SERVER rootdir these nodeids must be the frozen IDs.
         records.setdefault(record["nodeid"], []).append(record)
     complete = (code == 0 and plugin.collected == EXPECTED_IDS and plugin.started == EXPECTED_IDS
-                and set(records) == set(EXPECTED_IDS) and len(cases) == 80
+                and set(records) == set(EXPECTED_IDS) and junit_exact
                 and all([r["when"] for r in records.get(nodeid, [])] == ["setup", "call", "teardown"]
                         and all(r["outcome"] == "passed" and not r["wasxfail"] for r in records[nodeid])
-                        for nodeid in EXPECTED_IDS)
-                and all(not list(case.iter("failure")) and not list(case.iter("error"))
-                        and not list(case.iter("skipped")) for case in cases))
+                        for nodeid in EXPECTED_IDS))
     return {"pytest_exitstatus": code, "complete80": complete, "expected_ids": EXPECTED_IDS,
             "collected": plugin.collected, "started": plugin.started, "phase_records": plugin.records,
+            "junit_exact_ids_and_totals": junit_exact,
             "junit_sha256": sha(xml) if xml.is_file() else None,
             "not_executed": [n for n in EXPECTED_IDS if not any(r["when"] == "call" for r in records.get(n, []))]}
 
@@ -821,24 +1256,22 @@ def save_evidence(path, value):
 
 
 def main():
+    deadline = install_absolute_deadline()
     if sys.argv[1:] == ["--describe-approved-service-location-writer-schema"]:
-        return describe_main()
+        return describe_main(deadline)
     # Nothing from app/helper/framework/fixtures can execute before this guard.
     try:
         context = verify_approval()
+        deadline()
     except Exception:
         print(json.dumps({"ok": False, "stage": "source_environment_approval", "runtime": "NOT_STARTED"}))
         return 2
+    context["deadline"] = deadline
     context["anchors"] = {p: (p.stat().st_dev, p.stat().st_ino, p.stat().st_uid) for p in context["directories"]}
     counters = {"forbidden": [], "pg_connect": 0, "pg_sendmsg": 0,
                 "connections": [], "cleanup_failures": [], "ipv6_probe_flag_restored": False}
     stack = ExitStack()
     result, stage_result, manifest, manifest_sha, local_ok = {}, None, None, None, False
-    def execution_deadline(*_):
-        context["timed_out"] = True
-        refuse("600s bounded execution exceeded")
-    signal.signal(signal.SIGALRM, execution_deadline)
-    signal.alarm(MAX_SECONDS)
     try:
         sys.path[:0] = [str(context["site"]), str(SERVER)]
         install_import_boundary(context["site"])
@@ -897,8 +1330,8 @@ def main():
             guard_private_roots(context, context["anchors"])
         except BaseException:
             local_ok = False
-        signal.alarm(0)
         stack.close()
+    deadline()
     return 0 if local_ok else 1
 
 
@@ -917,14 +1350,7 @@ def verify_describe_approval():
     if (set(os.environ) - allowed or any(os.environ.get(k) != "1" for k in flags)
             or os.environ.get("HOME") != pwd.getpwuid(0).pw_dir):
         refuse("source-describe unique opt-in/minimal environment required")
-    for entry in os.listdir("/proc/self/fd"):
-        fd = int(entry)
-        if fd > 2:
-            try:
-                os.fstat(fd)
-            except OSError:
-                continue
-            refuse("source-describe inherited foreign FD")
+    fresh_process_descriptors()
     path, approval = private_json(os.environ["SLW_APPROVAL"], os.environ["SLW_APPROVAL_SHA256"])
     expected_self = os.environ["SLW_RUNNER_SHA256"]
     if (approval.get("authority") != "ROOT" or approval.get("mode") != "describe"
@@ -956,7 +1382,6 @@ def install_describe_boundaries(context, counters, stack):
     """Stdlib-only path: ALL network closed, including the provision PG port."""
     from importlib.machinery import PathFinder
     from unittest.mock import patch
-    target = context["directories"][1] / "source-description.json"
     stdlib = no_links(Path(sysconfig.get_paths()["stdlib"]))
 
     def deny(event):
@@ -985,42 +1410,30 @@ def install_describe_boundaries(context, counters, stack):
                      "os.kill", "os.killpg", "os.chdir", "os.mkdir", "os.remove", "os.rmdir", "os.rename",
                      "os.link", "os.symlink", "os.truncate", "os.chown", "os.chmod", "os.utime"}:
             deny("describe-process-or-mutation:" + event)
-        if event == "open":
-            value = args[0]
-            flags = args[2] if len(args) > 2 and type(args[2]) is int else 0
-            if not isinstance(value, (str, bytes, os.PathLike)):
-                deny("describe-file-descriptor-open")
-            path = no_links(Path(os.path.abspath(os.fsdecode(value))))
-            if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
-                if path != target or not flags & os.O_EXCL:
-                    deny("describe-write-outside-exclusive-evidence-file")
 
     def forbidden(*args, **kwargs):
         deny("describe-network-or-fd-operation")
 
     sys.meta_path.insert(0, DescribeImports())
     sys.addaudithook(audit)
+    install_filesystem_boundary(context, deny)
     for name in ("send", "sendall", "sendmsg", "sendto", "recv", "recv_into", "recvfrom", "recvmsg", "listen"):
         if hasattr(socket.socket, name):
             stack.enter_context(patch.object(socket.socket, name, forbidden))
-    for name in ("write", "writev", "pwrite", "pwritev", "ftruncate", "dup", "dup2", "fchmod", "fchown",
-                 "sendfile", "copy_file_range", "splice"):
-        if hasattr(os, name):
-            stack.enter_context(patch.object(os, name, forbidden))
 
 
-def describe_main():
+def describe_main(deadline):
     # Deliberately does not call verify_approval/install_boundaries/load_fixture:
     # those are provision/test paths and may import framework/driver code.
     try:
         context = verify_describe_approval()
+        deadline()
     except Exception:
         print(json.dumps({"ok": False, "stage": "source_describe_approval", "runtime": "NOT_STARTED"}))
         return 2
+    context["deadline"] = deadline
     context["anchors"] = {p: (p.stat().st_dev, p.stat().st_ino, p.stat().st_uid) for p in context["directories"]}
     stack, forbidden, result, ok = ExitStack(), [], {}, False
-    signal.signal(signal.SIGALRM, lambda *_: refuse("source-describe time bound"))
-    signal.alarm(MAX_SECONDS)
     try:
         install_describe_boundaries(context, forbidden, stack)
         # Sole nonstdlib source execution is the exact reviewed fixture module;
@@ -1037,6 +1450,7 @@ def describe_main():
             refuse("source description selected closure differs")
         ok = True
     except BaseException as error:
+        ok = False
         result = {"failure_class": type(error).__name__}
     finally:
         try:
@@ -1057,8 +1471,8 @@ def describe_main():
             guard_private_roots(context, context["anchors"])
         except BaseException:
             ok = False
-        signal.alarm(0)
         stack.close()
+    deadline()
     return 0 if ok else 1
 
 
