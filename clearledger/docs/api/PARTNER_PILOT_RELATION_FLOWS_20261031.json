@@ -5,7 +5,7 @@
   "baseRevision": "2a8128dfc59aaf9195d5113e7ab10d67061caf19",
   "currentHeadAtPreparation": "2a8128dfc59aaf9195d5113e7ab10d67061caf19",
   "workspace": "/home/mag/orca/workspaces/ledger-app/partner-pilot-relation-fixture-proposal-20261031",
-  "implementedSourceChanges": 1,
+  "implementedSourceChanges": 4,
   "actualFuturePathsWritten": true,
   "runtimeTests": "NOTRUN",
   "pureMocks": "NOTRUN",
@@ -46,17 +46,19 @@
     },
     {
       "path": "clearledger/tools/partner-pilots/clients/run.ts",
-      "lines": "12-34",
       "gitBlob": "40c9318171ab1b116df26fb72438d8e6da5d6615",
       "baseSha256": "2de042e90a73e6d063c7e20c4ba8d58cdc4bac4a87845a88f811a4ffa8324730",
-      "currentSha256": "2de042e90a73e6d063c7e20c4ba8d58cdc4bac4a87845a88f811a4ffa8324730"
+      "currentSha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9",
+      "baseLines": "1-221",
+      "currentLines": "1-246"
     },
     {
       "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
-      "lines": "1-205",
       "gitBlob": "11c4794a042880cdd58075c30ad2de7aec8044f8",
       "baseSha256": "3ee82e6b3caf8062a3897438d397b24d124512bed4f6f7a6f4c7eaff7e16b437",
-      "currentSha256": "3ee82e6b3caf8062a3897438d397b24d124512bed4f6f7a6f4c7eaff7e16b437"
+      "currentSha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab",
+      "baseLines": "1-177",
+      "currentLines": "1-330"
     },
     {
       "path": "clearledger/server/app/product_api/app.py",
@@ -148,6 +150,14 @@
       "gitBlob": "7a3a1638778cb089e0454b2987e0c8b3b4c4d65d",
       "baseSha256": "9bdb202417114a095c6e821ed72600831241c0f81e57e49d6dd063588d730769",
       "currentSha256": "9bdb202417114a095c6e821ed72600831241c0f81e57e49d6dd063588d730769"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "baseSha256": null,
+      "gitBlob": null,
+      "currentSha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1",
+      "baseLines": null,
+      "currentLines": "1-164"
     }
   ],
   "expectations": [
@@ -198,7 +208,7 @@
     {
       "case": "INDEPENDENT_DOCUMENT_CHILD",
       "expected": "conditional d0,d2; d1 private,d3 foreign,d4 outside resource SET hidden before total/limit",
-      "precondition": "separately approved delegated profile with contracts:read/documents:read and both grants; currently unavailable"
+      "precondition": "Requires separate ROOT synthetic-profile patch confirmed msg_e41e48c5bc73, both OAuth/resource authorities and current native ACL; combined runtime NOTRUN"
     },
     {
       "case": "CURRENT_DOCUMENT_PROFILE",
@@ -243,7 +253,7 @@
   "manifest": {
     "field": "resources.relations",
     "schema": "A scenario inputs only; wire expectations reuse generated ContractWire/ContractTypeWire, no hand-written SDK models",
-    "sourceBridge": "sandbox/server.py:219-222 already forwards fixture fields except owner/employee; A proposed run.ts reads relations explicitly",
+    "sourceBridge": "sandbox/server.py:219-222 forwards explicit fixture relations; run.ts:24-28 assigns rental/documents relations; no raw inventory inference",
     "rental": "Two existing allowed contracts; exact source contract DTOs and independently visible object sets",
     "documents": "Conditional explicit sets only; not callable positively with current profile",
     "authorizationChange": false,
@@ -256,7 +266,29 @@
     "futurePythonSqlHttpBrowserNodeBuildTests": "NOTRUN",
     "gitApply": "NOTRUN; forbidden",
     "sourceAssertionsAndGuards": "Existing assertions, grants, scope issuance, transport masks and guards unchanged; fixture seed extended only",
-    "unifiedHunkCountsAndContexts": "PASS_STATIC; reconstruction in memory only; no git apply"
+    "unifiedHunkCountsAndContexts": "PASS_STATIC; reconstruction in memory only; no git apply",
+    "fixtureAstAndInMemoryCompile": "PASS_STATIC; compiled code NEVER executed",
+    "originalRunCheckOrderPreserved": {
+      "status": "PASS_STATIC_TEXT_COMPARISON",
+      "checkNames": [
+        "RENTAL_READS_PAGING_TYPED_AND_TENANT_BOUNDARIES",
+        "APPROVED_ALL_PROFILE_OBEYS_EFFECTIVE_LOCATION_CEILING",
+        "MACHINE_SCOPE_ESCALATION_DENIED",
+        "OTHER_CLIENT_GRANT_DENIED",
+        "TOKEN_REVOCATION_DENIES_NEXT_REQUEST",
+        "OPERATIONS_READS_EQUIPMENT_MONITORING_AND_BOUNDARIES",
+        "CURRENT_INSTALLATION_BOUNDARY_NARROWS_NEXT_REQUEST",
+        "OWNER_GRANT_REVOKE_DENIES_NEXT_REQUEST_AND_REISSUE",
+        "SDK_REJECTS_WRONG_STATE_BEFORE_TOKEN_REQUEST",
+        "REAL_CODE_PKCE_NONCE_SIGNATURE_AND_USERINFO",
+        "DOCS_METADATA_PAGING_AND_RESOURCE_BOUNDARIES",
+        "DOCUMENT_VERSION_EXACT_BINARY_AND_NATIVE_DENIALS",
+        "ID_TOKEN_IS_NOT_API_CREDENTIAL",
+        "CURRENT_USER_MEMBERSHIP_REVOKE_DENIES_NEXT_REQUEST"
+      ]
+    },
+    "oldUppercaseCheckIdentifiersPreserved": "PASS_STATIC_TEXT_COMPARISON; no execution",
+    "operationsScenarioByteIdentical": "PASS_STATIC_EXTRACTED_FUNCTION_BYTES"
   },
   "independentReviewOfA": {
     "status": "ACTUAL_SOURCE_REVIEW_COMPLETE_STATIC",
@@ -303,20 +335,23 @@
     "mockEvidenceLimit": "relations.test.ts repeated scripted403 case repeats a fixed mock reply; it is not a server scope/grant ACL test. Distinct authority omission inputs test only the client admission function. All 9 proposed tests NOTRUN; real OAuth/HTTP/SQL acceptance NOTRUN."
   },
   "limitations": [
-    "Profile authorization remains unresolved; documents positive must report BLOCKED_BY_PROFILE instead of passing or silently skipping.",
+    "Frozen base documents profile lacks contracts authority; separate ROOT synthetic server patch confirmed by msg_e41e48c5bc73, combined source revision/runtime not yet verified here.",
     "Live timestamps/UUIDs/cursors/responses were not observed; all IDs in vectors come from explicitly seeded synthetic rows only.",
     "Company/unassigned empty relations and inactive catalog metadata remain source-derived expectations without new positive vectors.",
-    "One fixture source file and two reports prepared here; A actual3 source paths independently read, no further source finding; Node/TypeScript typecheck, pure mock execution and real pilot all NOTRUN."
+    "Complete6path package prepared and statically reviewed; production backend/SDK/guards/server/owner/transport unchanged. Node/typecheck/pure mocks/actual pilots all NOTRUN."
   ],
   "futureVerification": {
     "status": "NOTRUN",
     "pureMocksCommandAfterSeparateAuthorization": "cd clearledger/tools/partner-pilots/clients && node --experimental-strip-types --test guards.test.ts relations.test.ts",
     "reason": "package.json test:unit enumerates guards.test.ts only, so new relations.test.ts needs explicit future invocation; package files unchanged",
-    "realPilot": "NOTRUN; requires separate fixture/SQL/HTTP/browser authorization; current profile must preserve legacy checks, record passed:false blocked relation, then fail closed before success"
+    "realPilot": "ROOT subsequent verification NOTRUN; combine and pin separate synthetic server profile patch. Without it preserve old checks, record blocked positive, then fail before SUCCESS."
   },
   "artifactRole": "Source preparation report; runtime unverified",
   "implementedDocumentationChanges": 2,
   "implementedPaths": [
+    "clearledger/tools/partner-pilots/clients/run.ts",
+    "clearledger/tools/partner-pilots/clients/scenarios.ts",
+    "clearledger/tools/partner-pilots/clients/relations.test.ts",
     "clearledger/tools/partner-pilots/sandbox/fixture.py",
     "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.md",
     "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
@@ -332,11 +367,116 @@
       "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
     ],
     "restrictions": "No runtime, imports, tests/collection, controls, SQL/HTTP/SSH/Docker/build/install/formatter, merge/deploy/flags; no grants/scopes changes; exact base unchanged",
-    "applicationMethod": "stdlib exact context reconstruction and direct owned file write; git apply never invoked"
+    "applicationMethod": "stdlib exact context reconstruction and direct owned file write; git apply never invoked",
+    "coordinatorAuthorizedPackagePaths": [
+      "clearledger/tools/partner-pilots/clients/run.ts",
+      "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "clearledger/tools/partner-pilots/sandbox/fixture.py",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.md",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
+    ]
   },
   "historicalLocalProposal": {
     "path": "docs/api/external-developer-experience-20261031/relation-flows-proposal/fixture-proposal.patch",
     "status": "Uncommitted local preparation artifact; not part of final target delta"
   },
-  "implementationAccountingScope": "B owned component only: 1 fixture source + 2 reports; coordinator composes 6 total target paths with A 3 source paths"
+  "implementationAccountingScope": "Complete coordinator package:4 source files+2 reports; exactly6 target paths relative to frozen base",
+  "componentCommits": {
+    "A": {
+      "authored": "ae679dbf5fe4881738e11c034a8afa1efc1894a7",
+      "integrated": "20daebf1d51700b7d61161ecc8b48d8193350c26"
+    },
+    "B": {
+      "authored": "1457df337055f83e048ad7a17bef254ce58f454e",
+      "integrated": "ac88cccd7f051413b0e85a5507478efe97b5d11b"
+    }
+  },
+  "sourceFreezeCommit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+  "rootDependency": {
+    "status": "ROOT_CONFIRMED_SEPARATE_PATCH; NOT_PART_OF_THIS_PACKAGE; COMBINED_RUNTIME_NOTRUN",
+    "message": "msg_e41e48c5bc73",
+    "ownerRun": "run_19ce21b41b2c",
+    "path": "clearledger/tools/partner-pilots/sandbox/server.py",
+    "baseLines": "253-265",
+    "change": "Only synthetic documents client contracts:read + contracts SET on selected fixture contract IDs; explicit documents.vectors.contracts",
+    "preserve": "No objects/counterparties scopes; existing redaction, portal/session and other machine grants unchanged",
+    "baseWithoutRootPatch": "BLOCKED_BY_PROFILE; existing docs checks continue, new positive NOTRUN then nonzero before success",
+    "combinedSourceCommit": "UNKNOWN; ROOT must pin separately",
+    "combinedAcceptance": "NOTRUN"
+  },
+  "coordinatorReview": {
+    "run": "run_1e4d8306c273",
+    "scope": "Exact6paths; all4 source SHA matched actual worker-reviewed bytes",
+    "sourceExecution": 0,
+    "typescriptTypecheck": "NOTRUN",
+    "pureMockDefinitions": 9,
+    "runtimeTests": "NOTRUN",
+    "reviewLimits": "Text/AST/hash/Git checks only; not TypeScript compilation, SQL execution or observed HTTP responses",
+    "sourceReferences": [
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/clients/run.ts",
+        "lines": "1-246",
+        "sha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9"
+      },
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+        "lines": "1-330",
+        "sha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab"
+      },
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+        "lines": "1-164",
+        "sha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1"
+      },
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/sandbox/fixture.py",
+        "lines": "1-164",
+        "sha256": "1b945862711ca7f6b0bdef8abe837bf82c1f92fe43c6616ea5d14f178b4a6e5f"
+      }
+    ],
+    "futureAcceptance": {
+      "typescript": "NOTRUN; ROOT compiler",
+      "pureMocks": "NOTRUN; ROOT explicit guards.test.ts + relations.test.ts, no server ACL inference",
+      "actualPilot": "NOTRUN; ROOT must pin combined relation + separate synthetic server profile source and observe OAuth/HTTP results",
+      "M12_M18": "PARTIAL_SOURCE_PREPARATION_ONLY; no milestone closure",
+      "fullProgram": "20 M00-M19 and11 original gates preserved, no completion credit"
+    }
+  },
+  "packageSourceManifest": [
+    {
+      "path": "clearledger/tools/partner-pilots/clients/run.ts",
+      "sha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9",
+      "bytes": 15542,
+      "lines": 246
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "sha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab",
+      "bytes": 21186,
+      "lines": 330
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "sha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1",
+      "bytes": 11598,
+      "lines": 164
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/sandbox/fixture.py",
+      "sha256": "1b945862711ca7f6b0bdef8abe837bf82c1f92fe43c6616ea5d14f178b4a6e5f",
+      "bytes": 11256,
+      "lines": 164
+    }
+  ],
+  "markdownSha256": "e100899808500c5ede6d97533e5901af0af8f9dae0f843144684b2b05324cfee",
+  "jsonSelfHashPolicy": "No recursive self hash; final Git commit and external handoff/preview manifest identify complete JSON bytes"
 }
