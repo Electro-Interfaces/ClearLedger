@@ -37,13 +37,15 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app import guard, totp
 from app.auth import hash_password, native_claims_context, verify_password, decode_token
-from app.models import AuditEvent, Company, Invitation, User, UserCompany
+from app.models import AuditEvent, Company, CompanyRole, Invitation, User, UserCompany
 from app.routers import auth_router as routes
+from app.routers import invitations_router as invitations
 from app.services import contract_write_locks as locks
 from app.services import native_auth_locks as native
 from app.services import notify
 
 C, D, A, U, I = (UUID(int=i) for i in range(200, 205))
+R1, R2, N, E = (UUID(int=i) for i in range(205, 209))
 PASSWORD, NEW_PASSWORD = "Synthetic-Q7!Password", "Synthetic-R8!Changed"
 RESET = "synthetic-once-reset"
 EMAIL = "account@example.invalid"
@@ -60,7 +62,7 @@ async def store(monkeypatch):
     metadata = MetaData()
     # Exact ORM column sets, with only the FK parents relevant to this scope.
     # No production migrations, triggers, seed, or unrelated schema claim.
-    for model in (Company, User, UserCompany, Invitation, AuditEvent):
+    for model in (Company, CompanyRole, User, UserCompany, Invitation, AuditEvent):
         Table(model.__tablename__, metadata, *[
             Column(c.name, c.type, primary_key=c.primary_key,
                    nullable=False if c.primary_key else True,
@@ -74,6 +76,8 @@ async def store(monkeypatch):
         ("users", ["company_id"], ["companies.id"]),
         ("user_companies", ["company_id"], ["companies.id"]),
         ("user_companies", ["user_id"], ["users.id"]),
+        ("user_companies", ["role_id"], ["company_roles.id"]),
+        ("company_roles", ["company_id"], ["companies.id"]),
         ("invitations", ["company_id"], ["companies.id"]),
         ("invitations", ["invited_by"], ["users.id"]),
         ("audit_events", ["company_id"], ["companies.id"]),
@@ -201,19 +205,23 @@ async def running_route(store, invoke, *, actor_id=None, claims=None):
         await asyncio.gather(task, return_exceptions=True)
 
 
-async def account_owner(db, uid=U, *, extra_companies=(), member_company=None):
+async def account_owner(db, uid=U, *, extra_companies=(), member_company=None, roles=()):
     """Real frozen helper, complete Company S + User X plan, then canonical rows."""
     pointer = (await db.execute(select(User.company_id).where(User.id == uid))).scalar_one()
     parents = sorted(set(extra_companies) | ({pointer} if pointer is not None else set()))
     requests = tuple(locks.LockRequest(locks.CompanyKey(cid), S) for cid in parents)
     members = ((locks.LockRequest(locks.MemberKey(member_company, uid), X),)
                if member_company is not None else ())
-    plan = locks.LockPlan(requests + (locks.LockRequest(locks.UserKey(uid), X),) + members)
+    role_requests = tuple(locks.LockRequest(locks.RoleKey(cid, rid), S) for cid, rid in roles)
+    plan = locks.LockPlan(requests + (locks.LockRequest(locks.UserKey(uid), X),) + role_requests + members)
     cap = await locks.acquire_scoped_locks_async(db, plan)
     for cid in parents:
         await db.execute(select(Company).where(Company.id == cid).with_for_update(read=True))
     user = (await db.execute(select(User).where(User.id == uid).with_for_update()
                              .execution_options(populate_existing=True))).scalar_one()
+    for cid, rid in sorted(roles, key=lambda p: p[1]):
+        await db.execute(select(CompanyRole).where(CompanyRole.company_id == cid,
+            CompanyRole.id == rid).with_for_update(read=True))
     if member_company is not None:
         await db.execute(select(UserCompany).where(UserCompany.company_id == member_company,
             UserCompany.user_id == uid).with_for_update())
@@ -823,3 +831,255 @@ async def test_change_password_normal_error_order_is_unchanged(store, wrong_curr
         assert (exc.value.status_code, exc.value.detail) == (400, detail)
         assert state.commits == 0
     assert not store.audits
+
+
+INVITE_TOKEN = "synthetic-public-accept"
+
+
+async def accept_fixture(store, *, existing=True, scope="space"):
+    email = EMAIL if existing else "new-invited@example.invalid"
+    async with store.factory() as db:
+        db.add_all([CompanyRole(id=rid, company_id=C, name=f"role-{rid.int}", modules=[], is_system=False)
+                    for rid in (R1, R2)])
+        await db.flush()
+        (await db.get(UserCompany, (U, C))).role_id = R1
+        db.add(Invitation(id=I, company_id=C, email=email, role="admin", status="pending",
+            scope=scope, position="Invited position", party_type="partner",
+            token_hash=invitations._hash(INVITE_TOKEN),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            created_at=datetime.now(timezone.utc)))
+        await db.commit()
+    return SimpleNamespace(name="Invited" if not existing else None,
+                           password=PASSWORD if not existing else None, position="  Actual position  ")
+
+
+def accepting(payload):
+    async def route(db, actor):
+        return await invitations.accept_invite(INVITE_TOKEN, payload, db)
+    return route
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing,scope", [(True, "company"), (False, "company"),
+                                           (True, "space"), (False, "space")])
+async def test_public_accept_existing_new_company_space_parity_without_admin(store, monkeypatch, existing, scope):
+    payload = await accept_fixture(store, existing=existing, scope=scope)
+    monkeypatch.setattr(invitations.uuid, "uuid4", lambda: N)
+    async with running_route(store, accepting(payload)) as (task, state):
+        result = await asyncio.wait_for(task, 15)
+        assert state.handler_commits == 0
+    uid = U if existing else N
+    if existing:
+        assert result == {"joined": True, "user_exists": True}
+    else:
+        assert result.user.id == str(N) and result.user.role == "admin"
+        assert decode_token(result.access_token)["sub"] == str(N)
+    async with store.factory() as check:
+        user = await check.get(User, uid)
+        assert not user.is_superadmin and user.company_id == C
+        assert verify_password(PASSWORD, user.password_hash)
+        assert (await check.get(Invitation, I)).status == "accepted"
+        for cid in (C, D) if scope == "space" else (C,):
+            member = await check.get(UserCompany, (uid, cid))
+            assert member is not None
+            if existing and cid == C:
+                assert member.role == "user" and member.role_id == R1
+            else:
+                assert member.role == "admin" and member.role_id is None
+                assert member.position == "Actual position" and member.party_type == "partner"
+        if not existing and scope == "company":
+            assert await check.get(UserCompany, (uid, D)) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing,guarded", [(True, "user"), (False, "user"),
+    (True, "company-d"), (False, "company-d"), (True, "member-c"),
+    (True, "member-d"), (False, "member-d"), (True, "old-role")])
+async def test_space_accept_full_user_company_role_member_plan_before_any_flush(store, monkeypatch, existing, guarded):
+    payload = await accept_fixture(store, existing=existing)
+    monkeypatch.setattr(invitations.uuid, "uuid4", lambda: N)
+    uid = U if existing else N
+    key = {"user": locks.UserKey(uid), "company-d": locks.CompanyKey(D),
+           "member-c": locks.MemberKey(C, uid), "member-d": locks.MemberKey(D, uid),
+           "old-role": locks.RoleKey(C, R1)}[guarded]
+    async with store.factory() as owner, store.factory() as observer:
+        owner_pid = await pid(owner)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        async with running_route(store, accepting(payload)) as (task, state):
+            await wait_blocked(observer, state.pid, owner_pid, key)
+            async with store.factory() as check:
+                assert (await check.get(Invitation, I)).status == "pending"
+                assert await check.get(UserCompany, (uid, D)) is None
+                if not existing:
+                    assert await check.get(User, uid) is None
+            await owner.rollback()
+            await asyncio.wait_for(task, 15)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change,status", [("token", 404), ("revoked", 410),
+    ("accepted", 410), ("expired", 410), ("email", 409), ("scope", 409), ("targets", 409)])
+async def test_accept_repeats_public_admission_and_observed_target_set_after_wait(store, change, status):
+    payload = await accept_fixture(store)
+    async with store.factory() as owner, store.factory() as observer:
+        owner_pid = await pid(owner)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((
+            locks.LockRequest(locks.CompanyKey(C), X), locks.LockRequest(locks.CompanyKey(E), X))))
+        inv = await owner.get(Invitation, I)
+        async with running_route(store, accepting(payload)) as (task, state):
+            await wait_blocked(observer, state.pid, owner_pid, locks.CompanyKey(C))
+            if change == "token":
+                inv.token_hash = invitations._hash("reissued")
+            elif change in ("revoked", "accepted"):
+                inv.status = change
+            elif change == "expired":
+                inv.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            elif change == "email":
+                inv.email = "moved@example.invalid"
+            elif change == "scope":
+                inv.scope = "company"
+            else:
+                owner.add(Company(id=E, slug="synthetic-new-target", name="New", profile_id="energy"))
+            await owner.commit()
+            with pytest.raises(HTTPException) as exc:
+                await asyncio.wait_for(task, 15)
+            assert exc.value.status_code == status
+    async with store.factory() as check:
+        assert await check.get(UserCompany, (U, D)) is None
+        assert (await check.get(UserCompany, (U, C))).role_id == R1
+
+
+@pytest.mark.asyncio
+async def test_accept_changed_existing_named_role_pointer_aborts_without_late_role_acquire(store):
+    payload = await accept_fixture(store)
+    async with store.factory() as owner, store.factory() as observer:
+        owner_pid = await pid(owner)
+        await account_owner(owner, member_company=C, roles=((C, R1), (C, R2)))
+        async with running_route(store, accepting(payload)) as (task, state):
+            await wait_blocked(observer, state.pid, owner_pid, locks.UserKey(U))
+            (await owner.get(UserCompany, (U, C))).role_id = R2
+            await owner.commit()
+            with pytest.raises(HTTPException) as exc:
+                await asyncio.wait_for(task, 15)
+            assert exc.value.status_code == 409
+    async with store.factory() as check:
+        assert await check.get(UserCompany, (U, D)) is None
+        assert (await check.get(Invitation, I)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_public_invitation_consumed_once_by_two_existing_user_requests(store):
+    payload = await accept_fixture(store)
+    async with store.factory() as owner, store.factory() as observer:
+        owner_pid = await pid(owner)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((
+            locks.LockRequest(locks.CompanyKey(C), X),)))
+        async with running_route(store, accepting(payload)) as (first, state1):
+            async with running_route(store, accepting(payload)) as (second, state2):
+                await wait_blocked(observer, state1.pid, owner_pid, locks.CompanyKey(C))
+                await wait_blocked(observer, state2.pid, owner_pid, locks.CompanyKey(C))
+                await owner.rollback()
+                results = await asyncio.wait_for(asyncio.gather(first, second, return_exceptions=True), 15)
+    assert sum(r == {"joined": True, "user_exists": True} for r in results) == 1
+    errors = [r for r in results if isinstance(r, HTTPException)]
+    # If discovery saw absent Member D then the first added it, pointer drift
+    # fails409 before the second's invitation readmission; otherwise accepted410.
+    assert len(errors) == 1 and errors[0].status_code in (409, 410)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["name", "password"])
+async def test_new_public_invitee_keeps_name_password_requirements(store, missing):
+    payload = await accept_fixture(store, existing=False)
+    setattr(payload, missing, None)
+    async with running_route(store, accepting(payload)) as (task, state):
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(task, 15)
+        assert (exc.value.status_code, exc.value.detail) == (400, "Укажите имя и пароль")
+    async with store.factory() as check:
+        assert (await check.execute(select(User.id).where(
+            User.email == "new-invited@example.invalid"))).scalar_one_or_none() is None
+        assert (await check.get(Invitation, I)).status == "pending"
+
+
+async def wait_invitation_row(observer, waiter_pid, owner_pid):
+    deadline = monotonic() + 15
+    while monotonic() < deadline:
+        blockers = (await observer.execute(text("SELECT pg_blocking_pids(:pid)"),
+                                          {"pid": waiter_pid})).scalar_one()
+        waiting = (await observer.execute(text("""
+            SELECT count(*) FROM pg_locks WHERE pid=:pid AND NOT granted
+            AND locktype IN ('transactionid','tuple')
+        """), {"pid": waiter_pid})).scalar_one()
+        if owner_pid in blockers and waiting:
+            return
+    raise AssertionError("Expected real invitation UPDATE row wait")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change,status", [("token", 404), ("revoked", 410), ("expired", 410)])
+async def test_public_admission_is_repeated_after_final_invitation_row_wait(store, change, status):
+    payload = await accept_fixture(store)
+    async with store.factory() as owner, store.factory() as observer:
+        owner_pid = await pid(owner)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((
+            locks.LockRequest(locks.CompanyKey(C), S),)))
+        await owner.execute(select(Company).where(Company.id == C).with_for_update(read=True))
+        inv = (await owner.execute(select(Invitation).where(
+            Invitation.id == I, Invitation.company_id == C).with_for_update())).scalar_one()
+        async with running_route(store, accepting(payload)) as (task, state):
+            await wait_invitation_row(observer, state.pid, owner_pid)
+            if change == "token":
+                inv.token_hash = invitations._hash("reissued-after-row-wait")
+            elif change == "revoked":
+                inv.status = "revoked"
+            else:
+                inv.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await owner.commit()
+            with pytest.raises(HTTPException) as exc:
+                await asyncio.wait_for(task, 15)
+            assert exc.value.status_code == status
+    async with store.factory() as check:
+        assert await check.get(UserCompany, (U, D)) is None
+
+
+@pytest.mark.asyncio
+async def test_accept_legacy_cross_company_named_role_fails409_without_repair(store):
+    payload = await accept_fixture(store)
+    async with store.factory() as setup:
+        # Deliberate synthetic corruption permitted by the actual single Role FK.
+        setup.add(CompanyRole(id=E, company_id=D, name="Foreign", modules=[], is_system=False))
+        await setup.flush()
+        (await setup.get(UserCompany, (U, C))).role_id = E
+        await setup.commit()
+    async with running_route(store, accepting(payload)) as (task, state):
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(task, 15)
+        assert exc.value.status_code == 409
+    async with store.factory() as check:
+        assert (await check.get(UserCompany, (U, C))).role_id == E
+        assert await check.get(UserCompany, (U, D)) is None
+        assert (await check.get(Invitation, I)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_new_invitee_email_appearing_during_wait_aborts_without_switching_user_key(store, monkeypatch):
+    payload = await accept_fixture(store, existing=False)
+    monkeypatch.setattr(invitations.uuid, "uuid4", lambda: N)
+    other = UUID(int=209)
+    async with store.factory() as owner, store.factory() as observer:
+        owner_pid = await pid(owner)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((
+            locks.LockRequest(locks.CompanyKey(C), X), locks.LockRequest(locks.UserKey(other), X))))
+        async with running_route(store, accepting(payload)) as (task, state):
+            await wait_blocked(observer, state.pid, owner_pid, locks.CompanyKey(C))
+            owner.add(User(id=other, company_id=C, email="new-invited@example.invalid",
+                           password_hash=hash_password(PASSWORD), name="Concurrent", role="user"))
+            await owner.commit()
+            with pytest.raises(HTTPException) as exc:
+                await asyncio.wait_for(task, 15)
+            assert exc.value.status_code == 409
+    async with store.factory() as check:
+        assert await check.get(User, N) is None
+        assert await check.get(UserCompany, (other, C)) is None
+        assert (await check.get(Invitation, I)).status == "pending"

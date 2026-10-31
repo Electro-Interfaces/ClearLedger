@@ -175,3 +175,43 @@ def test_invite_resend_classification_and_demo_exact_selector():
                                  "twofa_status", "reset_password_preview", "_valid_reset_user"])
 def test_read_cookie_and_push_only_roots_do_not_claim_user_writer_authority(name):
     assert not calls(functions(ROUTER)[name], "prepare_auth_write")
+
+
+def test_invite_plan_includes_all_targets_absent_members_and_old_named_roles():
+    from app.services.native_auth_locks import invite_plan, S, X
+    from app.services.contract_write_locks import CompanyKey, UserKey, MemberKey, RoleKey
+    rid = UUID(int=99)
+    plan = invite_plan(user_id=U, new_user=False, companies=(C, D),
+                       members={C: (rid, "user"), D: None})
+    assert {(CompanyKey(C), S), (CompanyKey(D), S), (UserKey(U), S),
+            (MemberKey(C, U), X), (MemberKey(D, U), X), (RoleKey(C, rid), S)} == {
+                (r.key, r.mode) for r in plan.requests}
+    new = invite_plan(user_id=U, new_user=True, companies=(C, D), members={C: None, D: None})
+    assert any(r.key == UserKey(U) and r.mode == X for r in new.requests)
+
+
+def test_accept_has_one_complete_entrance_then_invitation_row_then_public_readmission():
+    path = ROOT / "app/routers/invitations_router.py"
+    node = functions(path)["accept_invite"]
+    source = ast.get_source_segment(path.read_text(), node)
+    assert len(calls(node, "prepare_invite_write")) == 1
+    assert source.index("assert_auth_clean(db)") < source.index("_valid_invite(token, db)")
+    assert source.index("user_id = uuid.uuid4()") < source.index("prepare_invite_write")
+    assert source.index("prepare_invite_write") < source.index(".with_for_update()")
+    assert source.index(".with_for_update()") < source.rindex("_valid_invite(token, db)")
+    assert source.index("set(fresh_targets) != set(targets)") < source.index("db.add(")
+    assert "Invitation.id == iid, Invitation.company_id == cid" in source
+    assert not calls(node, "commit") and not calls(node, "rollback")
+    assert "is_superadmin=False" in source and "if not current_user" not in source
+
+
+@pytest.mark.asyncio
+async def test_public_accept_dirty_preflight_is_rejected_without_sql():
+    from app.routers.invitations_router import accept_invite
+    from app.services.contract_write_locks import ScopedLockError
+    class Dirty:
+        new, dirty, deleted = (object(),), (), ()
+        def execute(self, *args, **kwargs):
+            raise AssertionError("public preflight autoflush")
+    with pytest.raises(ScopedLockError, match="clean entry"):
+        await accept_invite("synthetic", None, Dirty())
