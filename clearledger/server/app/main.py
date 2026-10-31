@@ -25,6 +25,8 @@ from app.database import (
     async_session_factory,
     create_all,
     database_startup_lock,
+    preflight_startup_sources,
+    require_startup_schema,
     get_db,
 )
 from app.routers import management_router
@@ -190,10 +192,7 @@ async def _prepare_database(started_before: datetime) -> None:
 
 async def _prepare_database_once(started_before: datetime) -> None:
     """Выполнить DDL/seed один раз на контейнер, а не по разу на worker."""
-    if settings.managed_core_budget_enabled:
-        from app import database as database_runtime
-        from app.services.schema_version_gate import require_engine
-        await require_engine(database_runtime.engine, settings)
+    await require_startup_schema()
     instance_id = os.getenv("HOSTNAME", "").strip() if settings.app_env == "prod" else ""
     if not instance_id:
         await _prepare_database(started_before)
@@ -254,6 +253,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Gunicorn запускает два процесса. Без общего лока оба одновременно меняют
     # схему и делают check-then-insert seed, что даёт гонки на DDL и unique.
+    preflight_startup_sources()
+    await require_startup_schema()
     async with database_startup_lock():
         await _prepare_database_once(started_at)
 
