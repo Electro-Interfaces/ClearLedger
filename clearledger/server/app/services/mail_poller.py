@@ -13,6 +13,7 @@ import asyncio
 import logging
 
 from app.database import async_session_factory
+from app.services import calendar_replies
 from app.services.mail_intake import poll_due
 
 logger = logging.getLogger("clearledger.mail")
@@ -36,4 +37,15 @@ async def run_forever() -> None:
             raise
         except Exception as e:  # noqa: BLE001 — цикл не должен умирать от одной ошибки
             logger.warning("опрос почты не выполнен: %s", e)
+        # Ответы на приглашения — свой ящик и своя ошибка: сбой одного опроса
+        # не должен останавливать другой.
+        try:
+            async with async_session_factory() as db:
+                n = await calendar_replies.poll(db)
+                if n:
+                    logger.info("почта: ответов на приглашения %s", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ящик ответов на приглашения не опрошен: %s", e)
         await asyncio.sleep(TICK_SECONDS)

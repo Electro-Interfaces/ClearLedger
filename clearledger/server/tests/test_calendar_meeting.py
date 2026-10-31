@@ -68,3 +68,26 @@ async def test_чужому_встречу_не_открыть(db, jitsi_key):
         await calendar_meeting(event['id'], company_id=str(company.id),
                                db=db, current_user=чужой)
     assert отказ.value.status_code == 403
+
+
+async def test_открытую_встречу_сотрудник_открывает(db, jitsi_key):
+    """Круг «вся компания»: войти может любой сотрудник, как из «Конференций»."""
+    from datetime import datetime, timedelta, timezone
+    company, owner, чужой, _ = await people(db)
+    start = datetime.now(timezone.utc) + timedelta(days=1)
+    открытая = await calendar_create(EventIn(
+        company_id=str(company.id), title='Общее собрание', starts_at=start,
+        ends_at=start + timedelta(hours=1), visibility='company'), db=db, current_user=owner)
+    вход = await calendar_meeting(открытая['id'], company_id=str(company.id),
+                                  db=db, current_user=чужой)
+    assert вход['room'], 'сотрудника не пустили в открытую встречу'
+    assert вход['moderator'] is False, 'посторонний вошёл ведущим до начала'
+
+    # Сессия этой встречи осталась бы идущей и попала бы в «Идут сейчас»
+    # соседних тестов конференций (база между тестами не откатывается).
+    from sqlalchemy import update
+    from app.models import ConfSession
+    await db.execute(update(ConfSession).where(
+        ConfSession.event_id == uuid.UUID(str(открытая['id'])))
+        .values(ended_at=datetime.now(timezone.utc)))
+    await db.commit()  # вход сам коммитит — flush откатился бы

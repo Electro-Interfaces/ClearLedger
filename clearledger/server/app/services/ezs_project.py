@@ -32,6 +32,9 @@ from app.services.ezs_changes import make_change
 from app.services.ezs_site_work import _item_by_key, log_event, set_gate_waiver, site_doc_kinds
 from app.services.ezs_checklist import norm_days
 from app.services import ezs_tp_steps
+from app.services.ezs_tp_projection import (
+    overdue_sql as tp_overdue_sql, has_next_sql as tp_has_next_sql,
+)
 from app.services.ezs_sites import (
     PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE, next_step_overdue_sql, phases_for,
     project_reporting_stage, stage_label, stage_phase,
@@ -178,6 +181,8 @@ _TC_BOOL_FIELDS = {"needs_reconstruction", "extra_power_possible", "transformer_
 
 
 def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
+    from app.services.ezs_tp_projection import summary
+    method_view = summary(tc)
     overdue = bool(tc.due_date and not tc.done_date and tc.due_date < date.today().isoformat()
                    and tc.status not in ("done", "rejected"))
     return {
@@ -204,7 +209,7 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "workflowVersion": tc.workflow_version or 0,
         "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
         "steps": ezs_tp_steps.steps_out(tc),
-        "overdue": overdue,
+        "overdue": overdue or method_view["overdue"], "methodView": method_view,
     }
 
 
@@ -216,6 +221,8 @@ async def get_tech_connection(db: AsyncSession, company_id, site_id) -> dict[str
         return None
     out = _tc_out(tc)
     out["kit"] = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site_id))
+    from app.services.ezs_tp_projection import read as read_tp_view
+    out["projection"] = await read_tp_view(db, tc)
     return out
 
 
@@ -282,7 +289,8 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         EzsTechConnection.site_id == site.id).with_for_update())).scalars().first()
     created = tc is None
     if tc is None:
-        tc = EzsTechConnection(company_id=company_id, site_id=site.id)
+        tc = EzsTechConnection(company_id=company_id, site_id=site.id,
+                               workflow={"_auto_start_new": True})
         db.add(tc)
     if (tc.workflow or {}).get("archived") and any(k != "note" for k in patch):
         raise HTTPException(409, "Сначала верните присоединение из архива")
@@ -482,13 +490,13 @@ async def tech_connections_by_operator(db: AsyncSession, company_id, *,
     """
     from app.services.ezs_sites import STAGE_ORDER
 
-    rows = (await db.execute(text("""
+    rows = (await db.execute(text(f"""
         select coalesce(nullif(trim(t.grid_operator), ''), '— не указана') as operator,
                t.grid_operator_counterparty_id as counterparty_id,
                t.status,
                t.application_date, t.specs_date, t.due_date, t.done_date,
                t.cost, t.total_cost, t.power_kwt,
-               s.stage
+               s.stage, {tp_overdue_sql("t")} as method_overdue
         from ezs_tech_connections t join ezs_sites s on s.id = t.site_id
         where t.company_id = :cid
           and (:all_stages or s.stage = any(:live))
@@ -527,8 +535,7 @@ async def tech_connections_by_operator(db: AsyncSession, company_id, *,
             a["rejected"] += 1
         elif r["status"] != "draft":
             a["inProgress"] += 1
-        if r["due_date"] and not r["done_date"] and r["due_date"] < today \
-                and r["status"] not in ("done", "rejected"):
+        if r["method_overdue"]:
             a["overdue"] += 1
         a["costSum"] += float(r["cost"] or 0)
         a["totalCostSum"] += float(r["total_cost"] or 0)
@@ -1139,7 +1146,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     Блоки, для которых данных нет, возвращают `empty` с подсказкой, чем их
     наполнить: экран из нулей хуже честного «нечего показывать».
     """
-    today = date.today().isoformat()
+    today = date.today()
     d30 = (date.today() - timedelta(days=30)).isoformat()
     d90 = (date.today() - timedelta(days=90)).isoformat()
 
@@ -1192,16 +1199,17 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
                        '$.*.*.waived ? (@ == true)'), false) as has_waived,
                    {next_step_overdue_sql("a")} as step_overdue,
                    (a.next_action is null and a.workspace_data->>'next_ref' is null
-                    and a.workspace_data->'external_wait'->>'waiting_for' is null) as missing_next,
+                    and a.workspace_data->'external_wait'->>'waiting_for' is null
+                    and not exists(select 1 from ezs_tech_connections t where t.site_id=a.id and t.company_id=a.company_id and {tp_has_next_sql('t')})) as missing_next,
                    exists (
                        select 1 from ezs_tech_connections t where t.site_id = a.id
-                         and t.due_date is not null and t.done_date is null
-                         and t.due_date < :today and t.status not in ('done','rejected')
+                         and {tp_overdue_sql("t", ":today")}
                    ) as tp_overdue,
                    exists (
                        select 1 from ezs_site_equipment eq where eq.site_id = a.id
                          and eq.due_date is not null and eq.supplied_date is null
-                         and eq.status in ('planned','ordered') and eq.due_date < :today
+                         and eq.status in ('planned','ordered')
+                         and eq.due_date < to_char(CAST(:today AS date), 'YYYY-MM-DD')
                    ) as eq_overdue
             from active a
             left join event_stats es on es.site_id = a.id
@@ -1598,12 +1606,15 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | N
     for c in ws[1]:
         c.font = Font(bold=True)
         c.alignment = Alignment(vertical="center", wrap_text=True)
+    from app.services.ezs_sites import next_steps
+    selected_sites=(await db.execute(select(EzsSite).where(EzsSite.company_id==company_id,EzsSite.id.in_([r["id"] for r in rows])))).scalars().all() if rows else []
+    next_by_site=await next_steps(db,company_id,user,selected_sites)
     for r in rows:
         ws.append([
             r["project_no"], r["title"], r["region"], r["city"], r["address"],
             PHASE_LABELS.get(STAGE_PHASE.get(r["stage"], ""), ""),
             STAGE_LABELS.get(r["stage"], r["stage"]), r["stage_since"],
-            r["owner"], r["owner_user"], r["next_action"], r["next_action_due"],
+            r["owner"], r["owner_user"], next_by_site.get(str(r["id"]),{}).get("text",r["next_action"]), next_by_site.get(str(r["id"]),{}).get("due",r["next_action_due"]),
             r["control_form"], r["contract_start"], r["contract_end"],
             float(r["planned_power_kwt"] or 0) or None, r["parking_spots"],
             "да" if r["subsidy_planned"] else "", r["commissioned_on"],
@@ -1960,6 +1971,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
                    for p in phases_for(site.kind)],
         "steps": steps,
         "tracks": [] if site.kind == "integration" else tracks,
+        "techConnection": tc.get("projection") if tc and site.kind != "integration" else None,
         "docs": {"count": len(docs), "kinds": sorted({d["kindLabel"] for d in docs})},
         "subsidy": subsidy_check(site),
         "progress": None if unknown_progress
@@ -2142,15 +2154,28 @@ async def export_tech_connections_xlsx(db: AsyncSession, company_id, *,
         i["specsNo"], i["specsDate"], i["contractNo"], i["contractDate"],
         i["powerKwt"], i["cost"], i["dueDate"], i["doneDate"],
         "да" if i["overdue"] else "",
+        " / ".join(b["stage"].get("name", "") for b in i["methodView"]["branches"]),
+        " / ".join((b["performer"] or {}).get("name", "") for b in i["methodView"]["branches"]),
+        len(i["methodView"]["deadlines"]),
     ] for i in rep["items"]]
     return build_xlsx([{
         "title": "Присоединение",
         "headers": ["Проект", "Название", "Стадия проекта", "Регион", "Город", "Статус", "Сетевая",
                     "№ заявки", "Дата заявки", "№ ТУ", "Дата ТУ", "№ договора",
                     "Дата договора", "Мощность, кВт", "Стоимость, ₽",
-                    "Срок мероприятий", "Исполнено", "Просрочено"],
+                    "Срок мероприятий", "Исполнено", "Просрочено", "Текущая работа ТП / сбыт", "Исполнитель процесса", "Просрочено по методике"],
         "rows": rows,
-        "widths": [16, 26, 18, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12],
+        "widths": [16, 26, 18, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12, 40, 30, 16],
+    }, {
+        "title": "Шаги ТП и сбыта",
+        "headers": ["Проект", "Название", "Ветка", "Пункт", "Работа", "План", "Факт", "Просрочено"],
+        "rows": [[i["projectNo"],i["title"],"Сбыт" if s["branch"]=="supply" else "ТП",s["no"],s["label"],s["plannedDate"],s["date"],"да" if s["overdue"] else ""] for i in rep["items"] for s in i["methodView"]["steps"]],
+        "widths": [16,26,14,10,65,16,16,14],
+    }, {
+        "title": "Просрочки ТП",
+        "headers": ["Проект", "Название", "Ветка", "Работа или замечание", "Срок"],
+        "rows": [[i["projectNo"],i["title"],d["branch"],d["label"],d["due"]] for i in rep["items"] for d in i["methodView"]["deadlines"]],
+        "widths": [16,26,14,65,16],
     }])
 
 

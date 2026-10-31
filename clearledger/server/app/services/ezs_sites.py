@@ -27,10 +27,14 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, case, cast, func, select
+from sqlalchemy import and_, case, cast, func, select, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ezs_tp_projection import (
+    overdue_sql as tp_overdue_sql, has_next_sql as tp_has_next_sql,
+    next_deadline_sql as tp_next_deadline_sql,
+)
 from app.models import EzsSite, Region
 from app.services.ezs_changes import make_change
 from app.services.ezs_checklist_integration import (
@@ -1104,6 +1108,11 @@ async def next_steps(db: AsyncSession, company_id, user, sites: list[EzsSite]) -
         for site_id, action, due in rows:
             по_проекту.setdefault(site_id, (action, due))
 
+    from app.models import EzsTechConnection
+    from app.services.ezs_tp_projection import summary as tp_summary
+    connections = (await db.execute(select(EzsTechConnection).where(
+        EzsTechConnection.company_id == company_id, EzsTechConnection.site_id.in_([s.id for s in sites])))).scalars().all() if sites else []
+    tp_next = {tc.site_id: tp_summary(tc)["nextWork"] for tc in connections}
     out: dict[str, dict[str, Any]] = {}
     for s in sites:
         data = s.workspace_data or {}
@@ -1134,6 +1143,8 @@ async def next_steps(db: AsyncSession, company_id, user, sites: list[EzsSite]) -
         шаг = по_проекту.get(s.id)
         if шаг:
             out[str(s.id)] = {"text": шаг[0], "due": шаг[1], "source": "project"}
+        elif tp_next.get(s.id):
+            out[str(s.id)] = tp_next[s.id]
     return out
 
 
@@ -1191,6 +1202,11 @@ def next_step_overdue_sql(alias="ezs_sites"):
             and exists (select 1 from ezs_projects p where p.site_id = {alias}.id
                 and p.closed_on is null and coalesce(p.next_action, '') <> ''
                 and p.next_action_due < to_char(current_date, 'YYYY-MM-DD')))
+        or ({alias}.next_action is null and {alias}.workspace_data->>'next_ref' is null
+            and {alias}.workspace_data->'external_wait'->>'waiting_for' is null
+            and not exists(select 1 from ezs_projects ep where ep.site_id={alias}.id and ep.closed_on is null and coalesce(ep.next_action,'')<>'')
+            and exists(select 1 from ezs_tech_connections t where t.site_id={alias}.id and t.company_id={alias}.company_id
+                and {tp_has_next_sql("t")} and {tp_next_deadline_sql("t")} < CURRENT_DATE))
     )"""
 
 
@@ -1225,7 +1241,9 @@ def _risk_conditions(risk: str) -> list[Any]:
         return [S.stage == "on_hold", S.hold_until.is_(None)]
     if risk == "no_next":
         return [*active, S.next_action.is_(None), S.workspace_data["next_ref"].astext.is_(None),
-                S.workspace_data["external_wait"]["waiting_for"].astext.is_(None)]
+                S.workspace_data["external_wait"]["waiting_for"].astext.is_(None),
+                ~exists(_select(EzsTechConnection.id).where(EzsTechConnection.site_id==S.id,
+                    EzsTechConnection.company_id==S.company_id,text(tp_has_next_sql('ezs_tech_connections'))))]
     if risk == "external_wait":
         return [*active, S.workspace_data["external_wait"]["waiting_for"].astext.is_not(None)]
     if risk == "contact_overdue":
@@ -1251,10 +1269,7 @@ def _risk_conditions(risk: str) -> list[Any]:
     if risk == "tp_overdue":
         return [*active, exists(_select(EzsTechConnection.id).where(
             EzsTechConnection.site_id == S.id,
-            EzsTechConnection.due_date.is_not(None),
-            EzsTechConnection.done_date.is_(None),
-            EzsTechConnection.due_date < today,
-            EzsTechConnection.status.notin_(["done", "rejected"])))]
+            text(tp_overdue_sql('ezs_tech_connections'))))]
     if risk == "eq_overdue":
         return [*active, exists(_select(EzsSiteEquipment.id).where(
             EzsSiteEquipment.site_id == S.id,

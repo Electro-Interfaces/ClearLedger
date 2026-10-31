@@ -49,10 +49,14 @@ export function CalendarPage() {
   const requestedDate = params.get('date') ?? ''
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && isValid(parseISO(requestedDate))
     ? startOfDay(parseISO(requestedDate)) : startOfDay(new Date())
-  /** Личный календарь и календарь компании остаются отдельными видами. */
+  /**
+   * Три вопроса к календарю. «Вместе» — своё и общий календарь компании в одной
+   * сетке, как слои в Outlook: иначе человек планирует неделю, не видя дня
+   * компании, который стоит на соседней вкладке.
+   */
   const scopeParam = params.get('calendarScope')
-  const scope = scopeParam === 'company' ? 'company' : 'mine'
-  const personal = scope === 'mine'
+  const scope = scopeParam === 'company' || scopeParam === 'all' ? scopeParam : 'mine'
+  const personal = scope !== 'company'
   const eventId = params.get('event')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
@@ -95,13 +99,6 @@ export function CalendarPage() {
     }
     return next
   }, { flushSync: true })
-  // Старые ссылки с объединённым видом открывают личный календарь.
-  useEffect(() => {
-    if (scopeParam !== 'all') return
-    const next = new URLSearchParams(params)
-    next.set('calendarScope', 'mine')
-    setParams(next, { replace: true })
-  }, [scopeParam, params, setParams])
   const dateKey = format(anchor, 'yyyy-MM-dd')
   const { from, to, days } = useMemo(() => {
     const at = parseISO(dateKey)
@@ -114,8 +111,18 @@ export function CalendarPage() {
 
   const eventsQ = useQuery({
     queryKey: ['calendar', companyId, scope, from.toISOString(), to.toISOString(), query],
-    queryFn: () => workService.listEvents(
-      companyId, from.toISOString(), to.toISOString(), { scope, q: query || undefined }),
+    queryFn: async () => {
+      const load = (s: 'mine' | 'company') => workService.listEvents(
+        companyId, from.toISOString(), to.toISOString(), { scope: s, q: query || undefined })
+      if (scope !== 'all') return { ...(await load(scope)), foreign: [] as string[] }
+      const [mine, company] = await Promise.all([load('mine'), load('company')])
+      const own = new Set(mine.events.map(e => e.id))
+      const rest = company.events.filter(e => !own.has(e.id))
+      return {
+        events: [...mine.events, ...rest], total: mine.total + rest.length,
+        truncated: mine.truncated || company.truncated, foreign: rest.map(e => e.id),
+      }
+    },
     enabled: !!companyId, staleTime: 30_000, refetchOnWindowFocus: true,
   })
   const tasksQ = useQuery({
@@ -242,6 +249,7 @@ export function CalendarPage() {
       return at >= from && at < to
         && (!query || (r.note ?? '').toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru')))
     })
+  const foreign = new Set(eventsQ.data?.foreign ?? [])
   const now = new Date()
   const repeats = (personal ? recurQ.data?.recurrences ?? [] : [])
     .filter(r => r.mine && r.enabled
@@ -266,7 +274,7 @@ export function CalendarPage() {
   </>
   const chip = (event: CalendarEvent) => cn(
     'mb-0.5 block w-full truncate rounded px-1 py-1 text-left text-xs',
-    'bg-primary/10 hover:bg-primary/20',
+    foreign.has(event.id) ? 'border border-border bg-background hover:bg-accent' : 'bg-primary/10 hover:bg-primary/20',
     (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')
   const busy = eventsQ.isFetching || (personal && (tasksQ.isFetching || planQ.isFetching))
   const errors = [
@@ -281,9 +289,8 @@ export function CalendarPage() {
    * Шапка календаря на телефоне — ОДНА строка (решение МАГа 07.09.2026).
    *
    * Сначала здесь было шесть строк управления, потом две; вторая строка с видом,
-   * выбором личного календаря или календаря компании и поиском всё равно читалась
-   * как отдельная панель, а «＋» стоял в ней вторым — рядом с плюсами у каждого
-   * дня в списке.
+   * «Мой · Компании» и поиском всё равно читалась как отдельная панель, а «＋»
+   * стоял в ней вторым — рядом с плюсами у каждого дня в списке.
    *
    * Теперь как в телефонном календаре: строка с периодом и стрелками, всё
    * остальное — за одним меню у названия периода (вид, чей календарь, сроки,
@@ -326,10 +333,11 @@ export function CalendarPage() {
             ))}
           </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuLabel>Календарь</DropdownMenuLabel>
+          <DropdownMenuLabel>Чей календарь</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={scope} onValueChange={value => update({ calendarScope: value })}>
-            <DropdownMenuRadioItem value="mine">Личный календарь</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="company">Календарь компании</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="mine">Мой</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="company">Компании</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="all">Вместе</DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
           {personal && (mode === 'week' || mode === 'day') && (
             <>
@@ -396,8 +404,8 @@ export function CalendarPage() {
 
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Календарь">
-          {([['mine', 'Личный календарь'], ['company', 'Календарь компании']] as const).map(([key, label]) => <Button key={key} variant={scope === key ? 'secondary' : 'ghost'} aria-pressed={scope === key} onClick={() => update({ calendarScope: key })}>{label}</Button>)}
+        <div className="flex gap-1">
+          {([['mine', 'Мой'], ['company', 'Компании'], ['all', 'Вместе']] as const).map(([key, label]) => <Button key={key} variant={scope === key ? 'secondary' : 'ghost'} aria-pressed={scope === key} onClick={() => update({ calendarScope: key })}>{label}</Button>)}
         </div>
         <select aria-label="Вид календаря" value={mode} onChange={e => update({ calendarMode: e.target.value })}
           className="ml-auto h-10 w-28 min-w-0 rounded-md border border-input bg-background px-3 text-base md:hidden">
@@ -453,7 +461,7 @@ export function CalendarPage() {
             <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{event.all_day ? 'Весь день' : <>{format(eventDaySegment(event, day)!.start, 'HH:mm')}<span className="block">{eventDaySegment(event, day)!.endMinute === 1440 ? '24:00' : format(eventDaySegment(event, day)!.end, 'HH:mm')}</span></>}</span>
             <span className="min-w-0 flex-1">
               <span className={cn('block break-words text-sm font-medium', (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')}>{event.title}</span>
-              <span className="mt-1 block break-words text-sm text-muted-foreground">{event.status === 'cancelled' ? `Отменена${event.cancel_reason ? ': ' + event.cancel_reason : ''}` : event.my_response === 'pending' ? 'Ждёт вашего ответа' : event.my_response === 'declined' ? 'Вы отказались' : event.location || (event.conference_url ? 'Видеовстреча' : eventDaySegment(event, day)?.continues ? 'Продолжение встречи' : '')}</span>
+              <span className="mt-1 block break-words text-sm text-muted-foreground">{event.status === 'cancelled' ? `Отменена${event.cancel_reason ? ': ' + event.cancel_reason : ''}` : event.my_response === 'pending' ? 'Ждёт вашего ответа' : event.my_response === 'declined' ? 'Вы отказались' : event.location || (event.conference_url ? 'Видеовстреча' : eventDaySegment(event, day)?.continues ? 'Продолжение встречи' : foreign.has(event.id) ? 'Календарь компании' : '')}</span>
             </span>
             {event.conference_url && <Video className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />}
           </button>)}
@@ -490,7 +498,7 @@ export function CalendarPage() {
         <Button className="mt-4" variant="outline" onClick={() => query ? setSearch('') : createAt(anchor)}>{query ? 'Сбросить поиск' : 'Назначить встречу'}</Button>
       </div>}
     </div> : mode !== 'month' ? <div className="flex min-h-0 flex-1 overflow-x-auto">
-      <TimeGrid days={days} events={events} tasks={showDue ? tasks : []} repeats={repeats} onEvent={open} onAdd={setNewAt} onDay={day => openDay(day, 'agenda')} />
+      <TimeGrid days={days} events={events} tasks={showDue ? tasks : []} foreign={foreign} repeats={repeats} onEvent={open} onAdd={setNewAt} onDay={day => openDay(day, 'agenda')} />
     </div> : <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-lg border border-border">
       <div className="grid grid-cols-7 border-b border-border bg-muted/40">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="py-2 text-center text-xs text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       <div className="grid flex-1 grid-cols-7 [grid-auto-rows:minmax(5.5rem,1fr)]">{days.map(day => {
@@ -525,9 +533,9 @@ export function CalendarPage() {
                точки. Точки говорят, что день занят, нажатие открывает его списком. */
             ? total > 0 && <button onClick={() => openDay(day, 'agenda')} aria-label={`${format(day, 'd MMMM', { locale: ru })}: ${total} ${запись(total)}`}
               className="flex min-h-8 w-full flex-wrap content-start items-center gap-1 px-0.5 py-1">
-              {meetings.slice(0, 3).map(e => <span key={e.id} className="size-1.5 rounded-full bg-primary" />)}
+              {meetings.slice(0, 3).map(e => <span key={e.id} className={cn('size-1.5 rounded-full', foreign.has(e.id) ? 'border border-foreground/60' : 'bg-primary')} />)}
               {due.slice(0, 3).map(t => <span key={t.id} className={cn('size-1.5 rounded-[1px]', t.overdue ? 'bg-destructive' : 'bg-foreground/50')} />)}
-              {total > 3 && <span className="text-xs leading-none tabular-nums text-muted-foreground">{total}</span>}
+              {total > 3 && <span className="text-[11px] leading-none tabular-nums text-muted-foreground">{total}</span>}
             </button>
             : <>
               {rows.slice(0, 3)}

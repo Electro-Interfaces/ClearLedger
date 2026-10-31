@@ -33,7 +33,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         cls.engine = create_async_engine(URL, poolclass=NullPool)
         cls.sessions = async_sessionmaker(cls.engine, expire_on_commit=False)
         names = ['ApprovalRequest', 'OutboxEvent', 'EventSubscription', 'AuditEvent', 'Company', 'User', 'UserCompany', 'Organization', 'Contract', 'EzsSite', 'EzsTechConnection',
-                 'EzsSiteDoc', 'EzsSiteParticipant', 'EzsSiteEquipment', 'EzsSiteCost', 'EzsSiteEvent', 'SourceFile', 'TpOrganizationDocument', 'DocCard', 'DocKind',
+                 'TaskEvent', 'WorkContextResult', 'EzsProject', 'EzsSiteDoc', 'EzsSiteParticipant', 'EzsSiteEquipment', 'EzsSiteCost', 'EzsSiteEvent', 'SourceFile', 'TpOrganizationDocument', 'DocCard', 'DocKind',
                  'DocSignatureEvidence', 'DocRelation', 'DocAcquaint', 'DocVersion', 'DocEvent', 'DocAccessGrant', 'ChatMessage', 'ChatRoom', 'ChatParticipant']
         tables = {getattr(m, n).__table__ for n in names}
         while True:
@@ -180,6 +180,58 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             tc=await db.get(m.EzsTechConnection,self.tc.id)
             self.assertIsNone(tc.workflow); self.assertEqual(tc.workflow_version,0)
+
+    async def test_existing_connection_stays_manual_until_explicit_start(self):
+        r = await self.save()
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["data"]["process_enabled"])
+        self.assertFalse(r.json()["autoStartNew"])
+        self.assertFalse(r.json()["autoStartedNew"])
+
+    async def test_new_connection_starts_after_required_people_are_saved(self):
+        async with self.sessions() as db:
+            tc = await db.get(m.EzsTechConnection, self.tc.id)
+            await db.delete(tc)
+            await db.commit()
+        created = await self.client.put(self.path, params=self.q, json={"method": "direct"})
+        self.assertEqual(created.status_code, 200, created.text)
+        state = await self.client.get(self.path + "/workflow", params=self.q)
+        self.assertTrue(state.json()["autoStartNew"])
+        self.assertFalse(state.json()["data"]["process_enabled"])
+
+        incomplete = copy.deepcopy(self.w)
+        incomplete["responsibilities"]["default"]["controller"] = None
+        pending = await self.client.put(self.path + "/workflow", params=self.q, json={
+            "version": state.json()["version"],
+            "evidence_token": state.json()["evidenceToken"],
+            "data": incomplete,
+        })
+        self.assertEqual(pending.status_code, 200, pending.text)
+        self.assertTrue(pending.json()["autoStartNew"])
+        self.assertFalse(pending.json()["data"]["process_enabled"])
+
+        launched = await self.save(self.w, version=pending.json()["version"])
+        self.assertEqual(launched.status_code, 200, launched.text)
+        self.assertFalse(launched.json()["autoStartNew"])
+        self.assertTrue(launched.json()["autoStartedNew"])
+        self.assertTrue(launched.json()["data"]["process_enabled"])
+
+    async def test_new_landlord_connection_does_not_start_a_network_process(self):
+        async with self.sessions() as db:
+            tc = await db.get(m.EzsTechConnection, self.tc.id)
+            await db.delete(tc)
+            await db.commit()
+        created = await self.client.put(self.path, params=self.q, json={"method": "landlord"})
+        self.assertEqual(created.status_code, 200, created.text)
+        state = await self.client.get(self.path + "/workflow", params=self.q)
+        r = await self.client.put(self.path + "/workflow", params=self.q, json={
+            "version": state.json()["version"],
+            "evidence_token": state.json()["evidenceToken"],
+            "data": self.w,
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["autoStartNew"])
+        self.assertFalse(r.json()["data"]["process_enabled"])
 
     async def test_real_chat_notification_and_archive(self):
         await self.doc('contract'); await self.doc('egrul')
@@ -363,4 +415,115 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         self.w['stages']=[dict(id=str(uuid.uuid4()),title='Монтаж',accepted='2026-10-20')]
         self.assertEqual((await self.save()).status_code,422)
 
-if __name__ == '__main__': unittest.main()
+
+
+    async def test_projection_explicit_deadline_matches_sql_and_risk_filter(self):
+        from app.services.ezs_tp_projection import summary, overdue_sql
+        from app.services.ezs_sites import _risk_conditions
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            tc.status='applied';tc.steps={'accepted':{'date':'2030-01-01'}}
+            tc.workflow=dict(self.w,responsibilities={'contract':{'due':'2030-01-05'}})
+            await db.commit()
+            fixed=date(2030,1,10)
+            view=summary(tc,fixed)
+            self.assertTrue(view['overdue'])
+            self.assertEqual(next(r['plannedDate'] for r in view['steps'] if r['key']=='contract'),'2030-01-05')
+            for done in (None,'2030-01-04'):
+                tc.contract_date=done;await db.flush()
+                actual=await db.scalar(text('SELECT '+overdue_sql('t',':tp_today')+' FROM ezs_tech_connections t WHERE id=:id'),{'tp_today':fixed,'id':tc.id})
+                self.assertEqual(bool(actual),summary(tc,fixed)['overdue'])
+            # Реальный отбор использует текущее число и те же сроки.
+            tc.contract_date=None;tc.workflow=dict(self.w,responsibilities={'contract':{'due':'2000-01-01'}})
+            await db.flush()
+            ids=(await db.execute(select(m.EzsSite.id).where(m.EzsSite.company_id==self.company.id,*_risk_conditions('tp_overdue')))).scalars().all()
+            self.assertIn(self.site.id,ids)
+
+    async def test_projection_stages_remarks_supply_and_archived_sql_match(self):
+        from app.services.ezs_tp_projection import summary, overdue_sql
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            fixed=date(2030,1,10)
+            cases=[dict(stages=[{'id':str(uuid.uuid4()),'title':'Кабель','due':'2030-01-02'}]),
+                   dict(remarks=[{'id':str(uuid.uuid4()),'text':'Исправить акт','branch':'inspection','received':'2030-01-01'}]),
+                   dict(remarks=[{'id':str(uuid.uuid4()),'text':'Приложить схему','branch':'application','received':'2030-01-01'}]),
+                   dict(supply_mode='direct',responsibilities={'supply_applied':{'due':'2030-01-02'}}),
+                   dict(supply_mode='landlord',responsibilities={'supply_applied':{'due':'2030-01-02'}}),
+                   dict(archived=True,responsibilities={'contract':{'due':'2030-01-02'}})]
+            for patch_data in cases:
+                tc.workflow=dict(self.w,**patch_data);await db.flush()
+                actual=await db.scalar(text('SELECT '+overdue_sql('t',':tp_today')+' FROM ezs_tech_connections t WHERE id=:id'),{'tp_today':fixed,'id':tc.id})
+                self.assertEqual(bool(actual),summary(tc,fixed)['overdue'],patch_data)
+
+    async def test_projection_next_step_keeps_manual_and_external_priority(self):
+        from app.services.ezs_sites import next_steps
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            tc.workflow=dict(self.w,process_enabled=True,responsibilities={'contract':{'due':'2000-01-01'}},_process={'at':'2030-01-02T12:00:00Z','items':{
+                'tp_connection':{'stage':{'code':'grid','name':'Получить договор и ТУ'},'state':'running','performer':{'id':'test','name':'Тест энергетик'}}}})
+            site=await db.get(m.EzsSite,self.site.id);await db.flush()
+            got=await next_steps(db,self.company.id,self.user,[site])
+            self.assertEqual(got[str(site.id)]['source'],'tech_connection')
+            from app.services.ezs_tp_projection import next_deadline_sql
+            from app.services.ezs_sites import next_step_overdue_sql,_risk_conditions
+            planned=await db.scalar(text('SELECT '+next_deadline_sql('t')+' FROM ezs_tech_connections t WHERE id=:id'),{'id':tc.id})
+            self.assertEqual(planned.isoformat(),got[str(site.id)]['due'])
+            late=await db.scalar(text('SELECT '+next_step_overdue_sql('s')+' FROM ezs_sites s WHERE id=:id'),{'id':site.id})
+            self.assertTrue(late)
+            missing=(await db.execute(select(m.EzsSite.id).where(m.EzsSite.company_id==self.company.id,*_risk_conditions('no_next')))).scalars().all()
+            self.assertNotIn(site.id,missing)
+            site.next_action='Проверить бюджет';await db.flush()
+            self.assertEqual((await next_steps(db,self.company.id,self.user,[site]))[str(site.id)]['source'],'manual')
+            site.workspace_data={'external_wait':{'waiting_for':'Ответ собственника','follow_up':'2030-02-01'}};await db.flush()
+            self.assertEqual((await next_steps(db,self.company.id,self.user,[site]))[str(site.id)]['source'],'wait')
+
+    async def test_projection_read_keeps_process_history_and_does_not_write(self):
+        from app.services.ezs_tp_projection import read
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            tc.workflow=dict(self.w,process_enabled=True,_process={'at':'2030-01-02T12:00:00Z','items':{
+                'tp_connection':{'stage':{'code':'grid','name':'Получить договор и ТУ'},'state':'running','performer':{'id':'test','name':'Тест энергетик'},
+                    'startedAt':'2030-01-01T00:00:00Z','history':[{'from_code':'collect','to_code':'grid','at':'2030-01-02T00:00:00Z'}]}}})
+            await db.commit();before=copy.deepcopy(tc.workflow);version=tc.workflow_version
+            view=await read(db,tc)
+            self.assertEqual(view['branches'][0]['history'][0]['to_code'],'grid')
+            self.assertEqual(view['branches'][0]['performer']['name'],'Тест энергетик')
+            self.assertEqual(tc.workflow,before);self.assertEqual(tc.workflow_version,version)
+            self.assertFalse(db.dirty)
+
+    async def test_projection_is_shared_by_roadmap_overview_and_company_scope(self):
+        from app.routers.project_workspace_router import router as workspace_router
+        self.app.include_router(workspace_router,prefix='/api')
+        road=await self.client.get(f'/api/sites/{self.site.id}/roadmap',params=self.q)
+        self.assertEqual(road.status_code,200,road.text)
+        overview=await self.client.get(f'/api/project-workspace/{self.site.id}',params=self.q)
+        self.assertEqual(overview.status_code,200,overview.text)
+        self.assertEqual(road.json()['techConnection'],overview.json()['tech_connection'])
+        denied=await self.client.get(f'/api/project-workspace/{self.site.id}',params={'company_id':str(self.foreign.id)})
+        self.assertEqual(denied.status_code,404)
+
+    async def test_projection_reaches_plan_operator_report_and_export(self):
+        import io
+        from openpyxl import load_workbook
+        from app.services.ezs_lifecycle import list_projects
+        from app.services.ezs_project import tech_connections_report,tech_connections_by_operator,export_tech_connections_xlsx,export_portfolio_xlsx
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            tc.workflow=dict(self.w,process_enabled=True,responsibilities={'contract':{'due':'2000-01-01'}},_process={'items':{
+                'tp_connection':{'stage':{'code':'grid','name':'Получить договор и ТУ'},'state':'running','performer':{'id':'test','name':'Тест энергетик'}}}})
+            p=m.EzsProject(company_id=self.company.id,site_id=self.site.id,kind='retrofit',stage='construction',title='Тест работа')
+            db.add(p);await db.commit()
+            plan=await list_projects(db,self.company.id,user=self.user)
+            self.assertIn('Получить договор',plan[0]['nextAction'])
+            self.assertEqual(plan[0]['nextActionDue'],'2000-01-01')
+            report=await tech_connections_report(db,self.company.id)
+            operators=await tech_connections_by_operator(db,self.company.id)
+            self.assertEqual(report['overdue'],1)
+            self.assertEqual(sum(x['overdue'] for x in operators['items']),1)
+            data=await export_tech_connections_xlsx(db,self.company.id)
+            book=load_workbook(io.BytesIO(data),data_only=True)
+            self.assertEqual(book.sheetnames,['Присоединение','Шаги ТП и сбыта','Просрочки ТП'])
+            self.assertEqual(book['Присоединение'].max_column,21)
+            portfolio=load_workbook(io.BytesIO(await export_portfolio_xlsx(db,self.company.id,user=self.user)),data_only=True)
+            found=any('Получить договор' in str(cell.value) for sheet in portfolio for row in sheet for cell in row)
+            self.assertTrue(found)

@@ -3036,6 +3036,11 @@ async def create_all() -> None:
             # карточки CPO из проверки исключены (они и так вне индексов резолва).
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_locations_code "
             "ON service_locations (company_id, code) WHERE is_test = false",
+            # Станция топлива одна на код в компании. 15.09.2026 два канала (смены и
+            # ТТН) стартовали одновременно и завели станцию 235 дважды; с 16.09 обход
+            # станций падал на ней шесть недель (gig, исправлено 28.10).
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fuel_stations_company_code "
+            "ON fuel_stations (company_id, code)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_locations_serial "
             "ON service_locations (company_id, lower(serial_number)) "
             "WHERE is_test = false AND serial_number IS NOT NULL AND serial_number <> ''",

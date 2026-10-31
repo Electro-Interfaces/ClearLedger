@@ -6,12 +6,12 @@
 
 Делаем ровно `VEVENT`, и делаем его руками: библиотека ради полутора десятков
 строк потянула бы свою модель времени и свои представления о часовых поясах, а
-у нас они уже есть (`space_time`). Полного iMIP тут нет — `METHOD:REQUEST` с
-разбором ответов это отдельная работа; здесь честная выгрузка встречи.
+у нас они уже есть (`space_time`). Ответы на приглашения (`METHOD:REPLY`)
+разбирает `calendar_replies`; здесь — сама встреча.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # Длина строки по стандарту — 75 октетов; всё, что длиннее, складывается
 # продолжением. Календари, которым это безразлично, встречаются, но Outlook к
@@ -51,13 +51,52 @@ def _stamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _with_join(description: str | None, location: str | None,
+               join_url: str | None) -> tuple[str | None, str | None]:
+    """Ссылка на видеовстречу — в «Место» и в описание.
+
+    Поле `URL` календари почти не показывают: в Outlook, VK и Gmail встреча
+    приходила с «Местом: Конференция» и без ссылки, и в нужный час войти было
+    не с чего (QA 27.10.2026). Ссылку в «Месте» они делают нажимаемой, в
+    описании её видят все остальные.
+    """
+    if not join_url:
+        return description, location
+    if join_url not in (description or ""):
+        description = f"{description}\n\nВидеовстреча: {join_url}" if description else f"Видеовстреча: {join_url}"
+    # «Конференция» — заглушка, которую пишет созыв из «Конференций»: место
+    # ничего не говорит, ссылка в нём нажимается.
+    if not location or location.strip() == "Конференция":
+        location = join_url
+    return description, location
+
+
+def _when(starts_at: datetime, ends_at: datetime, all_day: bool, tz: str | None) -> list[str]:
+    """`DTSTART`/`DTEND`. Событие на весь день — датами (`VALUE=DATE`), а не
+    моментами: иначе VK, Outlook и Google кладут его встречей «00:00–00:00» по
+    часам получателя, а у живущего в другом поясе оно съезжает на соседний день.
+    Конец по стандарту исключительный: день ПОСЛЕ последнего (QA 27.10.2026)."""
+    if not all_day:
+        return [f"DTSTART:{_stamp(starts_at)}", f"DTEND:{_stamp(ends_at)}"]
+    from app.services import space_time
+
+    пояс = space_time.zone(tz)
+    первый = space_time.as_utc(starts_at).astimezone(пояс)
+    конец = space_time.as_utc(ends_at).astimezone(пояс)
+    после = конец.date() if конец.time() == datetime.min.time() else конец.date() + timedelta(days=1)
+    после = max(после, первый.date() + timedelta(days=1))
+    return [f"DTSTART;VALUE=DATE:{первый:%Y%m%d}", f"DTEND;VALUE=DATE:{после:%Y%m%d}"]
+
+
 def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
               description: str | None = None, location: str | None = None,
               url: str | None = None, organizer_email: str | None = None,
               organizer_name: str | None = None,
               attendees: list[tuple[str, str | None]] | None = None,
               invite: bool = False,
-              cancelled: bool = False, sequence: int = 0) -> str:
+              cancelled: bool = False, sequence: int = 0,
+              all_day: bool = False, tz: str | None = None,
+              join_url: str | None = None) -> str:
     """Одна встреча файлом.
 
     `SEQUENCE` и `STATUS:CANCELLED` — то, чем отмена доезжает до чужого
@@ -80,18 +119,26 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
         "BEGIN:VEVENT",
         f"UID:{uid}",
         f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
-        f"DTSTART:{_stamp(starts_at)}",
-        f"DTEND:{_stamp(ends_at)}",
+        *_when(starts_at, ends_at, all_day, tz),
         f"SEQUENCE:{sequence}",
         f"SUMMARY:{_escape(title)}",
         f"STATUS:{'CANCELLED' if cancelled else 'CONFIRMED'}",
     ]
+    description, location = _with_join(description, location, join_url)
     if description:
         строки.append(f"DESCRIPTION:{_escape(description)}")
     if location:
         строки.append(f"LOCATION:{_escape(location)}")
     if url:
         строки.append(f"URL:{_escape(url)}")
+    # Приглашение и отмена — с адресом ящика ответов: «Принять» в почтовой
+    # программе уходит на адрес организатора, а оттуда его забирает пространство
+    # (calendar_replies). Имя остаётся хозяина встречи — его человек и видит.
+    if invite or cancelled:
+        from app.config import settings
+        if settings.calendar_reply_mailbox:
+            organizer_name = organizer_name or organizer_email
+            organizer_email = settings.calendar_reply_mailbox
     if organizer_email:
         имя = _escape(organizer_name or organizer_email)
         строки.append(f"ORGANIZER;CN={имя}:mailto:{organizer_email}")
@@ -131,15 +178,15 @@ def calendar_ics(events: list[dict], *, name: str = "Трек") -> str:
             "BEGIN:VEVENT",
             f"UID:{e['uid']}",
             f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
-            f"DTSTART:{_stamp(e['starts_at'])}",
-            f"DTEND:{_stamp(e['ends_at'])}",
+            *_when(e["starts_at"], e["ends_at"], e.get("all_day", False), e.get("tz")),
             f"SUMMARY:{_escape(e['title'])}",
             f"STATUS:{'CANCELLED' if e.get('cancelled') else 'CONFIRMED'}",
         ]
-        if e.get("description"):
-            строки.append(f"DESCRIPTION:{_escape(e['description'])}")
-        if e.get("location"):
-            строки.append(f"LOCATION:{_escape(e['location'])}")
+        описание, место = _with_join(e.get("description"), e.get("location"), e.get("join_url"))
+        if описание:
+            строки.append(f"DESCRIPTION:{_escape(описание)}")
+        if место:
+            строки.append(f"LOCATION:{_escape(место)}")
         if e.get("url"):
             строки.append(f"URL:{_escape(e['url'])}")
         строки.append("END:VEVENT")

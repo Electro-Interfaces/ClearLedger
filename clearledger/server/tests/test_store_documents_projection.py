@@ -110,6 +110,20 @@ class Session:
         entity = descriptions[0].get("entity") if descriptions else None
         return Result(self.rows.get(entity, ()))
 
+    async def stream(self, statement):
+        rows = self.rows.get(EdgePacket, ())
+
+        class Stream:
+            async def partitions(self, size):
+                for i in range(0, len(rows), size):
+                    yield [SimpleNamespace(**{**vars(row), "kind": getattr(row, "kind", "legacy")})
+                           for row in rows[i:i + size]]
+
+            async def close(self):
+                pass
+
+        return Stream()
+
 
 class IngestSession:
     def __init__(self, existing=None):

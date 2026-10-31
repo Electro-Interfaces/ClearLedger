@@ -25,6 +25,7 @@ import {
 } from '@/services/storeService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ApiError } from '@/services/apiClient'
+import { parseReceiptNumber, removeReceiptNumericDraft, type ReceiptNumericDrafts, type ReceiptNumericField } from '@/lib/receiptNumericDraft'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -647,6 +648,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
   const [docDate, setDocDate] = useState(localDayInput(receipt.doc_date))
   const [comment, setComment] = useState(receipt.comment ?? '')
   const [lines, setLines] = useState<StoreReceiptLine[]>(receipt.lines ?? [])
+  const [numericDrafts, setNumericDrafts] = useState<ReceiptNumericDrafts>({})
   const [signatureRef, setSignatureRef] = useState(receipt.signature_ref ?? '')
   const [signerName, setSignerName] = useState(receipt.signer_name ?? '')
   const [mchdGuid, setMchdGuid] = useState(receipt.mchd_guid ?? '')
@@ -683,6 +685,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
     setDocDate(localDayInput(updated.doc_date))
     setComment(updated.comment ?? '')
     setLines(updated.lines)
+    setNumericDrafts({})
     setSignatureRef(updated.signature_ref ?? '')
     setSignerName(updated.signer_name ?? '')
     setMchdGuid(updated.mchd_guid ?? '')
@@ -690,7 +693,16 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
     setMchdUntil(updated.mchd_valid_until ?? '')
   }
 
-  const body = (): StoreReceiptInput => ({
+  const body = (): StoreReceiptInput => {
+    for (const [index, draft] of Object.entries(numericDrafts)) {
+      for (const [field, raw] of Object.entries(draft)) {
+        if (parseReceiptNumber(raw) === null) {
+          const title = { qty_expected: 'заявлено', qty_fact: 'факт', price: 'цена' }[field as ReceiptNumericField]
+          throw new Error(`Строка ${Number(index) + 1}, ${title}: введите число от 0 до 1 000 000 000. Пустое поле не означает ноль.`)
+        }
+      }
+    }
+    return ({
     station_id: receipt.station_id, number: receipt.number,
     doc_date: docDate || receipt.doc_date,
     supplier_id: supplierId, supplier: supplier || null,
@@ -704,7 +716,8 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
     mchd_registry: mchdRegistry || null, mchd_valid_until: mchdUntil || null,
     signature_status: receipt.signature_status, signature_ref: receipt.signature_ref,
     version: receipt.version,
-  })
+    })
+  }
 
   const releaseAction = () => { actionLockRef.current = false }
   const failAction = (
@@ -727,6 +740,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
     onSuccess: (updated) => {
       onReceiptChange(updated)
       setLines(updated.lines)
+      setNumericDrafts({})
       setNotice({ state: 'success', title: 'Изменения сохранены' })
     },
     onError: (error) => failAction(error, 'Повторите сохранение.', 'save'),
@@ -787,16 +801,21 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
     if (actionLockRef.current) return
     actionLockRef.current = true
     setNotice({ state: 'pending', title })
-    if (action === 'save') save.mutate(body())
-    if (action === 'accept') accept.mutate(body())
-    if (action === 'send') send.mutate(body())
-    if (action === 'sign') sign.mutate({
-      signature_status: 'signed', signature_ref: signatureRef || null,
-      signer_name: signerName || null, mchd_guid: mchdGuid || null,
-      mchd_registry: mchdRegistry || null, mchd_valid_until: mchdUntil || null,
-      version: receipt.version,
-    })
-    if (action === 'refresh') refresh.mutate()
+    try {
+      if (action === 'save') save.mutate(body())
+      if (action === 'accept') accept.mutate(body())
+      if (action === 'send') send.mutate(body())
+      if (action === 'sign') sign.mutate({
+        signature_status: 'signed', signature_ref: signatureRef || null,
+        signer_name: signerName || null, mchd_guid: mchdGuid || null,
+        mchd_registry: mchdRegistry || null, mchd_valid_until: mchdUntil || null,
+        version: receipt.version,
+      })
+      if (action === 'refresh') refresh.mutate()
+    } catch (error) {
+      releaseAction()
+      failAction(error, 'Проверьте поля документа.', action)
+    }
   }
   const actionBusy = notice?.state === 'pending'
   const isBusy = actionBusy || scanPending
@@ -804,11 +823,22 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
   const setLine = (i: number, patch: Partial<StoreReceiptLine>) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
 
+  const setNumericLine = (i: number, field: ReceiptNumericField, raw: string) => {
+    setNumericDrafts((current) => ({ ...current, [i]: { ...current[i], [field]: raw } }))
+    const parsed = parseReceiptNumber(raw)
+    if (parsed !== null) setLine(i, { [field]: parsed })
+  }
+  const invalidNumbers = Object.values(numericDrafts).some((draft) =>
+    Object.values(draft).some((raw) => parseReceiptNumber(raw) === null))
+  const removeLine = (i: number) => {
+    setLines((current) => current.filter((_, idx) => idx !== i))
+    setNumericDrafts((current) => removeReceiptNumericDraft(current, i))
+  }
   const total = lines.reduce((s, l) => s + (l.qty_fact || 0) * (l.price || 0), 0)
   const diffCount = lines.filter((l) => Math.abs((l.qty_fact || 0) - (l.qty_expected || 0)) > 1e-6).length
   const linesDirty = useMemo(
-    () => JSON.stringify(lines) !== JSON.stringify(receipt.lines),
-    [lines, receipt.lines],
+    () => Object.keys(numericDrafts).length > 0 || JSON.stringify(lines) !== JSON.stringify(receipt.lines),
+    [lines, receipt.lines, numericDrafts],
   )
   const shown = onlyDiff
     ? lines.filter((l) => Math.abs((l.qty_fact || 0) - (l.qty_expected || 0)) > 1e-6)
@@ -1020,7 +1050,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
         </label>
         <div className="rounded-lg border border-border bg-card px-3 py-2">
           <div className="text-xs text-muted-foreground">Сумма по факту</div>
-          <div className="text-lg font-semibold tabular-nums">{money(total)} ₽</div>
+          <div className="text-lg font-semibold tabular-nums">{invalidNumbers ? '—' : money(total)} ₽</div>
         </div>
         <div className="rounded-lg border border-border bg-card px-3 py-2">
           <div className="text-xs text-muted-foreground">Расхождений</div>
@@ -1090,14 +1120,18 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
                     ) : null}
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <input type="number" value={l.qty_expected}
-                           onChange={(e) => setLine(i, { qty_expected: Number(e.target.value) })}
+                    <input type="text" inputMode="decimal" value={numericDrafts[i]?.qty_expected ?? l.qty_expected}
+                           aria-label={`Заявлено, строка ${i + 1}`}
+                           aria-invalid={numericDrafts[i]?.qty_expected !== undefined && parseReceiptNumber(numericDrafts[i]!.qty_expected!) === null}
+                           onChange={(e) => setNumericLine(i, 'qty_expected', e.target.value)}
                            disabled={readOnly || isBusy}
                            className="w-20 bg-transparent text-right text-base tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 sm:text-sm" />
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <input type="number" value={l.qty_fact}
-                           onChange={(e) => setLine(i, { qty_fact: Number(e.target.value) })}
+                    <input type="text" inputMode="decimal" value={numericDrafts[i]?.qty_fact ?? l.qty_fact}
+                           aria-label={`Факт, строка ${i + 1}`}
+                           aria-invalid={numericDrafts[i]?.qty_fact !== undefined && parseReceiptNumber(numericDrafts[i]!.qty_fact!) === null}
+                           onChange={(e) => setNumericLine(i, 'qty_fact', e.target.value)}
                            disabled={readOnly || isBusy}
                            className="w-20 bg-transparent text-right text-base tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 sm:text-sm" />
                   </td>
@@ -1105,8 +1139,10 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
                     {diff ? (diff > 0 ? `+${diff}` : diff) : '—'}
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <input type="number" value={l.price}
-                           onChange={(e) => setLine(i, { price: Number(e.target.value) })}
+                    <input type="text" inputMode="decimal" value={numericDrafts[i]?.price ?? l.price}
+                           aria-label={`Цена, строка ${i + 1}`}
+                           aria-invalid={numericDrafts[i]?.price !== undefined && parseReceiptNumber(numericDrafts[i]!.price!) === null}
+                           onChange={(e) => setNumericLine(i, 'price', e.target.value)}
                            disabled={readOnly || isBusy}
                            className="w-24 bg-transparent text-right text-base tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 sm:text-sm" />
                   </td>
@@ -1115,7 +1151,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
                   </td>
                   {!readOnly && (
                     <td className="px-3 py-1.5 text-right">
-                      <button onClick={() => setLines((current) => current.filter((_, idx) => idx !== i))}
+                      <button onClick={() => removeLine(i)}
                               disabled={isBusy} aria-label={`Удалить позицию ${l.name || i + 1}`}
                               title="Удалить позицию"
                               className="rounded text-muted-foreground outline-none hover:text-red-400 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">

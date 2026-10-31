@@ -206,7 +206,9 @@ async def reconcile(db, tc):
                        title=f'ТП · {site.title or site.project_no}',context=context,participants=participants)
             if result.get('participantsUnknown'):raise ProjectionError('Назначенные участники ещё не синхронизированы с Поддержкой')
             processes[definition]={'id':result['processId'],'stage':result.get('currentStep'),
-                                  'state':result.get('state'),'performer':result.get('performer'),'participants':result.get('participants')}
+                                  'state':result.get('state'),'performer':result.get('performer'),'participants':result.get('participants'),
+                                  'startedAt':result.get('startedAt'),'stepEnteredAt':result.get('stepEnteredAt'),
+                                  'steps':result.get('steps') or [],'history':result.get('history') or []}
         previous=(tc.workflow or {}).get('_process',{})
         tc.workflow=dict(tc.workflow or {},_process={'items':processes,'at':datetime.now(timezone.utc).isoformat(),'error':None})
         # Адресное сообщение при передаче, вне внешних писем Поддержки.

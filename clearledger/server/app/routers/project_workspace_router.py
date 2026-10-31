@@ -86,7 +86,14 @@ async def overview(sid: uuid.UUID, company_id: str, user=Depends(get_current_use
         ChatMessage.deleted_at.is_(None), ChatMessage.user_id != user.id,
         or_(ChatParticipant.history_from.is_(None), ChatMessage.created_at >= ChatParticipant.history_from),
         or_(ChatParticipant.last_read_at.is_(None), ChatMessage.created_at > ChatParticipant.last_read_at)))
-    return {"work": track, "pending_results": pending, "next_work": next_work, "external_wait": data.get("external_wait"),
+    from app.models import EzsTechConnection
+    from app.services.ezs_tp_projection import read as read_tp_view
+    tc = (await db.execute(select(EzsTechConnection).where(EzsTechConnection.company_id == cid,
+                                                          EzsTechConnection.site_id == sid))).scalars().first()
+    tp_view = await read_tp_view(db, tc) if tc and site.kind not in ('integration','warehouse','procurement','corporate_client') else None
+    from app.services.ezs_sites import next_steps
+    nearest = (await next_steps(db, cid, user, [site])).get(str(site.id)) if not next_work and not data.get('external_wait') else None
+    return {"next_step": nearest, "tech_connection": tp_view, "work": track, "pending_results": pending, "next_work": next_work, "external_wait": data.get("external_wait"),
         "scenario": project_scenarios.scenario(site), "demo": data.get("demo"), "unread": unread,
         "target_date": data.get("target_date"), "budget": data.get("budget"),
         "team": [{"id": str(uid), "name": name, "role": role} for uid, name, role in team],

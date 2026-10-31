@@ -199,7 +199,7 @@ def task_channels(user: User) -> set[str]:
 # мешал поток ответов по чужим задачам, выключал почту и переставал получать
 # в том числе «вам поручено». Теперь канал решает, писать ли вообще, а эти виды —
 # что именно писать.
-EMAIL_KINDS = ("task_assigned", "task_mention", "task_reply", "task_status", "digest")
+EMAIL_KINDS = ("task_assigned", "task_mention", "task_reply", "task_status", "digest", "meeting")
 # NULL в профиле — получать всё: обновление не вправе молча отключить человеку
 # письма, которые он получал вчера.
 EMAIL_KINDS_DEFAULT = EMAIL_KINDS
@@ -210,6 +210,9 @@ EMAIL_KIND_LABELS: dict[str, str] = {
     "task_reply": "Ответы и переписка по задаче",
     "task_status": "Задачу передали, выполнили или отменили",
     "digest": "Сводка дня",
+    # Стандартный iMIP: письмо с файлом .ics — VK, Яндекс, Outlook, Gmail и
+    # Apple сами кладут встречу в календарь, переносят и снимают её по отмене.
+    "meeting": "Встречи — в мой почтовый календарь (VK, Яндекс, Outlook, Gmail)",
 }
 
 

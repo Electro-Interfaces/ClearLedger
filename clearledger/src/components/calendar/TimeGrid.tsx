@@ -32,10 +32,12 @@ const ЧАСЫ = Array.from({ length: 24 }, (_, i) => i)
  *  колонку в 89 px, и три одновременные встречи давали по 29 px. */
 const МИН_БЛОК_PX = 44
 
-export function TimeGrid({ days, events, tasks, repeats = [], onEvent, onAdd, onDay }: {
+export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, onAdd, onDay }: {
   days: Date[]
   events: CalendarEvent[]
   tasks: SpaceTask[]
+  /** Встречи общего календаря компании, в которых человека нет: рамкой, не заливкой. */
+  foreign?: Set<string>
   /** Повторяющиеся дела вперёд: расписание ещё не поставило их поручением. */
   repeats?: { id: string; title: string; at: Date }[]
   onEvent: (e: CalendarEvent) => void
@@ -116,7 +118,8 @@ export function TimeGrid({ days, events, tasks, repeats = [], onEvent, onAdd, on
                   className={cn('block w-full truncate rounded px-1 text-[12px]',
                     e.status === 'cancelled'
                       ? 'text-muted-foreground line-through'
-                      : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
+                      : foreign?.has(e.id) ? 'border border-border bg-background text-foreground hover:bg-accent'
+                        : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
                   {e.title}
                 </button>
               ))}
@@ -212,6 +215,7 @@ export function TimeGrid({ days, events, tasks, repeats = [], onEvent, onAdd, on
                           ? 'border-border bg-muted/60 text-muted-foreground line-through'
                           : e.my_response === 'declined'
                             ? 'border-border bg-muted/40 text-muted-foreground line-through'
+                            : foreign?.has(e.id) ? 'border-border bg-background text-foreground hover:bg-accent'
                             : 'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25')}>
                       <span className="tabular-nums text-muted-foreground">
                         {continues ? 'Продолжение' : format(н, 'HH:mm')}
