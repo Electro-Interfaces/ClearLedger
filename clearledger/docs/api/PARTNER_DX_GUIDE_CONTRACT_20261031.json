@@ -1,0 +1,986 @@
+{
+  "kind": "partner-dx-guide-docs-only",
+  "baseCommit": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+  "run": "run_781185341d88",
+  "D2": "IMPLEMENTED_SOURCE_ONLY",
+  "C1": "HELD_EXPLICIT_USER_SCOPE_PENDING",
+  "applicationImports": "NOTRUN",
+  "tests": "NOTRUN",
+  "runtimeAcceptance": "NOTRUN",
+  "guideSourceCommit": "74107e9c652ef60f76f6599c61c3ad411df76a3f",
+  "guideIntegratedCommit": "eb29f5e17e8a65c344ed05a747f138b8f35ad3eb",
+  "allowedFiles": [
+    "clearledger/docs/partner/onboarding.md",
+    "clearledger/docs/partner/auth.md",
+    "clearledger/docs/partner/data-dictionary.md",
+    "clearledger/docs/partner/errors.md",
+    "clearledger/docs/partner/recipes/read-catalogs.md",
+    "clearledger/docs/partner/recipes/contracts.md",
+    "clearledger/docs/partner/recipes/monitoring.md",
+    "clearledger/docs/partner/recipes/documents.md",
+    "clearledger/docs/api/partner-dx-guide-evidence-20261031/verify_guide_examples.py",
+    "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.md",
+    "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.json"
+  ],
+  "sourceOnlyGuideCheck": {
+    "kind": "source/document examples check; no framework/application execution",
+    "baseline": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+    "guide_pages": 8,
+    "operations": 15,
+    "local_links": 97,
+    "json_blocks": 34,
+    "examples": [
+      {
+        "operationId": "listObjects",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 137,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getObject",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 141,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listEquipment",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 155,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getEquipment",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 159,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listCounterparties",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 163,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getCounterparty",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 167,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listContracts",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 171,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getContract",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 187,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getContractTypeMetadata",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 175,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listContractObjects",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 191,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listContractDocuments",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 203,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getObjectMonitoring",
+        "guide": "recipes/monitoring.md",
+        "source_decorator_line": 145,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listDocuments",
+        "guide": "recipes/documents.md",
+        "source_decorator_line": 216,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getDocument",
+        "guide": "recipes/documents.md",
+        "source_decorator_line": 220,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "downloadDocumentVersion",
+        "guide": "recipes/documents.md",
+        "source_decorator_line": 233,
+        "json_successes": 0,
+        "problem_examples": 1,
+        "binary": true
+      }
+    ],
+    "limitations": [
+      "limited explicit AST grammar, not Pydantic coercion/schema validation",
+      "not OIDC, HTTP, policy execution, binary download or partner acceptance"
+    ],
+    "files": [
+      {
+        "path": "clearledger/docs/partner/onboarding.md",
+        "sha256": "cffa9a11064df3137229d6841554720c2f850a3c3ac87cb4c7da14d1d8d1daf0"
+      },
+      {
+        "path": "clearledger/docs/partner/auth.md",
+        "sha256": "ce639f446f7739f99cb594b64c8df1e70e9ba396fb7adcd67f82898e54827a29"
+      },
+      {
+        "path": "clearledger/docs/partner/data-dictionary.md",
+        "sha256": "a661af446facba2a2358e06dc23a9ac32cfe93dd46cbda8324c27a4b7ff62633"
+      },
+      {
+        "path": "clearledger/docs/partner/errors.md",
+        "sha256": "8f931e7580c6fde1fa2fb7dc65416c53027a8090d417ab76272922ab75edec85"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/read-catalogs.md",
+        "sha256": "ab24190448f3b77adc2c96c668fefa0428b0f7ad4cd7898a715cf86e52967541"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/contracts.md",
+        "sha256": "ddd7b06550f347a20e7269ae664ec87f64c32c75aa07b4f3ff0fcc6a82564c0b"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/monitoring.md",
+        "sha256": "83d9bd7f6886442b50235ce488c3027ec98f8c2e90bee7a85239e44a700b7486"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/documents.md",
+        "sha256": "bf132cdc7a396d52b7156e65499f5ede76157fa3b7a7b10396056c3ddd072335"
+      }
+    ]
+  },
+  "sourceReferences": [
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "ranges": [
+        [
+          64,
+          185
+        ]
+      ],
+      "baseSourceSha256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          435,
+          603
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          636,
+          755
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/auth.py",
+      "ranges": [
+        [
+          46,
+          57
+        ]
+      ],
+      "baseSourceSha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/routers/docs_portal_router.py",
+      "ranges": [
+        [
+          73,
+          115
+        ]
+      ],
+      "baseSourceSha256": "1c73b96b371de984a1e748de7fe2fe99a16f1098eececa958c1278cc7dd6d86b"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/services/docs_portal.py",
+      "ranges": [
+        [
+          76,
+          179
+        ]
+      ],
+      "baseSourceSha256": "2d073a7036fd59f85d1334a54516de183654016097f2d55e715a58ca29a15532"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          399,
+          513
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          82,
+          89
+        ],
+        [
+          137,
+          237
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          270,
+          358
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/config.py",
+      "ranges": [
+        [
+          60,
+          78
+        ]
+      ],
+      "baseSourceSha256": "90c5da106f20fe90e31c899a88018ef741e6b3207a555fedbd58bafaa61780e8"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          11,
+          255
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          18,
+          23
+        ],
+        [
+          103,
+          235
+        ],
+        [
+          238,
+          279
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          220,
+          237
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/files.py",
+      "ranges": [
+        [
+          38,
+          84
+        ]
+      ],
+      "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/monitoring.py",
+      "ranges": [
+        [
+          19,
+          40
+        ]
+      ],
+      "baseSourceSha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "ranges": [
+        [
+          21,
+          35
+        ],
+        [
+          92,
+          101
+        ]
+      ],
+      "baseSourceSha256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          51,
+          73
+        ],
+        [
+          279,
+          354
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/budget.py",
+      "ranges": [
+        [
+          38,
+          47
+        ],
+        [
+          94,
+          116
+        ]
+      ],
+      "baseSourceSha256": "ad454225d15b1696432c4409886437bfee7d03a66543918006b84a5f0a28eee4"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "ranges": [
+        [
+          33,
+          100
+        ],
+        [
+          131,
+          185
+        ]
+      ],
+      "baseSourceSha256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/routers/docs_portal_router.py",
+      "ranges": [
+        [
+          15,
+          44
+        ]
+      ],
+      "baseSourceSha256": "1c73b96b371de984a1e748de7fe2fe99a16f1098eececa958c1278cc7dd6d86b"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/files.py",
+      "ranges": [
+        [
+          71,
+          84
+        ]
+      ],
+      "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          137,
+          169
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          172,
+          199
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          18,
+          21
+        ],
+        [
+          64,
+          101
+        ],
+        [
+          138,
+          163
+        ],
+        [
+          238,
+          264
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          171,
+          214
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          57,
+          120
+        ],
+        [
+          202,
+          212
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          174,
+          236
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          238,
+          278
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          203,
+          237
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          214,
+          237
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          87,
+          101
+        ],
+        [
+          238,
+          278
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/files.py",
+      "ranges": [
+        [
+          38,
+          84
+        ]
+      ],
+      "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          145,
+          153
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/product_api/monitoring.py",
+      "ranges": [
+        [
+          16,
+          40
+        ]
+      ],
+      "baseSourceSha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          123,
+          169
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "ranges": [
+        [
+          21,
+          35
+        ],
+        [
+          51,
+          101
+        ]
+      ],
+      "baseSourceSha256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          217,
+          223
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    }
+  ],
+  "protectedByteProof": [
+    {
+      "path": "clearledger/server/app/product_api/app.py",
+      "sha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/server/app/product_api/dto.py",
+      "sha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/src/generated/partner-api.d.ts",
+      "sha256": "570c4f648a31626a83bfcb79f74c4995e761b5ba12f17ae161a8ec158c959abb",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/docs/PARTNER_QUICKSTART.md",
+      "sha256": "e41c5a3f74b2402ecbb8a8170aa93a57f00837ca836ce174e77d53ff544117fa",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/docs/PARTNER_SDK_TYPES.md",
+      "sha256": "e37a7c94b26983d54c50871125f0a2dab38db50df61f59fa54eeaa293fcdeea9",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/guards.ts",
+      "sha256": "af0465b2f95bde6141988347f7471b0ebdcb80191c7f42c065e9f575736503f8",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/guards.test.ts",
+      "sha256": "76936a4339baa66395274178273e5d9db7749909882eee183ae5ef40d66ae1b6",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "sha256": "ae1bf7f6f2d0578e3336415a3cc51f7525ae5fce817f11f629a6a0c0fe71cf7f",
+      "baseByteIdentical": true
+    }
+  ],
+  "files": [
+    {
+      "path": "clearledger/docs/partner/onboarding.md",
+      "sha256": "cffa9a11064df3137229d6841554720c2f850a3c3ac87cb4c7da14d1d8d1daf0"
+    },
+    {
+      "path": "clearledger/docs/partner/auth.md",
+      "sha256": "ce639f446f7739f99cb594b64c8df1e70e9ba396fb7adcd67f82898e54827a29"
+    },
+    {
+      "path": "clearledger/docs/partner/data-dictionary.md",
+      "sha256": "a661af446facba2a2358e06dc23a9ac32cfe93dd46cbda8324c27a4b7ff62633"
+    },
+    {
+      "path": "clearledger/docs/partner/errors.md",
+      "sha256": "8f931e7580c6fde1fa2fb7dc65416c53027a8090d417ab76272922ab75edec85"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "sha256": "ab24190448f3b77adc2c96c668fefa0428b0f7ad4cd7898a715cf86e52967541"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/contracts.md",
+      "sha256": "ddd7b06550f347a20e7269ae664ec87f64c32c75aa07b4f3ff0fcc6a82564c0b"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/monitoring.md",
+      "sha256": "83d9bd7f6886442b50235ce488c3027ec98f8c2e90bee7a85239e44a700b7486"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/documents.md",
+      "sha256": "bf132cdc7a396d52b7156e65499f5ede76157fa3b7a7b10396056c3ddd072335"
+    },
+    {
+      "path": "clearledger/docs/api/partner-dx-guide-evidence-20261031/verify_guide_examples.py",
+      "sha256": "0494bb0a5b7d2d221be52187d6ecb3ee22a6ff3baf9cbdaaf0d4ddb1b380eeaa"
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.md",
+      "sha256": "d6663a77cb046d326155f73f86e66884888cb7504a0a08c1ab84b8f53b846e4a"
+    }
+  ],
+  "selfHashNote": "JSON report excluded from own hash list; final Git commit identifies it.",
+  "originalPlan": {
+    "commit": "77b4320bf42691d489ce87919ca4964a511b54fa",
+    "sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "rows": [
+      {
+        "id": "M00",
+        "originalRow": "| M00 | P0: актуальный совместимый source/runtime baseline | Выпуск + Core/Support | Нет | Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M01",
+        "originalRow": "| M01 | P0: завершить реестр поверхностей и владельцев | API + владельцы доменов | M00 | Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M02",
+        "originalRow": "| M02 | P0: characterization и измеряемые сценарии | Домены + проверка | M00, уточнения M01 | Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M03",
+        "originalRow": "| M03 | P0: общий проверенный контекст/route policy | Identity + домены | M00, M02 | Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M04",
+        "originalRow": "| M04 | P0: границы слоёв и владение транзакцией | Core/Support architecture | M02, M03 skeleton | Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M05",
+        "originalRow": "| M05 | P0: объекты, scopes, population и temporal identity | Core objects/equipment | M03, M04 | Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M06",
+        "originalRow": "| M06 | P0: контрагенты, договоры и идентичность | Core references/contracts | M03, M04 | Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M07",
+        "originalRow": "| M07 | P0: документы и файлы | Core documents/files | M03, M04 | Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M08",
+        "originalRow": "| M08 | P0: энергия, начисления и мониторинг | Core energy/ops | M05, M06 | Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M09",
+        "originalRow": "| M09 | P0: протокольный профиль и product OpenAPI | API contracts + домены | M01, M03, соответствующие M05–M08 | Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M10",
+        "originalRow": "| M10 | P0: OAuth/OIDC и developer access | Identity + integrations | M03, M09 profile | Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M11",
+        "originalRow": "| M11 | P0: защищённый Swagger и quickstart | API docs + Identity | M09, M10, sandbox | UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M12",
+        "originalRow": "| M12 | P1: клиентские transports и typed operations | Core/Support frontend | M02, M09 | Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never` |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M13",
+        "originalRow": "| M13 | P1: Support factories и service adapters | Support + Core integration | M03, M04, M06 | Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M14",
+        "originalRow": "| M14 | P1: доставка событий и change feed | Domain owners + integrations | M03, M04, применимые M13 | Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M15",
+        "originalRow": "| M15 | P1: ограничение нагрузки и оптимизация | Backend/DB + домены | M02 и зрелые queries | Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M16",
+        "originalRow": "| M16 | P1/P2: migration/schema ownership | Persistence + выпуск | M00, M02 | Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M17",
+        "originalRow": "| M17 | P1: перевести собственные приложения | Владельцы продуктов | M05–M13 по домену | Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M18",
+        "originalRow": "| M18 | P0 к внешнему запуску: пилоты и независимая приёмка | Партнёрский пилот + проверка | M09–M17 применимо | Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M19",
+        "originalRow": "| M19 | P2: deprecation и удаление дублей | Домены + выпуск | M17, M18, usage evidence | Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом |",
+        "completion": "unproven"
+      }
+    ],
+    "gates": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "closesSections": [],
+    "closesGates": []
+  },
+  "heldC1": {
+    "sourceCommit": "b220a97cffa99ee49b87a606ff90cd1810a5b48d",
+    "mixedLocalCommit": "74e56c955dfc90175aed2189bbd13123111b9d8d",
+    "published": false,
+    "inThisBranch": false,
+    "scopeApproval": false
+  },
+  "workerResources": {
+    "A": {
+      "task": "task_f59cc901c858",
+      "dispatch": "ctx_f442bacba6ff",
+      "released": true
+    },
+    "B": {
+      "task": "task_bd19fad6811a",
+      "dispatch": "ctx_042db951a319",
+      "released": true,
+      "technicalSourceWorkPrepared": true,
+      "scope": "HELD"
+    }
+  },
+  "limitations": [
+    "No framework/schema validation or live proof",
+    "No app/helper imports, pytest/collection, Node/codegen, HTTP/browser/OIDC/SQL/Docker/SSH, dependency changes, credentials, flags or deploy",
+    "Full M00-M19 and 11 gates remain unproven",
+    "C1 remains local pending direct user authorization"
+  ]
+}
