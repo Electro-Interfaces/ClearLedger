@@ -10,22 +10,68 @@ from unittest.mock import patch
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.services.contract_usage import _sources, contract_usage, usage_by_contract
 
-URL = os.getenv("TEST_DATABASE_URL", "")
-RUN = bool(URL and make_url(URL).host in {"localhost", "127.0.0.1"}
-           and make_url(URL).database == "contract_usage_alias_test")
+def _isolated_url(value):
+    """Разобрать один раз; query не может переопределить адрес или базу драйвера."""
+    try:
+        url = make_url(value)
+    except (ArgumentError, ValueError, TypeError):
+        return None
+    if (url.drivername == "postgresql+asyncpg" and not url.query
+            and url.host in {"localhost", "127.0.0.1"}
+            and url.database == "contract_usage_alias_test"):
+        return url
+    return None
+
+
+URL = _isolated_url(os.getenv("TEST_DATABASE_URL", ""))
+RUN = URL is not None
 LABEL = "Сервисные договоры «Поддержки»"
 CORE = "core.service_contracts"
 PUBLIC = "public.service_contracts"
 
 
+class ContractUsageAliasURLGuard(unittest.TestCase):
+    def test_exact_local_database_without_query_is_allowed(self):
+        for host in ("localhost", "127.0.0.1"):
+            with self.subTest(host=host):
+                url = _isolated_url(f"postgresql+asyncpg://test:test@{host}/contract_usage_alias_test")
+                self.assertIsNotNone(url)
+                self.assertEqual(url.host, host)
+                self.assertEqual(url.database, "contract_usage_alias_test")
+                self.assertEqual(dict(url.query), {})
+
+    def test_query_overrides_are_rejected_before_engine(self):
+        base = "postgresql+asyncpg://test:test@127.0.0.1/contract_usage_alias_test"
+        for query in ("database=unrelated_db", "host=remote.invalid", "port=9999",
+                      "database=contract_usage_alias_test", "ssl=disable", "unknown=1"):
+            with self.subTest(query=query):
+                self.assertIsNone(_isolated_url(base + "?" + query))
+
+    def test_unknown_malformed_driver_host_and_database_are_rejected(self):
+        for value in (
+            "", None, "invalid-url",
+            "postgresql+asyncpg://test@127.0.0.1:bad/contract_usage_alias_test",
+            "postgresql://test@127.0.0.1/contract_usage_alias_test",
+            "postgresql+psycopg://test@127.0.0.1/contract_usage_alias_test",
+            "sqlite:///contract_usage_alias_test",
+            "postgresql+asyncpg://test@remote.invalid/contract_usage_alias_test",
+            "postgresql+asyncpg://test@/contract_usage_alias_test",
+            "postgresql+asyncpg://test@127.0.0.1/unrelated_db",
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(_isolated_url(value))
+
+
 @unittest.skipUnless(RUN, "Нужна отдельная локальная contract_usage_alias_test")
 class ContractUsageAliasIntegration(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.assertIsNotNone(URL, "Отказ до engine: URL не прошёл защитный guard")
         self.engine = create_async_engine(URL, poolclass=NullPool)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         self.company, self.other_company = uuid.uuid4(), uuid.uuid4()
