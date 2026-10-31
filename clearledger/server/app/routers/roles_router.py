@@ -15,6 +15,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import CompanyRole, User, UserCompany
 from app.routers.users_router import require_company_admin
+from app.services.native_user_role_locks import assert_native_clean, prepare_native_write
 from app.schemas import CompanyRoleCreate, CompanyRoleResponse, CompanyRoleUpdate
 
 router = APIRouter(prefix="/roles", tags=["Роли доступа"])
@@ -90,8 +91,11 @@ async def update_role(
     current_user: User = Depends(get_current_user),
 ):
     """Изменить кастомную роль (имя/модули). Системные — только чтение."""
+    assert_native_clean(db)
     cid = await require_company_admin(payload.company_id, current_user, db)
-    role = await db.get(CompanyRole, uuid.UUID(role_id))
+    prepared = await prepare_native_write(db, current_user, company_id=cid,
+                                          role_id=uuid.UUID(role_id))
+    role = prepared.role
     if role is None or role.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Роль не найдена")
     if role.is_system:
@@ -117,14 +121,29 @@ async def delete_role(
     current_user: User = Depends(get_current_user),
 ):
     """Удалить кастомную роль. Носители роли → ad-hoc без модулей (role_id=NULL)."""
+    assert_native_clean(db)
     cid = await require_company_admin(company_id, current_user, db)
-    role = await db.get(CompanyRole, uuid.UUID(role_id))
+    prepared = await prepare_native_write(db, current_user, company_id=cid,
+                                          role_id=uuid.UUID(role_id))
+    role = prepared.role
     if role is None or role.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Роль не найдена")
     if role.is_system:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Системную роль нельзя удалить")
+    # A single role_id FK also admits legacy holders from another company.
+    # Probe the physical table so visit ORM criteria cannot hide corruption.
+    # Role X excludes participating assignments; never let DELETE silently
+    # cascade SET NULL into an unplanned tenant.
+    holder_table = UserCompany.__table__
+    foreign_holder = (await db.execute(select(holder_table.c.company_id).where(
+        holder_table.c.role_id == role.id, holder_table.c.company_id != cid
+    ).limit(1))).first()
+    if foreign_holder is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Роль назначена в другой компании; требуется сверка")
     members = (await db.execute(
-        select(UserCompany).where(UserCompany.role_id == role.id)
+        select(UserCompany).where(UserCompany.company_id == cid, UserCompany.role_id == role.id)
+        .order_by(UserCompany.user_id, UserCompany.company_id)
+        .with_for_update().execution_options(populate_existing=True)
     )).scalars().all()
     for m in members:
         m.role_id = None  # снятие роли; modules останется как есть (обычно None)
