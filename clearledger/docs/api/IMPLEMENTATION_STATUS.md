@@ -49,6 +49,8 @@ MigrationError code4/phase pulse_parent из проверенных исходн
 все процессы завершены, контейнер удалён, исходники сохранены. Это0 основных
 сценариев, не проверка миграций.
 
+**Corebootstrap:23из57 сценариев приняты в18отдельных сериях.**
+
 Принята одна полная серия6 проверок прежнего поведения Core: native207.81с,
 полный прогон221.24с, все процессы завершились успешно. Проверены два строгих
 ожидаемых отказа, public prepare/repeat, прежний marker bypass Pulse и два
@@ -87,9 +89,28 @@ ownCID cleanup/PG clientslocks0 подтверждены. Первая отде�
 repeat дала assertion без сохранённых значений; ошибка сохранена, последующее
 отдельное чтение показало0/0, приложение повторно не запускалось. Missing-edge
 проверяет DROP edge, отрицательная проверка extension сюда не входит.
-Итого12 разных сценариев из57 в СЕМИ сериях:baseline6 одной и6fresh по одному.
-Остальные45 ещё не приняты. Это не single12/fresh6green и не полный SQL/no-DDL,
+На том срезе были приняты12 разных сценариев из57 в СЕМИ сериях:baseline6 одной
+и6fresh по одному; остальные45 ещё не были приняты. Это не single12/fresh6green и не полный SQL/no-DDL,
 реальные jobs, upgrade, restore, rollback всей системы или текущий CI.
+
+Дополнительно приняты9UPG по одному: принятие3существующих canonical artifacts,
+префиксы1/2/3, отдельные create/adopt Pulse0003, повтор head, календарный cutover
+и отказ на несовместимом родителе. Missing successors создаются, head возвращает
+actions[]; populated association в adopt-сценариях сохраняется. У foreign-parent
+точный code4/columns, before==after/write0. Calendar здесь пустой, это не проверка
+populated sent_at/highwater; prefixes синтетические, не OLDUP8 настоящих старых
+исходников. Nativeprepare использует captured terminals, не реальныеjobs.
+Все9 exit0/source15851+77deps/censuses/independentabsence/ordinaryrm/PG0/0.
+Независимый Dreview b5308b3f/ba5bf45c подтвердил14 новых FRESH/UPG серий;
+вместе с прежним review покрыт срез21ID/16серий. ПолныйSQL/noDDL не заявляется.
+Отдельно принят REF-missing-core-public-decoy:33.22с/45.91с, точный trusted
+RuntimeError namespace ownership, before==after/write0. Прямой prepare здесь
+уже под startupLock: это не pre-lock proof. Отдельно принят REF-visible-public:
+33.93с native supervision/47.40с полный прогон, точный NS_FOREIGN RuntimeError
+из app/database.py:2231, before==after/write0. Все195CLI завершены,15851входов
+и77deps совпали; два kernel census, независимое отсутствие трёх процессов,
+обычное удаление своего контейнера и PG0/0 подтверждены. Итого23разныхID/57
+в18сериях, остальные34 требуют проверки; full57/OLDUP8/restore/workingbackup/CI открыты.
 
 В `0d5df23f` принят source анализ порядка блокировок внешнего CREATE договора.
 Сравнены глобальная и ограниченная предметными ключами схемы, но вариант ещё
@@ -110,24 +131,35 @@ listener startup-vs-stop; дальнейшая native проверка опис�
 0 primary,22 env/77 deps и все входы совпали,31 CLI завершены, собственный
 контейнер удалён, DB clients/locks0. Первая серия150 завершилась144 PASS/6 FAIL за133.22с; серия не принята.
 Ошибки затрагивают удаление компании, доступ к задачам, контролируемое закрытие
-сессии БД и обычное отключение клиента; корни fixture/app ещё уточняются.
+сессии БД и обычное отключение клиента; причины fixture/app разобраны ниже.
 Полные raw сохранены. Все928+15851 входов и77 зависимостей совпали до/после,
 715CLI завершены,16 metadata controls TRUE, запрещённых попыток0. ROOT отдельно
 подтвердил positive exit/PID0, отсутствие native процесса и контроллера,
 пустой либо удалённый cgroup и0подключений/блокировок PG; собственный контейнер
 удалён обычным rm. Это восстановление после FAIL, не приёмка тестов.
-Отдельные90 прежних сценариев остаются NOTRUN.
+На этом историческом срезе90 прежних сценариев ещё не запускались; текущий результат ниже.
 
-Дополнительное независимое source ревью выявило дефект close-join: disconnect
-удаляет сокет из реестра до окончания cleanup, поэтому повторный close мог
-вернуть завершение раньше продолжающегося UPDATE last_seen. Это конкретный
-source путь, точный sampled owner второго checkout в raw не измерялся.
-Исполнитель правит per-socket ownership и четыре fixture причины, сохраняя150
-IDs/прежние assertions/5с bounds; добавляет barrier на реальном SQL и повторные
-close waiters. Новый пакет ещё не принят, первый144PASS/6FAIL сохраняется.
+Дефект close-join и четыре fixture причины исправлены в freeze5,12 прежних paths;
+сохранены150IDs/старые assertions/5с bounds. В тестах реальный UPDATE last_seen
+предшествует barrier, два late close ждут owner DONE. ROOT и независимый
+source-review подтвердили closure, приписывать измеренный stack старому pool2 нельзя.
 
-Реальные TCP upgrade/close и PG delivery
-ещё требуют проверки. Frontend и автоматический refresh остаются отдельной фазой.
+Повторный полный backend150 принят ОДНОЙсерией:150/150,450setup/call/teardownPASS,
+0FAIL/ERROR/SKIP. Native pytest131.59с/JUnit130.938с/полный151.84с; source928+
+shared15851/77deps сохранились,707CLI завершены,16controls TRUE/forbidden0.
+Независимое отсутствие native/controller и ordinaryownCID removal подтверждены,
+PG clients/locks0. Старый144PASS/6FAIL остаётся отдельным FAILED, не294unique.
+Новый C0исполнителя принят отдельно с0primary/отказом доappimports.
+Первый legacy90 на freshOID16894/новомlease/23env остановлен ROOTFSguard:4
+служебные pytestcurrent symlinks, затем TERM/KILL137. Наблюдалось60 PASS до
+прерывания; completeboundary/JUnit отсутствуют, серия NOTPASS/не принята.
+270CLI/source77same/independentownCID recovery/PG0/0 подтверждены; raw сохранён.
+Независимая проверка сохранённых доказательств (MD455d6b39/JSON9f66dac4)
+подтвердила backend150 и interruptedlegacy90; ревьюер раскрыл авторство runnerV1/V2.
+Следующая задача исполнителя — только исходники отдельного runnerV3 с предотвращением
+создания optional symlinks в ядре; новая политика ещё не запускалась и не принята.
+Приложение/тесты/строгийзапретсимлинков не менялись. RealTCP,
+полный PGwire профиль/frontend/autoRefresh остаются следующими фазами.
 [Анализ WebSocket](http://10.10.70.56:8000/api-platform-20261029/chat-ws-lifetime.html).
 
 Защита журналов460offline и231nginx+9 прежних групп принята отдельными сериями.
