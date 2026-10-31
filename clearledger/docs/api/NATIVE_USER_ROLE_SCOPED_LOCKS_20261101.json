@@ -1,0 +1,849 @@
+{
+  "format": "native-user-role-scoped-locks-source-v1",
+  "date": "2026-11-01",
+  "label": "SOURCECONFIRMED implementation; UNKNOWN runtime; PROPOSAL future execution",
+  "repository": "Electro-Interfaces/ClearLedger",
+  "branch": "MagLook/contract-user-role-locks-author-20261101",
+  "source_base": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+  "protocol_base": "d71e4f3754efce7c911cc95cb46eb22707e8efbc",
+  "source_commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+  "authority": {
+    "root_step2": "msg_b211505b113a",
+    "dispatch_task": "task_fdb8ae27074c",
+    "dispatch": "ctx_2691863683f8",
+    "api": "msg_137c5ceeab48",
+    "helper_review_warning": "msg_783e29c02d09",
+    "fk_review": "msg_ef1a5e800f7c",
+    "root_failclosed409": "msg_5e53b6a0849a relayed by msg_863bad7e6c69",
+    "helper_B1": "actual Connection/DB RootTransaction lifetime gap accepted by ROOT; c9 not PASS; unchanged API replacement belongs to helper owner",
+    "target_superadmin_review": "msg_59400860e84c; successor cdef933b preserves b692b0e4 immutable parent"
+  },
+  "ownership_exact7": [
+    "clearledger/server/app/routers/users_router.py",
+    "clearledger/server/app/routers/roles_router.py",
+    "clearledger/server/app/services/native_user_role_locks.py",
+    "clearledger/server/tests/test_native_user_role_locks.py",
+    "clearledger/server/tests/test_native_user_role_locks_pg.py",
+    "clearledger/docs/api/NATIVE_USER_ROLE_SCOPED_LOCKS_20261101.md",
+    "clearledger/docs/api/NATIVE_USER_ROLE_SCOPED_LOCKS_20261101.json"
+  ],
+  "source_manifest": [
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "path": "clearledger/server/app/routers/users_router.py",
+      "range": [
+        1,
+        867
+      ],
+      "bytes": 45729,
+      "raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "path": "clearledger/server/app/routers/roles_router.py",
+      "range": [
+        1,
+        153
+      ],
+      "bytes": 7678,
+      "raw_sha256": "b6c02422f40990e406886bbf22fcc96abd7e4cb298aa9bf8aa87ebdfc3c9ded7"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "path": "clearledger/server/app/services/native_user_role_locks.py",
+      "range": [
+        1,
+        180
+      ],
+      "bytes": 9038,
+      "raw_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "path": "clearledger/server/tests/test_native_user_role_locks.py",
+      "range": [
+        1,
+        126
+      ],
+      "bytes": 6594,
+      "raw_sha256": "8e1eab2290701ed75428fdbd12c308882028d468bc123d8edb8e1780c3c714fd"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+      "path": "clearledger/server/tests/test_native_user_role_locks_pg.py",
+      "range": [
+        1,
+        467
+      ],
+      "bytes": 23002,
+      "raw_sha256": "b88919030e0395c6742e87decb26235492273179ad55cead310832090e9661ab"
+    }
+  ],
+  "common_native_entrance": [
+    "assert_native_clean before legacy read preflight (no I/O)",
+    "MVCC User/Member/actual Role owner discovery inside db.no_autoflush",
+    "one frozen full-plan acquire, no reentry/extension",
+    "expire discovery identity map; Company SHARE sorted UUID -> User SHARE/UPDATE sorted UUID -> company-filtered CompanyRole SHARE/UPDATE sorted UUID -> UserCompany SHARE/UPDATE sorted composite PK",
+    "compare discovered User parents/is_superadmin and Member role_id/native-role after wait; mismatch409 before write",
+    "reuse native_user_from_claims + native_visit_from_claims, then native superadmin/admin membership ACL; no new partner privilege"
+  ],
+  "api": {
+    "assert_native_clean": "assert_native_clean(db: AsyncSession) -> None; rejects real new/dirty/deleted before router preflight",
+    "prepare": "await prepare_native_write(db, actor, *, company_id, target_id=None, account=False, new_role_id=None, role_id=None, email_pointer=None, expected_member=None) -> NativeWrite",
+    "frozen_helper": "one acquire_scoped_locks_async(db, plan) using same db.sync_session; require_scoped_locks before/after row revalidation; no raw transaction SQL",
+    "modes": "Company S, actor User S + actor Member S/old Role S; target User S or upfront X for account; target Member X even absent, old/new Role S; role mutator Role X; frozen LockPlan merges same actor/target strongest modes",
+    "row_order": "Company sorted UUID SHARE -> User sorted UUID SHARE or UPDATE for account -> CompanyRole sorted UUID with tenant predicate before row lock -> UserCompany sorted (user_id,company_id) SHARE actor/UPDATE target -> later original dependent rows",
+    "conflict": "changed discovered parent/pointer/existence or legacy inconsistent Role FK -> HTTP409 before writes; rollback by existing get_db; no in-root retry/late key",
+    "new_user": "server uuid4 before full plan/ORM add/flush, no new HTTP field"
+  },
+  "roots": [
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "create_user",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "create_user",
+        "range": [
+          196,
+          241
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "7f71d719167fa417f40036a0067b513b4e6633813963a57dd01650ae4e11d1df"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "create_user",
+        "range": [
+          197,
+          249
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "5cd025bbfa940000f0e6c3d285921738fc4b4ea55ca5c75c34a359e99a98e373"
+      },
+      "before_trace": "admin -> organization resolve -> email lookup -> membership INSERT or new User INSERT/flush -> membership INSERT/flush -> close_invites -> audit(new only) -> response",
+      "after_trace": "existing: User S; new: preallocate UUID then User X; Member X including absent; actor User S/Member S; Company S; old Role S; revalidate email -> original writes/invite close/audit/response",
+      "plan_and_rows": "common_native_entrance; User X only for new account; existing membership S",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "update_user",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "update_user",
+        "range": [
+          245,
+          319
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "5829c369aa33682445ee7e6d4dd9e395f9f7f983e74e62c1b45bd2e7693891ee"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "update_user",
+        "range": [
+          253,
+          332
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "1a5bdb639e33c86d9eac865055e9a0c4d53e5abae0c6db3fb0fbd4c5910ba4b5"
+      },
+      "before_trace": "UUID -> company admin+membership or global superadmin -> target guard -> optional global name -> optional membership fields/audit -> flush -> response",
+      "after_trace": "same company/global branches -> User X iff name is not None (including empty string), otherwise S; per-company Member X/old Role S -> same optional values, audits, flush, response",
+      "plan_and_rows": "common_native_entrance; User X iff payload.name is not None",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "set_member_modules",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_modules",
+        "range": [
+          323,
+          346
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "7d67ac9533bbfd9632bff9aae556ca37133753cac84eb3f5350ca4d6b12847c9"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_modules",
+        "range": [
+          336,
+          361
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "defdfbc3fadada92a27905343049d65a9e6450f5a4ad64ee598a7fc68993c646"
+      },
+      "before_trace": "UUID -> admin -> member404 -> target superadmin403 -> modules/role_id clear -> flush -> response",
+      "after_trace": "User S + Member X + old Role S -> same admin-unlimited/ad-hoc assignments -> flush -> response",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "set_member_access",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_access",
+        "range": [
+          350,
+          386
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "177ff40b5687a585efa10e7ff3d2923b1089e6fe7cb7d601baf3e1ff1248c171"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_access",
+        "range": [
+          365,
+          414
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "82f35f6cbd56cddeff009e2f89133f49fd8adac4b9ea1f9bdd57c36803206ed5"
+      },
+      "before_trace": "UUID -> admin -> member404 -> target superadmin403 -> admin branch ignores role_id, else requested Role lookup/custom -> mutate -> audit -> commit -> response",
+      "after_trace": "same prechecks -> parse new role only for non-admin role mode; expected_member comparison covers preflight/discovery gap -> old/new Role S + Member X -> refreshed branch -> same audit/commit/response; repeat target-superadmin403 on refreshed locked target before any mutation, including preflight/discovery gap",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "set_member_scope",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_scope",
+        "range": [
+          390,
+          444
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "0132f88a5f3fbbd8268aebb0403b96200cc492fe935f1791eff46f3ceb6d9a43"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_scope",
+        "range": [
+          418,
+          474
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "7f943d51989f67887cb5fa86bc66f85a5c86ad68cafa4ce11fa14a0f0a1c8e48"
+      },
+      "before_trace": "UUID -> admin -> member404 -> target -> own location/org validation -> object/own-org fields -> audit -> commit -> response",
+      "after_trace": "User S + Member X + old Role S -> same object/org normalization, audit, commit, response",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "set_member_business_grants",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_business_grants",
+        "range": [
+          448,
+          501
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "a797d1aa197f3a5a60b002c9c61dbb3ed97fe0fd67e20f70289c4360a164d02a"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_business_grants",
+        "range": [
+          478,
+          533
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "d80bdfe8d2aa2de5279115a5f8e1628c5cc6c52da0dd13b90bccbeb8ebe2bf18"
+      },
+      "before_trace": "UUID -> admin -> member/target404 -> company404 -> station/location discovery -> normalize -> business_grants -> audit -> roster -> commit -> response",
+      "after_trace": "User S + Member X + old Role S -> same grant validation, audit, roster failure handling, commit, response",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "set_station_pin",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_station_pin",
+        "range": [
+          505,
+          540
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "30e647ba0a3afd0aca62a84a843cb4f466a929e70e40c4c6d7b1cc50b75291eb"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_station_pin",
+        "range": [
+          537,
+          574
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "bdaf2b3aeebc7d2d0ec3ec3461c10d1921cf4439037f63dc5c27c1438bc2821d"
+      },
+      "before_trace": "UUID -> admin -> member404 -> target404 -> PIN validate/set -> audit -> roster -> commit -> response",
+      "after_trace": "target User X + Member X + old Role S before PIN/account mutation -> same PIN/audit/roster/commit/response",
+      "plan_and_rows": "common_native_entrance; User X",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "set_member_contracts",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_contracts",
+        "range": [
+          562,
+          600
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "fc6eb7c148a9f035e4e73fbfd2cc30adb266140a3acfc8cea1496d70af355320"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "set_member_contracts",
+        "range": [
+          596,
+          636
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+      },
+      "before_trace": "UUID -> admin -> member404 -> target -> same-company contract IDs -> contract_ids -> audit -> commit -> response",
+      "after_trace": "User S + Member X + old Role S -> same contract validation/audit/commit/response",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "reset_sessions",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "reset_sessions",
+        "range": [
+          604,
+          627
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "bd86806c8b7a6ca9480ac963837c9214eb76d7b4bd5cae1e5b6176b78c5116e3"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "reset_sessions",
+        "range": [
+          640,
+          665
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "369bb43177d9edeedc7d8c985111e6030a370be6cd4ba821ed77f4f6899b75e4"
+      },
+      "before_trace": "admin -> UUID -> target/member404 -> target superadmin403 -> token_version increment -> audit -> commit",
+      "after_trace": "target User X + Member X + old Role S -> same checks/version/audit/commit",
+      "plan_and_rows": "common_native_entrance; User X",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "reset_2fa",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "reset_2fa",
+        "range": [
+          631,
+          654
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "899ebf1da42f3a093f37a2a38a7ecb56ff7b4ccff64c0a5f0d15d7030623ad6f"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "reset_2fa",
+        "range": [
+          669,
+          694
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "a199814ba42938ca6081dd147fc21fa2d96e040e5185160e2a2d19f3b4452c6d"
+      },
+      "before_trace": "admin -> UUID -> target/member404 -> target superadmin403 -> totp clear + token_version increment -> audit -> commit",
+      "after_trace": "target User X + Member X + old Role S -> same checks/totp/version/audit/commit",
+      "plan_and_rows": "common_native_entrance; User X",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "issue_reset_link",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "issue_reset_link",
+        "range": [
+          658,
+          719
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "7437c8743fb3afa3187848811fd34d9f764809cbb4a43b3eaec087b51da198e2"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "issue_reset_link",
+        "range": [
+          698,
+          761
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "427a0713c48ff780c1ed869463031d965d8cadcf0145ef7dffbc2437c7d81483"
+      },
+      "before_trace": "admin -> UUID -> target/member404 -> target superadmin403 -> reset token/hash/expiry -> audit -> flush -> optional email -> response",
+      "after_trace": "target User X + Member X + old Role S -> same token/expiry/audit/flush/email behavior",
+      "plan_and_rows": "common_native_entrance; User X",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "remove_user",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "remove_user",
+        "range": [
+          737,
+          772
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "00541f58dac4506169532ef8c972f0b661374aefb27013ba3aa13ee613b0acea"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "remove_user",
+        "range": [
+          779,
+          816
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+      },
+      "before_trace": "admin -> UUID -> self400 -> target/member404 -> target superadmin403 -> member DELETE/flush -> chat cleanup -> audit -> remaining-member probe -> possible User DELETE",
+      "after_trace": "after self400, target User X + User UPDATE row before member DELETE/flush; Member X + old Role S; preserve cleanup/audit/remaining probe/conditional User DELETE; no late upgrade",
+      "plan_and_rows": "common_native_entrance; User X always, even if remaining memberships exist",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "grant_company",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "grant_company",
+        "range": [
+          776,
+          794
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "0ddf2d7c184f8137519e284192debd05b6d7627df9c5db1ef6cb420c93361627"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "grant_company",
+        "range": [
+          820,
+          840
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "2ea621a6d5d2441891b0949c587fe1add76e67049128ac7a8f08c8a6c24ed326"
+      },
+      "before_trace": "admin -> UUID -> target404 -> absent member INSERT/flush -> response",
+      "after_trace": "User S + same absent/present Member X + old Role S -> fresh existence -> same conditional insert/flush/response",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "revoke_company",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "revoke_company",
+        "range": [
+          798,
+          819
+        ],
+        "file_raw_sha256": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+        "symbol_raw_sha256": "1c1f49628f09cc38512e4c10fbc84e3fab9a60cee19ef1b7892e90bbe190d4a7"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/users_router.py",
+        "symbol": "revoke_company",
+        "range": [
+          844,
+          867
+        ],
+        "file_raw_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+        "symbol_raw_sha256": "fc2776431c2f9ae99cc32c40978cc6fd3a6d7359770850653f644778e0de087a"
+      },
+      "before_trace": "admin -> UUID -> target404 -> target superadmin403 -> optional member DELETE/flush -> chat cleanup",
+      "after_trace": "User S + Member X + old Role S -> same target checks/member delete/flush/chat cleanup",
+      "plan_and_rows": "common_native_entrance; User S",
+      "commit_owner_unchanged": "get_db",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "update_role",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/roles_router.py",
+        "symbol": "update_role",
+        "range": [
+          86,
+          109
+        ],
+        "file_raw_sha256": "127ad077c30f6f30f3109e12f840f1854a58664880bc4964ec53d950842c3af8",
+        "symbol_raw_sha256": "1a3b77d7e693bdc49d4dd87fd802bca851ae5d0bf111b82192b1ff0e37e3aca5"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/roles_router.py",
+        "symbol": "update_role",
+        "range": [
+          87,
+          113
+        ],
+        "file_raw_sha256": "b6c02422f40990e406886bbf22fcc96abd7e4cb298aa9bf8aa87ebdfc3c9ded7",
+        "symbol_raw_sha256": "247cd676b2ef74834e8c192eb451f534c870e10934dfa95cec6332d81e744951"
+      },
+      "before_trace": "admin -> role get -> tenant404 -> system403 -> name/modules and optional chat_scope -> audit -> commit -> response",
+      "after_trace": "Role X before fresh tenant-filtered Role UPDATE row -> same 404/system403 -> preserve omitted chat_scope, audit, commit, response",
+      "plan_and_rows": "common_native_entrance; actor User S/Member S, Role X",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "root": "delete_role",
+      "before": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+        "path": "clearledger/server/app/routers/roles_router.py",
+        "symbol": "delete_role",
+        "range": [
+          113,
+          134
+        ],
+        "file_raw_sha256": "127ad077c30f6f30f3109e12f840f1854a58664880bc4964ec53d950842c3af8",
+        "symbol_raw_sha256": "5c483f5efa697c6b9557c3b6597897e04417864b9350f7ec24c7ee00a139000e"
+      },
+      "after": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "cdef933bd6b42ffbcb7336516ff7aa698538af66",
+        "path": "clearledger/server/app/routers/roles_router.py",
+        "symbol": "delete_role",
+        "range": [
+          117,
+          153
+        ],
+        "file_raw_sha256": "b6c02422f40990e406886bbf22fcc96abd7e4cb298aa9bf8aa87ebdfc3c9ded7",
+        "symbol_raw_sha256": "bd63ef1d3345948ee5caa4057a446e9682dc55fb83924a48b6db271fbd246b5e"
+      },
+      "before_trace": "admin -> role get -> tenant404 -> system403 -> ALL role_id holder probe -> holders role_id=NULL -> audit -> role DELETE -> commit",
+      "after_trace": "Role X -> tenant-filtered Role UPDATE row -> same 404/system403 -> physical cross-tenant holder probe: fail409 before any mutation -> same-tenant holders ordered UPDATE -> same assignment reset/audit/DELETE/commit; no late holder User keys",
+      "plan_and_rows": "common_native_entrance; actor User S/Member S, Role X; holders protected by Role X, not a claimed complete Member manifest",
+      "commit_owner_unchanged": "handler",
+      "rollback_owner_unchanged": "get_db exception rollback; adapter never commits/rolls back/retries",
+      "runtime": "UNKNOWN/NOTRUN"
+    }
+  ],
+  "unchanged_source_symbols": {
+    "users": [
+      "list_users",
+      "push_station_roster",
+      "require_company_admin",
+      "_membership_role",
+      "_is_member",
+      "_is_company_admin",
+      "_memberships",
+      "_resp",
+      "_leave_company_chats"
+    ],
+    "roles": [
+      "create_role",
+      "list_roles",
+      "_scope_or_none",
+      "_to_resp"
+    ]
+  },
+  "dependencies": [
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "path": "clearledger/server/app/services/contract_write_locks.py",
+      "range": [
+        1,
+        377
+      ],
+      "bytes": 14099,
+      "raw_sha256": "ef05d3134ef8b99601d0d38f051d13c731a0256138d37d0500c70275d434c78d"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "path": "clearledger/server/app/auth.py",
+      "range": [
+        1,
+        730
+      ],
+      "bytes": 38400,
+      "raw_sha256": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "path": "clearledger/server/app/models.py",
+      "range": [
+        1,
+        14447
+      ],
+      "bytes": 966529,
+      "raw_sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "path": "clearledger/server/app/database.py",
+      "range": [
+        1,
+        5601
+      ],
+      "bytes": 387732,
+      "raw_sha256": "556154faef73b11ca6efbfbe581a098d32a159d8b7f3e8ae2f862e0853014628"
+    },
+    {
+      "repository": "Electro-Interfaces/ClearLedger",
+      "commit": "c9e841c48ddf4864eb258e6bd5ddd7401a3833ea",
+      "path": "clearledger/server/app/routers/invitations_router.py",
+      "range": [
+        1,
+        414
+      ],
+      "bytes": 21722,
+      "raw_sha256": "a0b58cd46babb657e7cece860e158b8f7ef4f45b60dd7e0f34556aaca101d691"
+    }
+  ],
+  "gaps": [
+    {
+      "label": "UNKNOWN",
+      "owner": "helper owner/ROOT",
+      "gap": "c9 actual DB RootTransaction B1 lifetime review/fix; frozen API consumed, helper not edited or accepted here"
+    },
+    {
+      "label": "UNKNOWN",
+      "owner": "auth/invitations/seed/CLI/import and other native writer owners",
+      "gap": "all User/Member/Role writers must participate; nonparticipants can change pointers/authority without guards; source change here is not all-writer closure"
+    },
+    {
+      "label": "PROPOSAL",
+      "owner": "roles future writer owner",
+      "gap": "create_role remains byte/AST unchanged by explicit scope; role creation/update native catalog lifecycle closure needs separate assignment"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "owner": "ROOT schema/lifecycle",
+      "gap": "UserCompany.role_id single FK admits cross-company legacy assignments; this adapter refuses existing inconsistency409; role delete probes physical table including tenants hidden by visit ORM scope; no schema/composite-FK repair"
+    },
+    {
+      "label": "UNKNOWN",
+      "owner": "ROOT + company lifecycle writers",
+      "gap": "Company deletion/default-company reassignment and role-owner reassignment elsewhere need scoped guards; missing/changed discovered parents fail409 here"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "owner": "invitations/chat/roster domain owners",
+      "gap": "create closes invites and membership removal cleans chats; original calls/order and caller transaction retained, but their independent writer closure is not asserted"
+    },
+    {
+      "label": "UNKNOWN",
+      "owner": "ROOT executor",
+      "gap": "real PG scheduling, default READ COMMITTED behavior, DB driver/DDL/full-schema integration, ACL regression and latency not executed; synthetic harness omits unrelated FK targets/triggers/notification delivery"
+    },
+    {
+      "label": "SOURCECONFIRMED",
+      "owner": "ROOT schema ordinal4 owner",
+      "gap": "0004_partner_contract_create parent0003 untouched and separately reserved; no model/migration/schema edits"
+    }
+  ],
+  "tests": {
+    "status": "AUTHORED_NOTRUN; collection NOTRUN",
+    "unit_test_functions": 6,
+    "synthetic_pg_test_functions": 13,
+    "meaningful_cases": [
+      "complete old/new roles, absent member and same actor/target merge",
+      "dirty entry before even router auth/discovery, no I/O",
+      "actual set_member_access blocks old and new Role X; observed exact pg_locks + pg_blocking_pids",
+      "actual absent grant blocks same Member X",
+      "actual reset_sessions requires User X against User S",
+      "actual adapter writers change old Role parent/admin/session during observed wait; revalidation409/401 no audit/write",
+      "remove target User UPDATE row precedes member DELETE, no late advisory acquisition, member deletion precedes User deletion",
+      "actual Role delete waits Role X and resets holders before delete",
+      "native admin ignores malformed role_id; missing member404 and superadmin403 precede malformed role parse; invalid requested role400",
+      "new/existing user complete plan before flush; real helper wrapped for observation, no fake capability",
+      "single-FK legacy cross-company holder/member parent rejects409",
+      "empty global name value; role chat_scope omission; local versus get_db commits",
+      "target promoted to superadmin between preflight and discovery: actual prepare sees stable True, repeated locked-target403 forbids mutation"
+    ],
+    "guard": {
+      "url": "NATIVE_USER_ROLE_LOCKS_PG_URL must equal NATIVE_USER_ROLE_LOCKS_PG_ROOT_APPROVED_URL",
+      "approval": "ROOT-approved-synthetic-native-user-role-v1",
+      "database_prefix": "native_user_role_synthetic_",
+      "driver": "postgresql+psycopg",
+      "before_app_imports": true,
+      "conftest_limit": "repository conftest is earlier and destructive; module guard is NOT a runner, ROOT must isolate collection before any execution"
+    },
+    "real_pg_evidence": "PROPOSAL authored only: controlled async Sessions + ordinary pool + finite harness deadlines + pg_locks and pg_blocking_pids; no NullPool/sleep-race evidence; cleanup releases owner root and cancels/reaps pending task; synthetic unique schema dropped after sessions close"
+  },
+  "verification": {
+    "label": "SOURCECONFIRMED",
+    "git_diff_check": "PASS",
+    "stdlib_ast_and_in_memory_compile": "PASS for all 5 code/test files, without executing compiled code",
+    "router_changed_functions": {
+      "users": 14,
+      "roles": 2
+    },
+    "project_imports": 0,
+    "app_or_helper_execution": 0,
+    "test_collection": 0,
+    "tests_executed": 0,
+    "sql_or_db": 0,
+    "http_network": 0,
+    "node_codegen_build_ci": 0,
+    "ssh_docker": 0,
+    "credentials_read": false,
+    "push_pr_merge_deploy": false
+  },
+  "raw_parent_original_20M11_pins": [
+    {
+      "path": "/srv/projects/preview/api-platform-20261029/API-MODERNIZATION-PLAN.md",
+      "bytes": 29956,
+      "range": [
+        1,
+        238
+      ],
+      "raw_sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "role": "READ_ONLY_RAW_PARENT_ORIGINAL_20_SECTIONS_11_REQUIREMENTS_REFERENCE; no rewrite or acceptance update"
+    },
+    {
+      "path": "/srv/projects/preview/api-platform-20261029/completion-matrix.html",
+      "bytes": 28046,
+      "range": [
+        1,
+        219
+      ],
+      "raw_sha256": "811b7dba00cdc456a71f051527fe6e2ef425b9649fb0ac3a8e8d5564f4dab493",
+      "role": "READ_ONLY_RAW_PARENT_ORIGINAL_20_SECTIONS_11_REQUIREMENTS_REFERENCE; no rewrite or acceptance update"
+    },
+    {
+      "path": "/srv/projects/preview/external-developer-experience-20261031/inputs/API-MODERNIZATION-PLAN.md",
+      "bytes": 29956,
+      "range": [
+        1,
+        238
+      ],
+      "raw_sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "role": "READ_ONLY_RAW_PARENT_ORIGINAL_20_SECTIONS_11_REQUIREMENTS_REFERENCE; no rewrite or acceptance update"
+    }
+  ],
+  "acceptance": "No full writer closure, full B acceptance, M00-M19 closure, eleven cross-cutting requirement closure, helper PASS, working runtime or deployment claimed. Parent original rules/pins remain unchanged."
+}
