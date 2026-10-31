@@ -102,7 +102,7 @@ async def _has_running(db, channel_id: uuid.UUID) -> bool:
 
 async def _launch(db, ch: Channel, lookback_days: int) -> None:
     """Стартовать прогон канала тем же путём, что и кнопка в кокпите."""
-    from app.routers.channels_router import _run_channel_background
+    from app.services.channel_runs import run_channel_background
 
     today = datetime.now(_tz(ch.schedule or {})).date()
     df = (today - timedelta(days=max(lookback_days, 0))).isoformat()
@@ -120,7 +120,8 @@ async def _launch(db, ch: Channel, lookback_days: int) -> None:
     await db.commit()
 
     log.info("Автозапуск канала «%s» за %s…%s", ch.name, df, dt)
-    asyncio.create_task(_run_channel_background(ch.id, df, dt, log_id))
+    asyncio.create_task(run_channel_background(
+        ch.id, df, dt, log_id, session_factory=async_session_factory))
 
 
 async def tick() -> int:
