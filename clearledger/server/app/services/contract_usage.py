@@ -115,7 +115,11 @@ async def _service_contract_alias(db: AsyncSession) -> str | None:
         JOIN pg_catalog.pg_rewrite r ON r.ev_class = v.oid
             AND r.rulename = '_RETURN' AND r.ev_type = '1' AND r.is_instead
         WHERE v.relname = 'service_contracts' AND nv.nspname IN ('core', 'public')
-          AND v.relkind = 'v' AND b.relkind IN ('r', 'p')
+          AND v.relkind = 'v' AND b.relkind = 'r' AND NOT b.relispartition
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_catalog.pg_inherits i
+              WHERE i.inhparent = b.oid OR i.inhrelid = b.oid
+          )
           AND NOT b.relrowsecurity AND NOT b.relforcerowsecurity
           AND NOT v.relrowsecurity AND NOT v.relforcerowsecurity
           AND COALESCE(cardinality(v.reloptions), 0) = 0

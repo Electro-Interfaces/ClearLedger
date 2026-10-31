@@ -233,6 +233,35 @@ class ContractUsageAliasIntegration(unittest.IsolatedAsyncioTestCase):
             await db.execute(text(f"CREATE VIEW {PUBLIC} AS SELECT * FROM {CORE}"))
             await self.check(db, [CORE, PUBLIC], [1, 1])
 
+    async def test_inheritance_and_partition_topology_keep_both_sources(self):
+        columns = "(id UUID, company_id UUID, active BOOLEAN, contract_id UUID)"
+        for topology in ("parent", "child", "partition-root", "partition-leaf"):
+            with self.subTest(topology=topology):
+                # Каждая сессия откатывает собственный синтетический DDL.
+                async with self.sessions() as db:
+                    if topology == "parent":
+                        await self.table(db, CORE)
+                        await db.execute(text(f"CREATE TABLE public.child () INHERITS ({CORE})"))
+                        insert_table = "public.child"
+                    elif topology == "child":
+                        await db.execute(text(f"CREATE TABLE public.parent {columns}"))
+                        await db.execute(text(f"CREATE TABLE {CORE} () INHERITS (public.parent)"))
+                        insert_table = CORE
+                    elif topology == "partition-root":
+                        await db.execute(text(f"CREATE TABLE {CORE} {columns} PARTITION BY HASH (id)"))
+                        await db.execute(text(f"CREATE TABLE public.leaf PARTITION OF {CORE} "
+                                              "FOR VALUES WITH (MODULUS 1, REMAINDER 0)"))
+                        insert_table = CORE
+                    else:
+                        await db.execute(text(f"CREATE TABLE public.parent {columns} PARTITION BY HASH (id)"))
+                        await db.execute(text(f"CREATE TABLE {CORE} PARTITION OF public.parent "
+                                              "FOR VALUES WITH (MODULUS 1, REMAINDER 0)"))
+                        insert_table = CORE
+                    await db.execute(text(f"INSERT INTO {insert_table} VALUES (:id, :co, true, :cid)"),
+                                     {"id": uuid.uuid4(), "co": self.company, "cid": self.contract})
+                    await db.execute(text(f"CREATE VIEW {PUBLIC} AS SELECT * FROM {CORE}"))
+                    await self.check(db, [CORE, PUBLIC], [2, 2] if topology == "parent" else [1, 1])
+
     async def test_tenant_scope_null_links_and_old_payload(self):
         async with self.sessions() as db:
             await self.table(db, CORE)
