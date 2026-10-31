@@ -1,0 +1,1580 @@
+{
+  "kind": "partner-dx-guide-contract-implementation",
+  "scope": "D2+C1",
+  "run": "run_781185341d88",
+  "baseCommit": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+  "approval": {
+    "authority": "direct user reply in this chat",
+    "text": "Разрешаю узкий C1 и draft PR без запуска и выпуска",
+    "received": true,
+    "scope": "descriptions/examples existing dto.py/app.py; write tests without execution; draft PR; no runtime or release"
+  },
+  "sourceOnlyStatus": "PASS_SOURCE_ONLY",
+  "appImports": "NOTRUN",
+  "frameworkSchemaValidation": "NOTRUN",
+  "tests": "WRITTEN_NOTRUN",
+  "runtimeAcceptance": "NOTRUN",
+  "allowedFiles": [
+    "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.json",
+    "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.md",
+    "clearledger/docs/api/PARTNER_DX_METADATA_SOURCE_20261031.json",
+    "clearledger/docs/api/PARTNER_DX_METADATA_SOURCE_20261031.md",
+    "clearledger/docs/partner/auth.md",
+    "clearledger/docs/partner/data-dictionary.md",
+    "clearledger/docs/partner/errors.md",
+    "clearledger/docs/partner/onboarding.md",
+    "clearledger/docs/partner/recipes/contracts.md",
+    "clearledger/docs/partner/recipes/documents.md",
+    "clearledger/docs/partner/recipes/monitoring.md",
+    "clearledger/docs/partner/recipes/read-catalogs.md",
+    "clearledger/scripts/verify_partner_dx_metadata_20261031.py",
+    "clearledger/scripts/verify_partner_guide_examples_20261031.py",
+    "clearledger/server/app/product_api/app.py",
+    "clearledger/server/app/product_api/dto.py",
+    "clearledger/server/tests/test_partner_dx_examples_20261031.py",
+    "clearledger/server/tests/test_partner_dx_metadata_20261031.py"
+  ],
+  "files": [
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_GUIDE_CONTRACT_20261031.md",
+      "sha256": "9c5ff24b41020d17455316977ae865d2632ea36eb58b772f166bb8aa88b55667"
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_METADATA_SOURCE_20261031.json",
+      "sha256": "2a1516615c455e473b9cb3a8d57b9ef92d8bf94080b88a6f1a935104ba4daeb1"
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_METADATA_SOURCE_20261031.md",
+      "sha256": "113bc61e0d6bc27548531b36c63f52f9eba2e452d8fbb87b92efe3c1dacdeceb"
+    },
+    {
+      "path": "clearledger/docs/partner/auth.md",
+      "sha256": "ce639f446f7739f99cb594b64c8df1e70e9ba396fb7adcd67f82898e54827a29"
+    },
+    {
+      "path": "clearledger/docs/partner/data-dictionary.md",
+      "sha256": "a661af446facba2a2358e06dc23a9ac32cfe93dd46cbda8324c27a4b7ff62633"
+    },
+    {
+      "path": "clearledger/docs/partner/errors.md",
+      "sha256": "8f931e7580c6fde1fa2fb7dc65416c53027a8090d417ab76272922ab75edec85"
+    },
+    {
+      "path": "clearledger/docs/partner/onboarding.md",
+      "sha256": "cffa9a11064df3137229d6841554720c2f850a3c3ac87cb4c7da14d1d8d1daf0"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/contracts.md",
+      "sha256": "ddd7b06550f347a20e7269ae664ec87f64c32c75aa07b4f3ff0fcc6a82564c0b"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/documents.md",
+      "sha256": "bf132cdc7a396d52b7156e65499f5ede76157fa3b7a7b10396056c3ddd072335"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/monitoring.md",
+      "sha256": "83d9bd7f6886442b50235ce488c3027ec98f8c2e90bee7a85239e44a700b7486"
+    },
+    {
+      "path": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "sha256": "ab24190448f3b77adc2c96c668fefa0428b0f7ad4cd7898a715cf86e52967541"
+    },
+    {
+      "path": "clearledger/scripts/verify_partner_dx_metadata_20261031.py",
+      "sha256": "5f0a5b9c6ebca6aee437d060ac4558eb890be4e9f1cf0de6f6bd05510f8a728b"
+    },
+    {
+      "path": "clearledger/scripts/verify_partner_guide_examples_20261031.py",
+      "sha256": "e49d0743f664b090b475175dee81ac434e96265d2cceb7a7fe13de2276a260da"
+    },
+    {
+      "path": "clearledger/server/app/product_api/app.py",
+      "sha256": "c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774"
+    },
+    {
+      "path": "clearledger/server/app/product_api/dto.py",
+      "sha256": "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c"
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_dx_examples_20261031.py",
+      "sha256": "ed7caa5eeeb38d4ce4cde41557bda5216224fe12217f3e9b366d2f40bd039019"
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_dx_metadata_20261031.py",
+      "sha256": "70d9d6bdaaeb0d7ef2d8fdfe88dc8016e603715307cbe6ef190ec682dea60463"
+    }
+  ],
+  "selfHashNote": "Only this report JSON excluded from its own recursive hash list; final Git commit identifies it.",
+  "guideSourceCommit": "74107e9c652ef60f76f6599c61c3ad411df76a3f",
+  "guideIntegratedCommit": "adb823a130717a58821b885d9f53b7ab1a703967",
+  "metadataSourceCommit": "b220a97cffa99ee49b87a606ff90cd1810a5b48d",
+  "metadataIntegratedCommit": "74e56c955dfc90175aed2189bbd13123111b9d8d",
+  "metadataSourceProof": {
+    "path": "clearledger/docs/api/PARTNER_DX_METADATA_SOURCE_20261031.json",
+    "documentedFieldsAndAliases": 111,
+    "operations": 15,
+    "json200": 14,
+    "binary200": 1,
+    "protectedSources": {
+      "clearledger/server/app/api_contracts/__init__.py": {
+        "sha256": "41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b",
+        "baseSourceSha256": "41bacd6a77dfcf24ec096e1c0df8fd8130bdeb4d8a1fc9a35be66a281a45252b",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/api_contracts/context.py": {
+        "sha256": "050bc438db8bd36794b59cb741000b7745edad2a33787a00a4663f159f467154",
+        "baseSourceSha256": "050bc438db8bd36794b59cb741000b7745edad2a33787a00a4663f159f467154",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/api_contracts/routing.py": {
+        "sha256": "131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0",
+        "baseSourceSha256": "131f3bb5daebfd0631296999aef646449bfd02eddeea7b22e21887e30f2e48c0",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/product_api/__init__.py": {
+        "sha256": "2f2a457b4d3e891c6de506eea638364f429384fd1f325309feab2edd94b5fb7f",
+        "baseSourceSha256": "2f2a457b4d3e891c6de506eea638364f429384fd1f325309feab2edd94b5fb7f",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/product_api/access.py": {
+        "sha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+        "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/product_api/budget.py": {
+        "sha256": "ad454225d15b1696432c4409886437bfee7d03a66543918006b84a5f0a28eee4",
+        "baseSourceSha256": "ad454225d15b1696432c4409886437bfee7d03a66543918006b84a5f0a28eee4",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/product_api/files.py": {
+        "sha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958",
+        "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/product_api/monitoring.py": {
+        "sha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb",
+        "baseSourceSha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb",
+        "byteIdentical": true
+      },
+      "clearledger/server/app/product_api/queries.py": {
+        "sha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+        "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+        "byteIdentical": true
+      }
+    },
+    "dtoAstProof": {
+      "normalizedSha256": "8ef4eed0f64d017055de5428c025dbce80ff3379b35042cb4e25d1befbc4a5dc",
+      "whitelistLocations": [
+        "ListQuery.pageSize.description",
+        "ListQuery.pageSize.examples",
+        "ListQuery.cursor.description",
+        "ListQuery.cursor.examples",
+        "ListQuery.q.description",
+        "ListQuery.q.examples",
+        "ListQuery.dateFrom.description",
+        "ListQuery.dateFrom.examples",
+        "ListQuery.dateTo.description",
+        "ListQuery.dateTo.examples",
+        "ContractListQuery.typeCode.description",
+        "ContractListQuery.typeCode.examples",
+        "ContractTypeMetadataQuery.typeCode.description",
+        "ContractTypeMetadataQuery.typeCode.examples",
+        "ContractTypeMetadata.type_code.description",
+        "ContractTypeMetadata.type_code.examples",
+        "ContractTypeMetadata.label.description",
+        "ContractTypeMetadata.label.examples",
+        "ContractTypeMetadata.gk_basis.description",
+        "ContractTypeMetadata.gk_basis.examples",
+        "ContractTypeMetadata.direction.description",
+        "ContractTypeMetadata.direction.examples",
+        "ContractTypeMetadata.is_active.description",
+        "ContractTypeMetadata.is_active.examples",
+        "ContractObjectsQuery.pageSize.description",
+        "ContractObjectsQuery.pageSize.examples",
+        "ContractObjectsQuery.cursor.description",
+        "ContractObjectsQuery.cursor.examples",
+        "ContractObject.object_id.description",
+        "ContractObject.object_id.examples",
+        "ContractObjects.contract_id.description",
+        "ContractObjects.contract_id.examples",
+        "ContractObjects.scope_type.description",
+        "ContractObjects.scope_type.examples",
+        "ContractObjects.items.description",
+        "ContractObjects.items.examples",
+        "ContractObjects.total.description",
+        "ContractObjects.total.examples",
+        "ContractObjects.next_cursor.description",
+        "ContractObjects.next_cursor.examples",
+        "ContractDocumentsQuery.pageSize.description",
+        "ContractDocumentsQuery.pageSize.examples",
+        "ContractDocumentsQuery.cursor.description",
+        "ContractDocumentsQuery.cursor.examples",
+        "ContractDocument.document_id.description",
+        "ContractDocument.document_id.examples",
+        "ContractDocuments.contract_id.description",
+        "ContractDocuments.contract_id.examples",
+        "ContractDocuments.items.description",
+        "ContractDocuments.items.examples",
+        "ContractDocuments.total.description",
+        "ContractDocuments.total.examples",
+        "ContractDocuments.next_cursor.description",
+        "ContractDocuments.next_cursor.examples",
+        "MonitoringQuery.days.description",
+        "MonitoringQuery.days.examples",
+        "MonitoringQuery.asOf.description",
+        "MonitoringQuery.asOf.examples",
+        "MonitoringWindow.days.description",
+        "MonitoringWindow.days.examples",
+        "MonitoringWindow.start.description",
+        "MonitoringWindow.start.examples",
+        "MonitoringWindow.end.description",
+        "MonitoringWindow.end.examples",
+        "MonitoringWindow.time_zone.description",
+        "MonitoringWindow.time_zone.examples",
+        "MonitoringWindow.interval.description",
+        "MonitoringWindow.interval.examples",
+        "MonitoringTotals.sessions.description",
+        "MonitoringTotals.sessions.examples",
+        "MonitoringTotals.visits.description",
+        "MonitoringTotals.visits.examples",
+        "MonitoringTotals.successful_visits.description",
+        "MonitoringTotals.successful_visits.examples",
+        "MonitoringTotals.unsuccessful_visits.description",
+        "MonitoringTotals.unsuccessful_visits.examples",
+        "MonitoringTotals.energy_kwh.description",
+        "MonitoringTotals.energy_kwh.examples",
+        "MonitoringProvenance.as_of.description",
+        "MonitoringProvenance.as_of.examples",
+        "MonitoringProvenance.data_through.description",
+        "MonitoringProvenance.data_through.examples",
+        "MonitoringProvenance.data_lag_hours.description",
+        "MonitoringProvenance.data_lag_hours.examples",
+        "MonitoringProvenance.requested_date.description",
+        "MonitoringProvenance.requested_date.examples",
+        "MonitoringProvenance.catalog_mode.description",
+        "MonitoringProvenance.catalog_mode.examples",
+        "MonitoringProvenance.snapshot_note.description",
+        "MonitoringProvenance.snapshot_note.examples",
+        "MonitoringProvenance.boundary_scope.description",
+        "MonitoringProvenance.boundary_scope.examples",
+        "MonitoringProvenance.source.description",
+        "MonitoringProvenance.source.examples",
+        "MonitoringProvenance.visit_success.description",
+        "MonitoringProvenance.visit_success.examples",
+        "Monitoring.point_id.description",
+        "Monitoring.point_id.examples",
+        "Monitoring.status.description",
+        "Monitoring.status.examples",
+        "Monitoring.window.description",
+        "Monitoring.window.examples",
+        "Monitoring.totals.description",
+        "Monitoring.totals.examples",
+        "Monitoring.last_seen_at.description",
+        "Monitoring.last_seen_at.examples",
+        "Monitoring.provenance.description",
+        "Monitoring.provenance.examples",
+        "Object.id.description",
+        "Object.id.examples",
+        "Object.level.description",
+        "Object.level.examples",
+        "Object.code.description",
+        "Object.code.examples",
+        "Object.name.description",
+        "Object.name.examples",
+        "Object.type.description",
+        "Object.type.examples",
+        "Object.status.description",
+        "Object.status.examples",
+        "Object.address.description",
+        "Object.address.examples",
+        "Object.latitude.description",
+        "Object.latitude.examples",
+        "Object.longitude.description",
+        "Object.longitude.examples",
+        "Equipment.id.description",
+        "Equipment.id.examples",
+        "Equipment.level.description",
+        "Equipment.level.examples",
+        "Equipment.vendor.description",
+        "Equipment.vendor.examples",
+        "Equipment.model.description",
+        "Equipment.model.examples",
+        "Equipment.serial_number.description",
+        "Equipment.serial_number.examples",
+        "Equipment.power_kw.description",
+        "Equipment.power_kw.examples",
+        "Equipment.state.description",
+        "Equipment.state.examples",
+        "Equipment.object_id.description",
+        "Equipment.object_id.examples",
+        "Counterparty.id.description",
+        "Counterparty.id.examples",
+        "Counterparty.name.description",
+        "Counterparty.name.examples",
+        "Counterparty.inn.description",
+        "Counterparty.inn.examples",
+        "Counterparty.kpp.description",
+        "Counterparty.kpp.examples",
+        "Contract.type_code.description",
+        "Contract.type_code.examples",
+        "Contract.valid_until.description",
+        "Contract.valid_until.examples",
+        "Contract.id.description",
+        "Contract.id.examples",
+        "Contract.number.description",
+        "Contract.number.examples",
+        "Contract.date.description",
+        "Contract.date.examples",
+        "Contract.title.description",
+        "Contract.title.examples",
+        "Contract.is_closed.description",
+        "Contract.is_closed.examples",
+        "Contract.scope_type.description",
+        "Contract.scope_type.examples",
+        "Contract.counterparty_id.description",
+        "Contract.counterparty_id.examples",
+        "Document.id.description",
+        "Document.id.examples",
+        "Document.title.description",
+        "Document.title.examples",
+        "Document.status.description",
+        "Document.status.examples",
+        "Document.registration_number.description",
+        "Document.registration_number.examples",
+        "Document.registration_date.description",
+        "Document.registration_date.examples",
+        "Document.current_revision.description",
+        "Document.current_revision.examples",
+        "Document.object_id.description",
+        "Document.object_id.examples",
+        "Document.counterparty_id.description",
+        "Document.counterparty_id.examples",
+        "Version.id.description",
+        "Version.id.examples",
+        "Version.revision.description",
+        "Version.revision.examples",
+        "Version.role.description",
+        "Version.role.examples",
+        "Version.file_name.description",
+        "Version.file_name.examples",
+        "Version.mime_type.description",
+        "Version.mime_type.examples",
+        "Version.size_bytes.description",
+        "Version.size_bytes.examples",
+        "DocumentDetail.versions.description",
+        "DocumentDetail.versions.examples",
+        "DocumentDetail.versions_truncated.description",
+        "DocumentDetail.versions_truncated.examples",
+        "Page.items.description",
+        "Page.items.examples",
+        "Page.next_cursor.description",
+        "Page.next_cursor.examples",
+        "Page.total.description",
+        "Page.total.examples",
+        "Problem.type.description",
+        "Problem.type.examples",
+        "Problem.title.description",
+        "Problem.title.examples",
+        "Problem.status.description",
+        "Problem.status.examples",
+        "Problem.code.description",
+        "Problem.code.examples",
+        "Problem.request_id.description",
+        "Problem.request_id.examples",
+        "Problem.detail.description",
+        "Problem.detail.examples",
+        "Id.description",
+        "Id.examples",
+        "ObjectId.description",
+        "ObjectId.examples"
+      ],
+      "requiredAndDefaultPreserved": true,
+      "allOtherAstIdentical": true
+    },
+    "operationAstProof": {
+      "normalizedSha256": "1ba4d540f9ae7345c7b87ea67042cc5822d608de6e45a9c2668b1c320ffe0dfc",
+      "whitelistLocations": [
+        "listObjects.summary",
+        "listObjects.description",
+        "listObjects.responses.200.description",
+        "listObjects.responses.200.content.application/json.examples",
+        "getObject.summary",
+        "getObject.description",
+        "getObject.responses.200.description",
+        "getObject.responses.200.content.application/json.examples",
+        "getObjectMonitoring.summary",
+        "getObjectMonitoring.description",
+        "getObjectMonitoring.responses.200.description",
+        "getObjectMonitoring.responses.200.content.application/json.examples",
+        "listEquipment.summary",
+        "listEquipment.description",
+        "listEquipment.responses.200.description",
+        "listEquipment.responses.200.content.application/json.examples",
+        "getEquipment.summary",
+        "getEquipment.description",
+        "getEquipment.responses.200.description",
+        "getEquipment.responses.200.content.application/json.examples",
+        "listCounterparties.summary",
+        "listCounterparties.description",
+        "listCounterparties.responses.200.description",
+        "listCounterparties.responses.200.content.application/json.examples",
+        "getCounterparty.summary",
+        "getCounterparty.description",
+        "getCounterparty.responses.200.description",
+        "getCounterparty.responses.200.content.application/json.examples",
+        "listContracts.summary",
+        "listContracts.description",
+        "listContracts.responses.200.description",
+        "listContracts.responses.200.content.application/json.examples",
+        "getContractTypeMetadata.summary",
+        "getContractTypeMetadata.description",
+        "getContractTypeMetadata.responses.200.description",
+        "getContractTypeMetadata.responses.200.content.application/json.examples",
+        "getContract.summary",
+        "getContract.description",
+        "getContract.responses.200.description",
+        "getContract.responses.200.content.application/json.examples",
+        "listContractObjects.summary",
+        "listContractObjects.description",
+        "listContractObjects.responses.200.description",
+        "listContractObjects.responses.200.content.application/json.examples",
+        "listContractDocuments.summary",
+        "listContractDocuments.description",
+        "listContractDocuments.responses.200.description",
+        "listContractDocuments.responses.200.content.application/json.examples",
+        "listDocuments.summary",
+        "listDocuments.description",
+        "listDocuments.responses.200.description",
+        "listDocuments.responses.200.content.application/json.examples",
+        "getDocument.summary",
+        "getDocument.description",
+        "getDocument.responses.200.description",
+        "getDocument.responses.200.content.application/json.examples",
+        "downloadDocumentVersion.summary",
+        "downloadDocumentVersion.description",
+        "downloadDocumentVersion.responses.200.description"
+      ],
+      "allOtherAstIdentical": true,
+      "operations": [
+        {
+          "operationId": "listObjects",
+          "path": "/objects",
+          "method": "GET",
+          "resource": "objects",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "d0a3ac144f5bdb66e3631781740a9a9791e471801c52079f49df94e2cd78cc6c"
+        },
+        {
+          "operationId": "getObject",
+          "path": "/objects/{objectId}",
+          "method": "GET",
+          "resource": "objects",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "4f5ca263257acffa50de4bd62648aa3f2b6006aa2aab1969bdf489181096f479"
+        },
+        {
+          "operationId": "getObjectMonitoring",
+          "path": "/objects/{objectId}/monitoring",
+          "method": "GET",
+          "resource": "objects",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "82e7b3d6d3b61bba9321bfa5335d0dd25d79984230f29c39270fbdb41e798969"
+        },
+        {
+          "operationId": "listEquipment",
+          "path": "/equipment",
+          "method": "GET",
+          "resource": "equipment",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "ece2723157cb44f82dc8ba7296f95a881beec0b7a2da8fb14fa0a8275b3506be"
+        },
+        {
+          "operationId": "getEquipment",
+          "path": "/equipment/{equipmentId}",
+          "method": "GET",
+          "resource": "equipment",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "32fbf2b8e7ebbc44e6dcba7288784f012c16fdc91b443e9126faddd39655cb37"
+        },
+        {
+          "operationId": "listCounterparties",
+          "path": "/counterparties",
+          "method": "GET",
+          "resource": "counterparties",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "31c3aeed7c38974f51a9216ad80535db27638e57ed13f8af2302cc243825f59d"
+        },
+        {
+          "operationId": "getCounterparty",
+          "path": "/counterparties/{counterpartyId}",
+          "method": "GET",
+          "resource": "counterparties",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "0589694cae4664b1c7928028b3dd47c74882d2daeac60e0e2ac67fb5df4785e4"
+        },
+        {
+          "operationId": "listContracts",
+          "path": "/contracts",
+          "method": "GET",
+          "resource": "contracts",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "9c6c595a96534c234e2883287ec8c2b5fa0147130c93064313d2b4b6b2f1096d"
+        },
+        {
+          "operationId": "getContractTypeMetadata",
+          "path": "/contract-types",
+          "method": "GET",
+          "resource": "contracts",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "f2a8239e3f6cbc5818b923de7e6bba0c217691a28c3ebc7639c556ddedcc4a41"
+        },
+        {
+          "operationId": "getContract",
+          "path": "/contracts/{contractId}",
+          "method": "GET",
+          "resource": "contracts",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "c247f4a104accb8587da5874cbcc797338ed06ba1e2c53fa28a383dc76ad2421"
+        },
+        {
+          "operationId": "listContractObjects",
+          "path": "/contracts/{contractId}/objects",
+          "method": "GET",
+          "resource": "contracts",
+          "principalRule": "PARTNER|SERVICE",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "c9cd5e945a7e4f308b533182310afce8f59c47672555449079e2caf900ae5be0"
+        },
+        {
+          "operationId": "listContractDocuments",
+          "path": "/contracts/{contractId}/documents",
+          "method": "GET",
+          "resource": "documents",
+          "principalRule": "PARTNER",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "46ba13e9baffa3d7fe880c71dd37174466f281ff3d6ff6f547f3bd756ebeac4a"
+        },
+        {
+          "operationId": "listDocuments",
+          "path": "/documents",
+          "method": "GET",
+          "resource": "documents",
+          "principalRule": "PARTNER",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "0f6464c3f07686e29755867d03851ed1cf600dfa634f8b8f3edccf25fc3b4f73"
+        },
+        {
+          "operationId": "getDocument",
+          "path": "/documents/{docId}",
+          "method": "GET",
+          "resource": "documents",
+          "principalRule": "PARTNER",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "763c4508d087b90768f9c9275151a7ab1d13f084cda11bcd9a5b5d834ad3e227"
+        },
+        {
+          "operationId": "downloadDocumentVersion",
+          "path": "/documents/{docId}/versions/{versionId}/content",
+          "method": "GET",
+          "resource": "documents",
+          "principalRule": "PARTNER",
+          "routeAndPolicyAstPreserved": true,
+          "handlerAstPreserved": true,
+          "handlerSha256": "22f49e4a411b4af23c43e0e45e9403df12325b8b96a1fc8ce04ef1052d73c6ca"
+        }
+      ]
+    }
+  },
+  "guideProof": {
+    "kind": "source/document examples check; no framework/application execution",
+    "baseline": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+    "guide_pages": 8,
+    "operations": 15,
+    "local_links": 97,
+    "json_blocks": 34,
+    "examples": [
+      {
+        "operationId": "listObjects",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 137,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getObject",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 141,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listEquipment",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 155,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getEquipment",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 159,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listCounterparties",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 163,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getCounterparty",
+        "guide": "recipes/read-catalogs.md",
+        "source_decorator_line": 167,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listContracts",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 171,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getContract",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 187,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getContractTypeMetadata",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 175,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listContractObjects",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 191,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listContractDocuments",
+        "guide": "recipes/contracts.md",
+        "source_decorator_line": 203,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getObjectMonitoring",
+        "guide": "recipes/monitoring.md",
+        "source_decorator_line": 145,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "listDocuments",
+        "guide": "recipes/documents.md",
+        "source_decorator_line": 216,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "getDocument",
+        "guide": "recipes/documents.md",
+        "source_decorator_line": 220,
+        "json_successes": 1,
+        "problem_examples": 1,
+        "binary": false
+      },
+      {
+        "operationId": "downloadDocumentVersion",
+        "guide": "recipes/documents.md",
+        "source_decorator_line": 233,
+        "json_successes": 0,
+        "problem_examples": 1,
+        "binary": true
+      }
+    ],
+    "limitations": [
+      "limited explicit AST grammar, not Pydantic coercion/schema validation",
+      "not OIDC, HTTP, policy execution, binary download or partner acceptance"
+    ],
+    "files": [
+      {
+        "path": "clearledger/docs/partner/onboarding.md",
+        "sha256": "cffa9a11064df3137229d6841554720c2f850a3c3ac87cb4c7da14d1d8d1daf0"
+      },
+      {
+        "path": "clearledger/docs/partner/auth.md",
+        "sha256": "ce639f446f7739f99cb594b64c8df1e70e9ba396fb7adcd67f82898e54827a29"
+      },
+      {
+        "path": "clearledger/docs/partner/data-dictionary.md",
+        "sha256": "a661af446facba2a2358e06dc23a9ac32cfe93dd46cbda8324c27a4b7ff62633"
+      },
+      {
+        "path": "clearledger/docs/partner/errors.md",
+        "sha256": "8f931e7580c6fde1fa2fb7dc65416c53027a8090d417ab76272922ab75edec85"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/read-catalogs.md",
+        "sha256": "ab24190448f3b77adc2c96c668fefa0428b0f7ad4cd7898a715cf86e52967541"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/contracts.md",
+        "sha256": "ddd7b06550f347a20e7269ae664ec87f64c32c75aa07b4f3ff0fcc6a82564c0b"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/monitoring.md",
+        "sha256": "83d9bd7f6886442b50235ce488c3027ec98f8c2e90bee7a85239e44a700b7486"
+      },
+      {
+        "path": "clearledger/docs/partner/recipes/documents.md",
+        "sha256": "bf132cdc7a396d52b7156e65499f5ede76157fa3b7a7b10396056c3ddd072335"
+      }
+    ]
+  },
+  "guideSourceReferences": [
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "ranges": [
+        [
+          64,
+          185
+        ]
+      ],
+      "baseSourceSha256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          435,
+          603
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          636,
+          755
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/auth.py",
+      "ranges": [
+        [
+          46,
+          57
+        ]
+      ],
+      "baseSourceSha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/routers/docs_portal_router.py",
+      "ranges": [
+        [
+          73,
+          115
+        ]
+      ],
+      "baseSourceSha256": "1c73b96b371de984a1e748de7fe2fe99a16f1098eececa958c1278cc7dd6d86b"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/services/docs_portal.py",
+      "ranges": [
+        [
+          76,
+          179
+        ]
+      ],
+      "baseSourceSha256": "2d073a7036fd59f85d1334a54516de183654016097f2d55e715a58ca29a15532"
+    },
+    {
+      "guide": "clearledger/docs/partner/auth.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          399,
+          513
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          82,
+          89
+        ],
+        [
+          137,
+          237
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          270,
+          358
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    {
+      "guide": "clearledger/docs/partner/onboarding.md",
+      "path": "clearledger/server/app/config.py",
+      "ranges": [
+        [
+          60,
+          78
+        ]
+      ],
+      "baseSourceSha256": "90c5da106f20fe90e31c899a88018ef741e6b3207a555fedbd58bafaa61780e8"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          11,
+          255
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          18,
+          23
+        ],
+        [
+          103,
+          235
+        ],
+        [
+          238,
+          279
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          220,
+          237
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/files.py",
+      "ranges": [
+        [
+          38,
+          84
+        ]
+      ],
+      "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/product_api/monitoring.py",
+      "ranges": [
+        [
+          19,
+          40
+        ]
+      ],
+      "baseSourceSha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb"
+    },
+    {
+      "guide": "clearledger/docs/partner/data-dictionary.md",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "ranges": [
+        [
+          21,
+          35
+        ],
+        [
+          92,
+          101
+        ]
+      ],
+      "baseSourceSha256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          51,
+          73
+        ],
+        [
+          279,
+          354
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/budget.py",
+      "ranges": [
+        [
+          38,
+          47
+        ],
+        [
+          94,
+          116
+        ]
+      ],
+      "baseSourceSha256": "ad454225d15b1696432c4409886437bfee7d03a66543918006b84a5f0a28eee4"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "ranges": [
+        [
+          33,
+          100
+        ],
+        [
+          131,
+          185
+        ]
+      ],
+      "baseSourceSha256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/routers/docs_portal_router.py",
+      "ranges": [
+        [
+          15,
+          44
+        ]
+      ],
+      "baseSourceSha256": "1c73b96b371de984a1e748de7fe2fe99a16f1098eececa958c1278cc7dd6d86b"
+    },
+    {
+      "guide": "clearledger/docs/partner/errors.md",
+      "path": "clearledger/server/app/product_api/files.py",
+      "ranges": [
+        [
+          71,
+          84
+        ]
+      ],
+      "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          137,
+          169
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          172,
+          199
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          18,
+          21
+        ],
+        [
+          64,
+          101
+        ],
+        [
+          138,
+          163
+        ],
+        [
+          238,
+          264
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/read-catalogs.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          171,
+          214
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          57,
+          120
+        ],
+        [
+          202,
+          212
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          174,
+          236
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          238,
+          278
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/contracts.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          203,
+          237
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          214,
+          237
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "ranges": [
+        [
+          87,
+          101
+        ],
+        [
+          238,
+          278
+        ]
+      ],
+      "baseSourceSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/files.py",
+      "ranges": [
+        [
+          38,
+          84
+        ]
+      ],
+      "baseSourceSha256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/documents.md",
+      "path": "clearledger/server/app/product_api/access.py",
+      "ranges": [
+        [
+          98,
+          151
+        ]
+      ],
+      "baseSourceSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/product_api/app.py",
+      "ranges": [
+        [
+          145,
+          153
+        ]
+      ],
+      "baseSourceSha256": "863060da6b31c21fc2c34a7340c9a9f6223c955c106dae2a6eb776e385eaa886"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/product_api/monitoring.py",
+      "ranges": [
+        [
+          16,
+          40
+        ]
+      ],
+      "baseSourceSha256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "ranges": [
+        [
+          123,
+          169
+        ]
+      ],
+      "baseSourceSha256": "c0dce6e13762d6d51d3f95bffd6d80850463d90f7727b692a0ad51ba55023c98"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "ranges": [
+        [
+          21,
+          35
+        ],
+        [
+          51,
+          101
+        ]
+      ],
+      "baseSourceSha256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625"
+    },
+    {
+      "guide": "clearledger/docs/partner/recipes/monitoring.md",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "ranges": [
+        [
+          217,
+          223
+        ]
+      ],
+      "baseSourceSha256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    }
+  ],
+  "rootReservedAndToolingByteProof": [
+    {
+      "path": "clearledger/docs/PARTNER_QUICKSTART.md",
+      "sha256": "e41c5a3f74b2402ecbb8a8170aa93a57f00837ca836ce174e77d53ff544117fa",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/docs/PARTNER_SDK_TYPES.md",
+      "sha256": "e37a7c94b26983d54c50871125f0a2dab38db50df61f59fa54eeaa293fcdeea9",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/guards.ts",
+      "sha256": "af0465b2f95bde6141988347f7471b0ebdcb80191c7f42c065e9f575736503f8",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/guards.test.ts",
+      "sha256": "76936a4339baa66395274178273e5d9db7749909882eee183ae5ef40d66ae1b6",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "sha256": "ae1bf7f6f2d0578e3336415a3cc51f7525ae5fce817f11f629a6a0c0fe71cf7f",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/src/generated/partner-api.d.ts",
+      "sha256": "570c4f648a31626a83bfcb79f74c4995e761b5ba12f17ae161a8ec158c959abb",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/scripts/export-partner-openapi.py",
+      "sha256": "b5d52daca7220a523b4c5edc85852de39b0b921e5c033a86029b2f92040abd51",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-api-types/generate.mjs",
+      "sha256": "549d7f05625af2906b4cd44b44f571b5c935ea195490d52d530da5e08fe53817",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-api-types/package.json",
+      "sha256": "900597c5e189affc56dc83b662a84e77b149de8177302ebe07b05954bf61f380",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/tools/partner-api-types/package-lock.json",
+      "sha256": "c7f9ba06a2e02383cc7409b071fea099a03df4ad796287de249d9250a0d292ac",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/package.json",
+      "sha256": "94132e0d1cb6c4d9c0773ac0f0654d33401b35c48e7fb97180a23354beb2e022",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/package-lock.json",
+      "sha256": "d56ca0432084fe4eed8c801db640c77675eb921b7f5e64d39e099607e639c30e",
+      "baseByteIdentical": true
+    },
+    {
+      "path": "clearledger/server/requirements.txt",
+      "sha256": "f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0",
+      "baseByteIdentical": true
+    }
+  ],
+  "testsWritten": [
+    {
+      "path": "clearledger/server/tests/test_partner_dx_metadata_20261031.py",
+      "definitions": [
+        "test_complete_normalized_wire_route_policy_and_handler_ast",
+        "test_normalizer_rejects_wire_drift",
+        "test_normalizer_never_hides_response_kwargs_or_runtime_changes",
+        "test_protected_helpers_and_guards_are_byte_identical_to_immutable_base",
+        "test_actual_registered_principals_scopes_methods_and_tenant_policy"
+      ],
+      "execution": "WRITTEN_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_dx_examples_20261031.py",
+      "definitions": [
+        "test_complete_success_examples_validate_against_actual_dto_and_openapi",
+        "test_all_field_and_alias_examples_match_actual_schema",
+        "test_required_nullable_and_wire_type_failures_are_detected",
+        "test_opaque_object_id_other_id_and_raw_validity_remain_distinct",
+        "test_monitoring_example_time_units_and_unknowns_are_honest",
+        "test_examples_form_one_fictional_read_chain_and_binary_stays_bytes",
+        "test_existing_problem_content_and_headers_remain_present"
+      ],
+      "execution": "WRITTEN_NOTRUN"
+    }
+  ],
+  "originalPlan": {
+    "commit": "77b4320bf42691d489ce87919ca4964a511b54fa",
+    "sha256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "originalRow": "| M00 | P0: актуальный совместимый source/runtime baseline | Выпуск + Core/Support | Нет | Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M01",
+        "originalRow": "| M01 | P0: завершить реестр поверхностей и владельцев | API + владельцы доменов | M00 | Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M02",
+        "originalRow": "| M02 | P0: characterization и измеряемые сценарии | Домены + проверка | M00, уточнения M01 | Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M03",
+        "originalRow": "| M03 | P0: общий проверенный контекст/route policy | Identity + домены | M00, M02 | Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M04",
+        "originalRow": "| M04 | P0: границы слоёв и владение транзакцией | Core/Support architecture | M02, M03 skeleton | Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M05",
+        "originalRow": "| M05 | P0: объекты, scopes, population и temporal identity | Core objects/equipment | M03, M04 | Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M06",
+        "originalRow": "| M06 | P0: контрагенты, договоры и идентичность | Core references/contracts | M03, M04 | Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M07",
+        "originalRow": "| M07 | P0: документы и файлы | Core documents/files | M03, M04 | Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M08",
+        "originalRow": "| M08 | P0: энергия, начисления и мониторинг | Core energy/ops | M05, M06 | Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M09",
+        "originalRow": "| M09 | P0: протокольный профиль и product OpenAPI | API contracts + домены | M01, M03, соответствующие M05–M08 | Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M10",
+        "originalRow": "| M10 | P0: OAuth/OIDC и developer access | Identity + integrations | M03, M09 profile | Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M11",
+        "originalRow": "| M11 | P0: защищённый Swagger и quickstart | API docs + Identity | M09, M10, sandbox | UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M12",
+        "originalRow": "| M12 | P1: клиентские transports и typed operations | Core/Support frontend | M02, M09 | Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never` |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M13",
+        "originalRow": "| M13 | P1: Support factories и service adapters | Support + Core integration | M03, M04, M06 | Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M14",
+        "originalRow": "| M14 | P1: доставка событий и change feed | Domain owners + integrations | M03, M04, применимые M13 | Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M15",
+        "originalRow": "| M15 | P1: ограничение нагрузки и оптимизация | Backend/DB + домены | M02 и зрелые queries | Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M16",
+        "originalRow": "| M16 | P1/P2: migration/schema ownership | Persistence + выпуск | M00, M02 | Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M17",
+        "originalRow": "| M17 | P1: перевести собственные приложения | Владельцы продуктов | M05–M13 по домену | Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M18",
+        "originalRow": "| M18 | P0 к внешнему запуску: пилоты и независимая приёмка | Партнёрский пилот + проверка | M09–M17 применимо | Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников |",
+        "completion": "unproven"
+      },
+      {
+        "id": "M19",
+        "originalRow": "| M19 | P2: deprecation и удаление дублей | Домены + выпуск | M17, M18, usage evidence | Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом |",
+        "completion": "unproven"
+      }
+    ],
+    "gates": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "closesSections": [],
+    "closesGates": []
+  },
+  "scopeHistory": {
+    "initialC1HeldBeforeDirectPermission": true,
+    "localCommitsPreserved": true,
+    "D2SnapshotPR": "https://github.com/Electro-Interfaces/ClearLedger/pull/81",
+    "C1HoldNow": false
+  },
+  "workers": {
+    "A": {
+      "task": "task_f59cc901c858",
+      "dispatch": "ctx_f442bacba6ff",
+      "outcome": "succeeded",
+      "released": true
+    },
+    "B": {
+      "task": "task_bd19fad6811a",
+      "dispatch": "ctx_042db951a319",
+      "outcome": "succeeded",
+      "released": true
+    }
+  },
+  "limitations": [
+    "Source normalization is not actual framework/schema/HTTP acceptance",
+    "No app/helper/framework imports, pytest/collection, Node/exporter/codegen, browser, HTTP/OIDC/SQL/Docker/SSH, dependency changes, credentials/.env, live flags, CI/workflow/billing, merge/release/deploy",
+    "Generated types are unchanged; freshness and export/regeneration require separate ROOT acceptance",
+    "Full M00-M19 and 11 global gates remain unproven; reduced read walkthrough does not replace full pilots"
+  ]
+}
