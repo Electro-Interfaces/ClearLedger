@@ -64,6 +64,7 @@ from app.services.closing_date import get_closing_date, set_closing_date
 from app.services.store_document_contract import PROJECTION_DOCUMENT_KINDS
 from app.services.store_contract_commands import (
     create_store_partner_contract, prepare_store_partner_contract, save_store_contract,
+    prepare_store_contract, reject_store_pending_writes, require_store_contract_write,
 )
 from app.services.store_documents import (
     cheque_lines_from_catalog,
@@ -9501,7 +9502,9 @@ async def store_partner_create(
     Юрлицо или ИП определяется длиной ИНН (12 знаков — физлицо/ИП): так же
     решает приёмник, и расхождения между центром и бухгалтерией не будет.
     """
-    access = await _receipt_access(user, db)
+    reject_store_pending_writes(db)
+    with db.no_autoflush:
+        access = await _receipt_access(user, db)
     if not access.network:
         raise HTTPException(403, "Контрагентов сети ведёт товаровед сети")
     name = str(payload.get("name") or "").strip()
@@ -9517,12 +9520,13 @@ async def store_partner_create(
     # плодим двойника: справочник сети один на все станции, и дубли по ИНН
     # разбираются потом руками.
     if inn:
-        было = (await db.execute(text(r"""
-            SELECT id, name FROM edge.partner
-             WHERE company_id = :cid
-               AND regexp_replace(coalesce(inn,''), '\D', '', 'g') = :inn
-             LIMIT 1
-        """), {"cid": cid, "inn": inn})).mappings().first()
+        with db.no_autoflush:
+            было = (await db.execute(text(r"""
+                SELECT id, name FROM edge.partner
+                 WHERE company_id = :cid
+                   AND regexp_replace(coalesce(inn,''), '\D', '', 'g') = :inn
+                 LIMIT 1
+            """), {"cid": cid, "inn": inn})).mappings().first()
         if было:
             return {"id": было["id"], "name": было["name"], "created": False}
 
@@ -9536,8 +9540,12 @@ async def store_partner_create(
         type="ИП" if len(inn) == 12 else "ЮЛ", aliases=[], kind="external",
         raw={"source": "center_manual"},
     )
+    if contract_plan is not None:
+        require_store_contract_write(db, cid, contract_plan.prepared)
     db.add(канон)
     await db.flush()
+    if contract_plan is not None:
+        require_store_contract_write(db, cid, contract_plan.prepared)
     partner_id = (await db.execute(text("""
         INSERT INTO edge.partner
             (company_id, external_uuid, name, name_full, inn, kpp, role, source, comment)
@@ -9551,6 +9559,8 @@ async def store_partner_create(
     # Станции, с которыми он работает: без этой связи справочник ему не уедет
     # (обычная отправка шлёт только «своих»).
     for st in payload.get("stations") or []:
+        if contract_plan is not None:
+            require_store_contract_write(db, cid, contract_plan.prepared)
         await db.execute(text("""
             INSERT INTO edge.partner_station (partner_id, station_id)
             VALUES (:p, :s) ON CONFLICT DO NOTHING
@@ -9565,6 +9575,8 @@ async def store_partner_create(
     if contract_plan is not None:
         contract = await create_store_partner_contract(db, cid, канон.id, contract_plan)
         contract_id = str(contract.id)
+    if contract_plan is not None:
+        require_store_contract_write(db, cid, contract_plan.prepared)
     await db.commit()
     return {"id": partner_id, "supplier_id": str(канон.id), "name": name,
             "created": True, "contract_id": contract_id}
@@ -9616,10 +9628,14 @@ async def store_contract_save(
     хотя бы одно из «наименование» или «номер», плюс дата и вид договора.
     Валюту приёмник ставит сам рублёвую, если её не передали.
     """
-    access = await _receipt_access(user, db)
+    reject_store_pending_writes(db)
+    with db.no_autoflush:
+        access = await _receipt_access(user, db)
     if not access.network:
         raise HTTPException(403, "Договоры ведёт товаровед сети")
-    contract = await save_store_contract(db, access.company_id, payload)
+    prepared = await prepare_store_contract(db, access.company_id, payload)
+    contract = await save_store_contract(db, access.company_id, payload, prepared=prepared)
+    require_store_contract_write(db, access.company_id, prepared)
     await db.commit()
     return {"id": str(contract.id), "title": contract.title, "number": contract.number}
 

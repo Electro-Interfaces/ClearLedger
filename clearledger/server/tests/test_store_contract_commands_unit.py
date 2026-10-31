@@ -1,5 +1,6 @@
 """Authored NOT RUN. ROOT executor only; no ordinary pytest/conftest invocation."""
 import os
+from contextlib import nullcontext
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock
 import uuid
@@ -38,11 +39,16 @@ def payload(cp, org, **changes):
             "number": " Store-1 ", "date": "2026-01-02T12:34:56", **changes}
 
 
+async def save(db, cid, data):
+    prepared = await commands.prepare_store_contract(db, cid, data)
+    return await commands.save_store_contract(db, cid, data, prepared=prepared)
+
+
 @pytest.fixture
 def setup(monkeypatch):
     cid, cp, org = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     events, captured = [], []
-    db = NS(execute=AsyncMock(return_value=Result()), get=AsyncMock(),
+    db = NS(new=set(), dirty=set(), deleted=set(), no_autoflush=nullcontext(), execute=AsyncMock(return_value=Result()), get=AsyncMock(),
             commit=AsyncMock(), rollback=AsyncMock(), flush=AsyncMock(), add=lambda row: events.append("add"))
 
     async def lock(db, company, entity):
@@ -62,6 +68,18 @@ def setup(monkeypatch):
         captured.append(values)
         return NS(id=uuid.uuid4(), **vars(values))
 
+    # These retained scalar/HTTP regressions isolate the existing pipeline.
+    # Fake preparation is NOT evidence for B; real caller/helper schedules live
+    # in test_store_contract_scoped_locks_pg.py.
+    prepared = commands.PreparedStoreContractWrite(cid, None)
+
+    async def prepare(db, company):
+        await commands._lock_store_references(db, company, prepared=prepared)
+        return prepared
+
+    monkeypatch.setattr(commands, "_prepare_store_contract_write", prepare)
+    monkeypatch.setattr(commands, "require_store_contract_write", lambda *args: None)
+    monkeypatch.setattr(router, "require_store_contract_write", lambda *args: None)
     monkeypatch.setattr(commands, "lock_manual_creation", lock)
     monkeypatch.setattr(commands, "_validate_contract_parties", parties)
     monkeypatch.setattr(commands, "find_contract_card_duplicates", duplicates)
@@ -71,7 +89,7 @@ def setup(monkeypatch):
 
 async def test_create_barriers_validation_matcher_before_mutation_and_defaults(setup):
     w = setup
-    row = await commands.save_store_contract(w.db, w.cid, payload(w.cp, w.org))
+    row = await save(w.db, w.cid, payload(w.cp, w.org))
     assert w.events == ["counterparty", "contract", "parties", "duplicates", "create"]
     values, = w.captured
     assert (row.number, row.title, row.date) == ("Store-1", "Договор Store-1", "2026-01-02")
@@ -87,7 +105,7 @@ async def test_create_barriers_validation_matcher_before_mutation_and_defaults(s
 @pytest.mark.parametrize("value", [None, "", 0, False])
 async def test_legacy_null_empty_falsy_values(setup, value):
     w = setup
-    row = await commands.save_store_contract(w.db, w.cid, payload(w.cp, w.org,
+    row = await save(w.db, w.cid, payload(w.cp, w.org,
         title=" Паспорт ", number=value, date=value, kind=value, currency=value,
         type=value, comment=value))
     assert (row.number, row.title, row.date) == ("Паспорт", "Паспорт", "")
@@ -103,7 +121,7 @@ async def test_legacy_null_empty_falsy_values(setup, value):
 async def test_required_400_before_barriers_and_writes(setup, changes, detail):
     w = setup
     with pytest.raises(HTTPException) as error:
-        await commands.save_store_contract(w.db, w.cid, payload(w.cp, w.org, **changes))
+        await save(w.db, w.cid, payload(w.cp, w.org, **changes))
     assert (error.value.status_code, error.value.detail) == (400, detail)
     assert not w.events and not w.captured
 
@@ -120,7 +138,7 @@ async def test_update_uses_current_parties_type_excludes_self_preserves_raw_over
         return [current]
 
     monkeypatch.setattr(commands, "find_contract_card_duplicates", matches)
-    row = await commands.save_store_contract(w.db, w.cid, payload(uuid.uuid4(), uuid.uuid4(),
+    row = await save(w.db, w.cid, payload(uuid.uuid4(), uuid.uuid4(),
         id=str(current.id), type="Игнорируемый тип", comment="  примечание  "))
     assert row is current and not w.captured
     assert seen == [(w.cid, w.cp, w.org, ("Store-1", "2026-01-02", "Сохранённый тип"))]
@@ -132,18 +150,18 @@ async def test_update_uses_current_parties_type_excludes_self_preserves_raw_over
 async def test_missing_update_404_and_duplicate_409_have_no_mutation(setup, monkeypatch):
     w = setup
     with pytest.raises(HTTPException) as missing:
-        await commands.save_store_contract(w.db, w.cid, payload(w.cp, w.org, id=str(uuid.uuid4())))
+        await save(w.db, w.cid, payload(w.cp, w.org, id=str(uuid.uuid4())))
     assert missing.value.status_code == 404 and not w.captured
     monkeypatch.setattr(commands, "find_contract_card_duplicates", AsyncMock(return_value=[NS(id=uuid.uuid4())]))
     with pytest.raises(HTTPException) as duplicate:
-        await commands.save_store_contract(w.db, w.cid, payload(w.cp, w.org))
+        await save(w.db, w.cid, payload(w.cp, w.org))
     assert duplicate.value.status_code == 409 and not w.captured
 
 
 async def test_mixed_plan_locks_and_org_validation_before_first_mutation(setup):
     w = setup
 
-    async def org(model, uid):
+    async def org(model, uid, **kwargs):
         w.events.append("org")
         return NS(company_id=w.cid)
 
@@ -175,6 +193,7 @@ async def test_router_contract_keeps_acl_commit_and_response(setup, monkeypatch,
     monkeypatch.setattr(router, "_receipt_access", AsyncMock(return_value=NS(network=network, company_id=w.cid)))
     save = AsyncMock(return_value=NS(id=w.cp, title="Паспорт", number="1"))
     monkeypatch.setattr(router, "save_store_contract", save)
+    monkeypatch.setattr(router, "prepare_store_contract", AsyncMock(return_value=object()))
     if not network:
         with pytest.raises(HTTPException) as error:
             await router.store_contract_save({}, NS(), w.db)
