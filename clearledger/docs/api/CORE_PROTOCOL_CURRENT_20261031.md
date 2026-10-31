@@ -12,7 +12,9 @@
 | Historical integration comparators |31operations, не дополнительные special protocols |
 | Combined source-file facts |75 =44+31; не75 специальных API |
 | Current cdd whole-file comparison |55same /20drift |
-| Current endpoint function AST comparison |71same /4drift; не semantic/runtime equivalence |
+| Function AST,75fact rows |71same /4drift; console function повторяется для5methods; не71same unique functions |
+| Уникальные endpoint functions |71всего:67ASTsame /4drift; не semantic/runtime equivalence |
+| Уникальные reviewed source files |62всего:45same /17drift; sourceHashes включает helpers/frontend/deps, не62operations |
 | independently recomputed56931683 comparison |58same /17drift, исторический срез |
 | Historical actual e1cb1a53 |1703operations /12curated /1WS, immutable input |
 | Historical actual56931683 |1706operations /15curated /1WS, COMPOSED receipt |
@@ -21,6 +23,8 @@
 | Current special discovery |106function candidates:40historical endpoint candidates +66newly catalogued/internal;29multipart functions;0literal SSE candidates |
 
 44/40 и75 keys проверены против полного immutable runtime input e1cb SHA `f056e74b77564f8b1a9f650bf2dc87dbc24ad1bd558d6df967ef5fab86fa2af8`. Historical MD/JSON прочитаны полностью; их bytes/hashes не переписаны. Current source matching использует decorators, конкретный APIRouter prefix, source `main.include_router` и для product child `operation→PolicyRouter.operation(methods=GET)→include_router→mount`. Flags/readiness/source registration не считаются фактической доступностью. Все44 имеют current literal chain, но текущие order/generated IDs/actual startup unknown.
+
+Разные знаменатели не суммируются:55/20 —75operation-source file facts;71/4 — AST сравнения тех же75строк;67/4 —71уникальнаяendpoint function;45/17 —62уникальных reviewed source files. Historical58/17 сохранён без переименования.
 
 Stable identity — logical authority + protocol + method + path. Для44 authority — Core `app.main.app`, кроме S09 с отдельным product child `/api/v1`; физический gateway/authority unknown. Старые ordinal/order/generated ID сохранены в JSON только как provenance; совпавший suffix ID не является контрактом и не заменяет регистрацию.
 
@@ -227,4 +231,4 @@ Production scope будущего task — **только `app/services/export_f
 
 ## Результат и оставшаяся работа
 
-Production0/runtime0, никаких новых imports/tests/SQL/Node/application HTTP/secret reads/deploy. Были только source/Git/AST/hash/compile и чтение official standards; ошибки draft enrichment syntax исправлены до отчётов, application не исполнялось. Эти2reports ждут независимого ROOT source review перед named commit/push. Нужны отдельные protocol owner decisions и targeted actual characterization; M01/M09, M00–M19+11, current CI и release не закрыты.
+Production0/runtime0, никаких новых imports/tests/SQL/Node/application HTTP/secret reads/deploy. Были только source/Git/AST/hash/compile и чтение official standards; ошибки draft enrichment syntax исправлены до отчётов, application не исполнялось. ROOT source review принят `msg_867d3fbaa9ca`; report-only уточнение row-vs-unique counters разрешено `msg_a776de7fbe89`, без изменения источников/proofs. Нужны отдельные protocol owner decisions и targeted actual characterization; M01/M09, M00–M19+11, current CI и release не закрыты.
