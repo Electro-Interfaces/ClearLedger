@@ -5,23 +5,28 @@ import { createInterface } from "node:readline/promises";
 import { authorizeSandbox } from "./guards.ts";
 import { sandboxTransport } from "./transport.ts";
 import type { Observation } from "./transport.ts";
-import { ReadApplication, contract, rentalScenario, operationsScenario } from "./scenarios.ts";
-import type { Vectors, Result } from "./scenarios.ts";
+import { ReadApplication, contract, rentalScenario, operationsScenario, documentRelationsScenario, requireDocumentRelationAuthority } from "./scenarios.ts";
+import type { Vectors, Result, RentalRelations, DocumentRelations, RelationAuthority } from "./scenarios.ts";
 import { discover, machine, delegatedRequest, delegatedExchange, freshForControl, oidc } from "./oauth.ts";
 import type { OAuthClient } from "./oauth.ts";
 
 type MachinePilot = OAuthClient & { vectors: Vectors };
 type Manifest = {
   origin: string; caFile: string; runId: string; sourceRevision: string;
-  rental: MachinePilot;
+  resources: { relations: { rental: RentalRelations; documents: DocumentRelations } };
+  rental: MachinePilot & { relations: RentalRelations };
   operations: MachinePilot & { afterNarrowObjects: string[] };
-  documents: OAuthClient & { vectors: Vectors; allowedContent: { docId: string; versionId: string; sha256: string };
+  documents: OAuthClient & RelationAuthority & { relations: DocumentRelations; vectors: Vectors; allowedContent: { docId: string; versionId: string; sha256: string };
     deniedContent: { docId: string; versionId: string }[] };
 };
 
 /** Adapt only the root-supplied public fixture manifest, never server models. */
 function assignedManifest(value: unknown): Manifest {
   const manifest = value as Manifest;
+  contract(manifest.resources?.relations?.rental && manifest.resources?.relations?.documents,
+    "EXPLICIT_EFFECTIVE_RELATION_VECTORS_REQUIRED");
+  manifest.rental.relations = manifest.resources.relations.rental;
+  manifest.documents.relations = manifest.resources.relations.documents;
   for (const pilot of [manifest.rental, manifest.operations, manifest.documents]) {
     const policy = (pilot as OAuthClient & { resourceScopes?: Record<string, { mode?: string }> }).resourceScopes;
     for (const [kind, vector] of Object.entries(pilot.vectors)) {
@@ -89,7 +94,7 @@ async function run() {
   const rentalConfig = await discover(manifest.origin, manifest.rental, transport);
   const rental = await machine(rentalConfig, manifest.rental);
   const rentalApp = new ReadApplication(manifest.origin, transport, rental.tokens.access_token);
-  await check("RENTAL_READS_PAGING_TYPED_AND_TENANT_BOUNDARIES", () => rentalScenario(rentalApp, manifest.rental.vectors));
+  await check("RENTAL_READS_PAGING_TYPED_AND_TENANT_BOUNDARIES", () => rentalScenario(rentalApp, manifest.rental.vectors, manifest.rental.relations));
   if (manifest.rental.vectors.equipment) await check("APPROVED_ALL_PROFILE_OBEYS_EFFECTIVE_LOCATION_CEILING", async () => {
     await rentalApp.resourceBoundaries("equipment", manifest.rental.vectors.equipment!);
   });
@@ -186,6 +191,22 @@ async function run() {
       await docsApp.denied(`/api/v1/documents/${encodeURIComponent(value.docId)}/versions/${encodeURIComponent(value.versionId)}/content`, 404);
     }
   });
+  let documentRelationsBlocked = false;
+  try { requireDocumentRelationAuthority(manifest.documents); }
+  catch (error) {
+    if (!(error instanceof Error) || error.message !== "DOCUMENT_RELATIONS_BLOCKED_BY_PROFILE") throw error;
+    documentRelationsBlocked = true;
+  }
+  if (documentRelationsBlocked) {
+    await check("CURRENT_DOCUMENT_PROFILE_DENIES_CONTRACT_RELATIONS", async () => {
+      for (const vector of manifest.documents.relations.contracts) {
+        await docsApp.denied(`/api/v1/contracts/${encodeURIComponent(vector.contractId)}/documents?pageSize=1`, 403);
+      }
+    });
+    results.push({ case: "DELEGATED_CONTRACT_DOCUMENT_RELATIONS_PAGING_AND_BOUNDARIES", passed: false,
+      details: { status: "NOTRUN", reason: "BLOCKED_BY_PROFILE" } });
+  } else await check("DELEGATED_CONTRACT_DOCUMENT_RELATIONS_PAGING_AND_BOUNDARIES", () =>
+    documentRelationsScenario(docsApp, manifest.documents.relations));
   await check("ID_TOKEN_IS_NOT_API_CREDENTIAL", async () => {
     const idApp = new ReadApplication(manifest.origin, transport, docs.tokens.id_token!);
     await idApp.denied("/api/v1/documents", 401);
@@ -199,6 +220,10 @@ async function run() {
 
   contract(observations.every(row => row.method === "GET" || (row.method === "POST" && ["/api/oauth2/token", "/api/oauth2/revoke"].includes(row.path))),
     "NO_BUSINESS_WRITE_REQUESTS_ALLOWED");
+  if (documentRelationsBlocked) {
+    currentCase = "DELEGATED_CONTRACT_DOCUMENT_RELATIONS_PAGING_AND_BOUNDARIES";
+    throw new Error("DOCUMENT_RELATIONS_BLOCKED_BY_PROFILE"); // after all original checks, before success report.
+  }
   return { runId: manifest.runId, sourceRevision: manifest.sourceRevision, phase: docsOnly ? "documents-only" : "all", results, observations,
     businessWriteRequests: 0, clientSource: "external-public-contract-only" };
 }

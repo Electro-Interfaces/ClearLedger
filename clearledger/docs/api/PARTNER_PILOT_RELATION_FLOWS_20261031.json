@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "status": "SOURCE_PREPARED_RUNTIME_NOTRUN",
+  "repository": "https://github.com/Electro-Interfaces/ClearLedger.git",
+  "baseRevision": "2a8128dfc59aaf9195d5113e7ab10d67061caf19",
+  "currentHeadAtPreparation": "2a8128dfc59aaf9195d5113e7ab10d67061caf19",
+  "workspace": "/home/mag/orca/workspaces/ledger-app/partner-pilot-relation-fixture-proposal-20261031",
+  "implementedSourceChanges": 4,
+  "actualFuturePathsWritten": true,
+  "runtimeTests": "NOTRUN",
+  "pureMocks": "NOTRUN",
+  "program": {
+    "milestones": "M00-M19 (20)",
+    "gates": 11,
+    "status": "UNCHANGED; no readiness, completion or gate credit"
+  },
+  "provenance": [
+    {
+      "path": "clearledger/tools/partner-pilots/sandbox/fixture.py",
+      "gitBlob": "e004623e131ecd2bc809fa5fb346ecbde432b658",
+      "baseSha256": "ddafc7f5ad9c82a283d22d3b68eb52dc29e27853a5f3caaa43aee2de36c35685",
+      "currentSha256": "1b945862711ca7f6b0bdef8abe837bf82c1f92fe43c6616ea5d14f178b4a6e5f",
+      "baseLines": "1-119",
+      "currentLines": "1-164"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/sandbox/guard.py",
+      "lines": "7-30",
+      "gitBlob": "e6f6471bd3cc84b312969d3336ed2f1454269ef8",
+      "baseSha256": "a0a9c518a025516f87cdc666b675562560e0371a6ecdae2748325db3587c53ce",
+      "currentSha256": "a0a9c518a025516f87cdc666b675562560e0371a6ecdae2748325db3587c53ce"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/sandbox/server.py",
+      "lines": "26-39,123-164,219-270",
+      "gitBlob": "326836688903cfc16763ca0846713f9139111fe3",
+      "baseSha256": "f56069b0c718951ef7f7b1a0a0a04005ce37e12a8ab7decb4e7f75458157c628",
+      "currentSha256": "f56069b0c718951ef7f7b1a0a0a04005ce37e12a8ab7decb4e7f75458157c628"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/guards.ts",
+      "lines": "1-60",
+      "gitBlob": "c0985d30381d18e3d4c895189897c1b6962abc99",
+      "baseSha256": "e6ad8dfbfcd894bf59ef66c736406f1cf6c01b92bc3250015bd5aa55c16bdba0",
+      "currentSha256": "e6ad8dfbfcd894bf59ef66c736406f1cf6c01b92bc3250015bd5aa55c16bdba0"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/run.ts",
+      "gitBlob": "40c9318171ab1b116df26fb72438d8e6da5d6615",
+      "baseSha256": "2de042e90a73e6d063c7e20c4ba8d58cdc4bac4a87845a88f811a4ffa8324730",
+      "currentSha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9",
+      "baseLines": "1-221",
+      "currentLines": "1-246"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "gitBlob": "11c4794a042880cdd58075c30ad2de7aec8044f8",
+      "baseSha256": "3ee82e6b3caf8062a3897438d397b24d124512bed4f6f7a6f4c7eaff7e16b437",
+      "currentSha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab",
+      "baseLines": "1-177",
+      "currentLines": "1-330"
+    },
+    {
+      "path": "clearledger/server/app/product_api/app.py",
+      "lines": "83-90,563-764",
+      "gitBlob": "ffbf72829ea5c1793ff55c448cd9dd5b8d3395a9",
+      "baseSha256": "c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774",
+      "currentSha256": "c82da8d35b3ca301a93445a667a44bb861d2f2d2ace9fc3c08aac87a3ccab774"
+    },
+    {
+      "path": "clearledger/server/app/product_api/queries.py",
+      "lines": "27-42,49-101,103-236,265-273",
+      "gitBlob": "35dacad8f31db2841740e77fba7b28af8a075135",
+      "baseSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713",
+      "currentSha256": "cf8757ce4af40410cd5a3fb0c0737d5fffcd3ec2e5e2f866a6234eb328a6a713"
+    },
+    {
+      "path": "clearledger/server/app/product_api/access.py",
+      "lines": "98-106,118-147",
+      "gitBlob": "36b0a4ecac44d8c94139312f2e97ee652703d33e",
+      "baseSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2",
+      "currentSha256": "f6014e3cda1561da640ebd66b8a46ad63830660baa2581a4b605d880dc890ed2"
+    },
+    {
+      "path": "clearledger/server/app/product_api/dto.py",
+      "lines": "130-315",
+      "gitBlob": "e2d7faa2861bb637c5daf7238d58084a03f2803d",
+      "baseSha256": "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c",
+      "currentSha256": "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c"
+    },
+    {
+      "path": "clearledger/server/app/services/doc_subject_links.py",
+      "lines": "7-20",
+      "gitBlob": "00ef545df7d0cfb880c025edd3e1d0ed9f86cc71",
+      "baseSha256": "5f91d599f97e3abedd354617eb60ea518ac0ae591f0a6087272821fb7cbced83",
+      "currentSha256": "5f91d599f97e3abedd354617eb60ea518ac0ae591f0a6087272821fb7cbced83"
+    },
+    {
+      "path": "clearledger/server/app/services/doc_access.py",
+      "lines": "389-460",
+      "gitBlob": "122ef365a54aa6466dbbbed1da5cdbc62baf43a2",
+      "baseSha256": "b2f8c364edf7fd84474faf7b49b3e6a4a64c4148123cb9610c2e5a36dfe3fcbd",
+      "currentSha256": "b2f8c364edf7fd84474faf7b49b3e6a4a64c4148123cb9610c2e5a36dfe3fcbd"
+    },
+    {
+      "path": "clearledger/server/app/models.py",
+      "lines": "1346-1453,1489-1515,12849-12854,12923-12925,13054-13089",
+      "gitBlob": "5a0f9ac77043572271965d66bb3b81aa377399ca",
+      "baseSha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+      "currentSha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682"
+    },
+    {
+      "path": "clearledger/server/app/database.py",
+      "lines": "3554-3582",
+      "gitBlob": "dcba9c03b018697e7164e95b1705977ff9ed4dea",
+      "baseSha256": "30c01b44669729b0bc19210b44205092f61040aed9c1d5334c3a6f5feac106ec",
+      "currentSha256": "30c01b44669729b0bc19210b44205092f61040aed9c1d5334c3a6f5feac106ec"
+    },
+    {
+      "path": "docs/api/CURRENT_SURFACE_REGISTRY_20261031.json",
+      "lines": "106755 (program scope)",
+      "gitBlob": "9e9688a42bba72bd745fd519891a9bec24972174",
+      "baseSha256": "ff144d91c4c9f453736017cb1623ee43dd17f52fac2d54c20ddd86347bce88cf",
+      "currentSha256": "ff144d91c4c9f453736017cb1623ee43dd17f52fac2d54c20ddd86347bce88cf"
+    },
+    {
+      "path": "clearledger/src/generated/partner-api.d.ts",
+      "lines": "280-350",
+      "gitBlob": "d3f25303e69dd75fc4cc39f1ef4f03f1ca08aeed",
+      "baseSha256": "570c4f648a31626a83bfcb79f74c4995e761b5ba12f17ae161a8ec158c959abb",
+      "currentSha256": "570c4f648a31626a83bfcb79f74c4995e761b5ba12f17ae161a8ec158c959abb"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/package.json",
+      "lines": "7-12",
+      "gitBlob": "4fb9848b38fb36d89c511d4f1df45150939b7a8b",
+      "baseSha256": "5d7e8e6b5ee1f746eb02294b29547a1bfffea33f8f146ad034f0802e9dcfa20e",
+      "currentSha256": "5d7e8e6b5ee1f746eb02294b29547a1bfffea33f8f146ad034f0802e9dcfa20e"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/transport.ts",
+      "lines": "1-66",
+      "gitBlob": "89d97265731b7e4ebbf9eeb6403fd74fd4aa33fa",
+      "baseSha256": "2dcbfe759fb1096a7da02d8985def77315c66de96bb9917f5eca9b592359e6fc",
+      "currentSha256": "2dcbfe759fb1096a7da02d8985def77315c66de96bb9917f5eca9b592359e6fc"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/oauth.ts",
+      "lines": "1-45",
+      "gitBlob": "7a3a1638778cb089e0454b2987e0c8b3b4c4d65d",
+      "baseSha256": "9bdb202417114a095c6e821ed72600831241c0f81e57e49d6dd063588d730769",
+      "currentSha256": "9bdb202417114a095c6e821ed72600831241c0f81e57e49d6dd063588d730769"
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "baseSha256": null,
+      "gitBlob": null,
+      "currentSha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1",
+      "baseLines": null,
+      "currentLines": "1-164"
+    }
+  ],
+  "expectations": [
+    {
+      "case": "OPAQUE_OBJECT_ID",
+      "expected": " Точка Ё pilot ",
+      "basis": "dto.ObjectId and native_id preserve non-UUID object IDs; no trim/normalization"
+    },
+    {
+      "case": "TYPE_METADATA_UNKNOWN",
+      "expected": {
+        "typeCode": " Pilot Unknown Ё ",
+        "label": null,
+        "gkBasis": null,
+        "direction": null,
+        "isActive": null
+      },
+      "basis": "queries.py:175-186; fresh native catalog database.py:3554-3582 has no such code"
+    },
+    {
+      "case": "TYPE_EMPTY",
+      "expected": "typeCode empty preserved on contract; metadata query omitted, since min_length=1"
+    },
+    {
+      "case": "RAW_VALID_UNTIL",
+      "expected": [
+        "31.12.2030",
+        null
+      ],
+      "basis": "queries.py:270 forwards raw string; no ISO/perpetual inference"
+    },
+    {
+      "case": "HIDDEN_PARENT",
+      "expected": 404,
+      "precondition": "caller has route scopes, accepted principal kind and nonempty required resource grants",
+      "basis": "queries.py:190,218 calls detail with current conditions"
+    },
+    {
+      "case": "FOREIGN_PARENT",
+      "expected": 404,
+      "precondition": "same route admission preconditions; tenant foreign parent supplied explicitly"
+    },
+    {
+      "case": "INDEPENDENT_OBJECT_CHILD",
+      "expected": "only p0,p1; p2 and foreign hidden before total/limit",
+      "basis": "queries.py:198-212"
+    },
+    {
+      "case": "INDEPENDENT_DOCUMENT_CHILD",
+      "expected": "conditional d0,d2; d1 private,d3 foreign,d4 outside resource SET hidden before total/limit",
+      "precondition": "Requires separate ROOT synthetic-profile patch confirmed msg_e41e48c5bc73, both OAuth/resource authorities and current native ACL; combined runtime NOTRUN"
+    },
+    {
+      "case": "CURRENT_DOCUMENT_PROFILE",
+      "expected": 403,
+      "status": "BLOCKED_BY_PROFILE",
+      "basis": "server.py:253-255; access.py:98-106; no grant widening proposed"
+    },
+    {
+      "case": "MACHINE_DOCUMENT_RELATION",
+      "expected": 403,
+      "basis": "app.py:83-88 documents resource accepts PARTNER only"
+    },
+    {
+      "case": "RELATION_UNSUPPORTED_FILTER",
+      "expected": 422,
+      "inputs": [
+        "q",
+        "dateFrom",
+        "dateTo",
+        "typeCode",
+        "companyId"
+      ],
+      "basis": "dto relation queries extra=forbid; valid parent/scopes required"
+    },
+    {
+      "case": "CURSOR",
+      "expected": "changed parent/resource/pageSize/context or tampered cursor ->400; duplicate-free traversal, exact explicit set, live total before cursor, terminal nextCursor null",
+      "basis": "queries.py:103-136,188-236; do not invent signed cursor bytes"
+    },
+    {
+      "case": "DUPLICATE_DOCUMENT_LINK",
+      "expected": "d0 subject+basis+annex_of yields one document row",
+      "basis": "doc_subject_links.py OR EXISTS + queries.py DocCard outer select"
+    },
+    {
+      "case": "COMPANY_UNASSIGNED",
+      "expected": "authorized parent returns empty explicit object associations, total0,nextCursor null; SET location profile may hide parent =>404",
+      "basis": "queries.py:49-59,190-196",
+      "coverage": "SOURCE_ONLY; no fixture/profile expansion proposed"
+    }
+  ],
+  "manifest": {
+    "field": "resources.relations",
+    "schema": "A scenario inputs only; wire expectations reuse generated ContractWire/ContractTypeWire, no hand-written SDK models",
+    "sourceBridge": "sandbox/server.py:219-222 forwards explicit fixture relations; run.ts:24-28 assigns rental/documents relations; no raw inventory inference",
+    "rental": "Two existing allowed contracts; exact source contract DTOs and independently visible object sets",
+    "documents": "Conditional explicit sets only; not callable positively with current profile",
+    "authorizationChange": false,
+    "rawInventoryInference": false
+  },
+  "checks": {
+    "baseAndSourceHashes": "PASS_STATIC",
+    "proposedFixtureAstAndInMemoryCompile": "PASS_STATIC; compiled code NEVER executed",
+    "sourceImports": "NONE executed",
+    "futurePythonSqlHttpBrowserNodeBuildTests": "NOTRUN",
+    "gitApply": "NOTRUN; forbidden",
+    "sourceAssertionsAndGuards": "Existing assertions, grants, scope issuance, transport masks and guards unchanged; fixture seed extended only",
+    "unifiedHunkCountsAndContexts": "PASS_STATIC; reconstruction in memory only; no git apply",
+    "fixtureAstAndInMemoryCompile": "PASS_STATIC; compiled code NEVER executed",
+    "originalRunCheckOrderPreserved": {
+      "status": "PASS_STATIC_TEXT_COMPARISON",
+      "checkNames": [
+        "RENTAL_READS_PAGING_TYPED_AND_TENANT_BOUNDARIES",
+        "APPROVED_ALL_PROFILE_OBEYS_EFFECTIVE_LOCATION_CEILING",
+        "MACHINE_SCOPE_ESCALATION_DENIED",
+        "OTHER_CLIENT_GRANT_DENIED",
+        "TOKEN_REVOCATION_DENIES_NEXT_REQUEST",
+        "OPERATIONS_READS_EQUIPMENT_MONITORING_AND_BOUNDARIES",
+        "CURRENT_INSTALLATION_BOUNDARY_NARROWS_NEXT_REQUEST",
+        "OWNER_GRANT_REVOKE_DENIES_NEXT_REQUEST_AND_REISSUE",
+        "SDK_REJECTS_WRONG_STATE_BEFORE_TOKEN_REQUEST",
+        "REAL_CODE_PKCE_NONCE_SIGNATURE_AND_USERINFO",
+        "DOCS_METADATA_PAGING_AND_RESOURCE_BOUNDARIES",
+        "DOCUMENT_VERSION_EXACT_BINARY_AND_NATIVE_DENIALS",
+        "ID_TOKEN_IS_NOT_API_CREDENTIAL",
+        "CURRENT_USER_MEMBERSHIP_REVOKE_DENIES_NEXT_REQUEST"
+      ]
+    },
+    "oldUppercaseCheckIdentifiersPreserved": "PASS_STATIC_TEXT_COMPARISON; no execution",
+    "operationsScenarioByteIdentical": "PASS_STATIC_EXTRACTED_FUNCTION_BYTES"
+  },
+  "independentReviewOfA": {
+    "status": "ACTUAL_SOURCE_REVIEW_COMPLETE_STATIC",
+    "patchSha256": "22398104a935c9e445940de43cd7fa8e71b52ce41395ee3ee593b44a8423b736",
+    "patchPath": "/home/mag/orca/workspaces/ledger-app/partner-pilot-relation-clients-proposal-20261031/docs/api/external-developer-experience-20261031/relation-flows-proposal/clients-proposal.patch",
+    "findings": [
+      {
+        "id": "A-P1-01",
+        "severity": "P1",
+        "initialArtifactLines": "50-53",
+        "issue": "Early profile gate bypassed legacy document checks",
+        "resolution": "Fixed: proposed run.ts194-209 records NOTRUN passed:false after binary checks; positive helper before membership revoke; run.ts225 throws only after original membership and observation checks",
+        "status": "CLOSED_STATIC; no runtime verification"
+      }
+    ],
+    "remainingFindings": [],
+    "schemaCompatibility": "resources.relations rental/documents exact scenario fields match fixture",
+    "checks": "Exact hunk contexts reconstructed in memory; original assertion/check name strings preserved; no TS imports/execution",
+    "actualSourceRoot": "/home/mag/orca/workspaces/ledger-app/partner-pilot-relation-clients-proposal-20261031",
+    "actualSourceFiles": [
+      {
+        "path": "clearledger/tools/partner-pilots/clients/run.ts",
+        "sha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9",
+        "lines": 246
+      },
+      {
+        "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+        "sha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab",
+        "lines": 330
+      },
+      {
+        "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+        "sha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1",
+        "lines": 164
+      }
+    ],
+    "sourceLineEvidence": {
+      "run.ts:194-209": "gate after legacy binary checks; current403 then passed:false NOTRUN/blocked or positive real helper",
+      "run.ts:210-218": "old ID-token and membership revoke checks follow unchanged",
+      "run.ts:223-226": "failclosed after original observations invariant, before success return",
+      "relations.test.ts:1-164": "9 pure scripted mock tests; source only NOTRUN",
+      "scenarios.ts:207-330": "typed helpers use explicit supplied vectors, no grant issuance"
+    },
+    "mockEvidenceLimit": "relations.test.ts repeated scripted403 case repeats a fixed mock reply; it is not a server scope/grant ACL test. Distinct authority omission inputs test only the client admission function. All 9 proposed tests NOTRUN; real OAuth/HTTP/SQL acceptance NOTRUN."
+  },
+  "limitations": [
+    "Frozen base documents profile lacks contracts authority; separate ROOT synthetic server patch confirmed by msg_e41e48c5bc73, combined source revision/runtime not yet verified here.",
+    "Live timestamps/UUIDs/cursors/responses were not observed; all IDs in vectors come from explicitly seeded synthetic rows only.",
+    "Company/unassigned empty relations and inactive catalog metadata remain source-derived expectations without new positive vectors.",
+    "Complete6path package prepared and statically reviewed; production backend/SDK/guards/server/owner/transport unchanged. Node/typecheck/pure mocks/actual pilots all NOTRUN."
+  ],
+  "futureVerification": {
+    "status": "NOTRUN",
+    "pureMocksCommandAfterSeparateAuthorization": "cd clearledger/tools/partner-pilots/clients && node --experimental-strip-types --test guards.test.ts relations.test.ts",
+    "reason": "package.json test:unit enumerates guards.test.ts only, so new relations.test.ts needs explicit future invocation; package files unchanged",
+    "realPilot": "ROOT subsequent verification NOTRUN; combine and pin separate synthetic server profile patch. Without it preserve old checks, record blocked positive, then fail before SUCCESS."
+  },
+  "artifactRole": "Source preparation report; runtime unverified",
+  "implementedDocumentationChanges": 2,
+  "implementedPaths": [
+    "clearledger/tools/partner-pilots/clients/run.ts",
+    "clearledger/tools/partner-pilots/clients/scenarios.ts",
+    "clearledger/tools/partner-pilots/clients/relations.test.ts",
+    "clearledger/tools/partner-pilots/sandbox/fixture.py",
+    "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.md",
+    "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
+  ],
+  "authorizationProvenance": {
+    "scopeChangeFrom": "static-only proposal",
+    "receivedVia": "Orca coordinator message msg_587606287f3e",
+    "userEvidence": "main msg_f141e959f608; session codex_22b96a77_7ffb_487a_84d2_880f88417089; 2026-10-31",
+    "quotedAuthorization": "Разрешаю код, тесты и документацию в отдельных ветках",
+    "authorizedOwnedPaths": [
+      "clearledger/tools/partner-pilots/sandbox/fixture.py",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.md",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
+    ],
+    "restrictions": "No runtime, imports, tests/collection, controls, SQL/HTTP/SSH/Docker/build/install/formatter, merge/deploy/flags; no grants/scopes changes; exact base unchanged",
+    "applicationMethod": "stdlib exact context reconstruction and direct owned file write; git apply never invoked",
+    "coordinatorAuthorizedPackagePaths": [
+      "clearledger/tools/partner-pilots/clients/run.ts",
+      "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "clearledger/tools/partner-pilots/sandbox/fixture.py",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.md",
+      "clearledger/docs/api/PARTNER_PILOT_RELATION_FLOWS_20261031.json"
+    ]
+  },
+  "historicalLocalProposal": {
+    "path": "docs/api/external-developer-experience-20261031/relation-flows-proposal/fixture-proposal.patch",
+    "status": "Uncommitted local preparation artifact; not part of final target delta"
+  },
+  "implementationAccountingScope": "Complete coordinator package:4 source files+2 reports; exactly6 target paths relative to frozen base",
+  "componentCommits": {
+    "A": {
+      "authored": "ae679dbf5fe4881738e11c034a8afa1efc1894a7",
+      "integrated": "20daebf1d51700b7d61161ecc8b48d8193350c26"
+    },
+    "B": {
+      "authored": "1457df337055f83e048ad7a17bef254ce58f454e",
+      "integrated": "ac88cccd7f051413b0e85a5507478efe97b5d11b"
+    }
+  },
+  "sourceFreezeCommit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+  "rootDependency": {
+    "status": "ROOT_CONFIRMED_SEPARATE_PATCH; NOT_PART_OF_THIS_PACKAGE; COMBINED_RUNTIME_NOTRUN",
+    "message": "msg_e41e48c5bc73",
+    "ownerRun": "run_19ce21b41b2c",
+    "path": "clearledger/tools/partner-pilots/sandbox/server.py",
+    "baseLines": "253-265",
+    "change": "Only synthetic documents client contracts:read + contracts SET on selected fixture contract IDs; explicit documents.vectors.contracts",
+    "preserve": "No objects/counterparties scopes; existing redaction, portal/session and other machine grants unchanged",
+    "baseWithoutRootPatch": "BLOCKED_BY_PROFILE; existing docs checks continue, new positive NOTRUN then nonzero before success",
+    "combinedSourceCommit": "UNKNOWN; ROOT must pin separately",
+    "combinedAcceptance": "NOTRUN"
+  },
+  "coordinatorReview": {
+    "run": "run_1e4d8306c273",
+    "scope": "Exact6paths; all4 source SHA matched actual worker-reviewed bytes",
+    "sourceExecution": 0,
+    "typescriptTypecheck": "NOTRUN",
+    "pureMockDefinitions": 9,
+    "runtimeTests": "NOTRUN",
+    "reviewLimits": "Text/AST/hash/Git checks only; not TypeScript compilation, SQL execution or observed HTTP responses",
+    "sourceReferences": [
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/clients/run.ts",
+        "lines": "1-246",
+        "sha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9"
+      },
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+        "lines": "1-330",
+        "sha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab"
+      },
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+        "lines": "1-164",
+        "sha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1"
+      },
+      {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "20daebf1d51700b7d61161ecc8b48d8193350c26",
+        "path": "clearledger/tools/partner-pilots/sandbox/fixture.py",
+        "lines": "1-164",
+        "sha256": "1b945862711ca7f6b0bdef8abe837bf82c1f92fe43c6616ea5d14f178b4a6e5f"
+      }
+    ],
+    "futureAcceptance": {
+      "typescript": "NOTRUN; ROOT compiler",
+      "pureMocks": "NOTRUN; ROOT explicit guards.test.ts + relations.test.ts, no server ACL inference",
+      "actualPilot": "NOTRUN; ROOT must pin combined relation + separate synthetic server profile source and observe OAuth/HTTP results",
+      "M12_M18": "PARTIAL_SOURCE_PREPARATION_ONLY; no milestone closure",
+      "fullProgram": "20 M00-M19 and11 original gates preserved, no completion credit"
+    }
+  },
+  "packageSourceManifest": [
+    {
+      "path": "clearledger/tools/partner-pilots/clients/run.ts",
+      "sha256": "bf05a28aa7b9c921f19ffaca7e8e838005effcfba790c31f4110e949d8bf78b9",
+      "bytes": 15542,
+      "lines": 246
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/scenarios.ts",
+      "sha256": "e9d6170ea497919c4e8d94723d162c59d159942db0a86e5e5f4ab06a54983dab",
+      "bytes": 21186,
+      "lines": 330
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/clients/relations.test.ts",
+      "sha256": "9031d2aa5458500e667659a321c918e164706dd64b391f19a22ab7d951987de1",
+      "bytes": 11598,
+      "lines": 164
+    },
+    {
+      "path": "clearledger/tools/partner-pilots/sandbox/fixture.py",
+      "sha256": "1b945862711ca7f6b0bdef8abe837bf82c1f92fe43c6616ea5d14f178b4a6e5f",
+      "bytes": 11256,
+      "lines": 164
+    }
+  ],
+  "markdownSha256": "e100899808500c5ede6d97533e5901af0af8f9dae0f843144684b2b05324cfee",
+  "jsonSelfHashPolicy": "No recursive self hash; final Git commit and external handoff/preview manifest identify complete JSON bytes"
+}
