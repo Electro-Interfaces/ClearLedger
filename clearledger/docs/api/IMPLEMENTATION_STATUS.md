@@ -29,8 +29,18 @@ ObjectLink parent/child point_of_service блокирует удаление д�
 связи. ROOT подтвердил exact7hashes/21dependency hashes/23selectedAST/105прежних
 определений и разрешённую дельту. Приёмка source-only; runtime ещё впереди.
 25функций/80статических вариантов — NOTRUN. Политика new-create, no-reuse,
-другие soft-history категории и гонки остаются открыты. Оба пакета ещё не входят
-в интеграционную ветку ROOT и не закрывают20разделов или11общих gates.
+другие soft-history категории и гонки остаются открыты. Исходники обоих пакетов перенесены
+в draft integration ROOT (PR83 какb928b810; PR82 как498c824b/a941834e/2bb17606).
+Серверный WS7c492966 перенесён как17f6934c. Все37файлов трёх пакетов совпали
+с принятыми источниками побайтно, Python syntax и два source checker на совместном
+составе прошли. Общий runtime ещё не проверен;20разделов и11gates не закрыты.
+
+Оба дополнительных оркестратора получили следующую реализацию: Run2b5ab9b9e3c5
+готовит pure DTO/OpenAPI harness (26cases из12definitions), Runebbbfb0bebf8 —
+точную selected schema fixture и harness80warehouse cases. По два supervised
+исполнителя ready в отдельных деревьях, runtime0; source freeze родителей сохранён.
+В ROOT ещё один агент пишет TCP/PGwire6cases, другой готовит4команды TX3,
+третий проверяет последние CFG artifacts. Source-оснастка ещё не допущена к запуску.
 
 ## Проверенные пакеты и текущая работа · 31.10.2026
 
@@ -73,7 +83,20 @@ MigrationError code4/phase pulse_parent из проверенных исходн
 все процессы завершены, контейнер удалён, исходники сохранены. Это0 основных
 сценариев, не проверка миграций.
 
-**Corebootstrap:33из57 сценариев приняты в28отдельных сериях.**
+**Corebootstrap:36из57 сценариев приняты в31отдельной серии.**
+
+Приняты и последние три CFG сценария отдельными запусками: no-port
+(32.72с native supervision/45.56с полный), real-path (32.99с/45.76с),
+source-before-lock (31.53с/44.36с). Первый проверяет только offline-нормализацию
+порта5432 без подключения к нему. Второй после canonical0001–0003 проверяет
+реальный public search_path и точный require_connection76→67 namespace refusal;
+44relations/3journalrows до/после совпали, write0 относится только окну отказа.
+Третий проверяет прямой preflight_startup_sources до нового socket checkout,
+RuntimeError preflight43→MigrationError3/target; это не whole-lifespan/prelock
+и не zero-SQL всего процесса. Во всех трёх сохранены15851inputs/77deps, два
+PID1 census, отсутствие трёх процессов, own ordinarycleanup и PG0/0;
+195/195/186CLI завершены. Все6CFG приняты шестью отдельными сериями.
+Текущее36разных primary в31серии,21remaining:TX3/LIFE6/REC4/OLDUP8.
 
 Следующие два CFG сценария приняты отдельными ROOT запусками: CFG-identity
 (31.76с native supervision/43.97с полный) и CFG-url-options (30.62с/44.21с).
@@ -83,8 +106,8 @@ RuntimeError require_engine/_config. До/после состояние совп
 Context setup использует собственную БД, это не zero-SQL всего процесса.
 Исходники15851/77deps, classifier13/metadata16, два PID1 census, отсутствие трёх
 процессов, ordinary ownCID cleanup и PG clients/locks0 подтверждены;189/183CLI
-завершены. Всего33разных ID в28сериях,24ещё открыты. FactsOnly5 остаётся
-историческим отчётом30/25, а не текущим33.
+завершены. После первых трёх CFG были приняты33разных ID в28сериях. FactsOnly5 остаётся
+историческим отчётом30/25; текущий результат36/31 хранится в ROOT receipts.
 
 Принята одна полная серия6 проверок прежнего поведения Core: native207.81с,
 полный прогон221.24с, все процессы завершились успешно. Проверены два строгих
