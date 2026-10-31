@@ -1,0 +1,1316 @@
+{
+  "schema_version": 1,
+  "package": "CORE-B02",
+  "status": "SOURCE_ONLY_TESTS_WRITTEN_NOTRUN",
+  "base": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+  "own_tree_head": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+  "candidate_tree": "/home/mag/orca/workspaces/ledger-app/service-location-writer-core-20261031",
+  "candidate_freeze": {
+    "state": "FOUR_PRODUCTION_SHA256_VERIFIED",
+    "authority": "A FINALFREEZE msg_41dce4767ce3 relayed by coordinator msg_b537a63ef3e9",
+    "source_base": "cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+    "sha256": {
+      "clearledger/server/app/routers/locations_router.py": "33d6ce2f89a8c348eff42d73eba860731178c56e9bac2027cdbf37153ec6f503",
+      "clearledger/server/app/services/location_commands.py": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+      "clearledger/server/app/services/ezs_equipment_docs.py": "bf85fe837f153f9ab54b63739513bb80090ab037024ed4634e2fe4e11cef8a2b",
+      "clearledger/server/app/services/ezs_equipment.py": "9813f1ff7858d38a852109ec8b174bdfeee3a2e89bcbda49c10af7df85befc22"
+    },
+    "runtime": "NOTRUN; exact-byte source review only; not imported or executed"
+  },
+  "authorization": "User source edits in own branches authorized via coordinator; no runtime, commit/push/merge/release/deploy",
+  "worker_B_claimed_changed_files": [
+    "clearledger/server/tests/test_service_location_writer_convergence_20261031.py",
+    "clearledger/docs/api/SERVICE_LOCATION_WRITER_CONVERGENCE_20261031.md",
+    "clearledger/docs/api/SERVICE_LOCATION_WRITER_CONVERGENCE_20261031.json"
+  ],
+  "complete_package_allowlist": [
+    "clearledger/server/app/routers/locations_router.py",
+    "clearledger/server/app/services/location_commands.py",
+    "clearledger/server/app/services/ezs_equipment_docs.py",
+    "clearledger/server/app/services/ezs_equipment.py",
+    "clearledger/server/tests/test_service_location_writer_convergence_20261031.py",
+    "clearledger/docs/api/SERVICE_LOCATION_WRITER_CONVERGENCE_20261031.md",
+    "clearledger/docs/api/SERVICE_LOCATION_WRITER_CONVERGENCE_20261031.json"
+  ],
+  "production_source_owned_by": "A only; B reads and hashes, never copies or modifies production",
+  "source_dependency_manifest": [
+    {
+      "file": "clearledger/server/app/routers/locations_router.py",
+      "role": "A production",
+      "base_sha256": "e2a6d5e7fc011ff98078bc1d7108ffe94e5a182ed0145ee45c17429cc05c13c1",
+      "candidate_observed_sha256": "33d6ce2f89a8c348eff42d73eba860731178c56e9bac2027cdbf37153ec6f503",
+      "candidate_matches_base": false,
+      "candidate_frozen_sha256": "33d6ce2f89a8c348eff42d73eba860731178c56e9bac2027cdbf37153ec6f503"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "role": "A production",
+      "base_sha256": "855d25a55bc64d8ab4f55cb2b364e62972d35b8d0d6c486f8c985f17102bb4ba",
+      "candidate_observed_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+      "candidate_matches_base": false,
+      "candidate_frozen_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "role": "A production",
+      "base_sha256": "413c4109fa3b52ce81011acf593d3059c5721b814254083b2d2478f98978ddc5",
+      "candidate_observed_sha256": "bf85fe837f153f9ab54b63739513bb80090ab037024ed4634e2fe4e11cef8a2b",
+      "candidate_matches_base": false,
+      "candidate_frozen_sha256": "bf85fe837f153f9ab54b63739513bb80090ab037024ed4634e2fe4e11cef8a2b"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment.py",
+      "role": "A production",
+      "base_sha256": "8cfa7902dbed0ced07e6c50c04e27ed2e6ae64fc2f64127f9d7fb4e03c9ef5be",
+      "candidate_observed_sha256": "9813f1ff7858d38a852109ec8b174bdfeee3a2e89bcbda49c10af7df85befc22",
+      "candidate_matches_base": false,
+      "candidate_frozen_sha256": "9813f1ff7858d38a852109ec8b174bdfeee3a2e89bcbda49c10af7df85befc22"
+    },
+    {
+      "file": "clearledger/server/app/routers/equipment_router.py",
+      "role": "read-only dependency",
+      "base_sha256": "5992759b387be39603a3effc0bca474b09ae279dfe39ce3ce31417469b996aab",
+      "candidate_observed_sha256": "5992759b387be39603a3effc0bca474b09ae279dfe39ce3ce31417469b996aab",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "5992759b387be39603a3effc0bca474b09ae279dfe39ce3ce31417469b996aab"
+    },
+    {
+      "file": "clearledger/server/app/auth.py",
+      "role": "read-only dependency",
+      "base_sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+      "candidate_observed_sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7"
+    },
+    {
+      "file": "clearledger/server/app/deps.py",
+      "role": "read-only dependency",
+      "base_sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c",
+      "candidate_observed_sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c"
+    },
+    {
+      "file": "clearledger/server/app/scope.py",
+      "role": "read-only dependency",
+      "base_sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b",
+      "candidate_observed_sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b"
+    },
+    {
+      "file": "clearledger/server/app/models.py",
+      "role": "read-only dependency",
+      "base_sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+      "candidate_observed_sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682"
+    },
+    {
+      "file": "clearledger/server/app/database.py",
+      "role": "read-only dependency",
+      "base_sha256": "30c01b44669729b0bc19210b44205092f61040aed9c1d5334c3a6f5feac106ec",
+      "candidate_observed_sha256": "30c01b44669729b0bc19210b44205092f61040aed9c1d5334c3a6f5feac106ec",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "30c01b44669729b0bc19210b44205092f61040aed9c1d5334c3a6f5feac106ec"
+    },
+    {
+      "file": "clearledger/server/app/config.py",
+      "role": "read-only dependency",
+      "base_sha256": "90c5da106f20fe90e31c899a88018ef741e6b3207a555fedbd58bafaa61780e8",
+      "candidate_observed_sha256": "90c5da106f20fe90e31c899a88018ef741e6b3207a555fedbd58bafaa61780e8",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "90c5da106f20fe90e31c899a88018ef741e6b3207a555fedbd58bafaa61780e8"
+    },
+    {
+      "file": "clearledger/server/app/services/object_freeze.py",
+      "role": "read-only dependency",
+      "base_sha256": "72aa8f516631b661f33b0c28efeaa91ee4ec9d53749e407387cdb2fcb8987118",
+      "candidate_observed_sha256": "72aa8f516631b661f33b0c28efeaa91ee4ec9d53749e407387cdb2fcb8987118",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "72aa8f516631b661f33b0c28efeaa91ee4ec9d53749e407387cdb2fcb8987118"
+    },
+    {
+      "file": "clearledger/server/tests/partner_test_safety.py",
+      "role": "read-only dependency",
+      "base_sha256": "43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1",
+      "candidate_observed_sha256": "43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1"
+    },
+    {
+      "file": "clearledger/server/tests/conftest.py",
+      "role": "read-only dependency",
+      "base_sha256": "32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b",
+      "candidate_observed_sha256": "32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b"
+    },
+    {
+      "file": "clearledger/server/tests/test_location_commands.py",
+      "role": "read-only dependency",
+      "base_sha256": "52f1aa9ce06b149cd55c9d177ce01d6bb456c3a4243384671952f5fd560cb455",
+      "candidate_observed_sha256": "52f1aa9ce06b149cd55c9d177ce01d6bb456c3a4243384671952f5fd560cb455",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "52f1aa9ce06b149cd55c9d177ce01d6bb456c3a4243384671952f5fd560cb455"
+    },
+    {
+      "file": "clearledger/server/tests/test_location_identifier_history.py",
+      "role": "read-only dependency",
+      "base_sha256": "00b8013bb43a8c77f46f2fa59a70b431aa8212aea521946592cd8b9d0c193c38",
+      "candidate_observed_sha256": "00b8013bb43a8c77f46f2fa59a70b431aa8212aea521946592cd8b9d0c193c38",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "00b8013bb43a8c77f46f2fa59a70b431aa8212aea521946592cd8b9d0c193c38"
+    },
+    {
+      "file": "clearledger/server/tests/test_location_metadata_merge.py",
+      "role": "read-only dependency",
+      "base_sha256": "99d67c4d26cf2d02f38c280832d7f4bf3883c21755ae2b159e579a738ba12419",
+      "candidate_observed_sha256": "99d67c4d26cf2d02f38c280832d7f4bf3883c21755ae2b159e579a738ba12419",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "99d67c4d26cf2d02f38c280832d7f4bf3883c21755ae2b159e579a738ba12419"
+    },
+    {
+      "file": "clearledger/server/tests/test_location_source_number_patch.py",
+      "role": "read-only dependency",
+      "base_sha256": "90e6276d1feb30d960ffa011c6d10021e978b8c337c3a64b6cd3a0bb4278f945",
+      "candidate_observed_sha256": "90e6276d1feb30d960ffa011c6d10021e978b8c337c3a64b6cd3a0bb4278f945",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "90e6276d1feb30d960ffa011c6d10021e978b8c337c3a64b6cd3a0bb4278f945"
+    },
+    {
+      "file": "clearledger/server/tests/test_location_manual_names.py",
+      "role": "read-only dependency",
+      "base_sha256": "8e4ad918b11be679aa7ef175ddb1dcc3f460c0b94cd8b1c9863e78e96d145ff4",
+      "candidate_observed_sha256": "8e4ad918b11be679aa7ef175ddb1dcc3f460c0b94cd8b1c9863e78e96d145ff4",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "8e4ad918b11be679aa7ef175ddb1dcc3f460c0b94cd8b1c9863e78e96d145ff4"
+    },
+    {
+      "file": "clearledger/server/tests/test_location_lock_sets.py",
+      "role": "read-only dependency",
+      "base_sha256": "7abf32d441808f235318cbfd1342a6ef6c1ccc8dc24dfb2d1542bcdb9abdd653",
+      "candidate_observed_sha256": "7abf32d441808f235318cbfd1342a6ef6c1ccc8dc24dfb2d1542bcdb9abdd653",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "7abf32d441808f235318cbfd1342a6ef6c1ccc8dc24dfb2d1542bcdb9abdd653"
+    },
+    {
+      "file": "clearledger/server/tests/test_equipment_docs.py",
+      "role": "read-only dependency",
+      "base_sha256": "103bb80ff806cc23a9a2211e60ea50a62bdf948d6fe02b02f4771bae60e0bdad",
+      "candidate_observed_sha256": "103bb80ff806cc23a9a2211e60ea50a62bdf948d6fe02b02f4771bae60e0bdad",
+      "candidate_matches_base": true,
+      "candidate_frozen_sha256": "103bb80ff806cc23a9a2211e60ea50a62bdf948d6fe02b02f4771bae60e0bdad"
+    }
+  ],
+  "manifest_scope": "Explicit scoped dependencies only. Not global points-to/import/runtime/write closure. Preparation raw artifacts and all foreign tests/reports remain untouched.",
+  "old_new_callchains": [
+    {
+      "id": "operational",
+      "old": "locations_router.set_operational_status -> get_owned/validation -> loc.operational_status -> AuditEvent -> flush/refresh -> stations_by_location -> space_projection.project_object -> get_db commit",
+      "status": "FROZEN_SOURCE_REVIEWED_NOTRUN",
+      "proposed": "Same caller admission/effects/commit; only the status invariant/mutation goes through the existing common owner via a narrow named command. No extra event/flush/projection."
+    },
+    {
+      "id": "warehouse_create",
+      "old": "equipment_router.warehouse_create -> assert_company_member -> save_warehouse -> duplicate ci-trim SELECT -> get_or_create_warehouse -> _wh_loc_id/constructor/add/flush -> warehouse validation/metadata -> flush -> warehouse_card -> get_db commit",
+      "status": "FROZEN_SOURCE_REVIEWED_NOTRUN",
+      "proposed": "Preserve the domain chain and internal vs form-create distinction; helper constructor/add path delegates once to named warehouse invariant command. No native namespace/scope/name/meta conversion."
+    },
+    {
+      "id": "warehouse_update",
+      "old": "equipment_router.warehouse_update -> assert_company_member -> save_warehouse -> load tenant/type -> validate parties/contract/MOL -> loc.name/address/extra_metadata -> flush -> card -> get_db commit",
+      "status": "FROZEN_SOURCE_REVIEWED_NOTRUN",
+      "proposed": "Domain old assignment ordering retained via update_warehouse_details(name/address) BEFORE User lookup/autoflush, then update_warehouse_card(warehouse subtree) at old metadata assignment; caller flush/card unchanged."
+    },
+    {
+      "id": "warehouse_status",
+      "old": "warehouse_status -> assert_company_member -> set_warehouse_status -> _own_warehouse -> _warehouse_usage on close -> loc.status -> flush -> card -> get_db commit",
+      "status": "FROZEN_SOURCE_REVIEWED_NOTRUN",
+      "proposed": "Same close/reopen policy and history retention; named warehouse status command, no extra audit or projection."
+    },
+    {
+      "id": "warehouse_delete",
+      "old": "warehouse_delete -> assert_company_member -> delete_warehouse -> _own_warehouse/usage guards -> delete zero stock -> db.delete warehouse -> router adds equipment_warehouse_delete audit -> get_db commit",
+      "status": "FROZEN_SOURCE_REVIEWED_NOTRUN",
+      "proposed": "Retain old usage guard, then additional ROOT-approved same-company point_of_service ObjectLink parent/child guard including closed; old zero-stock cleanup and named row delete; one outer audit, caller transaction."
+    },
+    {
+      "id": "warehouse_import",
+      "old": "import_units_xlsx caller transaction/loop -> get_or_create_warehouse -> direct constructor/add/flush -> existing caller progress/commit",
+      "status": "FROZEN_SOURCE_REVIEWED_NOTRUN",
+      "proposed": "Only helper delegation changes; existing import loop, ID helper, caches, dry_run and commits stay byte-identical. Pending/lock interactions require exact source review before candidate freeze."
+    }
+  ],
+  "contract_matrix": [
+    {
+      "flow": "operational",
+      "admission": "old get_owned membership/visit and named owner company/current truthy object ceiling; [] keeps legacy unrestricted semantics; no native ContractLocation org join",
+      "fields": "operational_status only; same-status audit preserved",
+      "transaction": "same caller session; existing flush then refresh; no new lock/commit",
+      "audit": "one location_op_status from/to/reason, actor unchanged at route",
+      "effects": "stations_by_location then exactly one projection; failed result ignored as before, raised exception propagates"
+    },
+    {
+      "flow": "warehouse helper/create",
+      "admission": "outer membership + old ci-trim lookup; full genuinely new formcreate outside nonempty O preserved through same-session/object/company/id/active-root persistent origin and details->card one-time phases; existing-resource commands always enforce ceiling",
+      "fields": "id/code/name/type/status from legacy warehouse profile; no native number reservations or generic create preparation",
+      "transaction": "helper retains original add/flush in caller; no new barriers after pending import/FK work",
+      "audit": "no new helper/create audit",
+      "effects": "import loop/cache/dry_run/report/commit bodies outside allowed edit"
+    },
+    {
+      "flow": "warehouse card",
+      "admission": "outer assert_company_member, owned type/company and explicit current ceiling including warm map; domain party/contract/MOL validation retained",
+      "fields": "name[:300] source rule; address[:500]; workflow-built warehouse subtree; all other metadata/code/id/history/bindings preserved",
+      "transaction": "details command writes name/address at old point before User lookup/autoflush; card command writes metadata at old point; original flush/card remains",
+      "audit": "no new card audit",
+      "effects": "no projection or new side effects"
+    },
+    {
+      "flow": "warehouse lifecycle",
+      "admission": "owned type/company/current ceiling; close checks units/nonzero stock, reopen skips close-only restriction",
+      "fields": "status closed/active only",
+      "transaction": "existing caller session and flush; no locks or commit added",
+      "audit": "no new status audit",
+      "effects": "card only; history stays"
+    },
+    {
+      "flow": "warehouse delete",
+      "admission": "owned company/type/current ceiling; original usage/history guards plus ROOT-approved same-company ObjectLink point_of_service parent/child guard for all relation/valid_to values; foreign links ignored and preserved",
+      "fields": "only unused warehouse and old zero-stock cleanup; no links or historical rows removed; other soft-history/concurrent insertion UNKNOWN",
+      "transaction": "cleanup, named row deletion and outer audit in same caller transaction; two rollback tests written",
+      "audit": "equipment_router adds exactly one equipment_warehouse_delete",
+      "effects": "no projection; native DELETE409 unaffected"
+    }
+  ],
+  "tests": [
+    {
+      "id": "test_op_status_and_noop_preserve_audit_projection_and_outer_commit",
+      "preparation_families": "OP-01/02",
+      "source_line": 181,
+      "setup": "all eight statuses including same unknown",
+      "expected_assertions": "Persisted status-only change; one exact old audit; stations then one projection seeing flushed audit; no commit before caller",
+      "variants": [
+        {
+          "arguments": "status",
+          "values": [
+            "working",
+            "no_link",
+            "disabled",
+            "not_working",
+            "on_repair",
+            "maintenance",
+            "unknown",
+            "decommissioned"
+          ]
+        }
+      ],
+      "source_expanded_cases": 8,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_op_invalid_status_precedes_target_admission",
+      "preparation_families": "OP-03",
+      "source_line": 206,
+      "setup": "invalid status own/foreign/missing",
+      "expected_assertions": "400 precedes location admission, unchanged committed rows/history/audit, no effects",
+      "variants": [
+        {
+          "arguments": "identifier_index",
+          "values": [
+            0,
+            2,
+            null
+          ]
+        }
+      ],
+      "source_expanded_cases": 3,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_op_projection_returned_failure_vs_exception_rollback",
+      "preparation_families": "OP-07/08",
+      "source_line": 219,
+      "setup": "projection returned failed vs raised",
+      "expected_assertions": "failed return still commits old behavior; exception plus explicit caller rollback restores rows/audit, effect invocation remains observed",
+      "variants": [
+        {
+          "arguments": "raised",
+          "values": [
+            false,
+            true
+          ]
+        }
+      ],
+      "source_expanded_cases": 2,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_op_foreign_company_no_audit_or_effect",
+      "preparation_families": "OP-04",
+      "source_line": 240,
+      "setup": "foreign tenant",
+      "expected_assertions": "404, exact independent snapshot unchanged, no audit or projection",
+      "variants": [],
+      "source_expanded_cases": 1,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_existing_object_ceiling_before_mutation_even_warm",
+      "preparation_families": "OP-05/WH-13",
+      "source_line": 253,
+      "setup": "operational/rename/close/delete cold and warm",
+      "expected_assertions": "404 before mutation; warmed target attributes unchanged; independent committed rows/history preserved",
+      "variants": [
+        {
+          "arguments": "flow",
+          "values": [
+            "operational",
+            "rename",
+            "close",
+            "delete"
+          ]
+        },
+        {
+          "arguments": "warm",
+          "values": [
+            false,
+            true
+          ]
+        }
+      ],
+      "source_expanded_cases": 8,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_op_effective_context_ceiling_is_checked_even_with_unrestricted_membership",
+      "preparation_families": "OP-05",
+      "setup": "Full admin membership, narrower current object ContextVar; cold/warm target",
+      "expected_assertions": "404 before mutation/audit/effects; warm identity-map target would pass old get_owned, so explicit effective ceiling at common owner is required; independent snapshot unchanged",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 280,
+      "source_expanded_cases": 2,
+      "variants": [
+        {
+          "arguments": "warm",
+          "values": [
+            false,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_warehouse_tenant_type_and_member_denial",
+      "preparation_families": "WH-13",
+      "source_line": 298,
+      "setup": "foreign company/wrong type/no membership",
+      "expected_assertions": "404 for target mismatch, 403 for company admission; no committed changes",
+      "variants": [
+        {
+          "arguments": "flow",
+          "values": [
+            "rename",
+            "close",
+            "delete"
+          ]
+        },
+        {
+          "arguments": "target",
+          "values": [
+            "foreign",
+            "wrong_type",
+            "no_membership"
+          ]
+        }
+      ],
+      "source_expanded_cases": 9,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_warehouse_partial_patch_preserves_subtrees_identity_and_null_rules",
+      "preparation_families": "WH-07/08/09",
+      "source_line": 318,
+      "setup": "partial rename/null address/phone",
+      "expected_assertions": "trim name, code/id/number/bindings/history unchanged; nested opaque metadata and omitted note retained; warehouse subtree updated",
+      "variants": [],
+      "source_expanded_cases": 1,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_warehouse_details_autoflush_before_real_mol_lookup_preserves_old_phase",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "preparation_families": "WH-07/09/12/TX-01",
+      "setup": "name/address change plus responsibleUserId triggers actual db.get(User)",
+      "expected_assertions": "True User lookup/autoflush must flush new name/address while metadata remains old; real same-session table-column SELECT observes ordering; independent session sees old state; rollback restores all rows",
+      "source_line": 341,
+      "source_expanded_cases": 1,
+      "variants": []
+    },
+    {
+      "id": "test_warehouse_helper_lookup_is_not_form_create_or_metadata_update",
+      "preparation_families": "WH-03/04",
+      "source_line": 372,
+      "setup": "helper ci-trim lookup vs form duplicate",
+      "expected_assertions": "helper returns same row without mutation; form create returns409",
+      "variants": [],
+      "source_expanded_cases": 1,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_warehouse_create_exact_trimmed_identity_and_outer_rollback",
+      "preparation_families": "WH-01/TX-01",
+      "source_line": 389,
+      "setup": "new unscoped warehouse then outer rollback",
+      "expected_assertions": "deterministic exact ID/code/type/status; actual metadata fresh note; same active root transaction; independent snapshot old until outer rollback",
+      "variants": [],
+      "source_expanded_cases": 1,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_warehouse_create_late_validation_failure_rolls_back_new_row_and_pending_work",
+      "preparation_families": "WH-11/TX-01",
+      "source_line": 408,
+      "setup": "late rent validation and pending caller edit",
+      "expected_assertions": "400; new staged row and pending description edit both rolled back",
+      "variants": [],
+      "source_expanded_cases": 1,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_new_form_warehouse_legacy_scope_exception_does_not_admit_later_existing_edit",
+      "preparation_families": "WH-01/13",
+      "setup": "Nonempty membership scope excludes genuinely new warehouse ID",
+      "expected_assertions": "Full formcreate and metadata save succeed with context intact; later warm existing edit404; no blanket bypass for existing records",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 424,
+      "source_expanded_cases": 1,
+      "variants": []
+    },
+    {
+      "id": "test_new_warehouse_initialization_cannot_cross_root_or_session",
+      "preparation_families": "WH-01/13/TX-01",
+      "setup": "Actual helper-created hidden warehouse; commit/new-root, rollback/new-root, different AsyncSession variants",
+      "expected_assertions": "Details initialization404 after boundary, no old origin authority leakage; only deliberately committed new row persists, rolled-back rows/stock/history/audit unchanged",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 455,
+      "source_expanded_cases": 3,
+      "variants": [
+        {
+          "arguments": "boundary",
+          "values": [
+            "commit_new_root",
+            "rollback_new_root",
+            "cross_session"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_new_warehouse_initialization_is_not_an_existing_object_permission",
+      "preparation_families": "WH-01/13/TX-01",
+      "setup": "Consumed metadata, card-before-details, own existing-by-id entry, other warmed hidden target",
+      "expected_assertions": "Both detail/card writes404 after consumed/revoked or unrelated authority; early card404 then legitimate detail/card succeeds; rollback exact committed state. Does not forge/read private receipt storage",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 495,
+      "source_expanded_cases": 4,
+      "variants": [
+        {
+          "arguments": "boundary",
+          "values": [
+            "consumed",
+            "card_before_details",
+            "existing_entry",
+            "different_loaded_target"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_new_warehouse_initialization_never_bypasses_other_commands",
+      "preparation_families": "WH-01/13",
+      "setup": "Active new initialization profile with operational/lifecycle/delete variants",
+      "expected_assertions": "All non-initialization commands404 despite active new-card origin; status unchanged and outer rollback restores baseline",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 529,
+      "source_expanded_cases": 3,
+      "variants": [
+        {
+          "arguments": "operation",
+          "values": [
+            "operational",
+            "lifecycle",
+            "delete"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_renamed_warehouse_original_name_keeps_pk_collision_and_outer_rollback",
+      "preparation_families": "WH-02/07",
+      "setup": "Create deterministic ID, rename warehouse, formcreate original name",
+      "expected_assertions": "Old occupied PK IntegrityError retained; outer rollback preserves exact rows/history/stock/audits; no upsert or ID reuse invented",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 549,
+      "source_expanded_cases": 1,
+      "variants": []
+    },
+    {
+      "id": "test_known_opaque_history_blocks_delete_without_touching_link_or_zero_stock",
+      "preparation_families": "WH-19",
+      "setup": "Same-company ObjectLink point_of_service at parent/child × active/closed; zero stock exists",
+      "expected_assertions": "Generic409 without link identifiers/relation; links, warehouse, stock/history/audit unchanged after outer rollback",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 585,
+      "source_expanded_cases": 4,
+      "variants": [
+        {
+          "arguments": "end",
+          "values": [
+            "parent",
+            "child"
+          ]
+        },
+        {
+          "arguments": "closed",
+          "values": [
+            false,
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_foreign_tenant_opaque_link_is_neither_disclosed_nor_deleted",
+      "preparation_families": "WH-19",
+      "setup": "Only foreign-company ObjectLink to own warehouse, parent/child variants",
+      "expected_assertions": "Own unused warehouse may delete; response only old deleted/name; foreign links byte/value preserved, one outer audit; no foreign metadata disclosure",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "source_line": 601,
+      "source_expanded_cases": 2,
+      "variants": [
+        {
+          "arguments": "end",
+          "values": [
+            "parent",
+            "child"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test_delete_each_usage_guard_preserves_real_rows",
+      "preparation_families": "WH-18",
+      "source_line": 649,
+      "setup": "seven independent usage guards",
+      "expected_assertions": "active unit, nonzero stock and five movement/document history paths each block deletion409; full usage-model snapshots unchanged",
+      "variants": [
+        {
+          "arguments": "kind",
+          "values": [
+            "unit",
+            "spares",
+            "equipment_movement",
+            "spare_movement",
+            "equipment_doc",
+            "spare_doc",
+            "supply_doc"
+          ]
+        }
+      ],
+      "source_expanded_cases": 7,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_close_stock_guards_and_reopen_history_contract",
+      "preparation_families": "WH-14/15/16",
+      "source_line": 663,
+      "setup": "close/reopen",
+      "expected_assertions": "active unit/nonzero stock block409; zero stock, terminal unit and document history allow close/reopen; history preserved, no audit/effects",
+      "variants": [
+        {
+          "arguments": "kind,denied",
+          "values": [
+            [
+              "unit",
+              true
+            ],
+            [
+              "spares",
+              true
+            ],
+            [
+              "zero",
+              false
+            ],
+            [
+              "terminal",
+              false
+            ],
+            [
+              "equipment_doc",
+              false
+            ]
+          ]
+        }
+      ],
+      "source_expanded_cases": 5,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_zero_stock_delete_is_atomic_and_has_exactly_one_outer_audit",
+      "preparation_families": "WH-17/20/21",
+      "source_line": 687,
+      "setup": "zero-stock delete and two injected faults",
+      "expected_assertions": "real SQL cleanup then row deletion; success exactly one outer audit; fault after cleanup or outer audit add rolls back warehouse/stock/history",
+      "variants": [
+        {
+          "arguments": "fault",
+          "values": [
+            null,
+            "after_cleanup",
+            "outer_audit"
+          ]
+        }
+      ],
+      "source_expanded_cases": 3,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_common_owner_rejection_cannot_be_bypassed",
+      "preparation_families": "SRC-01",
+      "source_line": 740,
+      "setup": "six common-owner command denial spies, including both warehouse detail and metadata phases",
+      "expected_assertions": "Six named owner denial seams; actual helper create keeps LC.LocationConflict/status409, route/docs flows map HTTPException/status_code409; independent committed snapshot unchanged, one invocation, no effects. Supplementary architecture oracle only.",
+      "variants": [
+        {
+          "arguments": "flow,command",
+          "values": [
+            [
+              "operational",
+              "set_operational_status"
+            ],
+            [
+              "rename",
+              "update_warehouse_card"
+            ],
+            [
+              "rename",
+              "update_warehouse_details"
+            ],
+            [
+              "close",
+              "set_warehouse_status"
+            ],
+            [
+              "delete",
+              "delete_unused_warehouse"
+            ],
+            [
+              "create",
+              "create_warehouse"
+            ]
+          ]
+        }
+      ],
+      "source_expanded_cases": 6,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_selected_organization_is_preserved_without_new_native_join_policy",
+      "preparation_families": "OP-06/WH-13",
+      "source_line": 770,
+      "setup": "selected organization without ContractLocation join",
+      "expected_assertions": "operational and card writes retain current context; no newly imposed native org-join policy; rollback both",
+      "variants": [],
+      "source_expanded_cases": 1,
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN"
+    },
+    {
+      "id": "test_empty_legacy_context_keeps_existing_unrestricted_semantics",
+      "status": "NOTRUN",
+      "baseline_runtime": "UNKNOWN_NOT_EXECUTED",
+      "candidate_runtime": "NOTRUN",
+      "preparation_families": "OP-05/WH-13",
+      "setup": "Explicit [] object ContextVar under legacy semantics, operational/card variants",
+      "expected_assertions": "Legacy [] remains unrestricted; no new native EMPTY deny imposed; context remains []; rollback restores committed state",
+      "source_line": 785,
+      "source_expanded_cases": 2,
+      "variants": [
+        {
+          "arguments": "flow",
+          "values": [
+            "operational",
+            "warehouse"
+          ]
+        }
+      ]
+    }
+  ],
+  "test_function_count": 25,
+  "source_expanded_case_count": 80,
+  "counts_are_not_collection": true,
+  "runtime": {
+    "application_imports": 0,
+    "helper_framework_fixture_imports": 0,
+    "collection": 0,
+    "tests": 0,
+    "pure_controls": 0,
+    "SQL_HTTP_SSH_Docker_Node_browser_build_install": 0
+  },
+  "allowed_checks": "stdlib ast.parse + compile(AST,...,exec) in memory; SHA256; Git status/diff/diff-check. Compiled code object never executed; no pyc produced.",
+  "fixture_contract": {
+    "execution_owner": "ROOT only after source and schema freeze; no runtime authorization for worker B or coordinator",
+    "entrypoint": "direct route/service functions; real get_owned/assert_company_member, no auth dependency override, no app.main/ASGI/network",
+    "guards": [
+      "RUN_SERVICE_LOCATION_WRITER_CONVERGENCE_TESTS=1 before app/framework imports",
+      "partner_test_safety_error with this exact flag; explicit safe TEST_DATABASE_URL and absolute test UPLOAD_DIR",
+      "Fresh process: app.main/app.config must not be pre-imported; cwd has no .env; DATABASE_URL then set from validated TEST_DATABASE_URL",
+      "SERVICE_LOCATION_WRITER_SCHEMA_READY=1 explicitly supplied by ROOT after review; not proof of ownership by itself",
+      "--noconftest and explicit pytest_asyncio plugin; no existing db/native_world/world/setup_database fixture reused"
+    ],
+    "direct_tables": [
+      "companies",
+      "users",
+      "user_companies",
+      "service_locations",
+      "audit_events",
+      "ezs_equipment_units",
+      "ezs_equipment_movements",
+      "ezs_equipment_documents",
+      "ezs_spare_parts",
+      "ezs_spare_part_stock",
+      "ezs_spare_part_movements",
+      "ezs_spare_documents",
+      "ezs_supply_documents",
+      "object_links"
+    ],
+    "transitive_fk_tables": [
+      "regions",
+      "company_roles",
+      "counterparties",
+      "organizations",
+      "org_departments",
+      "data_entries",
+      "channels"
+    ],
+    "schema_assumption": "ROOT provisions all mapped columns, types/defaults/nullability/FKs/indexes and relevant production constraints for exact frozen model/schema. No DDL is emitted by tests. Table-name preflight is not schema equivalence. ROOT reviews import-time dependency closure and schema drift first.",
+    "scope": "install_orm_scope once in fresh process; ContextVars reset by fixture, never cleared inside mutation to bypass ceiling",
+    "seeds_per_case": "two companies, one ordinary actor (non-superadmin), one membership, three ServiceLocations; usage adds one spare/one unit/at most one stock or history record; known-history/delete-fault cases add one ObjectLink; collision/scoped-create cases at most one additional warehouse",
+    "bounds": {
+      "source_expanded_cases": 80,
+      "max_company_rows": 160,
+      "max_users": 80,
+      "max_location_rows": 320,
+      "max_additional_usage_rows_per_case": 4,
+      "pool_size": 3,
+      "max_overflow": 0,
+      "seed_documents": "synthetic dates/IDs only; no attachments or working data",
+      "payloads": "No files or bulk body: synthetic statuses length<=14; names/code<100; notes/reasons/addresses<100; phone old-phone; spare qty 0 or1; ISO date 2026-10-31. Bounded cases only; no concurrency/load assertion."
+    },
+    "transactions": "Seeds commit. Actual mutations use caller-owned AsyncSession, explicit commit or rollback. Assertions open independent sessions over same engine. Injected failure after SQL stock cleanup and at router audit add never commits. No savepoints or fixture-wide wrapping that would hide implicit helper commit.",
+    "cleanup": "No DROP/TRUNCATE/delete-all: synthetic rows remain until ROOT destroys disposable DB; no test executor, provisioner or migration runner added.",
+    "effect_seams": "Only stations_by_location and project_object are replaced with local observers. Projection reads actual flushed local row/audit; no HTTP. Remote effect rollback is not claimed."
+  },
+  "future_command": {
+    "status": "NOTRUN_PENDING_ROOT_FREEZE_AND_SCHEMA_REVIEW",
+    "command": "cd \"$ROOT_TEST_CWD\"\nenv PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=\"$ROOT_FROZEN_LEDGER/clearledger/server\" RUN_SERVICE_LOCATION_WRITER_CONVERGENCE_TESTS=1 SERVICE_LOCATION_WRITER_SCHEMA_READY=1 TEST_DATABASE_URL=\"$ROOT_APPROVED_TEST_DATABASE_URL\" UPLOAD_DIR=\"$ROOT_APPROVED_TEST_UPLOAD_DIR\" \"$ROOT_REVIEWED_PYTHON\" -m pytest -p pytest_asyncio.plugin --noconftest -q \"$ROOT_FROZEN_LEDGER/clearledger/server/tests/test_service_location_writer_convergence_20261031.py\" --junitxml=\"$ROOT_REPORT_DIR/service-location-writer-convergence.xml\"",
+    "variables": "All ROOT_* values assigned solely by ROOT; ROOT_TEST_CWD is absolute synthetic directory with no .env. URL/UPLOAD_DIR never guessed or printed."
+  },
+  "preserved_unknowns": [
+    {
+      "id": "NEW-SCOPED-WAREHOUSE",
+      "state": "ROOT_DIRECTION_IMPLEMENTED_SOURCE_FROZEN_NOTRUN",
+      "counterexample": "Legacy genuinely new full formcreate outside nonempty O preserved through private same-session/object/company/id/active-root persistent origin; details->card then consumed; existing-by-id entry revokes. General db.get/db.refresh revocation or global writer closure UNKNOWN. Tests are source-written NOTRUN."
+    },
+    {
+      "id": "DETERMINISTIC-ID-COLLISION-REUSE",
+      "state": "COLLISION_DIRECTION_CONFIRMED_RECREATION_UNKNOWN",
+      "counterexample": "Occupied renamed deterministic ID retains old PK error/rollback; unused-deleted identity formula stays unchanged and recreation/no-reuse remains UNKNOWN, no tombstone/number/history policy added."
+    },
+    {
+      "id": "OPAQUE-HISTORY",
+      "state": "KNOWN_OBJECTLINK_GUARD_APPROVED_NOTRUN_OTHER_HISTORY_UNKNOWN",
+      "counterexample": "ROOT adds only same-company ObjectLink point_of_service parent/child guard, any relation/current or closed; generic409, no foreign disclosure/deletion. Existing seven usage terms remain. Concurrent link insertion and unenumerated audit/other soft-history categories remain UNKNOWN."
+    },
+    {
+      "id": "LONG-NAME-SCHEMA",
+      "state": "BASELINE_RUNTIME_UNKNOWN",
+      "counterexample": "save_warehouse slices name[:300], model name is String(255); helper code=full name is String(100). No 256/300-name success asserted; no native name255 validation silently substituted."
+    },
+    {
+      "id": "LOCKS-RACES",
+      "state": "NOTRUN_UNKNOWN",
+      "counterexample": "Native lock functions unchanged; warehouse/operational acquire no new advisory/row locks. Concurrent ci-trim create, stale-card overwrite, delete-vs-movement and FK timing not proven serializable."
+    },
+    {
+      "id": "MALFORMED-LEGACY-METADATA",
+      "state": "PRESERVED_UNKNOWN",
+      "counterexample": "dict(loc.extra_metadata or {}) and warehouse subtree assumptions retained. Unknown warehouse child keys rebuilt by old workflow may be dropped; independent top-level subtrees retained. No repair policy invented."
+    },
+    {
+      "id": "TRUST-AUTH",
+      "state": "OUTSIDE_DIRECT_TEST_HARNESS",
+      "counterexample": "Tests call actual route functions with synthetic actor and real admission; do not execute get_current_user token/session/visit resolution or prove service/legacy/OAuth boundaries. Auth source unchanged; independent acceptance required."
+    },
+    {
+      "id": "NATIVE-REGRESSION",
+      "state": "NOTRUN",
+      "counterexample": "Existing native identifier/manual-name/null/number/history/lock suites untouched, not run. Native DELETE409 and CORE-B03/mirrorDelete unchanged by scope; no global source write closure claimed."
+    }
+  ],
+  "original_program": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "program_decision": "All 20M + 11 cross-cutting criteria retained unchanged; M05 and all global acceptance gates remain open. 15GET/OFF unchanged, no /api/v1 mutation exposure.",
+  "test_source_sha256": "b7e27f89f72f830606f6483d05475ec7571bb9d673ae8278ad88949d4d81d2e1",
+  "report_md_sha256": "0a7aae3566c2d64613a01f8adb2bc2d5823fdccdfa00d58c0488fb99e83b5729",
+  "source_preservation_checks": [
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "_barrier",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "91c2bc714d6300e705247d98ee8ddf857bc435c0c7f5c0073b8260ceb8bcdfba",
+      "observed_candidate_ast_sha256": "91c2bc714d6300e705247d98ee8ddf857bc435c0c7f5c0073b8260ceb8bcdfba",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "_locked",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "f206286626e56d7c96d0992d7a64fe4153430297c6523b8393ab4652bae61206",
+      "observed_candidate_ast_sha256": "f206286626e56d7c96d0992d7a64fe4153430297c6523b8393ab4652bae61206",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "_assert_visible",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "570a95bbb718beea53ad9fb78118eb959a810f3f576130f74f0a5338e78837f1",
+      "observed_candidate_ast_sha256": "570a95bbb718beea53ad9fb78118eb959a810f3f576130f74f0a5338e78837f1",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "merge_metadata",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "55502f9bb30f415faaa653497f71b860f87f0cfc913a1fc7bfe1595f8afc35a5",
+      "observed_candidate_ast_sha256": "55502f9bb30f415faaa653497f71b860f87f0cfc913a1fc7bfe1595f8afc35a5",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "_prepare",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "a45744150cbf5e314fe9ab283f206dd9d4fbdcb44c1f351288abbf1a8c184a2f",
+      "observed_candidate_ast_sha256": "a45744150cbf5e314fe9ab283f206dd9d4fbdcb44c1f351288abbf1a8c184a2f",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "_apply",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "0ab3688dfcbd6bbbae191591a278b715f2816e0d25769b3b78e7bbc86038d723",
+      "observed_candidate_ast_sha256": "0ab3688dfcbd6bbbae191591a278b715f2816e0d25769b3b78e7bbc86038d723",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "create",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "558b7286e956761b054224c9c2bc3a9ed9a436ccdff19b35a7b3c0cd4683c287",
+      "observed_candidate_ast_sha256": "558b7286e956761b054224c9c2bc3a9ed9a436ccdff19b35a7b3c0cd4683c287",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "update",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "8e9839298b876fdfc45525fa4a1d28994212abe5e6ffd1edcd75b103577555dd",
+      "observed_candidate_ast_sha256": "8e9839298b876fdfc45525fa4a1d28994212abe5e6ffd1edcd75b103577555dd",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "upsert",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "b0b5a2877776e2bf50d0015d44f413e69d63651cb0090472fd5c99823f0db954",
+      "observed_candidate_ast_sha256": "b0b5a2877776e2bf50d0015d44f413e69d63651cb0090472fd5c99823f0db954",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "acquire_location_set",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "fe6dc2fc8907a80c7b10e865b3b27629ff1eac4f16039f21af4d292d715e7925",
+      "observed_candidate_ast_sha256": "fe6dc2fc8907a80c7b10e865b3b27629ff1eac4f16039f21af4d292d715e7925",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "locked_visible_in_set",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "fa5fc35f487d6369479e4f30b3f10dc1e35d6ff404c18767c27e57fd4f5d546b",
+      "observed_candidate_ast_sha256": "fa5fc35f487d6369479e4f30b3f10dc1e35d6ff404c18767c27e57fd4f5d546b",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "symbol": "_warehouse_usage",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "bf86c4b2fbe276110c4fe75a860c4fb7f1d1ca0e1e9532555d24b3c0b117a4c3",
+      "observed_candidate_ast_sha256": "bf86c4b2fbe276110c4fe75a860c4fb7f1d1ca0e1e9532555d24b3c0b117a4c3",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "symbol": "warehouse_card",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "a07f074caf6f370c60b35b218091895885380ae6ffc8882dea295e17b6e8d28e",
+      "observed_candidate_ast_sha256": "a07f074caf6f370c60b35b218091895885380ae6ffc8882dea295e17b6e8d28e",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "symbol": "check_counterparty",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "008d4a613d1424b7ca82ea30289323fb9c984c9bc8080236fb81e9dc1391f0f7",
+      "observed_candidate_ast_sha256": "008d4a613d1424b7ca82ea30289323fb9c984c9bc8080236fb81e9dc1391f0f7",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "symbol": "check_contract",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "625803c8d8f5c871946cf2ed5cf7d16c7c898142b59f45576d146c7c5b59e260",
+      "observed_candidate_ast_sha256": "625803c8d8f5c871946cf2ed5cf7d16c7c898142b59f45576d146c7c5b59e260",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment.py",
+      "symbol": "_wh_loc_id",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "5b145d511ec97b7c33153f167543ca22270552e171ef9545a207440c8c8fe7a4",
+      "observed_candidate_ast_sha256": "5b145d511ec97b7c33153f167543ca22270552e171ef9545a207440c8c8fe7a4",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/ezs_equipment.py",
+      "symbol": "import_units_xlsx",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "e146d32f96fcbe7b2c2207954dbab0fde87996ef0102b1033a778dc385f4509d",
+      "observed_candidate_ast_sha256": "e146d32f96fcbe7b2c2207954dbab0fde87996ef0102b1033a778dc385f4509d",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/routers/locations_router.py",
+      "symbol": "delete_location",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "6d2a7eabb6874e3b911056c67c83b499613ad7238ea873caa3fc7bce208e2048",
+      "observed_candidate_ast_sha256": "6d2a7eabb6874e3b911056c67c83b499613ad7238ea873caa3fc7bce208e2048",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/routers/locations_router.py",
+      "symbol": "LocationIn",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "6128ea5c4d57890d3e079fa97bc7bc0e5135a48fe85f9257fd3cba983f26e535",
+      "observed_candidate_ast_sha256": "6128ea5c4d57890d3e079fa97bc7bc0e5135a48fe85f9257fd3cba983f26e535",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/routers/locations_router.py",
+      "symbol": "LocationUpdate",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "3858a9eff2e5f1301addd8a283591b5b69ffec899ba4be93f1b11caac83af9a6",
+      "observed_candidate_ast_sha256": "3858a9eff2e5f1301addd8a283591b5b69ffec899ba4be93f1b11caac83af9a6",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/routers/locations_router.py",
+      "symbol": "LocationOut",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "e09a0dbe8bc79a3421e16ad0fc5f4fc1e89089bd551d275f4bf9a270b7f7936d",
+      "observed_candidate_ast_sha256": "e09a0dbe8bc79a3421e16ad0fc5f4fc1e89089bd551d275f4bf9a270b7f7936d",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/routers/locations_router.py",
+      "symbol": "OpStatusBody",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "689183c12a724b9ac2918ce0f10be2872959d906b64e07335a8c1c2a21c12b8a",
+      "observed_candidate_ast_sha256": "689183c12a724b9ac2918ce0f10be2872959d906b64e07335a8c1c2a21c12b8a",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    },
+    {
+      "file": "clearledger/server/app/services/location_commands.py",
+      "symbol": "apply_existing_source_number_patch",
+      "status": "AST_IDENTICAL",
+      "base_ast_sha256": "2ec88ef7e086bc589e62a81210a24848ab158a29b3f5b7fba7424216fd117090",
+      "observed_candidate_ast_sha256": "2ec88ef7e086bc589e62a81210a24848ab158a29b3f5b7fba7424216fd117090",
+      "freeze": "VERIFIED_FROZEN_SOURCE_NOTRUN"
+    }
+  ],
+  "policy_decisions": {
+    "authority": "ROOT msg_b78ac8e3a4c3, relayed by coordinator msg_2b0cb71c761b",
+    "new_warehouse": "Preserve full legacy formcreate outside nonempty object scope only for actual newly created record; existing-resource ceiling mandatory; no generic bypass/context clearing",
+    "occupied_deterministic_id": "Preserve old PK-failure and caller rollback on old-name collision after rename; deleted-unused formula unchanged, no-reuse remains UNKNOWN",
+    "known_object_link_history": "Add generic409 guard for same-company ObjectLink parent OR child type point_of_service and exact warehouse id, any relation and any valid_to including closed; foreign-company links neither disclosed nor removed; concurrency and other history categories UNKNOWN"
+  },
+  "initialization_profile": {
+    "origin": "create_warehouse constructs/adds exact new object and records private same-session/root/company/id/object receipt; helper retains old flush; receipt requires persistent identity in issuing session/root",
+    "phases": "details receipt permits only update_warehouse_details then transitions to card; update_warehouse_card consumes/removes receipt. Existing-row warehouse_for_mutation revokes same-ID receipt before lookup. Operational/lifecycle/delete never consult it.",
+    "limits": "Not membership admission; not generic permission bypass; no context clearing, lock or transaction boundary. Arbitrary raw db.get/db.refresh or source writers outside selected entrypoints are not global revocation/ownership closure.",
+    "tests": "Behavioral PostgreSQL cases written for consumed/revoked/phase order, root/session boundaries, unrelated loaded target and other commands; NOTRUN."
+  }
+}
