@@ -1,0 +1,31 @@
+{
+  "status": "SOURCE_ONLY_NOTRUN",
+  "base": "8b512be5f54bc88340dfd0d20ff8129f829cb0cc",
+  "helper_source": "18d9061f5a9fa6671c128f3ad97d77490360f3cc",
+  "helper_files": "exact5 byte-identical",
+  "plan": [
+    [
+      "CompanyKey(server_company_uuid)",
+      "SHARED"
+    ],
+    [
+      "RefCompositeKey(server_company_uuid)",
+      "EXCLUSIVE"
+    ]
+  ],
+  "api": "require_scoped_locks(db.sync_session, prepared.capability, requiredtuple)",
+  "absent_contract": "legacy CP only; no B acquire",
+  "test_source": "test_store_contract_scoped_locks_pg.py",
+  "tests": "ALL NOTRUN including imports/collection; no case/pass claims",
+  "open": [
+    "INN pre-lock race/no under-lock recheck/different-CP matcher P1",
+    "full Store account-authority linearization",
+    "entire B",
+    "M00-M19",
+    "all 11 program conditions"
+  ],
+  "CREATE": "OFF",
+  "runtime_GO": false,
+  "working_data_GO": false,
+  "merge_deploy_GO": false
+}
