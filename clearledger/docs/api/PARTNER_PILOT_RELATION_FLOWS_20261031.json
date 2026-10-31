@@ -500,7 +500,7 @@
       "recordScope": "Every pre-existing top-level record is historical original PR86 preparation, including status/NOTRUN, provenance currentSha256, packageSourceManifest, markdownSha256, coordinatorReview and futureVerification; none is relabelled as current follow-up bytes.",
       "markdownSha256": "e100899808500c5ede6d97533e5901af0af8f9dae0f843144684b2b05324cfee",
       "jsonSha256": "7b65cca116b196908489b9886b0dc2b589bad0bfcb05d81594a9d0812cc2e102",
-      "preservation": "Markdown exact original prefix preserved; JSON original top-level values and original byte prefix before final closing brace preserved.",
+      "preservation": "Markdown exact original prefix and all original JSON top-level values preserved; JSON extension adds the required separator comma before its new top-level object.",
       "oldPr86BranchAndWorktree": "UNTOUCHED"
     },
     "changes": {
@@ -642,6 +642,65 @@
       "gates": 11,
       "status": "UNCHANGED; no readiness, completion or gate credit"
     },
-    "reportHashPolicy": "No recursive report self hash; complete four-path SHA256 and final commit are supplied in external worker handoff."
+    "reportHashPolicy": "No recursive report self hash; complete four-path SHA256 and final commit are supplied in external worker handoff.",
+    "rootEvidenceUpdate20261031": {
+      "messageId": "msg_b72babd54bd8",
+      "messageTimestampUtc": "2026-10-31T17:29:25Z",
+      "kind": "EXTERNAL_ROOT_OBSERVATION; COORDINATOR_READ_ARTIFACTS_WITHOUT_REEXECUTION",
+      "clarifiesUnknownFieldsInInitialReceipt": true,
+      "testedHead": "6e893817a9f4741eee555f9190d6977b73ffb4bc",
+      "testedUTCFromReceipt": "2026-10-31T17:24:44.419988+00:00",
+      "nodeVersion": "v22.23.2",
+      "cwdRelativeToRootWorktree": "clearledger/tools/partner-pilots/clients",
+      "unit": {
+        "command": "node --experimental-strip-types --test guards.test.ts relations.test.ts",
+        "exitReported": 0,
+        "tests": 16,
+        "pass": 16,
+        "fail": 0,
+        "skip": 0,
+        "durationMsFromTap": "325.223827",
+        "scope": "7 guards+9 pure mocked relation cases; not server ACL/OAuth/HTTP/SQL"
+      },
+      "typecheck": {
+        "command": "./node_modules/.bin/tsc -p tsconfig.json",
+        "exitReported": 0,
+        "outputReported": ""
+      },
+      "artifacts": [
+        {
+          "rootWorktree": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029",
+          "path": ".artifacts/pr86-root-review-20261031/source.json",
+          "sha256": "0812c6271395fa37e30b9a63e324bf3947352d6c71cca526bd916aa6c1954007",
+          "bytes": 1988
+        },
+        {
+          "rootWorktree": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029",
+          "path": ".artifacts/pr86-root-review-20261031/unit.tap",
+          "sha256": "878408802c3a83a6e8cd14af90da20729f151749af0e1f3b54551dd7605a878a",
+          "bytes": 3716,
+          "summaryLines": "98-106"
+        }
+      ],
+      "artifactReadingChecks": [
+        "source receipt unit.rawSHA256 equals actual TAP SHA256",
+        "TAP summary tests/pass16 fail0 skip0 and duration matches ROOT message",
+        "Node version, tested HEAD and tsc result read from source receipt; not observed by executing coordinator commands"
+      ],
+      "humanRootReport": {
+        "repository": "Electro-Interfaces/ClearLedger",
+        "commit": "8cb892b99f88f95bc1753b2776a4461009f34437",
+        "path": "clearledger/docs/api/PARTNER_PILOT_RELATION_ROOT_VERIFICATION_20261031.md"
+      },
+      "newFollowupNpmCommand": "NOTRUN by worker/coordinator; ROOT rerun pending",
+      "coordinatorExecution": 0,
+      "realHttpOAuthSqlSeedPilot": "NOTRUN; unit/TSC receipt gives no such acceptance"
+    },
+    "coordinatorStaticReview": {
+      "method": "Exact byte normalization read, single scripts.test:unit replacement and ten NOTRUN prefix removals; JSON/Git/hash and read-only ROOT artifact inspection",
+      "workerAuthoredCommit": "033eabe87597892e5a0131f12c43c638446e137f",
+      "sourceChangesAfterWorkerCommit": "NONE; coordinator updates only2reports with later ROOT evidence and precise JSON preservation wording",
+      "nodeNpmTscOrTestsExecuted": false
+    }
   }
 }
