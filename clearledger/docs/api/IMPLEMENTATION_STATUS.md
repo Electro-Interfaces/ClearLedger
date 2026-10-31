@@ -1,5 +1,36 @@
 # Партнёрский API: интеграционный кандидат
 
+## ROOT: Core45 и проверенная команда Поддержки · 31.10.2026
+
+CoreI5 принят по45различным ID в40отдельных сериях;12осталось: REC4 иOLDUP8.
+Все6LIFE приняты раздельно:66raw/1589CLI. Readiness принят корректирующим
+V3 над тем же58ac capture: ровно1source-derivedwarning вместе с typed503,
+actualDROP/childabsence и всеми прежними проверками. Native/SQL не повторялись.
+Полный prepare, повторный marker, no-jobs и disposal прошли на синтетической
+БД. Source15851/77deps, native exits, PID1 censuses, обычная очистка иPG0/0
+подтверждены. I5 остаётся отдельным компонентным составом, единого CI
+интеграционного HEAD нет. Зачёт полного prepare исправлен только после полной
+AST-деривации276статей/455связей; исходный отказ267/443 сохранён.
+
+Support PR27df13 перенесён в собственный кандидат PR28. Правило отмены заявок
+вынесено в отдельную команду; SQL342байта и остальная логика маршрута сохранены.
+ROOT получил23/23JS comparison PASS и3syntax PASS; отдельно подтверждены
+opt-in-off и два drift отказа до импорта. Это сравнение на синтетических ответах
+query, без PostgreSQL/HTTP/JWT/сервера/доставки;35логических вариантов не35тестов.
+Независимый reviewer подтвердил scoped source/artifact без новых findings.
+Следующий request-atomic пакет готовится отдельно в Run9bcd86c122a0; физические
+rollback/commit/concurrency ещё не проверены. Старые source-only отчёты сохранены.
+
+WSwireF2/P2 исправлен как source c2f849f3: проверка пустого public и эффективной
+схемы передDDL, actual placement после него. Независимый source review пройден;
+6wire+13old+13newcontrols NOTRUN, DDL compiler и3PID supervisor ещё требуются.
+PR90 diagnostics-only и новый PR91 kernel-admission остаются безruntime;
+A/exit0 не заменяют внешний controller/F и реальные kernel-проверки.
+Все20исходныхmilestones/11gates остаются открытыми, merge/deploy/flags0.
+
+[Проверка Поддержки](http://10.10.70.56:8000/api-platform-20261029/support-retirement-verification.html).
+
+
 Штатная команда клиента обновлена (source73b9be2d→ROOT621d1d53/c0bfc220): npm run test:unit выполняет guards.test.ts и relations.test.ts. ROOT подтвердил16PASS/0FAIL/0SKIP и npm run typecheck exit0 на совместном составе. Это повтор тех же16сценариев, не32различных; OAuth/HTTP/SQL остаются NOTRUN.
 
 Полный LIFE-full-prepare d9c778ca1859 выполнен отдельно: nativeготовность достигнута, но ROOT acceptorV1 отказал на подсчёте начальных статей/связей. В source-деривации пропущены два ARTICLES.extend (9статей/12связей); C исправляет только оснастку по полному AST, прежнийfreeze/raw сохраняется. До корректирующей проверки этот сценарий не принят, Core остаётся40/57; повторного запуска приложения не было.
