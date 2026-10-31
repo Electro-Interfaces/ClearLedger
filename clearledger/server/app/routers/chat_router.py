@@ -3180,32 +3180,28 @@ async def presence(
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
-async def _ws_user(token: str) -> User | None:
-    """Аутентификация WS по JWT из query (WS не шлёт заголовки).
-
-    Причина отказа пишется в журнал. Без неё отвергнутый апгрейд виден только как
-    403 в nginx: 25.10.2026 так разбирали 15 тыс. отказов в сутки с одного
-    браузера и причину нашли чтением кода, а не журнала. Токен в запись не
-    попадает — только почему он не принят.
-    """
-    from app.auth import session_valid
-    журнал = logging.getLogger("clearledger.chat")
+async def _ws_user(token: str, company_id: str | None = None, *, ws: WebSocket | None = None):
+    """Decode once; the manager retains only native claims/proofs, never Bearer."""
+    from app.services.chat_ws_session import SessionDenied
+    denied = None
     try:
+        if ws is not None and len(ws.query_params.getlist("company_id")) > 1:
+            raise SessionDenied("access_changed")
         payload = decode_token(token)
-        uid = uuid.UUID(payload.get("sub"))
-    except Exception:  # noqa: BLE001
-        журнал.info("WS чата отклонён: токен не разобран или просрочен")
-        return None
-    async with async_session_factory() as db:
-        user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
-    if user is None:
-        журнал.info("WS чата отклонён: пользователя %s больше нет", uid)
-        return None
-    # Отозванный вход (смена пароля, «выйти со всех устройств») гасит и чат.
-    if not session_valid(payload, user):
-        журнал.info("WS чата отклонён: сеанс %s отозван", uid)
-        return None
-    return user
+    except HTTPException as exc:
+        denied = SessionDenied("session_expired" if exc.detail == "Токен истёк" else "session_revoked")
+    except (ValueError, TypeError, OverflowError):
+        # JWT numeric-claim conversion can fail before native shape validation.
+        # Keep this boundary WS-only; the HTTP verifier keeps its old behavior.
+        denied = SessionDenied()
+    except SessionDenied as exc:
+        denied = exc
+    if denied is not None:
+        if ws is not None:
+            await manager.reject(ws, denied.code, denied.reason)
+        raise denied from None
+    token = ""
+    return await manager.admit(payload, company_id, ws=ws)
 
 
 async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
@@ -3231,55 +3227,45 @@ async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
 
 
 @router.websocket("/ws")
-async def chat_ws(ws: WebSocket, token: str = Query(...)):
-    user = await _ws_user(token)
-    if user is None:
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    cid = str(user.company_id) if user.company_id else None
-    became_online = await manager.connect(ws, str(user.id), cid)
-    await ws.send_json({"type": "connected", "userId": str(user.id)})
-    if became_online and cid:
-        await manager.broadcast(f"company:{cid}",
-                                {"type": "presence", "userId": str(user.id),
-                                 "userName": user.name, "online": True})
+async def chat_ws(ws: WebSocket, token: str = Query(...), company_id: str | None = Query(None)):
+    from app.services.chat_ws_session import SessionDenied
+    started = False
     try:
+        session, proof = await _ws_user(token, company_id, ws=ws)
+        token = ""  # no raw credential retained in application session metadata
+        cid = str(proof.company_id) if proof.company_id is not None else None
+        started = True
+        became_online = await manager.connect(ws, str(proof.user_id), cid,
+                                               session=session, proof=proof)
+        if not await manager.send(ws, {"type": "connected", "userId": str(proof.user_id)}):
+            return
+        if became_online and cid and manager.is_live(ws):
+            await manager.broadcast(f"company:{cid}",
+                {"type": "presence", "userId": str(proof.user_id),
+                 "userName": proof.user_name, "online": True}, actor=ws)
         while True:
             data = await ws.receive_json()
+            await manager.current(ws)
             mtype = data.get("type")
             if mtype == "ping":
-                await ws.send_json({"type": "pong"})
+                if not await manager.send(ws, {"type": "pong"}):
+                    return
             elif mtype == "subscribe":
-                ch = data.get("channel", "")
-                async with async_session_factory() as db:
-                    ok = await _ws_can_subscribe(user, ch, db)
-                if ok:
-                    manager.subscribe(ws, ch)
-                else:
-                    await ws.send_json({"type": "subscribe:denied", "channel": ch})
+                await manager.subscribe_current(ws, data.get("channel", ""), _ws_can_subscribe)
             elif mtype == "unsubscribe":
                 manager.unsubscribe(ws, data.get("channel", ""))
             elif mtype == "typing":
-                ch = data.get("channel", "")
-                if manager.is_subscribed(ws, ch):
-                    async with async_session_factory() as db:
-                        if not await _ws_can_subscribe(user,ch,db):
-                            manager.unsubscribe(ws,ch)
-                            continue
-                    await manager.broadcast(ch, {"type": "chat:typing", "userId": str(user.id),
-                                                 "userName": user.name}, exclude=ws)
+                await manager.typing_current(ws, data.get("channel", ""), _ws_can_subscribe)
+    except SessionDenied as exc:
+        if started:
+            await manager.close(ws, exc.code, exc.reason)
     except WebSocketDisconnect:
-        pass
-    except Exception:  # noqa: BLE001
+        manager.peer_disconnected(ws)
+    except Exception:  # same malformed/binary message boundary; no new error envelope
         pass
     finally:
-        uid, ucid, became_offline = await manager.disconnect(ws)
-        if became_offline and ucid:
-            async with async_session_factory() as db:
-                await db.execute(text("UPDATE users SET last_seen_at = now() WHERE id = :u"), {"u": uid})
-                await db.commit()
-            await manager.broadcast(f"company:{ucid}",
-                                    {"type": "presence", "userId": uid, "online": False})
+        if started:
+            await manager.close(ws)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Приложение «Чаты» — управление чатами пространства (только администраторы)

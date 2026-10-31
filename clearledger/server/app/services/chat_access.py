@@ -56,10 +56,10 @@ async def audit_foreign_access(room: ChatRoom, user: User, db: AsyncSession, *,
                     details={"roomId": str(room.id), "type": room.type})
 
 
-async def assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession, *,
+async def participant_eligibility(room_id: uuid.UUID, user: User, db: AsyncSession, *,
                              company_of: Callable[..., Awaitable[uuid.UUID]] | None = None,
                              chat_scope: Callable[..., Awaitable[str | None]] | None = None,
-                             audit_foreign: Callable[..., Awaitable[None]] | None = None) -> ChatRoom:
+                             ) -> tuple[ChatRoom, bool]:
     """Комната существует, активна, юзер в ней участник и она принадлежит ВЫБРАННОЙ
     организации — иначе 404 (не палим чужое).
 
@@ -70,7 +70,6 @@ async def assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession, *
     """
     company_of = company_of if company_of is not None else scope_company_id
     chat_scope = chat_scope if chat_scope is not None else chat_scope_of
-    audit_foreign = audit_foreign if audit_foreign is not None else audit_foreign_access
     room = await db.get(ChatRoom, room_id)
     if room is None or not room.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
@@ -101,7 +100,18 @@ async def assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession, *
         scope = await chat_scope(user, room.company_id, db)
         if scope and room.scope_product != scope:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
-    if p is None:
+    return room, p is None
+
+
+async def assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession, *,
+                             company_of: Callable[..., Awaitable[uuid.UUID]] | None = None,
+                             chat_scope: Callable[..., Awaitable[str | None]] | None = None,
+                             audit_foreign: Callable[..., Awaitable[None]] | None = None) -> ChatRoom:
+    """Прежний entrypoint: eligibility и прежний late-bound audit, без commit."""
+    audit_foreign = audit_foreign if audit_foreign is not None else audit_foreign_access
+    room, foreign = await participant_eligibility(
+        room_id, user, db, company_of=company_of, chat_scope=chat_scope)
+    if foreign:
         await audit_foreign(room, user, db)
     return room
 
