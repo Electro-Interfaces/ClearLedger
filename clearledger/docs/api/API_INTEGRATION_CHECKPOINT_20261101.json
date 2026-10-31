@@ -129,7 +129,12 @@
     "rootHead": "bcb2bbce54d62704f1afcf22924c7421f1a098fd",
     "guardTestsActualPassed": 16,
     "atomicSeamActualPassed": 22,
-    "physicalPG": "NOTRUN"
+    "physicalPG": {
+      "status": "ROOT_ACCEPTED_COMPONENT_PAIR_AFTER_INDEPENDENT_REVIEW",
+      "cases": 2,
+      "report": "PROJECTED_OBJECT_SYNC_PHYSICAL_PG_ROOT_VERIFICATION_20261101.md",
+      "sharedCore": "NOTRUN"
+    }
   },
   "reviewLimits": [
     "memory compile and hashes do not prove runtime parity",
@@ -140,5 +145,29 @@
   "nextImplementation": {
     "DX": "scoped parent lock implementation, then actual roles/member writers",
     "RootSchemaAuthor": "task_59227e1bdafa/ctx_b573a2312fc1; SOURCE ordinal4 0004_partner_contract_create reserved; explicit migration not working activation"
+  },
+  "serviceContractAlias": {
+    "root": "c8d05f9aef2002b1e03fb6d136b3cf4c76a9f171",
+    "actualTargetedTests": 16,
+    "guards": 3,
+    "PGMethods": 13,
+    "fail": 0,
+    "skip": 0,
+    "profile": "synthetic narrow4column and actual PG catalogue; not fullCore/installed203",
+    "SQL203Execution": "NOTRUN"
+  },
+  "contractCreateSchema4": {
+    "source": "e9223fc5269d392c696ba244c0ed566302dec66a",
+    "root": "2e9571889a4a74c9b08e8857e33cd92670d2fea4",
+    "sourceReview": "SOURCE_ACCEPTABLE",
+    "offlineActual": {
+      "tests": 23,
+      "new": 9,
+      "legacy": 14,
+      "fail": 0,
+      "skip": 0
+    },
+    "actualORMAndPG": "NOTRUN",
+    "oldCore55NotMovedTo4": true
   }
 }
