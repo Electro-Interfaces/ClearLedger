@@ -3,6 +3,9 @@
 Never execute, import, collect, or even invoke --help as a dispatched worker.
 ROOT must review this complete source and supply its SHA256, source HEAD and branch
 in a fresh CPython 3.13.7 -I -S -B process. Exact argv: --execute-approved-partner-dx.
+The separate --execute-approved-partner-dx-kernel-v1 entry requires seven extra
+closed environment keys and sealed A; it always reports EXTERNAL_FINAL_PENDING.
+Kernel launch capability/controller implementation remain UNKNOWN/NOTRUN.
 First use the separately approved --prepare-approved-partner-dx-cache mode in a
 Git checkout; ROOT reviews and SHA-pins its external prepare-cache.json. Execute
 accepts that sealed cache through DX_PREPARED_CACHE / DX_PREPARED_CACHE_SHA256,
@@ -41,7 +44,9 @@ import json
 import os
 from pathlib import Path
 import posix
+import posixpath
 import pwd
+import re
 import resource
 import _signal
 import signal
@@ -230,7 +235,7 @@ def private_empty(name):
     return path
 
 
-def approval():
+def legacy_approval():
     require(sys.argv[1:] in (["--execute-approved-partner-dx"], ["--prepare-approved-partner-dx-cache"]),
             "exact opt-in; no default/help execution")
     mode = "prepare" if sys.argv[1] == "--prepare-approved-partner-dx-cache" else "execute"
@@ -264,6 +269,455 @@ def approval():
     require(sys.getprofile() is None and sys.gettrace() is None, "no preexisting tracing hooks")
     os.umask(0o077)
     return mode, directories
+
+
+# Kernel v1 is an additional SOURCE-only admission path. These Python diagnostics
+# are not an OS sandbox or proof of the installed BPF/controller/image. Only the
+# trusted external controller can accept safety with F; this candidate emits no F.
+KERNEL = None
+KERNEL_EXTRA_ENV = frozenset({"DX_EXECUTION_MODE", "DX_ADMISSION_RECEIPT", "DX_ADMISSION_RECEIPT_SHA256",
+                              "DX_WORKLOAD_NONCE", "DX_KERNEL_POLICY_SHA256", "DX_EXPECTED_UID", "DX_EXPECTED_GID"})
+KERNEL_ADMISSION_PATH = "/inputs/admission/admission.json"
+KERNEL_POLICY_PATH = "/inputs/policy/execute-policy.json"
+KERNEL_JSON_LIMIT = 65536
+KERNEL_PROC_LIMIT = 131072
+
+# Closed literal type grammar, mirrored by PARTNER_DX_KERNEL_ADMISSION_V1.schema.json.
+# No third-party validator/import is used before the existing framework boundary.
+KERNEL_SHAPES = {
+    "A": {
+        "format": ("const", "elsy.partner-dx.kernel-admission.v1"), "phase": ("const", "ADMISSION"),
+        "clock": ("const", "CLOCK_MONOTONIC_MS"), "nonce": "H", "issued_ms": "N", "expires_ms": "N",
+        "candidate": "Candidate", "bindings": "Bindings", "namespaces": "Namespaces",
+        "mounts": ("list", "Mount", 12, 12), "quota": "Quota", "host_floor": "HostFloor", "controller": "Controller",
+    },
+    "Candidate": {
+        "uid": "N", "gid": "N", "supplementary_gids": ("list", "N", 0, 0), "home": "P",
+        "no_new_privs": ("const", 1), "seccomp_mode": ("const", 2),
+        "cap_inh": ("const", "0000000000000000"), "cap_prm": ("const", "0000000000000000"),
+        "cap_eff": ("const", "0000000000000000"), "cap_bnd": ("const", "0000000000000000"),
+        "cap_amb": ("const", "0000000000000000"),
+    },
+    "Bindings": {
+        "runner_sha256": "H", "source_head": "G", "source_branch": "Branch", "app_sha256": "H",
+        "tests_sha256": "H", "migrations_sha256": "H", "support_sha256": "H", "native_site_sha256": "H",
+        "versions_sha256": "H", "prepared_cache_sha256": "H", "policy_sha256": "H", "controller_sha256": "H",
+        "image_digest": "Image",
+    },
+    "Namespaces": {
+        "mnt": "D", "net": "D", "pid": "D", "ipc": "D", "user": "D", "time": "D",
+        "controller_mnt": "D", "controller_net": "D", "controller_pid": "D", "controller_ipc": "D",
+        "controller_user": "D", "controller_time": "D", "mountinfo_sha256": "H",
+    },
+    "Mount": {
+        "role": ("enum", ("rootfs", "source", "native_runtime", "venv", "policy", "admission", "cache",
+                           "work_pool", "cwd", "upload", "evidence", "scratch")),
+        "path": "P", "mount_id": "N", "major": "N", "minor": "N", "root": "P", "mount_point": "P",
+        "fs_type": ("ascii", 1, 32), "read_only": "Bool", "owner_uid": "N", "owner_gid": "N", "mode": "O",
+    },
+    "Quota": {
+        "kind": ("const", "shared-tmpfs-v1"), "pool_mount_id": "N", "max_bytes": ("const", 67108864),
+        "max_inodes": ("const", 133), "max_regular_entries": ("const", 128),
+        "file_max_bytes": ("const", 16777216), "hardlinks": ("const", "DENY_KERNEL_POLICY"),
+    },
+    "HostFloor": {
+        "threshold_bytes": ("const", 8589934592), "before": ("list", "HostSample", 1, 8),
+        "monitor_interval_ms": ("const", 1000), "max_sample_gap_ms": ("const", 1500),
+        "on_failure": ("const", "KILL_AND_REJECT"), "after_required": ("const", True),
+    },
+    "HostSample": {"storage_id": ("ascii", 1, 128), "measured_ms": "N", "free_bytes": "N"},
+    "Controller": {
+        "euid": "N", "policy_path": ("const", "/inputs/policy/execute-policy.json"),
+        "admission_sealed": ("const", True), "kernel_policy_loaded": ("const", True),
+        "external_watchdog_armed": ("const", True), "wall_ms": ("const", 180000),
+        "stdout_stderr_max_bytes": ("const", 8388608), "cpu_hard_seconds": ("const", 150),
+        "memory_max_bytes": ("const", 2147483648), "file_hard_bytes": ("const", 16777216),
+        "fd_hard_limit": ("const", 96), "pids_max": ("const", 1),
+    },
+    "F": {
+        "format": ("const", "elsy.partner-dx.kernel-final.v1"), "phase": ("const", "FINAL"),
+        "clock": ("const", "CLOCK_MONOTONIC_MS"), "nonce": "H", "admission_sha256": "H", "policy_sha256": "H",
+        "runner_sha256": "H", "source_head": "G", "exit_code": "N", "termination_signal": "N",
+        "host_floor": "FinalHostFloor", "output_bytes": "N", "artifacts_manifest_sha256": "H",
+        "source_before_sha256": "H", "source_after_sha256": "H", "runtime_before_sha256": "H",
+        "runtime_after_sha256": "H", "decision": ("enum", ("SAFETY_ACCEPTED", "REJECTED")),
+    },
+    "FinalHostFloor": {
+        "storage_results": ("list", "StorageResult", 1, 8), "status": ("enum", ("PASS", "FAIL")),
+    },
+    "StorageResult": {
+        "storage_id": ("ascii", 1, 128), "before_free": "N", "minimum_observed_during_free": "N", "after_free": "N",
+        "samples": "N", "max_gap_ms": "N",
+    },
+}
+KERNEL_PATTERNS = {
+    "H": "[0-9a-f]{64}", "G": "[0-9a-f]{40}", "D": "[1-9][0-9]*", "O": "[0-7]{4}",
+    "P": "/[A-Za-z0-9._/-]*", "Branch": "[A-Za-z0-9._/-]{1,200}", "Image": "sha256:[0-9a-f]{64}",
+}
+
+
+def kernel_canonical(value):
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii") + b"\n"
+
+
+def kernel_shape(value, shape):
+    if isinstance(shape, tuple):
+        kind = shape[0]
+        if kind == "const":
+            require(type(value) is type(shape[1]) and value == shape[1], "kernel exact typed constant")
+        elif kind == "enum":
+            require(type(value) is str and value in shape[1], "kernel enum")
+        elif kind == "ascii":
+            require(type(value) is str and value.isascii() and shape[1] <= len(value) <= shape[2], "kernel ASCII string")
+        elif kind == "list":
+            require(type(value) is list and shape[2] <= len(value) <= shape[3], "kernel array bound")
+            for item in value:
+                kernel_shape(item, shape[1])
+        else:
+            require(False, "unknown kernel grammar")
+    elif shape in KERNEL_SHAPES:
+        fields = KERNEL_SHAPES[shape]
+        require(type(value) is dict and set(value) == set(fields), "kernel closed fields " + shape)
+        for name, descriptor in fields.items():
+            kernel_shape(value[name], descriptor)
+    elif shape == "N":
+        require(type(value) is int and 0 <= value <= 2 ** 63 - 1, "kernel integer0..2^63-1 (not bool)")
+    elif shape == "Bool":
+        require(type(value) is bool, "kernel bool")
+    else:
+        require(type(value) is str and re.fullmatch(KERNEL_PATTERNS[shape], value, flags=re.ASCII) is not None,
+                "kernel string grammar " + shape)
+        if shape == "P":
+            require(posixpath.normpath(value) == value and not value.startswith("//")
+                    and ".." not in value.split("/"), "kernel normalized absolute POSIX path")
+
+
+def kernel_no_float(value):
+    raise RuntimeError("partner-DX ROOT gate: kernel JSON floats/NaN/Infinity forbidden")
+
+
+def kernel_json(raw, shape):
+    require(0 < len(raw) <= KERNEL_JSON_LIMIT, "kernel receipt65536 byte bound")
+    value = json.loads(raw.decode("ascii"), object_pairs_hook=unique_object,
+                       parse_float=kernel_no_float, parse_constant=kernel_no_float)
+    kernel_shape(value, shape)
+    require(raw == kernel_canonical(value), "kernel canonical ASCII sorted JSON with exactly one LF")
+    return value
+
+
+def kernel_path(value):
+    kernel_shape(value, "P")
+    path = Path(value)
+    require(lexical(path) == path, "kernel path without ANY symlink")
+    return path
+
+
+class KernelAdmission:
+    def __init__(self, directories):
+        self.directories = directories
+        self.proc_frame = None
+        self.proc_function = type(self).proc_bytes
+        self.proc_code = self.proc_function.__code__
+        self.proc_globals = self.proc_function.__globals__
+        self.diagnostic_functions = tuple((name, getattr(type(self), name), getattr(type(self), name).__code__)
+                                          for name in ("identity_check", "verify", "mounts_read", "storage_check"))
+        self.admission_path = kernel_path(os.environ["DX_ADMISSION_RECEIPT"])
+        require(str(self.admission_path) == KERNEL_ADMISSION_PATH, "fixed admission path")
+        self.policy_path = kernel_path(KERNEL_POLICY_PATH)
+        self.cache_path = kernel_path(os.environ["DX_PREPARED_CACHE"])
+        self.pool = next(iter(directories.values())).parent
+        self.uid, self.gid = (int(os.environ[key]) for key in ("DX_EXPECTED_UID", "DX_EXPECTED_GID"))
+        raw = bounded_bytes(self.admission_path, KERNEL_JSON_LIMIT)
+        self.admission_sha256 = sha(raw)
+        require(self.admission_sha256 == os.environ["DX_ADMISSION_RECEIPT_SHA256"], "independent raw SHA(A) including LF")
+        self.a = kernel_json(raw, "A")
+        self.external_state = {str(self.admission_path): self.admission_sha256,
+                               str(self.policy_path): os.environ["DX_KERNEL_POLICY_SHA256"]}
+        self.bindings_check()
+        self.startup_freshness()
+        ids = []
+        for sample in self.a["host_floor"]["before"]:
+            require(sample["free_bytes"] >= FREE_FLOOR
+                    and 0 <= self.a["issued_ms"] - sample["measured_ms"] <= 1000,
+                    "external physical storage pre-sample floor/freshness1000ms")
+            ids.append(sample["storage_id"])
+        require(len(ids) == len(set(ids)), "distinct external physical storage IDs")
+        self.verify()
+
+    def startup_freshness(self):
+        # Startup only, repeated after expensive source/site preflight and before
+        # closure/import. Post-run verification deliberately never calls this.
+        now_ms = time.monotonic_ns() // 1000000
+        require(self.a["issued_ms"] <= now_ms <= self.a["expires_ms"]
+                and self.a["expires_ms"] - self.a["issued_ms"] <= 30000, "startup monotonic admission freshness30s")
+
+    def bindings_check(self):
+        a, b = self.a, self.a["bindings"]
+        for key in ("DX_RUNNER_SHA256", "DX_PREPARED_CACHE_SHA256", "DX_KERNEL_POLICY_SHA256",
+                    "DX_ADMISSION_RECEIPT_SHA256", "DX_WORKLOAD_NONCE"):
+            kernel_shape(os.environ[key], "H")
+        kernel_shape(os.environ["DX_SOURCE_HEAD"], "G")
+        kernel_shape(os.environ["DX_SOURCE_BRANCH"], "Branch")
+        require(a["nonce"] == os.environ["DX_WORKLOAD_NONCE"] and b["runner_sha256"] == os.environ["DX_RUNNER_SHA256"]
+                and b["source_head"] == os.environ["DX_SOURCE_HEAD"] and b["source_branch"] == os.environ["DX_SOURCE_BRANCH"]
+                and b["prepared_cache_sha256"] == os.environ["DX_PREPARED_CACHE_SHA256"]
+                and b["policy_sha256"] == os.environ["DX_KERNEL_POLICY_SHA256"], "kernel independent launcher pins")
+        require(b["app_sha256"] == FROZEN["app"]["sha256"] and b["tests_sha256"] == FROZEN["tests"]["sha256"]
+                and b["migrations_sha256"] == FROZEN["schema_migrations"]["sha256"]
+                and b["native_site_sha256"] == FROZEN_SITE["sha256"]
+                and b["support_sha256"] == sha(kernel_canonical(SUPPORT))
+                and b["versions_sha256"] == sha(kernel_canonical(PINNED_DISTRIBUTIONS)), "kernel full frozen manifest bindings")
+        # controller_sha256/image_digest are sealed external attestations, NOT a
+        # self-proof of controller identity or of the installed seccomp BPF hash.
+
+    def proc_bytes(self, name):
+        paths = {"status": "/proc/self/status", "mountinfo": "/proc/self/mountinfo"}
+        require(name in paths and self.proc_frame is None, "fixed nonrecursive kernel diagnostic")
+        path = paths[name]
+        self.proc_frame = sys._getframe()
+        try:
+            # Proc reports st_size=0: bounded read, never regular-file bounded_bytes.
+            with open(path, "rb") as stream:
+                raw = stream.read(KERNEL_PROC_LIMIT + 1)
+            require(0 < len(raw) <= KERNEL_PROC_LIMIT, "fixed proc read131072 byte bound")
+            return raw
+        finally:
+            self.proc_frame = None
+
+    def diagnostic_open(self, args, boundary):
+        frame = sys._getframe(2)  # audit -> diagnostic_open; exact proc_bytes caller.
+        exact_reader = (boundary.kernel is self
+                and frame is self.proc_frame and frame.f_code is self.proc_code
+                and type(self).proc_bytes is self.proc_function and self.proc_function.__code__ is self.proc_code
+                and self.proc_function.__globals__ is self.proc_globals and frame.f_globals is self.proc_globals
+                and frame.f_locals.get("self") is self and frame.f_locals.get("path") == args[0]
+                and type(args[0]) is str and args[0] in ("/proc/self/status", "/proc/self/mountinfo")
+                and args[1] == "r" and type(args[2]) is int
+                and args[2] == (os.O_RDONLY | os.O_CLOEXEC))
+        if not exact_reader or not all(getattr(type(self), name) is function and function.__code__ is code
+                                       and function.__globals__ is self.proc_globals
+                                       for name, function, code in self.diagnostic_functions):
+            return False
+        codes = {name: code for name, function, code in self.diagnostic_functions}
+        parent = frame.f_back
+        if args[0] == "/proc/self/status":
+            chain = ("identity_check", "verify")
+        else:
+            chain = ("mounts_read", "storage_check")
+        for name in chain:
+            if (parent is None or parent.f_code is not codes[name] or parent.f_globals is not self.proc_globals
+                    or parent.f_locals.get("self") is not self):
+                return False
+            parent = parent.f_back
+        if args[0] == "/proc/self/status":
+            return boundary.phase == "postcheck"
+        # Storage admission also runs from run_pytest/write_json before postcheck.
+        # Permit only this exact source chain, not arbitrary proc reads by tests.
+        return (parent is not None and parent.f_globals is self.proc_globals and (
+            parent.f_code is codes["verify"] and parent.f_locals.get("self") is self and boundary.phase == "postcheck"
+            or parent.f_code is artifact_scan.__code__ and parent.f_locals.get("directories") is self.directories
+            and boundary.phase in {"pytest", "postcheck"}))
+
+    def identity_check(self):
+        fields = {}
+        for line in self.proc_bytes("status").decode("ascii").splitlines():
+            name, separator, value = line.partition(":")
+            require(separator and name not in fields, "unique proc status fields")
+            fields[name] = value.strip()
+        candidate = self.a["candidate"]
+        require(self.uid > 0 and self.gid > 0 and candidate["uid"] == self.uid and candidate["gid"] == self.gid,
+                "nonroot exact expected candidate UID/GID")
+        require(os.getuid() == os.geteuid() == self.uid and os.getresuid() == (self.uid,) * 3
+                and fields["Uid"].split() == [str(self.uid)] * 4, "real/effective/saved/fs UID match")
+        require(os.getgid() == os.getegid() == self.gid and os.getresgid() == (self.gid,) * 3
+                and fields["Gid"].split() == [str(self.gid)] * 4, "real/effective/saved/fs GID match")
+        require(os.getgroups() == [] and fields["Groups"].split() == [] and candidate["supplementary_gids"] == [],
+                "no supplementary groups")
+        require(str(kernel_path(candidate["home"])) == os.environ["HOME"] == pwd.getpwuid(self.uid).pw_dir,
+                "candidate actual HOME without symlinks")
+        require(fields["NoNewPrivs"] == "1" and fields["Seccomp"] == "2", "actual NoNewPrivs1/Seccomp2")
+        for receipt_key, status_key in (("cap_inh", "CapInh"), ("cap_prm", "CapPrm"), ("cap_eff", "CapEff"),
+                                        ("cap_bnd", "CapBnd"), ("cap_amb", "CapAmb")):
+            require(fields[status_key] == candidate[receipt_key] == "0000000000000000", "actual zero " + status_key)
+        ns = self.a["namespaces"]
+        # Fixed readlink names only; no arbitrary proc path or namespace traversal.
+        for name, path in (("mnt", "/proc/self/ns/mnt"), ("net", "/proc/self/ns/net"), ("pid", "/proc/self/ns/pid"),
+                           ("ipc", "/proc/self/ns/ipc"), ("user", "/proc/self/ns/user"), ("time", "/proc/self/ns/time")):
+            actual = os.readlink(path)
+            require(actual == name + ":[" + ns[name] + "]", "actual namespace inode " + name)
+            require((ns[name] == ns["controller_" + name]) if name in {"user", "time"}
+                    else (ns[name] != ns["controller_" + name]), "namespace separation/shared user and monotonic clock domain")
+
+    @staticmethod
+    def mount_unescape(value):
+        require(re.search(r"\\(?!040|011|012|134)", value) is None, "mountinfo recognized octal escapes")
+        return re.sub(r"\\(040|011|012|134)", lambda match: chr(int(match[1], 8)), value)
+
+    def mounts_read(self):
+        raw = self.proc_bytes("mountinfo")
+        require(sha(raw) == self.a["namespaces"]["mountinfo_sha256"], "entire raw final-namespace mountinfo SHA")
+        mounts = {}
+        for line in raw.decode("ascii").splitlines():
+            cells = line.split(" ")
+            require(cells.count("-") == 1, "mountinfo separator")
+            split = cells.index("-")
+            require(split >= 6 and len(cells) == split + 4 and all(cells), "mountinfo complete fields")
+            ids = (cells[0], cells[1], *cells[2].split(":"))
+            require(len(ids) == 4 and all(re.fullmatch(r"0|[1-9][0-9]*", value) for value in ids), "mountinfo decimal IDs/device")
+            mount_id, parent_id, major, minor = map(int, ids)
+            require(mount_id > 0 and mount_id not in mounts, "unique positive mount ID")
+            root, point = (self.mount_unescape(value) for value in cells[3:5])
+            require(root.startswith("/") and point.startswith("/") and posixpath.normpath(root) == root
+                    and posixpath.normpath(point) == point, "mountinfo absolute normalized paths")
+            flags = cells[5].split(",")
+            require(("ro" in flags) != ("rw" in flags) and len(flags) == len(set(flags)), "mountinfo actual vfs ro/rw flag")
+            mounts[mount_id] = {"mount_id": mount_id, "major": major, "minor": minor, "root": root,
+                                "mount_point": point, "fs_type": cells[split + 1], "read_only": "ro" in flags,
+                                "superoptions": cells[split + 3].split(",")}
+        require(mounts, "nonempty kernel mountinfo")
+        return mounts
+
+    def input_check(self, path, digest):
+        info, parent = path.stat(), path.parent.stat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == self.uid
+                and stat.S_IMODE(info.st_mode) == 0o400 and stat.S_ISDIR(parent.st_mode)
+                and parent.st_uid == self.uid and stat.S_IMODE(parent.st_mode) == 0o700,
+                "kernel readable owned0400 single-link input in owned0700 parent")
+        require(not path.is_relative_to(REPO) and not REPO.is_relative_to(path.parent)
+                and not any(path.is_relative_to(root) or root.is_relative_to(path.parent)
+                            or path.parent.is_relative_to(root) for root in self.directories.values()),
+                "kernel input separate from source/work dirs")
+        require(os.statvfs(path).f_flag & os.ST_RDONLY and os.statvfs(path.parent).f_flag & os.ST_RDONLY,
+                "kernel input and parent actually read-only")
+        require(sha(bounded_bytes(path, KERNEL_JSON_LIMIT if path == self.admission_path else MAX_FILE)) == digest,
+                "kernel external input bytes unchanged")
+
+    def storage_check(self):
+        mounts = self.mounts_read()
+        roles = {row["role"]: row for row in self.a["mounts"]}
+        expected = {"rootfs": Path("/"), "source": REPO, "native_runtime": STDLIB.parents[1], "venv": PREFIX,
+                    "policy": self.policy_path, "admission": self.admission_path, "cache": self.cache_path,
+                    "work_pool": self.pool, "cwd": self.directories["DX_EMPTY_CWD"], "upload": self.directories["DX_UPLOAD_DIR"],
+                    "evidence": self.directories["DX_EVIDENCE_DIR"], "scratch": self.directories["DX_SCRATCH_DIR"]}
+        require(len(roles) == 12 and set(roles) == set(expected), "exact12 distinct kernel mount roles")
+        for role, path in expected.items():
+            row = roles[role]
+            require(kernel_path(row["path"]) == path, "exact actual path for mount role " + role)
+            kernel_path(row["root"])
+            kernel_path(row["mount_point"])
+            candidates = [entry for entry in mounts.values() if path == Path(entry["mount_point"])
+                          or path.is_relative_to(Path(entry["mount_point"]))]
+            require(candidates, "mountinfo covering path")
+            longest = max(len(entry["mount_point"]) for entry in candidates)
+            selected = [entry for entry in candidates if len(entry["mount_point"]) == longest]
+            require(len(selected) == 1, "unambiguous most-specific mount (stacked mounts unsupported)")
+            actual = selected[0]
+            require(all(row[key] == actual[key] for key in ("mount_id", "major", "minor", "root", "mount_point", "fs_type", "read_only")),
+                    "actual mount ID/device/root/point/type/flags " + role)
+            info = path.stat()
+            require(os.major(info.st_dev) == row["major"] and os.minor(info.st_dev) == row["minor"]
+                    and info.st_uid == row["owner_uid"] and info.st_gid == row["owner_gid"]
+                    and format(stat.S_IMODE(info.st_mode), "04o") == row["mode"], "actual mount role device/owner/mode")
+            read_only = role not in {"work_pool", "evidence", "scratch"}
+            require(row["read_only"] is read_only and bool(os.statvfs(path).f_flag & os.ST_RDONLY) is read_only,
+                    "actual role RO/RW statvfs agrees with mountinfo")
+        require(all(path.parent == self.pool for path in self.directories.values())
+                and len(set(self.directories.values())) == 4, "four exact sibling pool directories")
+        pool_info = kernel_path(str(self.pool)).stat()
+        require(stat.S_ISDIR(pool_info.st_mode) and pool_info.st_uid == 0 and stat.S_IMODE(pool_info.st_mode) == 0o755,
+                "pool root owned by UID0 mode0755")
+        require(set(self.pool.iterdir()) == set(self.directories.values()), "pool root contains exactly four fixed directories")
+        pool_row = roles["work_pool"]
+        require(pool_row["fs_type"] == "tmpfs" and pool_row["mount_id"] == self.a["quota"]["pool_mount_id"]
+                and all(path.stat().st_dev == pool_info.st_dev for path in self.directories.values()), "one shared actual tmpfs quota")
+        for role in ("cwd", "upload", "evidence", "scratch"):
+            row, path = roles[role], expected[role]
+            require(row["fs_type"] == "tmpfs" and (row["major"], row["minor"]) == (pool_row["major"], pool_row["minor"]),
+                    "same tmpfs superblock for each work directory")
+            if row["mount_id"] != pool_row["mount_id"]:
+                require(row["root"] == posixpath.join(pool_row["root"], str(path.relative_to(self.pool)))
+                        and row["mount_point"] == str(path), "exact pool-backed per-directory bind mount")
+        options = {}
+        for option in mounts[pool_row["mount_id"]]["superoptions"]:
+            key, separator, value = option.partition("=")
+            require(key not in options, "unique tmpfs superoptions")
+            options[key] = value if separator else None
+        for key, maximum in (("size", MAX_ARTIFACT_BYTES), ("nr_inodes", 133)):
+            value = options.get(key)
+            require(type(value) is str and re.fullmatch(r"[1-9][0-9]*[kKmMgG]?", value) is not None,
+                    "explicit finite tmpfs " + key)
+            suffix = value[-1].lower()
+            amount = int(value[:-1]) * {"k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}[suffix] if suffix in "kmg" else int(value)
+            require(0 < amount <= maximum, "actual tmpfs total superoption bound " + key)
+        capacity = os.statvfs(self.pool)
+        require(0 < capacity.f_blocks * capacity.f_frsize <= MAX_ARTIFACT_BYTES and 0 < capacity.f_files <= 133,
+                "actual tmpfs TOTAL capacity64MiB/inodes133, not free space")
+        for path in self.directories.values():
+            info = kernel_path(str(path)).stat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == self.uid and stat.S_IMODE(info.st_mode) == 0o700
+                    and not path.is_relative_to(REPO) and not REPO.is_relative_to(path), "private pool directories preserved")
+        # Five fixed inodes + kernel link/linkat denial is an EXTERNAL policy
+        # attestation; Cap/Seccomp status cannot self-prove its BPF byte hash.
+
+    def verify(self):
+        self.bindings_check()
+        self.identity_check()
+        for path, digest in self.external_state.items():
+            self.input_check(kernel_path(path), digest)
+        parents = (self.admission_path.parent, self.policy_path.parent, self.cache_path.parent)
+        require(not any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
+                        for index, a in enumerate(parents) for b in parents[index + 1:]), "separate nonnested sealed input parents")
+        # Preserve the historical 0600 cache/0700 parent/nlink1 contract exactly.
+        sealed_cache(self.directories)
+        self.storage_check()
+        return {"safety_acceptance": "EXTERNAL_FINAL_PENDING", "clock": "CLOCK_MONOTONIC_MS",
+                "admission_sha256": self.admission_sha256, "nonce": self.a["nonce"],
+                "host_floor_during_after": "EXTERNAL_CONTROLLER_REQUIRED", "kernel_policy_self_proof": False}
+
+
+def kernel_approval():
+    global KERNEL
+    require(sys.argv[1:] == ["--execute-approved-partner-dx-kernel-v1"], "exact kernel v1 opt-in")
+    fixed = {"ROOT_APPROVED_PARTNER_DX": "1", "RUN_PARTNER_DX_METADATA": "1",
+             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
+             "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
+    variable = {"HOME", "DX_RUNNER_SHA256", "DX_SOURCE_HEAD", "DX_SOURCE_BRANCH", "DX_EMPTY_CWD", "DX_EVIDENCE_DIR",
+                "DX_SCRATCH_DIR", "DX_UPLOAD_DIR", "DX_PREPARED_CACHE", "DX_PREPARED_CACHE_SHA256"}
+    require(set(os.environ) == set(fixed) | variable | KERNEL_EXTRA_ENV
+            and all(os.environ[k] == v for k, v in fixed.items())
+            and os.environ["DX_EXECUTION_MODE"] == "kernel-controlled-v1", "exact kernel environment, no fallback")
+    for key in ("DX_EXPECTED_UID", "DX_EXPECTED_GID"):
+        kernel_shape(os.environ[key], "D")
+        require(int(os.environ[key]) <= 2 ** 63 - 1, "expected kernel ID integer bound")
+    require(os.environ["HOME"] == pwd.getpwuid(os.getuid()).pw_dir, "actual HOME preserved")
+    require(sys.version_info[:3] == (3, 13, 7) and sys.flags.isolated and sys.flags.no_site
+            and sys.flags.dont_write_bytecode and not sys.flags.optimize and sys.prefix == sys.base_prefix,
+            "CPython3.13.7 -I -S -B no optimization")
+    require(sys.executable == str(PREFIX / "bin/python") and Path(sys.executable).resolve() == STDLIB.parents[1] / "bin/python3.13",
+            "existing approved native interpreter")
+    require(not any(name in sys.modules for name in ("app", "pytest", "site", "pydantic", "sqlalchemy"))
+            and not any("site-packages" in path or path == "" for path in sys.path), "stdlib only before gate")
+    require(sha(bounded_bytes(SELF)) == os.environ["DX_RUNNER_SHA256"], "ROOT-reviewed full self SHA")
+    directories = {name: private_empty(name) for name in
+                   ("DX_EMPTY_CWD", "DX_EVIDENCE_DIR", "DX_SCRATCH_DIR", "DX_UPLOAD_DIR")}
+    values = list(directories.values())
+    require(Path.cwd() == directories["DX_EMPTY_CWD"] and len(set(values)) == 4
+            and not any(a != b and a.is_relative_to(b) for a in values for b in values), "four separate nonnested directories")
+    for root in (REPO, *values):
+        for ancestor in (root, *root.parents):
+            require(not (ancestor / ".env").exists() and not (ancestor / ".env").is_symlink(), "no ancestor dotenv")
+    require(KERNEL is None, "single kernel startup admission")
+    KERNEL = KernelAdmission(directories)
+    require(sys.getprofile() is None and sys.gettrace() is None, "no preexisting tracing hooks")
+    os.umask(0o077)
+    return "kernel-controlled-v1", directories
+
+
+def approval():
+    if sys.argv[1:] == ["--execute-approved-partner-dx-kernel-v1"]:
+        return kernel_approval()
+    # Old exact argv/closed env rejects unknown modes AND all kernel env keys.
+    return legacy_approval()
 
 
 class AbsoluteDeadline:
@@ -456,6 +910,7 @@ class Boundary:
         self.fd_census = None
         self.thread_census = None
         self.deadline = deadline
+        self.kernel = KERNEL
         self.checker_module = None
         self.checker_function = None
         self.checker_code = None
@@ -508,6 +963,8 @@ class Boundary:
             self.deny("open without native call gate")
         if not isinstance(args[0], (str, bytes, os.PathLike)):
             self.deny("file descriptor open")
+        if self.kernel is not None and len(args) == 3 and self.kernel.diagnostic_open(args, self):
+            return  # Exact identity/postcheck or storage-admission chain (pytest/postcheck); legacy lexical unchanged.
         path = lexical(args[0])
         mode = args[1] if len(args) > 1 else None
         flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
@@ -1151,7 +1608,10 @@ def artifact_scan(directories, *, reserve_count=0, reserve_bytes=0):
         total += signature["bytes"]
         require(count + reserve_count <= 128 and total + reserve_bytes <= MAX_ARTIFACT_BYTES,
                 "finite128files/64MiB including reserved final receipt")
-        require(os.statvfs(root).f_bavail * os.statvfs(root).f_frsize >= FREE_FLOOR, "post freefloor8GiB")
+        if KERNEL is None:
+            require(os.statvfs(root).f_bavail * os.statvfs(root).f_frsize >= FREE_FLOOR, "post freefloor8GiB")
+        else:
+            KERNEL.storage_check()
     return {"files": rows, "count": count, "bytes": total,
             "reserved_count": reserve_count, "reserved_bytes": reserve_bytes}
 
@@ -1184,6 +1644,8 @@ def postcheck(directories, original_env, proof, boundary, external_state):
 
     check("environment", environment)
 
+    if KERNEL is not None:
+        check("kernel_admission", KERNEL.verify)  # Startup expiry is deliberately NOT rechecked.
     check("artifacts", lambda: artifact_scan(directories))
     if boundary is not None:
         def closed_state():
@@ -1247,6 +1709,11 @@ def main():
                         "file_bytes": MAX_FILE, "stdout_stderr_bytes": MAX_OUTPUT,
                         "artifact_and_scratch_bytes": MAX_ARTIFACT_BYTES, "free_floor_bytes": FREE_FLOOR},
              "adapters": [], "phase": "preflight", "errors": []}
+    if KERNEL is not None:
+        proof["safety_acceptance"] = "EXTERNAL_FINAL_PENDING"
+        proof["admission_sha256"] = KERNEL.admission_sha256
+        proof["nonce"] = KERNEL.a["nonce"]
+        proof["clock"] = "CLOCK_MONOTONIC_MS"
     boundary, external_state, payload = None, {}, None
     deadline = AbsoluteDeadline(started)
     success = False
@@ -1261,6 +1728,9 @@ def main():
             success = True
         else:
             cache, proof["source"], external_state = sealed_cache(directories)
+            if KERNEL is not None:
+                external_state.update(KERNEL.external_state)
+                proof["kernel_before"] = KERNEL.verify()
             proof["sealed_cache_sha256"] = os.environ["DX_PREPARED_CACHE_SHA256"]
             require(Path(sys.base_prefix).absolute() == STDLIB.parents[1], "stdlib prefix binding")
             paths = []
@@ -1274,6 +1744,8 @@ def main():
             tempfile.tempdir = str(scratch)
             boundary = Boundary(directories, source_bindings, site_bindings, cache, external_state, deadline)
             proof["phase"] = "install_closed_boundary"
+            if KERNEL is not None:
+                KERNEL.startup_freshness()
             boundary.install()  # Always before app/framework imports, including package __init__.
             proof["adapters"].append(inert_database(boundary))
             proof["adapters"].extend([
@@ -1318,6 +1790,9 @@ def main():
     summary = {"ok": proof["ok"], "mode": mode, "receipt": str(evidence / "receipt.json"),
                "receipt_sha256": sha(bounded_bytes(evidence / "receipt.json")),
                "unproven": proof["unproven"]}
+    if KERNEL is not None:
+        summary.update({"safety_acceptance": "EXTERNAL_FINAL_PENDING", "admission_sha256": KERNEL.admission_sha256,
+                        "nonce": KERNEL.a["nonce"], "clock": "CLOCK_MONOTONIC_MS"})
     if proof.get("prepared_cache"):
         summary["prepared_cache"] = proof["prepared_cache"]
     sys.stdout.write(json.dumps(summary, sort_keys=True) + "\n")

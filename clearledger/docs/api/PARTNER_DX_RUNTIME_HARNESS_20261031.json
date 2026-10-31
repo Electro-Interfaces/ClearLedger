@@ -1,7 +1,7 @@
 {
   "format": 1,
   "kind": "partner-dx-runtime-harness-source-review",
-  "status": "SOURCE_FIX_REVIEWED_STATIC_ONLY_RUNTIME_NOTRUN",
+  "status": "KERNEL_ADMISSION_INDEPENDENT_SOURCE_REVIEW_COMPLETE_RUNTIME_NOTRUN",
   "runtimeExecutions": 0,
   "runtimeAcceptance": "NOTRUN",
   "runId": "run_1e4d8306c273",
@@ -11,28 +11,35 @@
   "ownership": {
     "pathsInitiallyAbsent": false,
     "paths": [
-      "clearledger/server/tests/partner_dx_metadata_approved.py",
       "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
       "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json"
     ],
     "onlyNewFiles": false,
     "noPushNoPR": true,
-    "followupScope": "F9/F10/F11: exactly3 existing paths relative to immutable PR85 HEAD; helper first commit, reports second; no push/PR"
+    "followupScope": "Reviewer B: exactly2 existing reports; author A exclusively helper+one new schema; composition4 paths relative exactPR87 parent"
   },
   "sourceFreeze": {
-    "helperCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
-    "helperSha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee",
-    "helperBytes": 85985,
-    "helperLines": 1333,
+    "helperCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+    "helperSha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+    "helperBytes": 116310,
+    "helperLines": 1808,
     "helperPath": "clearledger/server/tests/partner_dx_metadata_approved.py",
-    "authorBranch": "MagLook/partner-dx-harness-dirfd-fix-20261031",
+    "authorBranch": "MagLook/partner-dx-kernel-admission-author-20261031",
     "baseline": "725bee174f40b7155c87c38493b0581138da3ef0",
     "finalCompositionRepin": "UNKNOWN; separate reviewed ROOT whole-composition repin required",
     "helperInitialAuthorCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
-    "helperFixCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
-    "helperFixBranch": "MagLook/partner-dx-harness-dirfd-fix-20261031",
-    "fixScope": "F9 directory FD/native open/thread closure; F10 absolute fatal deadline and native timer/mask gate; F11 actual checker code/globals identity",
-    "exactParent": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4"
+    "helperFixCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+    "helperFixBranch": "MagLook/partner-dx-kernel-admission-author-20261031",
+    "fixScope": "Additional explicit kernel admission v1; helper plus one new documentation schema, preserving historical Python gates; K1/K2 source corrections",
+    "exactParent": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
+    "schemaPath": "clearledger/docs/api/PARTNER_DX_KERNEL_ADMISSION_V1.schema.json",
+    "schemaSha256": "3653efd446bc3f743f29eb85650cf78d4ed871d5cfc25827780a21adf8ac09ed",
+    "schemaBytes": 27254,
+    "schemaLines": 1011,
+    "legacyHelperCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+    "legacyHelperSha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee",
+    "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
+    "integratedSourceCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b"
   },
   "fullManifests": {
     "app": {
@@ -42357,7 +42364,7 @@
       "id": "F9",
       "issue": "open audit omits dir_fd; lexical cwd path can differ from native directory-relative target",
       "resolution": "Exact trusted os.open wrapper rejects dir_fd/int/directory flags/existing directories; preserved native posix.open identity is c_call-gated by exact active wrapper frame/code/globals/closure; finite inherited-FD/single-thread censuses and native thread-start denial close Python-thread gap",
-      "status": "FIX_AUTHORED_SOURCE_REASONING_ONLY_INDEPENDENT_REVIEW_PENDING",
+      "status": "HISTORICAL_PARTIAL_HOLD_NOT_SOURCE_CLOSED",
       "sourceRefs": [
         {
           "repo": "Electro-Interfaces/ClearLedger",
@@ -42410,13 +42417,14 @@
         }
       ],
       "runtimeVerification": "NOTRUN",
-      "sourceCounterexampleExecuted": false
+      "sourceCounterexampleExecuted": false,
+      "currentErratum": "Python diagnostics are not OS sandbox; kernel admission does not close native bypass or establish runtime control coverage"
     },
     {
       "id": "F10",
       "issue": "One-shot Python SIGALRM TimeoutError can be swallowed by postcheck BaseException and leave no wall timer",
       "resolution": "Absolute started+180 deadline; soft150 handler arms fatal SIG_DFL remainder before throwing; finally uses only absolute remainder; signal/alarm/setitimer/pthread_sigmask native identities gated, inherited SIGALRM mask rejected; every profile callback exception exits through pinned native _exit; first post entry pins min(absolute180,post_entry+30), every subsequent hard/post arm uses the same fixed target and work stage is one-shot pre-post",
-      "status": "FIX_AUTHORED_SOURCE_REASONING_ONLY_INDEPENDENT_REVIEW_PENDING",
+      "status": "HISTORICAL_PARTIAL_HOLD_NOT_SOURCE_CLOSED",
       "sourceRefs": [
         {
           "repo": "Electro-Interfaces/ClearLedger",
@@ -42469,7 +42477,8 @@
         }
       ],
       "runtimeVerification": "NOTRUN",
-      "sourceCounterexampleExecuted": false
+      "sourceCounterexampleExecuted": false,
+      "currentErratum": "Python diagnostics are not OS sandbox; kernel admission does not close native bypass or establish runtime control coverage"
     },
     {
       "id": "F11",
@@ -42501,6 +42510,81 @@
       ],
       "runtimeVerification": "NOTRUN",
       "sourceCounterexampleExecuted": false
+    },
+    {
+      "id": "K1",
+      "discoveredBy": "Coordinator; independently confirmed by reviewer B",
+      "beforeSourceReasoning": "Postcheck-only proc allowance rejected legitimate artifact admission from run_pytest/write_json before postcheck.",
+      "resolution": "Exact proc reader frame/code/globals/method pins plus identity_check->verify (postcheck) or mounts_read->storage_check->verify (postcheck)/artifact_scan (pytest/postcheck with exact directories); broad proc whitelist absent.",
+      "status": "SOURCE_CORRECTED_AND_INDEPENDENTLY_REREAD_RUNTIME_NOTRUN",
+      "runtime": "NOTRUN",
+      "executed": false,
+      "sourceRefs": [
+        {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 487,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1699,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1614,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
+          "meaning": "artifact_scan: explicit KERNEL.storage_check branch"
+        }
+      ],
+      "intermediateBeforeSha256": "898fd2117a57cf0c2c83cdac01520a6353c1de3544c21bb89863e96017657d0f",
+      "beforeFreeze": "Transient uncommitted author source, not a Git freeze; exact postcheck-only diagnostic branch read by coordinator/B"
+    },
+    {
+      "id": "K2",
+      "discoveredBy": "Reviewer B; accepted by third coordinator msg_eb277db9c6a1",
+      "beforeSourceReasoning": "Startup freshness was checked before expensive source/site/cache scans; a later verify did not recheck expiry before import.",
+      "resolution": "Separate startup_freshness immediately before Boundary.install after scans; verify/postcheck never call it, so expiry after startup does not shorten external180s window.",
+      "status": "SOURCE_CORRECTED_AND_INDEPENDENTLY_REREAD_RUNTIME_NOTRUN",
+      "runtime": "NOTRUN",
+      "executed": false,
+      "sourceRefs": [
+        {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 447,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1699,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1748,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
+          "meaning": "main: startup_freshness call immediately before Boundary.install"
+        }
+      ],
+      "beforeFreeze": "Transient uncommitted author source read before K2 correction; complete raw SHA not recorded, no invented before commit"
     }
   ],
   "limitations": [
@@ -42515,7 +42599,12 @@
     "F9/F10/F11 negative and allowed source cases are authored reasoning only; no syscall reproduction or positive/negative control execution",
     "Fatal SIGALRM and any profile callback exception terminate without guaranteed receipt; caught profile-denial escape does not return",
     "Whole-composition repin UNKNOWN; immutable PR85 parent remains2b81; no OS sandbox guarantee for native dependencies/external races",
-    "Initial deadline admission failure (including inherited blocked SIGALRM) may occur before main guarded try/finally; no receipt/postcheck guarantee, independent ROOT controller census required."
+    "Initial deadline admission failure (including inherited blocked SIGALRM) may occur before main guarded try/finally; no receipt/postcheck guarantee, independent ROOT controller census required.",
+    "Current authority is SOURCE-only code/docs in branch; no invocation skeleton is runtime authorization.",
+    "F9/F10 remain historical PARTIAL/HOLD; trusted_native_open_gate/absolute_fatal_deadline booleans express Python identity checks, not native isolation completeness.",
+    "Kernel A is startup-only and external physical-before attestation, never future during/after proof; F and controller required outside candidate.",
+    "Current exact immutable parent is PR87 1bf25045bfde8c8037e00edf929e10a1aa749e5c; older PR85 statements above are retained history.",
+    "No pure validator/helper function called even with synthetic data; all positive/negative cases are source reasoning NOTRUN."
   ],
   "typedImportClosure": {
     "actualApp": [
@@ -42829,252 +42918,429 @@
   "sourceReferences": {
     "approval": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 233,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 716,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "sources": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 176,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 181,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "inventory": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 160,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 165,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "expected_ids": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 190,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 195,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "git_prefetch": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 337,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 791,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.audit": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 479,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 934,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.profile": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 560,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1017,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.spec": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 647,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1104,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.install": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 675,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1132,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "inert_database": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 737,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1194,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "run_pytest": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 784,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1241,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "write_json": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 879,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1336,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "schema_exports": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 895,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1352,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "prepare_cache": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 1066,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1523,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "sealed_cache": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 1092,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1549,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "artifact_scan": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 1135,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1592,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "postcheck": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 1159,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1619,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "main": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 1237,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1699,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "FROZEN_SITE": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 92,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 97,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "NATIVE_OPEN": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 97,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 102,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "NATIVE_SIGNAL_CONTROLS": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 98,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 103,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "NATIVE_THREAD_STARTS": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 99,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 104,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "AbsoluteDeadline": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 269,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 723,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "AbsoluteDeadline.__init__.control": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 286,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 740,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "AbsoluteDeadline.trusted_call": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 314,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 768,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "AbsoluteDeadline.intact": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 320,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 774,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "inherited_fd_census": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 391,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 845,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "single_thread_census": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 421,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 875,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.profile_event": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 569,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1026,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.check_output": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 541,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 998,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.source_loader": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 616,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1073,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.source_loader.FrozenSource.exec_module": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 620,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1077,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     "Boundary.install.guarded_open": {
       "repo": "Electro-Interfaces/ClearLedger",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "line": 679,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "line": 1136,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "legacy_approval": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 238,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "kernel_approval": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 678,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "kernel_canonical": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 359,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "kernel_shape": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 363,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "kernel_json": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 399,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "kernel_path": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 408,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KERNEL_SHAPES": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 287,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 415,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.__init__": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 416,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.startup_freshness": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 447,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.bindings_check": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 454,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.proc_bytes": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 473,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.diagnostic_open": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 487,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.identity_check": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 521,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.mounts_read": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 556,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.input_check": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 580,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.storage_check": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 595,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "KernelAdmission.verify": {
+      "repo": "Electro-Interfaces/ClearLedger",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "line": 662,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     }
   },
   "sourceChecks": {
     "helperMatchesFrozenGitBlob": true,
-    "helperDeltaToBase": "Relative to exactPR85 parent2b81: three existing paths modified; app/test/schema/support bytes unchanged",
-    "helperUnmodifiedByReviewer": false,
+    "helperDeltaToBase": "Author exactPR87 delta2paths (helper modified/schema new); reviewer branch2 existing reports; coordinator composition4 paths (3 modified/1 added), integration not performed here",
+    "helperUnmodifiedByReviewer": true,
     "originalTestsByteUnchanged": true,
     "sourceBindingsVerified": 22,
     "gitCacheTuplesVerifiedAgainstActualReadonlyGit": 12,
-    "ASTAndInMemoryCompileOnly": "helper and2original tests AST-parsed/compiled in memory; compiled code never executed; no helper import/--help/controls/syscall proof",
+    "ASTAndInMemoryCompileOnly": "Frozen helper and2original tests AST parsed/in-memory compiled, code never executed; schema/examples JSON parse and AST/field metadata comparisons only; no pure helper/validator invocation",
     "pytestCollection": "NOTRUN",
     "runtimeExecutions": 0,
-    "helperChangeByReviewer": "F9/F10/F11 source edits; historical B8-only facts retained under priorPR85Provenance",
+    "helperChangeByReviewer": "NONE; reviewer B changed only2 existing reports",
     "canonicalSiteRowsGloballySorted": true,
     "canonicalSiteManifestMatchesActualFilesystem": true,
     "helperSingleShaCorrectionVsA": false,
     "B8RuntimeExecution": 0,
-    "newFindingCount": 3,
+    "newFindingCount": 2,
     "initialACommitDeltaToBase": {
       "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
       "newPaths": [
@@ -43094,15 +43360,47 @@
       "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
       "scope": "FROZEN_SITE.sha256 literal only;1 insertion/1 deletion"
     },
-    "exactImmutableParent": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4",
+    "exactImmutableParent": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
     "parentHelperBytesImmutable": true,
-    "helperFirstCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+    "helperFirstCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
     "wholeCompositionRepin": "UNKNOWN",
-    "staticPreservation": "AST equality against exact parent for constants/manifests,tree,sources,inventory,expected_ids,approval,bounded_bytes,run_pytest,schema_exports,write_json,artifact_scan,prepare_cache,sealed_cache,git_prefetch,inert_database,BoundedOutput; original test bytes identical; first5 resource limits identical",
-    "totalFindingCount": 11,
+    "staticPreservation": "24 AST units unchanged (approval body preserved under legacy_approval rename); all30 preexisting top-level assignment values unchanged; Boundary adds kernel diagnostic branch only; artifact_scan keeps exact legacy floor under KERNEL is None; postcheck/main add explicit kernel mode",
+    "totalFindingCount": 13,
     "helperUnmodifiedByCoordinator": true,
-    "preservedAstUnitsVerifiedByCoordinator": 21,
-    "previousPreparedCacheReuse": "DENY by runner SHA pin; regenerate/review exact new prepare-cache after this helper change"
+    "preservedAstUnitsVerifiedByCoordinator": 23,
+    "previousPreparedCacheReuse": "DENY runner SHA mismatch; fresh reviewed prepare-cache required after helper change",
+    "preservedAstUnitsVerifiedByReviewer": 24,
+    "preexistingTopAssignmentValuesVerifiedByReviewer": 30,
+    "schemaClosedObjectShapesCompared": 12,
+    "integratedSourceCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+    "cacheVerificationMeaning": "12 actual read-only Git tuple checks are historical evidence; current review proves exact GIT_CACHE_SHA/prepare_cache/sealed_cache AST unchanged, not fresh helper execution",
+    "preservedAstUnitNamesVerifiedByReviewer": [
+      "require",
+      "sha",
+      "encode",
+      "lexical",
+      "bounded_bytes",
+      "tree",
+      "inventory",
+      "sources",
+      "expected_ids",
+      "private_empty",
+      "approval",
+      "AbsoluteDeadline",
+      "set_limits",
+      "git_prefetch",
+      "inherited_fd_census",
+      "single_thread_census",
+      "inert_database",
+      "BoundedOutput",
+      "run_pytest",
+      "write_json",
+      "schema_exports",
+      "prepare_cache",
+      "unique_object",
+      "sealed_cache"
+    ],
+    "legacyApprovalBodyComparedSeparately": true
   },
   "finiteBounds": {
     "totalWallSeconds": 180,
@@ -43138,14 +43436,17 @@
     "kernelThreadCensusEntries": 2,
     "requiredKernelThreads": 1,
     "profileDenial": "FATAL_NATIVE_EXIT; no catch/reopen window; no guaranteed receipt",
-    "postcheckTarget": "Fixed once: min(started+180, first_post_entry+30); hard/post rearm never moves either target"
+    "postcheckTarget": "Fixed once: min(started+180, first_post_entry+30); hard/post rearm never moves either target",
+    "kernelModeStorage": "External physical host8GiB before/monitor/after; helper actual shared tmpfs total<=64MiB and<=133 inodes, source artifact128files/64MiB/16MiB unchanged; no fake statvfs",
+    "kernelExternalWatchdog": "CLOCK_MONOTONIC integer180000ms from candidate exec; ROOT implementation UNKNOWN/NOTRUN"
   },
   "futureRootInvocation": {
-    "status": "NOTRUN_SKELETON_ONLY",
+    "status": "HISTORICAL_LEGACY_SKELETON_NOT_RUNTIME_AUTHORIZATION",
     "prepare": "cd \"<PREPARE_EMPTY_CWD>\"\nenv -i HOME=\"<ACTUAL_PASSWD_HOME>\" PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \\\n ROOT_APPROVED_PARTNER_DX=1 RUN_PARTNER_DX_METADATA=1 \\\n PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 \\\n DX_RUNNER_SHA256=\"<REVIEWED_HELPER_SHA256>\" \\\n DX_SOURCE_HEAD=\"<FROZEN_GIT_SOURCE_HEAD>\" DX_SOURCE_BRANCH=\"<FROZEN_GIT_SOURCE_BRANCH>\" \\\n DX_EMPTY_CWD=\"<PREPARE_EMPTY_CWD>\" DX_EVIDENCE_DIR=\"<PREPARE_EVIDENCE_0700>\" \\\n DX_SCRATCH_DIR=\"<PREPARE_SCRATCH_0700>\" DX_UPLOAD_DIR=\"<PREPARE_UPLOAD_0700>\" \\\n /srv/projects/api-modernization-upgrade-test-env-20261030/.venv/bin/python -I -S -B \\\n \"<CLEAN_GIT_SOURCE>/clearledger/server/tests/partner_dx_metadata_approved.py\" \\\n --prepare-approved-partner-dx-cache",
     "execute": "cd \"<EXEC_EMPTY_CWD>\"\nenv -i HOME=\"<ACTUAL_PASSWD_HOME>\" PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \\\n ROOT_APPROVED_PARTNER_DX=1 RUN_PARTNER_DX_METADATA=1 \\\n PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 \\\n DX_RUNNER_SHA256=\"<REVIEWED_HELPER_SHA256>\" \\\n DX_SOURCE_HEAD=\"<SAME_FROZEN_GIT_SOURCE_HEAD>\" DX_SOURCE_BRANCH=\"<SAME_FROZEN_GIT_SOURCE_BRANCH>\" \\\n DX_EMPTY_CWD=\"<EXEC_EMPTY_CWD>\" DX_EVIDENCE_DIR=\"<EXEC_EVIDENCE_0700>\" \\\n DX_SCRATCH_DIR=\"<EXEC_SCRATCH_0700>\" DX_UPLOAD_DIR=\"<EXEC_UPLOAD_0700>\" \\\n DX_PREPARED_CACHE=\"<PREPARE_EVIDENCE_0700>/prepare-cache.json\" \\\n DX_PREPARED_CACHE_SHA256=\"<ROOT_REVIEWED_SEALED_CACHE_SHA256>\" \\\n /srv/projects/api-modernization-upgrade-test-env-20261030/.venv/bin/python -I -S -B \\\n \"<EXACT_SOURCE_COPY_WITH_OR_WITHOUT_GIT>/clearledger/server/tests/partner_dx_metadata_approved.py\" \\\n --execute-approved-partner-dx",
     "inputs": "ROOT reviewed self/sourceHEAD/branch/base/cacheSHA; actual HOME; secrets none; fresh owned0700 separate nonnested cwd/evidence/scratch/upload outside source; preclosure accepts no liveFD>2/directory stdio and exactly one kernel thread; inherited SIGALRM must be unblocked",
-    "finalCompositionRepin": "UNKNOWN; separate reviewed ROOT repin required before whole-final composition claims"
+    "finalCompositionRepin": "UNKNOWN; separate reviewed ROOT repin required before whole-final composition claims",
+    "kernelMode": "SOURCE SPECIFICATION ONLY: exact --execute-approved-partner-dx-kernel-v1 plus seven enumerated additional env keys, sealed A/policy/cache and external controller/F REQUIRED; controller implementation UNKNOWN, no executable launch recipe supplied"
   },
   "reviewChecklist": [
     {
@@ -43227,18 +43528,30 @@
   "packageFileManifest": [
     {
       "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
-      "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
-      "bytes": 85985,
-      "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "change": "MODIFIED_EXISTING",
+      "bytes": 116310,
+      "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_DX_KERNEL_ADMISSION_V1.schema.json",
+      "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "change": "NEW_OUTSIDE_FROZEN_TREES",
+      "bytes": 27254,
+      "sha256": "3653efd446bc3f743f29eb85650cf78d4ed871d5cfc25827780a21adf8ac09ed",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
     },
     {
       "path": "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
-      "bytes": 32190,
-      "sha256": "a3a7d59cbce238656bd18edb028347aeadef62a39fc1b1f0b82fca2a47608635"
+      "change": "MODIFIED_EXISTING",
+      "bytes": 43992,
+      "sha256": "6843c6cec4932675c16451fc8db93ba789d4893f69eedeaad846a8f3e81b5901"
     },
     {
       "path": "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json",
-      "selfHashPolicy": "No recursive self hash; complete file identified by final report Git commit and external coordinator SHA manifest"
+      "change": "MODIFIED_EXISTING",
+      "selfHashPolicy": "No recursive self hash; complete JSON identified by external report Git commit and coordinator outer SHA; no invented self commit/hash in its own bytes"
     }
   ],
   "originalReviewProvenance": {
@@ -43248,16 +43561,23 @@
     "scope": "B1-B7 original source review; B8 was subsequently discovered by coordinator; no runtime PASS"
   },
   "independentReview": {
-    "status": "COORDINATOR_STATIC_SOURCE_READ_COMPLETE",
+    "status": "WORKER_B_FROZEN_SOURCE_READ_COMPLETE",
     "run": "run_1e4d8306c273",
-    "reviewedHelperCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
-    "reviewedHelperSha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee",
-    "parent": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4",
-    "method": "Read changed raw source; AST and code-object inspection from memory-only compilation; compare21 unchanged AST units/constants/5RLIMIT calls/two original test bytes; verify manifests/hashes; helper NEVER imported or executed",
-    "additionalCorrection": "Coordinator found loss of postcheck30 cap in initial b320 source; fixed target min(absolute180,entry+30) independently reread in f75e source",
-    "helperModifiedByCoordinator": false,
-    "runtimeApproval": "NOTRUN; no controls or syscall proof executed",
-    "wholeCompositionRepin": "UNKNOWN"
+    "taskId": "task_43f2335f8f8e",
+    "dispatchId": "ctx_d418019efdd2",
+    "reviewedHelperCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+    "reviewedHelperSha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+    "schemaSha256": "3653efd446bc3f743f29eb85650cf78d4ed871d5cfc25827780a21adf8ac09ed",
+    "parent": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
+    "method": "Read actual author bytes and match Git blobs; AST/hash/JSON/compile only, never import or execute candidate code; compare closed schema fieldsets/descriptors as data; examples only JSON parsed",
+    "helperModifiedByReviewer": false,
+    "findingsClosedBySourceOnly": [
+      "K1",
+      "K2"
+    ],
+    "runtimeApproval": "NONE; runtime0/NOTRUN",
+    "wholeCompositionRepin": "UNKNOWN",
+    "reviewedAuthoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
   },
   "priorPR85Provenance": {
     "head": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4",
@@ -43691,6 +44011,1666 @@
     "Single kernel thread and no external FD mutation during finite preclosure census; at most one vanished listing FD after iterator close",
     "No external filesystem path/symlink races; native/Rust internal threads and unaudited C syscalls are not covered by Python gates",
     "Kernel signal delivery/scheduling and actual framework compatibility are not measured; fatal expiry/denial requires independent ROOT controller census",
-    "Initial deadline admission failure (including inherited blocked SIGALRM) may occur before main guarded try/finally; no receipt/postcheck guarantee, independent ROOT controller census required."
-  ]
+    "Initial deadline admission failure (including inherited blocked SIGALRM) may occur before main guarded try/finally; no receipt/postcheck guarantee, independent ROOT controller census required.",
+    "Trusted external ROOT controller, independent launcher pins, frozen namespace/mount layout and nonreused nonce are required; A hash/owner/RO cannot prove host facts, installed BPF policy or final controller outcome from inside candidate."
+  ],
+  "priorPR87Provenance": {
+    "head": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
+    "historical": true,
+    "status": "SOURCE_FIX_REVIEWED_STATIC_ONLY_RUNTIME_NOTRUN",
+    "ownership": {
+      "pathsInitiallyAbsent": false,
+      "paths": [
+        "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json"
+      ],
+      "onlyNewFiles": false,
+      "noPushNoPR": true,
+      "followupScope": "F9/F10/F11: exactly3 existing paths relative to immutable PR85 HEAD; helper first commit, reports second; no push/PR"
+    },
+    "sourceFreeze": {
+      "helperCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "helperSha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee",
+      "helperBytes": 85985,
+      "helperLines": 1333,
+      "helperPath": "clearledger/server/tests/partner_dx_metadata_approved.py",
+      "authorBranch": "MagLook/partner-dx-harness-dirfd-fix-20261031",
+      "baseline": "725bee174f40b7155c87c38493b0581138da3ef0",
+      "finalCompositionRepin": "UNKNOWN; separate reviewed ROOT whole-composition repin required",
+      "helperInitialAuthorCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+      "helperFixCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "helperFixBranch": "MagLook/partner-dx-harness-dirfd-fix-20261031",
+      "fixScope": "F9 directory FD/native open/thread closure; F10 absolute fatal deadline and native timer/mask gate; F11 actual checker code/globals identity",
+      "exactParent": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4"
+    },
+    "sourceChecks": {
+      "helperMatchesFrozenGitBlob": true,
+      "helperDeltaToBase": "Relative to exactPR85 parent2b81: three existing paths modified; app/test/schema/support bytes unchanged",
+      "helperUnmodifiedByReviewer": false,
+      "originalTestsByteUnchanged": true,
+      "sourceBindingsVerified": 22,
+      "gitCacheTuplesVerifiedAgainstActualReadonlyGit": 12,
+      "ASTAndInMemoryCompileOnly": "helper and2original tests AST-parsed/compiled in memory; compiled code never executed; no helper import/--help/controls/syscall proof",
+      "pytestCollection": "NOTRUN",
+      "runtimeExecutions": 0,
+      "helperChangeByReviewer": "F9/F10/F11 source edits; historical B8-only facts retained under priorPR85Provenance",
+      "canonicalSiteRowsGloballySorted": true,
+      "canonicalSiteManifestMatchesActualFilesystem": true,
+      "helperSingleShaCorrectionVsA": false,
+      "B8RuntimeExecution": 0,
+      "newFindingCount": 3,
+      "initialACommitDeltaToBase": {
+        "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+        "newPaths": [
+          "clearledger/server/tests/partner_dx_metadata_approved.py"
+        ]
+      },
+      "finalB8BranchDeltaToBase": {
+        "newPaths": [
+          "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
+          "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json"
+        ],
+        "count": 3,
+        "existingPathsChanged": 0
+      },
+      "B8CommitDeltaToParent": {
+        "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+        "scope": "FROZEN_SITE.sha256 literal only;1 insertion/1 deletion"
+      },
+      "exactImmutableParent": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4",
+      "parentHelperBytesImmutable": true,
+      "helperFirstCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "wholeCompositionRepin": "UNKNOWN",
+      "staticPreservation": "AST equality against exact parent for constants/manifests,tree,sources,inventory,expected_ids,approval,bounded_bytes,run_pytest,schema_exports,write_json,artifact_scan,prepare_cache,sealed_cache,git_prefetch,inert_database,BoundedOutput; original test bytes identical; first5 resource limits identical",
+      "totalFindingCount": 11,
+      "helperUnmodifiedByCoordinator": true,
+      "preservedAstUnitsVerifiedByCoordinator": 21,
+      "previousPreparedCacheReuse": "DENY by runner SHA pin; regenerate/review exact new prepare-cache after this helper change"
+    },
+    "independentReview": {
+      "status": "COORDINATOR_STATIC_SOURCE_READ_COMPLETE",
+      "run": "run_1e4d8306c273",
+      "reviewedHelperCommit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+      "reviewedHelperSha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee",
+      "parent": "2b81ce6b9bc9ed2558aff41fe519ae259406b1d4",
+      "method": "Read changed raw source; AST and code-object inspection from memory-only compilation; compare21 unchanged AST units/constants/5RLIMIT calls/two original test bytes; verify manifests/hashes; helper NEVER imported or executed",
+      "additionalCorrection": "Coordinator found loss of postcheck30 cap in initial b320 source; fixed target min(absolute180,entry+30) independently reread in f75e source",
+      "helperModifiedByCoordinator": false,
+      "runtimeApproval": "NOTRUN; no controls or syscall proof executed",
+      "wholeCompositionRepin": "UNKNOWN"
+    },
+    "sourceReferences": {
+      "approval": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 233,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "sources": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 176,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "inventory": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 160,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "expected_ids": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 190,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "git_prefetch": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 337,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.audit": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 479,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.profile": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 560,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.spec": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 647,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.install": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 675,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "inert_database": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 737,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "run_pytest": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 784,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "write_json": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 879,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "schema_exports": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 895,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "prepare_cache": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 1066,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "sealed_cache": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 1092,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "artifact_scan": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 1135,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "postcheck": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 1159,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "main": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 1237,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "FROZEN_SITE": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 92,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "NATIVE_OPEN": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 97,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "NATIVE_SIGNAL_CONTROLS": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 98,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "NATIVE_THREAD_STARTS": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 99,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "AbsoluteDeadline": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 269,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "AbsoluteDeadline.__init__.control": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 286,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "AbsoluteDeadline.trusted_call": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 314,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "AbsoluteDeadline.intact": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 320,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "inherited_fd_census": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 391,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "single_thread_census": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 421,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.profile_event": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 569,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.check_output": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 541,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.source_loader": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 616,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.source_loader.FrozenSource.exec_module": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 620,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      "Boundary.install.guarded_open": {
+        "repo": "Electro-Interfaces/ClearLedger",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "line": 679,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      }
+    },
+    "reviewFindings": [
+      {
+        "id": "B1",
+        "issue": "Загрузчик отвергал настоящий пакет tests",
+        "resolution": "Добавлен точный hash binding tests/__init__.py; conftest по-прежнему запрещён",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 478,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 478,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B2",
+        "issue": "Счётчик pytest.main использовал неверное имя модуля",
+        "resolution": "Проверяются origin/hash настоящего _pytest.config.main; profile считает точный code object и требует один вызов",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 588,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 431,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 588,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            },
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 431,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B3",
+        "issue": "mkdir допускал аргумент dir_fd",
+        "resolution": "Проверяется точная audit signature и отвергается fd-relative mkdir; запись вне разрешённых путей запрещена",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 359,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 359,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B4",
+        "issue": "Postcheck полного SITE конфликтовал с3044 существующими .pyc",
+        "resolution": "Чтение pinned SITE .pyc разрешено только точной цепочке code frames postcheck/inventory/tree/bounded_bytes для хеширования; imports загружают проверенные .py, phase устанавливается перед postcheck",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 359,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 463,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 963,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 359,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            },
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 463,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            },
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 963,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B5",
+        "issue": "AST ID и limits проверялись до guarded try",
+        "resolution": "Сначала создаётся минимальный proof; limits и AST IDs находятся внутри try/finally; preapproval failure явно не обещает receipt",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1020,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 1020,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B6",
+        "issue": "Поздние файлы и FAIL receipt обходили общий лимит",
+        "resolution": "Перед каждым JSON open writer резервирует один файл и точный encoded размер; output/JUnit резервируются отдельно, поздние файлы попадают в final scan; отказ admission не создаёт лишний файл",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 683,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 588,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 939,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1020,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 683,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            },
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 588,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            },
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 939,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            },
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 1020,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B7",
+        "issue": "Генератор объявления ошибочно считался runtime function",
+        "resolution": "Разрешён только frozen genexpr queries.py:23 с точными filename/line и same-globals caller <module> для метаданных CONTRACT_TYPES; Query и остальные функции запрещены",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 431,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "originalResolutionProvenance": {
+          "helperCommit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+          "helperSha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342",
+          "sourceRefs": [
+            {
+              "repo": "Electro-Interfaces/ClearLedger",
+              "commit": "8c31d7f79962d6958914a97492c0d47901a1580d",
+              "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+              "line": 431,
+              "sha256": "28b0b7f6b3120b04fe93b21b143feb8c44e232d61fe8eef57360c4fbcdf55342"
+            }
+          ],
+          "reportsCommit": "159f5915f4f679caf0bf70f049a9a41b1132cab9",
+          "runtimeVerification": "NOTRUN"
+        }
+      },
+      {
+        "id": "B8",
+        "issue": "Порядок SITE rows в исходном JSON не совпадал с глобальным rows.sort в helper.tree; исходный FROZEN_SITE SHA вызывал детерминированный отказ",
+        "discoveredBy": "coordinator orca_session_id:codex_f3a0b977_0646_472c_867e_4e2533a6450b",
+        "independentlyConfirmedBy": "review worker task_2d9d26cdcbe8 / ctx_2b41ac3c90d2",
+        "resolution": "Единственная замена FROZEN_SITE.sha256; site.rows глобально отсортированы и совпадают с независимым stdlib filesystem manifest",
+        "status": "RESOLVED_IN_FROZEN_SOURCE_NOT_RUNTIME_VERIFIED",
+        "previousErroneousOrderSha256": "937b3668aef208860ab8ea14b49caf13c1b8d9367932c809a051ee3a712386c2",
+        "canonicalSortedSha256": "49071b9c07b1fe65baf287e952e9b3c98907ee92f9434c0f30d151d513f8bec2",
+        "firstOldOrderMismatch": [
+          "aiofiles/__init__.py",
+          "aiofiles-24.1.0.dist-info/INSTALLER"
+        ],
+        "count": 7245,
+        "bytes": 169999373,
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "2f14a1840f451fc8784e30b904e70a307e672d16",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 88,
+            "sha256": "cb08651807954ea9b31a1bbb3e21b2ef89eb8e46ceb2e110340e008fcf7d6455",
+            "integratedCommit": "7f954a80af5b5f8ba5098c13d7d5deef861d0d8a"
+          }
+        ],
+        "runtimeExecutions": 0
+      },
+      {
+        "id": "F9",
+        "issue": "open audit omits dir_fd; lexical cwd path can differ from native directory-relative target",
+        "resolution": "Exact trusted os.open wrapper rejects dir_fd/int/directory flags/existing directories; preserved native posix.open identity is c_call-gated by exact active wrapper frame/code/globals/closure; finite inherited-FD/single-thread censuses and native thread-start denial close Python-thread gap",
+        "status": "FIX_AUTHORED_SOURCE_REASONING_ONLY_INDEPENDENT_REVIEW_PENDING",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 679,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 560,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 569,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 391,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 421,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 479,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1159,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          }
+        ],
+        "runtimeVerification": "NOTRUN",
+        "sourceCounterexampleExecuted": false
+      },
+      {
+        "id": "F10",
+        "issue": "One-shot Python SIGALRM TimeoutError can be swallowed by postcheck BaseException and leave no wall timer",
+        "resolution": "Absolute started+180 deadline; soft150 handler arms fatal SIG_DFL remainder before throwing; finally uses only absolute remainder; signal/alarm/setitimer/pthread_sigmask native identities gated, inherited SIGALRM mask rejected; every profile callback exception exits through pinned native _exit; first post entry pins min(absolute180,post_entry+30), every subsequent hard/post arm uses the same fixed target and work stage is one-shot pre-post",
+        "status": "FIX_AUTHORED_SOURCE_REASONING_ONLY_INDEPENDENT_REVIEW_PENDING",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 269,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 286,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 314,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 560,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 569,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1237,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1159,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          }
+        ],
+        "runtimeVerification": "NOTRUN",
+        "sourceCounterexampleExecuted": false
+      },
+      {
+        "id": "F11",
+        "issue": "Filename/co_name/globals name caller check is forgeable with different compiled code/globals",
+        "resolution": "Hash-pinned checker module code owns the one immediate git co_consts code; loader pins actual git function/code/module/globals; bridge requires exact caller code+globals and current function integrity; postcheck verifies again",
+        "status": "FIX_AUTHORED_SOURCE_REASONING_ONLY_INDEPENDENT_REVIEW_PENDING",
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 620,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 541,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1159,
+            "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+          }
+        ],
+        "runtimeVerification": "NOTRUN",
+        "sourceCounterexampleExecuted": false
+      }
+    ],
+    "sourceProofCases": [
+      {
+        "finding": "F9",
+        "case": "wrapper non-None dir_fd (including -1) / int path",
+        "sourceExpectedOutcome": "DENY_BEFORE_NATIVE",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 679,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "O_DIRECTORY/O_PATH/existing-directory opens",
+        "sourceExpectedOutcome": "DENY_BEFORE_NATIVE",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 679,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "direct posix.open/prebound native alias with borrowed directory FD",
+        "sourceExpectedOutcome": "FATAL_C_CALL_DENY_BEFORE_SYSCALL",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 569,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "inherited liveFD>2 or directory stdio",
+        "sourceExpectedOutcome": "REFUSE_PRECLOSURE",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 391,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "second kernel thread / native thread-start alias or Thread.start",
+        "sourceExpectedOutcome": "REFUSE_CENSUS_OR_FATAL_NATIVE_DENY",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 421,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "approved frozen regular file read",
+        "sourceExpectedOutcome": "SUPPORTED_SUBJECT_TO_EXISTING_AUDIT_POLICIES",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 479,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "owned regular evidence/scratch write",
+        "sourceExpectedOutcome": "SUPPORTED_SUBJECT_TO_EXISTING_PATH_AND_ADMISSION_BOUNDS",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 479,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "dir_fd mkdir",
+        "sourceExpectedOutcome": "EXISTING_DIRFD_DENIAL_UNCHANGED",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 479,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "pinned3044 pyc verifier hashing",
+        "sourceExpectedOutcome": "ONLY_EXISTING_EXACT_POSTCHECK_CHAIN; ordinary loader/framework cache reads denied",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 479,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F9",
+        "case": "ordinary framework reads/stdio ops/locks",
+        "sourceExpectedOutcome": "EXISTING_CONSTRAINTS_PRESERVED; no general FD-open allowance; runtime compatibility UNKNOWN",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 758,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F10",
+        "case": "postcheck catches ordinary error or soft work timeout",
+        "sourceExpectedOutcome": "FATAL_KERNEL_REMAINDER_STAYS_ARMED; fixed min(absolute180, first_post_entry+30); rearm never extends target",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 286,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F10",
+        "case": "raw signal/alarm/setitimer/pthread_sigmask aliases",
+        "sourceExpectedOutcome": "FATAL_C_CALL_DENY",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 569,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F10",
+        "case": "catch old query/service profile denial then cancel timer",
+        "sourceExpectedOutcome": "NO_RETURN_FROM_PROFILE_EXCEPTION; native_exit fatal",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 560,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F11",
+        "case": "forged git same filename/name with different code/globals",
+        "sourceExpectedOutcome": "BRIDGE_IDENTITY_DENY_BEFORE_CACHE",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 541,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      },
+      {
+        "finding": "F11",
+        "case": "actual pinned git with exact12 tuples",
+        "sourceExpectedOutcome": "SUPPORTED_SUBJECT_TO_EXISTING_CACHE_PINS_AND_BOUNDS",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 541,
+          "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+        }
+      }
+    ],
+    "packageFileManifest": [
+      {
+        "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "commit": "f75e1ead72ba0f8cfd40108e79ce9a62a5f23a6c",
+        "bytes": 85985,
+        "sha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee"
+      },
+      {
+        "path": "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
+        "bytes": 32190,
+        "sha256": "a3a7d59cbce238656bd18edb028347aeadef62a39fc1b1f0b82fca2a47608635"
+      },
+      {
+        "path": "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json",
+        "selfHashPolicy": "No recursive self hash; complete file identified by final report Git commit and external coordinator SHA manifest"
+      }
+    ],
+    "futureRootInvocation": {
+      "status": "NOTRUN_SKELETON_ONLY",
+      "prepare": "cd \"<PREPARE_EMPTY_CWD>\"\nenv -i HOME=\"<ACTUAL_PASSWD_HOME>\" PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \\\n ROOT_APPROVED_PARTNER_DX=1 RUN_PARTNER_DX_METADATA=1 \\\n PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 \\\n DX_RUNNER_SHA256=\"<REVIEWED_HELPER_SHA256>\" \\\n DX_SOURCE_HEAD=\"<FROZEN_GIT_SOURCE_HEAD>\" DX_SOURCE_BRANCH=\"<FROZEN_GIT_SOURCE_BRANCH>\" \\\n DX_EMPTY_CWD=\"<PREPARE_EMPTY_CWD>\" DX_EVIDENCE_DIR=\"<PREPARE_EVIDENCE_0700>\" \\\n DX_SCRATCH_DIR=\"<PREPARE_SCRATCH_0700>\" DX_UPLOAD_DIR=\"<PREPARE_UPLOAD_0700>\" \\\n /srv/projects/api-modernization-upgrade-test-env-20261030/.venv/bin/python -I -S -B \\\n \"<CLEAN_GIT_SOURCE>/clearledger/server/tests/partner_dx_metadata_approved.py\" \\\n --prepare-approved-partner-dx-cache",
+      "execute": "cd \"<EXEC_EMPTY_CWD>\"\nenv -i HOME=\"<ACTUAL_PASSWD_HOME>\" PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \\\n ROOT_APPROVED_PARTNER_DX=1 RUN_PARTNER_DX_METADATA=1 \\\n PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 \\\n DX_RUNNER_SHA256=\"<REVIEWED_HELPER_SHA256>\" \\\n DX_SOURCE_HEAD=\"<SAME_FROZEN_GIT_SOURCE_HEAD>\" DX_SOURCE_BRANCH=\"<SAME_FROZEN_GIT_SOURCE_BRANCH>\" \\\n DX_EMPTY_CWD=\"<EXEC_EMPTY_CWD>\" DX_EVIDENCE_DIR=\"<EXEC_EVIDENCE_0700>\" \\\n DX_SCRATCH_DIR=\"<EXEC_SCRATCH_0700>\" DX_UPLOAD_DIR=\"<EXEC_UPLOAD_0700>\" \\\n DX_PREPARED_CACHE=\"<PREPARE_EVIDENCE_0700>/prepare-cache.json\" \\\n DX_PREPARED_CACHE_SHA256=\"<ROOT_REVIEWED_SEALED_CACHE_SHA256>\" \\\n /srv/projects/api-modernization-upgrade-test-env-20261030/.venv/bin/python -I -S -B \\\n \"<EXACT_SOURCE_COPY_WITH_OR_WITHOUT_GIT>/clearledger/server/tests/partner_dx_metadata_approved.py\" \\\n --execute-approved-partner-dx",
+      "inputs": "ROOT reviewed self/sourceHEAD/branch/base/cacheSHA; actual HOME; secrets none; fresh owned0700 separate nonnested cwd/evidence/scratch/upload outside source; preclosure accepts no liveFD>2/directory stdio and exactly one kernel thread; inherited SIGALRM must be unblocked",
+      "finalCompositionRepin": "UNKNOWN; separate reviewed ROOT repin required before whole-final composition claims"
+    },
+    "limitations": [
+      "SOURCE_ONLY, runtime=0; no helper --help/import/execution, pytest or collection.",
+      "App/frameworks/controls/HTTP/SQL/SSH/Docker/browser/Node/codegen/build/install/live/env/secrets were not used.",
+      "Canonical/browser schema export and validation are NOTRUN here; documentation is not runtime PASS.",
+      "Official SDK generation and freshness NOTRUN.",
+      "All20 modernization milestones and11 gates remain UNPROVEN.",
+      "The helper is a pure schema/test boundary, not application serving/lifespan/auth/database/runtime acceptance.",
+      "Report files are excluded from their own recursive manifests; final Git commit and coordinator outer freeze identify their complete bytes.",
+      "SIGKILL/OOM/hard RLIMIT_CPU cannot run finally or guarantee a receipt; ROOT/controller must independently census source/site/processes and treat missing/incomplete receipt as unaccepted.",
+      "F9/F10/F11 negative and allowed source cases are authored reasoning only; no syscall reproduction or positive/negative control execution",
+      "Fatal SIGALRM and any profile callback exception terminate without guaranteed receipt; caught profile-denial escape does not return",
+      "Whole-composition repin UNKNOWN; immutable PR85 parent remains2b81; no OS sandbox guarantee for native dependencies/external races",
+      "Initial deadline admission failure (including inherited blocked SIGALRM) may occur before main guarded try/finally; no receipt/postcheck guarantee, independent ROOT controller census required."
+    ],
+    "reviewChecklist": [
+      {
+        "item": "exact opt-in/interpreter/env/HOME/private dirs/selfSHA gate",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "full app/tests/schema/support/site77 binding manifests before and after",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "boundary installed before eager app/framework import",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "only inert database.Base; actual DTO/models/factory/policies/normalizers",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "closed process/network/SQL/sender/outside-write/settings/lifespan/job boundary",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "source-only loaders including direct checker spec; no pyc execution",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "exact immutable12 Git cache tuples; separate prepare and git-free execute",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "AST-derived26 IDs; original asserts and16 negative mutation cases preserved",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "single real pytest.main with exact78 phases/JUnit26/no skips/errors/xfail",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "actual canonical+browser schema validation/security/headers/examples/binary exports",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "FAIL postcheck and artifact admission; fatal termination limits documented",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "20M11gates unproven; official SDKgen/freshness notrun",
+        "sourceReview": "PRESENT_IN_FROZEN_SOURCE",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "F9: open audit omits dir_fd; lexical cwd path can differ from native directory-relative target",
+        "sourceReview": "AUTHORED_SOURCE_REASONING_PENDING_INDEPENDENT_REVIEW",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "F10: One-shot Python SIGALRM TimeoutError can be swallowed by postcheck BaseException and leave no wall timer",
+        "sourceReview": "AUTHORED_SOURCE_REASONING_PENDING_INDEPENDENT_REVIEW",
+        "runtime": "NOTRUN"
+      },
+      {
+        "item": "F11: Filename/co_name/globals name caller check is forgeable with different compiled code/globals",
+        "sourceReview": "AUTHORED_SOURCE_REASONING_PENDING_INDEPENDENT_REVIEW",
+        "runtime": "NOTRUN"
+      }
+    ]
+  },
+  "kernelAdmissionReview": {
+    "status": "INDEPENDENT_FROZEN_SOURCE_REVIEW_COMPLETE",
+    "authority": "ROOTmsg_4a14f0aeac50",
+    "parent": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
+    "acceptedPrivateContractSha256": "55cb90ea165f547a0afc4234acf42261eb7b8974d127cb44d18f5b63bd15d9b0",
+    "clockErratum": {
+      "domain": "CLOCK_MONOTONIC_MS",
+      "integerMillisecondsOnly": true,
+      "AandFExplicitDomain": true,
+      "timeNamespace": "time == controller_time == actual /proc/self/ns/time inode",
+      "startupAdmissionOnly": true,
+      "watchdog": "180000ms from candidate exec, external ROOT controller",
+      "contractFileModified": false
+    },
+    "runtimeExecutions": 0,
+    "rootKernelControllerImplementation": "UNKNOWN / NOTRUN",
+    "realCapability": "UNKNOWN / NOTRUN",
+    "externalFinal": "REQUIRED_OUTSIDE_CANDIDATE_NOT_IMPLEMENTED",
+    "helperSafetyAcceptance": "EXTERNAL_FINAL_PENDING",
+    "F9": "HISTORICAL_PARTIAL_HOLD",
+    "F10": "HISTORICAL_PARTIAL_HOLD",
+    "tests26phases78": "NOTRUN",
+    "manifestRowsIndependentlyMatchedActualFiles": {
+      "app": 504,
+      "tests": 397,
+      "schema_migrations": 24,
+      "site": 7245
+    },
+    "bindingsIndependentlyMatchedActualBytes": 22,
+    "method": "filesystem/Git and stdlib AST/hash/JSON/in-memory compile only; compiled code never executed; no helper/pure validator function called even on synthetic data",
+    "authorityMessage": "msg_4a14f0aeac50",
+    "authorityAcceptedAt": "2026-10-31T18:20:10Z",
+    "clockNamespaceClarificationMessage": "msg_a136d9f3cbda",
+    "authorCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
+    "helperSha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+    "schemaSha256": "3653efd446bc3f743f29eb85650cf78d4ed871d5cfc25827780a21adf8ac09ed",
+    "sourceCorrections": [
+      {
+        "id": "K1",
+        "discoveredBy": "Coordinator; independently confirmed by reviewer B",
+        "beforeSourceReasoning": "Postcheck-only proc allowance rejected legitimate artifact admission from run_pytest/write_json before postcheck.",
+        "resolution": "Exact proc reader frame/code/globals/method pins plus identity_check->verify (postcheck) or mounts_read->storage_check->verify (postcheck)/artifact_scan (pytest/postcheck with exact directories); broad proc whitelist absent.",
+        "status": "SOURCE_CORRECTED_AND_INDEPENDENTLY_REREAD_RUNTIME_NOTRUN",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 487,
+            "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+            "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1699,
+            "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+            "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1614,
+            "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+            "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
+            "meaning": "artifact_scan: explicit KERNEL.storage_check branch"
+          }
+        ],
+        "intermediateBeforeSha256": "898fd2117a57cf0c2c83cdac01520a6353c1de3544c21bb89863e96017657d0f",
+        "beforeFreeze": "Transient uncommitted author source, not a Git freeze; exact postcheck-only diagnostic branch read by coordinator/B"
+      },
+      {
+        "id": "K2",
+        "discoveredBy": "Reviewer B; accepted by third coordinator msg_eb277db9c6a1",
+        "beforeSourceReasoning": "Startup freshness was checked before expensive source/site/cache scans; a later verify did not recheck expiry before import.",
+        "resolution": "Separate startup_freshness immediately before Boundary.install after scans; verify/postcheck never call it, so expiry after startup does not shorten external180s window.",
+        "status": "SOURCE_CORRECTED_AND_INDEPENDENTLY_REREAD_RUNTIME_NOTRUN",
+        "runtime": "NOTRUN",
+        "executed": false,
+        "sourceRefs": [
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 447,
+            "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+            "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1699,
+            "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+            "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+          },
+          {
+            "repo": "Electro-Interfaces/ClearLedger",
+            "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+            "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+            "line": 1748,
+            "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+            "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152",
+            "meaning": "main: startup_freshness call immediately before Boundary.install"
+          }
+        ],
+        "beforeFreeze": "Transient uncommitted author source read before K2 correction; complete raw SHA not recorded, no invented before commit"
+      }
+    ],
+    "sourceProofCases": [
+      {
+        "case": "legacy argv with any kernel env key",
+        "sourceExpectedOutcome": "DENY exact closed environment; both legacy literal statvfs8GiB checks preserved",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 238,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "unknown/mixed CLI or kernel CLI without exact seven extra env keys",
+        "sourceExpectedOutcome": "DENY; no fallback to legacy",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 678,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "candidate UID0/GID0, saved/fs ID mismatch, nonempty groups, wrong HOME/caps/NoNewPrivs/Seccomp",
+        "sourceExpectedOutcome": "DENY against actual fixed kernel status and UID/GID tuples; ROOT role is not UID0",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 521,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "root-owned0400 admission/policy or mode0600/nonregular/hardlinked input",
+        "sourceExpectedOutcome": "DENY; exact candidate owner0400,nlink1 and owned0700 parent on RO layout",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 580,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "cache changed to0400 or bad owner/0700 parent/nlink",
+        "sourceExpectedOutcome": "DENY; historical cache0600 retained; kernel additionally requires actual RO",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1549,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "symlink in any input/work/source role path or malformed/relative/nonnormal path",
+        "sourceExpectedOutcome": "DENY without normalization fallback; namespace readlink is separately fixed",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 408,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "receipt over65536 bytes, missing/extra LF, BOM/nonASCII/noncanonical raw bytes",
+        "sourceExpectedOutcome": "DENY; SHA(A) pins every raw byte including exactly one LF",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 399,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "duplicate/unknown keys at any shape level, float/NaN/Infinity, bool as integer, noncanonical integer spelling",
+        "sourceExpectedOutcome": "DENY by unique_object, exact type grammar and raw canonical equality",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 399,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "wrong runner/source/branch/cache/policy/nonce/manifest/version/support pins",
+        "sourceExpectedOutcome": "DENY; actual source/self/site/cache bytes also rechecked by preserved guards",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 454,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "stale/future admission at startup, stale/future HostSample",
+        "sourceExpectedOutcome": "DENY; samples are before-only, age0..1000ms to issued; no invented during/after facts",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 447,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "preflight crosses expires_ms before boundary install",
+        "sourceExpectedOutcome": "DENY at repeated startup_freshness (K2); no helper code executed to test this",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1748,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "postcheck after startup admission expires but within own external watchdog",
+        "sourceExpectedOutcome": "No expiry recheck in verify/postcheck; source outcome remains EXTERNAL_FINAL_PENDING",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 662,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "wrong time namespace or clock domain, wrong mnt/net/pid/ipc separation or user mapping",
+        "sourceExpectedOutcome": "DENY; actual fixed readlinks, user/time shared, other namespaces distinct; CLOCK_MONOTONIC_MS integer domain",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 521,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "wrong whole mountinfo raw SHA, role count/path/ID/device/root/point/type/flags, stacked ambiguous mount",
+        "sourceExpectedOutcome": "DENY; effective most-specific mount matched, stat.st_dev and actual statvfs ST_RDONLY agree",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 595,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "writable source/runtime/venv/policy/admission/cache/cwd/upload or RO evidence/scratch/work_pool",
+        "sourceExpectedOutcome": "DENY; only work_pool/evidence/scratch RW",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 595,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "same device but wrong bind root/mount point or different quota backing",
+        "sourceExpectedOutcome": "DENY; shared tmpfs checked with bind roots/IDs/device/type, not device equality alone",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 595,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "tmpfs only has small free bytes but excessive full size/inode capacity or absent superoption bounds",
+        "sourceExpectedOutcome": "DENY; actual size<=64MiB/nr_inodes<=133 and full positive f_blocks*f_frsize/f_files checked",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 595,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "pool not root0755, unexpected top-level entry or non-sibling/private work dir",
+        "sourceExpectedOutcome": "DENY; pool contains exactly four candidate-owned0700 sibling dirs; cwd/upload remain empty via artifact scan",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 595,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "fixed proc files with reported st_size0",
+        "sourceExpectedOutcome": "Bounded direct read<=131072 bytes; no false bounded_bytes length==stat.size requirement",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 473,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "arbitrary proc path/read caller or replacement diagnostic method/frame/globals",
+        "sourceExpectedOutcome": "No special allowance; exact fixed reader/source chain only (K1)",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 487,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "legitimate artifact_scan during pytest/schema outputs and postcheck",
+        "sourceExpectedOutcome": "Narrow exact mountinfo chain allowed by source; full OS/framework compatibility NOTRUN",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 487,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "changed A/policy/cache/self/source/site/identity/ns/mount/quota at postcheck",
+        "sourceExpectedOutcome": "Recheck or reject; startup expiry intentionally not repeated",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1619,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "helper own ok:true/exit0 without external F or fake future host facts",
+        "sourceExpectedOutcome": "Always EXTERNAL_FINAL_PENDING plus SHA(A)/nonce/clock; no F emitted or accepted by candidate",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 1699,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "missing/mismatched external F, stale/gapped monitoring, host floor breach, wrong kill exit/signal, output excess, source/runtime mutation",
+        "sourceExpectedOutcome": "EXTERNAL ROOT CONTROLLER MUST REJECT; no controller implementation or F cross-field validator execution here",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 287,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      },
+      {
+        "case": "well-shaped schema examples",
+        "sourceExpectedOutcome": "JSON parse only; NOTREAL fiction, no schema validation/helper calls and no host evidence",
+        "sourceRef": {
+          "repo": "Electro-Interfaces/ClearLedger",
+          "commit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+          "path": "clearledger/server/tests/partner_dx_metadata_approved.py",
+          "line": 287,
+          "sha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+          "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+        },
+        "runtime": "NOTRUN",
+        "executed": false
+      }
+    ],
+    "openMaterialFindingsInAcceptedScope": [],
+    "externalUnknowns": [
+      "privileged launcher/controller implementation and actual euid/capability",
+      "installed BPF policy hash / cgroup/network/FD/pids/resource enforcement",
+      "real image digest/mount layout/two-phase preexec seal and nonce uniqueness",
+      "physical storage selection/before-monitor-after samples and kill/reject handling",
+      "external CLOCK_MONOTONIC180s watchdog and gap<=1500ms enforcement",
+      "external canonical F provenance, A bindings, source/runtime immutability, output and exit/signal checks",
+      "actual Python/framework compatibility and all runtime controls"
+    ],
+    "schemaReview": {
+      "closedObjectFieldsets": 12,
+      "descriptorComparison": "AST literal data vs parsed schema properties/required/closed flags/constants/enums/array bounds; manual scalar/normalization review",
+      "schemaValidation": "NOTRUN",
+      "examples": "two NOTREAL examples JSON parsed only, never validated or fed to any helper function",
+      "byteProtocol": "ASCII sorted compact JSON+one LF; raw SHA includes LF; canonical/duplicate/typed rejection belongs to manual Python byte/grammar path",
+      "crossFields": "A actual kernel checks in helper; F relations external controller REQUIRED/UNKNOWN, schema shape alone cannot enforce them",
+      "outsideFrozenTrees": true
+    },
+    "legacy": {
+      "hasHistoricalUidNonzeroGuard": false,
+      "meaning": "Legacy actual-owner equality does not imply nonroot; kernel requires UID/GID>0; ROOT role is not UID0",
+      "firstFloorLiteralLine": 268,
+      "secondFloorLiteralLine": 1612,
+      "cacheMode": "0600",
+      "inputAdmissionPolicyMode": "0400",
+      "parentsMode": "0700",
+      "prepareCLI": "unchanged separate trusted ROOT operation; not inside execute workload"
+    },
+    "beforeAfter": {
+      "parentHelperSha256": "f2945b558434c7f500f72fe6d2b48fce63d6e33db8bc2657d9b0a0429b5581ee",
+      "afterHelperSha256": "3129cf75a14575ecf200391fb70db98f7fc1eabb518e6b99c7f35942381d6dfa",
+      "beforeSourceParent": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
+      "afterSourceCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b",
+      "runtime": "NOTRUN",
+      "authoredCommit": "d267808217dee7036c4ae9f5c45187739a2a3152"
+    },
+    "packageComposition": {
+      "parent": "1bf25045bfde8c8037e00edf929e10a1aa749e5c",
+      "totalPaths": 4,
+      "existingModified": [
+        "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json"
+      ],
+      "newPaths": [
+        "clearledger/docs/api/PARTNER_DX_KERNEL_ADMISSION_V1.schema.json"
+      ],
+      "authorCommitPaths": [
+        "clearledger/server/tests/partner_dx_metadata_approved.py",
+        "clearledger/docs/api/PARTNER_DX_KERNEL_ADMISSION_V1.schema.json"
+      ],
+      "reviewerCommitPaths": [
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.md",
+        "clearledger/docs/api/PARTNER_DX_RUNTIME_HARNESS_20261031.json"
+      ],
+      "integration": "Helper/schema integrated by coordinator as 6818cf89924b5f28147fd92b2a1077c9c21fda5b; reviewer changed only2 reports, their integration/publication belongs to coordinator",
+      "noExtraSourceReportPaths": true
+    },
+    "sourceCommit": "6818cf89924b5f28147fd92b2a1077c9c21fda5b"
+  }
 }

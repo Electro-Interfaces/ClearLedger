@@ -1,0 +1,1011 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:elsy:partner-dx:kernel-admission:v1",
+  "title": "Partner DX kernel admission and external final v1 (SOURCE ONLY / NOTRUN)",
+  "$comment": "NOTREAL: Both complete examples are pure fiction, not host measurements, receipts, control execution or acceptance. Runtime remains 0; ROOT kernel implementation and real capability UNKNOWN/NOTRUN; F9/F10 PARTIAL/HOLD. This schema is outside frozen API/schema trees.",
+  "description": "Byte protocol: ASCII json.dumps(ensure_ascii=True,sort_keys=True,separators=(comma,colon),allow_nan=False) plus exactly one LF, <=65536 raw bytes including LF; raw SHA includes LF. Reject BOM, duplicate keys, floats/NaN/Infinity, noncanonical integers and extra bytes before schema validation. All fields required; unknown fields forbidden. Schema checks shape only: kernel observations, independent pins, namespace identity, RO/ownership, quota and controller final relations are additional mandatory checks. Candidate outcome is EXTERNAL_FINAL_PENDING until trusted external F. Clock is CLOCK_MONOTONIC_MS, including all HostSample.measured_ms, startup issued/expires, watchdog 180000ms and monitoring gaps; time/controller_time must equal actual /proc/self/ns/time.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/A"
+    },
+    {
+      "$ref": "#/$defs/F"
+    }
+  ],
+  "$defs": {
+    "A": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "phase",
+        "clock",
+        "nonce",
+        "issued_ms",
+        "expires_ms",
+        "candidate",
+        "bindings",
+        "namespaces",
+        "mounts",
+        "quota",
+        "host_floor",
+        "controller"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "elsy.partner-dx.kernel-admission.v1"
+        },
+        "phase": {
+          "type": "string",
+          "const": "ADMISSION"
+        },
+        "clock": {
+          "type": "string",
+          "const": "CLOCK_MONOTONIC_MS"
+        },
+        "nonce": {
+          "$ref": "#/$defs/H"
+        },
+        "issued_ms": {
+          "$ref": "#/$defs/N"
+        },
+        "expires_ms": {
+          "$ref": "#/$defs/N"
+        },
+        "candidate": {
+          "$ref": "#/$defs/Candidate"
+        },
+        "bindings": {
+          "$ref": "#/$defs/Bindings"
+        },
+        "namespaces": {
+          "$ref": "#/$defs/Namespaces"
+        },
+        "mounts": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/Mount"
+          }
+        },
+        "quota": {
+          "$ref": "#/$defs/Quota"
+        },
+        "host_floor": {
+          "$ref": "#/$defs/HostFloor"
+        },
+        "controller": {
+          "$ref": "#/$defs/Controller"
+        }
+      },
+      "description": "External sealed startup admission only; never evidence of future monitoring or final safety acceptance. All millisecond fields use CLOCK_MONOTONIC in the same time namespace as the controller."
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uid",
+        "gid",
+        "supplementary_gids",
+        "home",
+        "no_new_privs",
+        "seccomp_mode",
+        "cap_inh",
+        "cap_prm",
+        "cap_eff",
+        "cap_bnd",
+        "cap_amb"
+      ],
+      "properties": {
+        "uid": {
+          "$ref": "#/$defs/N"
+        },
+        "gid": {
+          "$ref": "#/$defs/N"
+        },
+        "supplementary_gids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 0,
+          "items": {
+            "$ref": "#/$defs/N"
+          }
+        },
+        "home": {
+          "$ref": "#/$defs/P"
+        },
+        "no_new_privs": {
+          "type": "integer",
+          "const": 1
+        },
+        "seccomp_mode": {
+          "type": "integer",
+          "const": 2
+        },
+        "cap_inh": {
+          "type": "string",
+          "const": "0000000000000000"
+        },
+        "cap_prm": {
+          "type": "string",
+          "const": "0000000000000000"
+        },
+        "cap_eff": {
+          "type": "string",
+          "const": "0000000000000000"
+        },
+        "cap_bnd": {
+          "type": "string",
+          "const": "0000000000000000"
+        },
+        "cap_amb": {
+          "type": "string",
+          "const": "0000000000000000"
+        }
+      }
+    },
+    "Bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner_sha256",
+        "source_head",
+        "source_branch",
+        "app_sha256",
+        "tests_sha256",
+        "migrations_sha256",
+        "support_sha256",
+        "native_site_sha256",
+        "versions_sha256",
+        "prepared_cache_sha256",
+        "policy_sha256",
+        "controller_sha256",
+        "image_digest"
+      ],
+      "properties": {
+        "runner_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "source_head": {
+          "$ref": "#/$defs/G"
+        },
+        "source_branch": {
+          "$ref": "#/$defs/Branch"
+        },
+        "app_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "tests_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "migrations_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "support_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "native_site_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "versions_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "prepared_cache_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "policy_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "controller_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "image_digest": {
+          "$ref": "#/$defs/Image"
+        }
+      }
+    },
+    "Namespaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mnt",
+        "net",
+        "pid",
+        "ipc",
+        "user",
+        "time",
+        "controller_mnt",
+        "controller_net",
+        "controller_pid",
+        "controller_ipc",
+        "controller_user",
+        "controller_time",
+        "mountinfo_sha256"
+      ],
+      "properties": {
+        "mnt": {
+          "$ref": "#/$defs/D"
+        },
+        "net": {
+          "$ref": "#/$defs/D"
+        },
+        "pid": {
+          "$ref": "#/$defs/D"
+        },
+        "ipc": {
+          "$ref": "#/$defs/D"
+        },
+        "user": {
+          "$ref": "#/$defs/D"
+        },
+        "time": {
+          "$ref": "#/$defs/D"
+        },
+        "controller_mnt": {
+          "$ref": "#/$defs/D"
+        },
+        "controller_net": {
+          "$ref": "#/$defs/D"
+        },
+        "controller_pid": {
+          "$ref": "#/$defs/D"
+        },
+        "controller_ipc": {
+          "$ref": "#/$defs/D"
+        },
+        "controller_user": {
+          "$ref": "#/$defs/D"
+        },
+        "controller_time": {
+          "$ref": "#/$defs/D"
+        },
+        "mountinfo_sha256": {
+          "$ref": "#/$defs/H"
+        }
+      }
+    },
+    "Mount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "mount_id",
+        "major",
+        "minor",
+        "root",
+        "mount_point",
+        "fs_type",
+        "read_only",
+        "owner_uid",
+        "owner_gid",
+        "mode"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "rootfs",
+            "source",
+            "native_runtime",
+            "venv",
+            "policy",
+            "admission",
+            "cache",
+            "work_pool",
+            "cwd",
+            "upload",
+            "evidence",
+            "scratch"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/P"
+        },
+        "mount_id": {
+          "$ref": "#/$defs/N"
+        },
+        "major": {
+          "$ref": "#/$defs/N"
+        },
+        "minor": {
+          "$ref": "#/$defs/N"
+        },
+        "root": {
+          "$ref": "#/$defs/P"
+        },
+        "mount_point": {
+          "$ref": "#/$defs/P"
+        },
+        "fs_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[\\u0000-\\u007f]*$(?![\\s\\S])"
+        },
+        "read_only": {
+          "$ref": "#/$defs/Bool"
+        },
+        "owner_uid": {
+          "$ref": "#/$defs/N"
+        },
+        "owner_gid": {
+          "$ref": "#/$defs/N"
+        },
+        "mode": {
+          "$ref": "#/$defs/O"
+        }
+      }
+    },
+    "Quota": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "pool_mount_id",
+        "max_bytes",
+        "max_inodes",
+        "max_regular_entries",
+        "file_max_bytes",
+        "hardlinks"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "shared-tmpfs-v1"
+        },
+        "pool_mount_id": {
+          "$ref": "#/$defs/N"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "const": 67108864
+        },
+        "max_inodes": {
+          "type": "integer",
+          "const": 133
+        },
+        "max_regular_entries": {
+          "type": "integer",
+          "const": 128
+        },
+        "file_max_bytes": {
+          "type": "integer",
+          "const": 16777216
+        },
+        "hardlinks": {
+          "type": "string",
+          "const": "DENY_KERNEL_POLICY"
+        }
+      }
+    },
+    "HostFloor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "threshold_bytes",
+        "before",
+        "monitor_interval_ms",
+        "max_sample_gap_ms",
+        "on_failure",
+        "after_required"
+      ],
+      "properties": {
+        "threshold_bytes": {
+          "type": "integer",
+          "const": 8589934592
+        },
+        "before": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/HostSample"
+          }
+        },
+        "monitor_interval_ms": {
+          "type": "integer",
+          "const": 1000
+        },
+        "max_sample_gap_ms": {
+          "type": "integer",
+          "const": 1500
+        },
+        "on_failure": {
+          "type": "string",
+          "const": "KILL_AND_REJECT"
+        },
+        "after_required": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "HostSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage_id",
+        "measured_ms",
+        "free_bytes"
+      ],
+      "properties": {
+        "storage_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[\\u0000-\\u007f]*$(?![\\s\\S])"
+        },
+        "measured_ms": {
+          "$ref": "#/$defs/N"
+        },
+        "free_bytes": {
+          "$ref": "#/$defs/N"
+        }
+      }
+    },
+    "Controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "euid",
+        "policy_path",
+        "admission_sealed",
+        "kernel_policy_loaded",
+        "external_watchdog_armed",
+        "wall_ms",
+        "stdout_stderr_max_bytes",
+        "cpu_hard_seconds",
+        "memory_max_bytes",
+        "file_hard_bytes",
+        "fd_hard_limit",
+        "pids_max"
+      ],
+      "properties": {
+        "euid": {
+          "$ref": "#/$defs/N"
+        },
+        "policy_path": {
+          "type": "string",
+          "const": "/inputs/policy/execute-policy.json"
+        },
+        "admission_sealed": {
+          "type": "boolean",
+          "const": true
+        },
+        "kernel_policy_loaded": {
+          "type": "boolean",
+          "const": true
+        },
+        "external_watchdog_armed": {
+          "type": "boolean",
+          "const": true
+        },
+        "wall_ms": {
+          "type": "integer",
+          "const": 180000
+        },
+        "stdout_stderr_max_bytes": {
+          "type": "integer",
+          "const": 8388608
+        },
+        "cpu_hard_seconds": {
+          "type": "integer",
+          "const": 150
+        },
+        "memory_max_bytes": {
+          "type": "integer",
+          "const": 2147483648
+        },
+        "file_hard_bytes": {
+          "type": "integer",
+          "const": 16777216
+        },
+        "fd_hard_limit": {
+          "type": "integer",
+          "const": 96
+        },
+        "pids_max": {
+          "type": "integer",
+          "const": 1
+        }
+      }
+    },
+    "F": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "phase",
+        "clock",
+        "nonce",
+        "admission_sha256",
+        "policy_sha256",
+        "runner_sha256",
+        "source_head",
+        "exit_code",
+        "termination_signal",
+        "host_floor",
+        "output_bytes",
+        "artifacts_manifest_sha256",
+        "source_before_sha256",
+        "source_after_sha256",
+        "runtime_before_sha256",
+        "runtime_after_sha256",
+        "decision"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "elsy.partner-dx.kernel-final.v1"
+        },
+        "phase": {
+          "type": "string",
+          "const": "FINAL"
+        },
+        "clock": {
+          "type": "string",
+          "const": "CLOCK_MONOTONIC_MS"
+        },
+        "nonce": {
+          "$ref": "#/$defs/H"
+        },
+        "admission_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "policy_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "runner_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "source_head": {
+          "$ref": "#/$defs/G"
+        },
+        "exit_code": {
+          "$ref": "#/$defs/N"
+        },
+        "termination_signal": {
+          "$ref": "#/$defs/N"
+        },
+        "host_floor": {
+          "$ref": "#/$defs/FinalHostFloor"
+        },
+        "output_bytes": {
+          "$ref": "#/$defs/N"
+        },
+        "artifacts_manifest_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "source_before_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "source_after_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "runtime_before_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "runtime_after_sha256": {
+          "$ref": "#/$defs/H"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "SAFETY_ACCEPTED",
+            "REJECTED"
+          ]
+        }
+      },
+      "description": "External controller ONLY; candidate never emits or accepts F as its own proof. Same nonce and raw admission SHA required. External semantics require matching storage IDs, all physical before/during/after >=8589934592, samples>=1, gap<=1500ms, output<=8388608, unchanged source/runtime, valid exit/signal, all independent controls; otherwise REJECTED. Normal termination_signal=0 and exit_code=0..255; signal=1..64 requires exit_code=128+signal and REJECTED."
+    },
+    "FinalHostFloor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage_results",
+        "status"
+      ],
+      "properties": {
+        "storage_results": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/StorageResult"
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        }
+      }
+    },
+    "StorageResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage_id",
+        "before_free",
+        "minimum_observed_during_free",
+        "after_free",
+        "samples",
+        "max_gap_ms"
+      ],
+      "properties": {
+        "storage_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[\\u0000-\\u007f]*$(?![\\s\\S])"
+        },
+        "before_free": {
+          "$ref": "#/$defs/N"
+        },
+        "minimum_observed_during_free": {
+          "$ref": "#/$defs/N"
+        },
+        "after_free": {
+          "$ref": "#/$defs/N"
+        },
+        "samples": {
+          "$ref": "#/$defs/N"
+        },
+        "max_gap_ms": {
+          "$ref": "#/$defs/N"
+        }
+      }
+    },
+    "N": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "Bool": {
+      "type": "boolean"
+    },
+    "H": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{64})$(?![\\s\\S])"
+    },
+    "G": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40})$(?![\\s\\S])"
+    },
+    "D": {
+      "type": "string",
+      "pattern": "^(?:[1-9][0-9]*)$(?![\\s\\S])"
+    },
+    "O": {
+      "type": "string",
+      "pattern": "^(?:[0-7]{4})$(?![\\s\\S])"
+    },
+    "P": {
+      "type": "string",
+      "pattern": "^(?:/[A-Za-z0-9._/-]*)$(?![\\s\\S])",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "//"
+          }
+        },
+        {
+          "not": {
+            "pattern": "/\\.{1,2}(?:/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "/.+/$"
+          }
+        }
+      ],
+      "description": "Absolute normalized POSIX path; runtime must also reject symlinks in every component, without rewriting input."
+    },
+    "Branch": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9._/-]{1,200})$(?![\\s\\S])"
+    },
+    "Image": {
+      "type": "string",
+      "pattern": "^(?:sha256:[0-9a-f]{64})$(?![\\s\\S])"
+    }
+  },
+  "examples": [
+    {
+      "format": "elsy.partner-dx.kernel-admission.v1",
+      "phase": "ADMISSION",
+      "clock": "CLOCK_MONOTONIC_MS",
+      "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "issued_ms": 100000,
+      "expires_ms": 100500,
+      "candidate": {
+        "uid": 10001,
+        "gid": 10001,
+        "supplementary_gids": [],
+        "home": "/fictional/home",
+        "no_new_privs": 1,
+        "seccomp_mode": 2,
+        "cap_inh": "0000000000000000",
+        "cap_prm": "0000000000000000",
+        "cap_eff": "0000000000000000",
+        "cap_bnd": "0000000000000000",
+        "cap_amb": "0000000000000000"
+      },
+      "bindings": {
+        "runner_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "source_head": "0000000000000000000000000000000000000000",
+        "source_branch": "fictional/NOTREAL",
+        "app_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "tests_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "migrations_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "support_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "native_site_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "versions_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "prepared_cache_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "controller_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "namespaces": {
+        "mnt": "200",
+        "net": "201",
+        "pid": "202",
+        "ipc": "203",
+        "user": "204",
+        "time": "205",
+        "controller_mnt": "206",
+        "controller_net": "207",
+        "controller_pid": "208",
+        "controller_ipc": "209",
+        "controller_user": "204",
+        "controller_time": "205",
+        "mountinfo_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mounts": [
+        {
+          "role": "rootfs",
+          "path": "/",
+          "mount_id": 101,
+          "major": 0,
+          "minor": 1,
+          "root": "/",
+          "mount_point": "/",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 0,
+          "owner_gid": 0,
+          "mode": "0755"
+        },
+        {
+          "role": "source",
+          "path": "/fictional/source",
+          "mount_id": 102,
+          "major": 0,
+          "minor": 2,
+          "root": "/",
+          "mount_point": "/fictional/source",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0755"
+        },
+        {
+          "role": "native_runtime",
+          "path": "/fictional/runtime",
+          "mount_id": 103,
+          "major": 0,
+          "minor": 3,
+          "root": "/",
+          "mount_point": "/fictional/runtime",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0755"
+        },
+        {
+          "role": "venv",
+          "path": "/fictional/venv",
+          "mount_id": 104,
+          "major": 0,
+          "minor": 4,
+          "root": "/",
+          "mount_point": "/fictional/venv",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0755"
+        },
+        {
+          "role": "policy",
+          "path": "/inputs/policy/execute-policy.json",
+          "mount_id": 105,
+          "major": 0,
+          "minor": 5,
+          "root": "/",
+          "mount_point": "/inputs/policy/execute-policy.json",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0400"
+        },
+        {
+          "role": "admission",
+          "path": "/inputs/admission/admission.json",
+          "mount_id": 106,
+          "major": 0,
+          "minor": 6,
+          "root": "/",
+          "mount_point": "/inputs/admission/admission.json",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0400"
+        },
+        {
+          "role": "cache",
+          "path": "/fictional/cache/cache.json",
+          "mount_id": 107,
+          "major": 0,
+          "minor": 7,
+          "root": "/",
+          "mount_point": "/fictional/cache/cache.json",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0600"
+        },
+        {
+          "role": "work_pool",
+          "path": "/fictional/work",
+          "mount_id": 108,
+          "major": 0,
+          "minor": 8,
+          "root": "/",
+          "mount_point": "/fictional/work",
+          "fs_type": "tmpfs",
+          "read_only": false,
+          "owner_uid": 0,
+          "owner_gid": 0,
+          "mode": "0755"
+        },
+        {
+          "role": "cwd",
+          "path": "/fictional/work/cwd",
+          "mount_id": 109,
+          "major": 0,
+          "minor": 8,
+          "root": "/cwd",
+          "mount_point": "/fictional/work/cwd",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0700"
+        },
+        {
+          "role": "upload",
+          "path": "/fictional/work/upload",
+          "mount_id": 110,
+          "major": 0,
+          "minor": 8,
+          "root": "/upload",
+          "mount_point": "/fictional/work/upload",
+          "fs_type": "tmpfs",
+          "read_only": true,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0700"
+        },
+        {
+          "role": "evidence",
+          "path": "/fictional/work/evidence",
+          "mount_id": 108,
+          "major": 0,
+          "minor": 8,
+          "root": "/",
+          "mount_point": "/fictional/work",
+          "fs_type": "tmpfs",
+          "read_only": false,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0700"
+        },
+        {
+          "role": "scratch",
+          "path": "/fictional/work/scratch",
+          "mount_id": 108,
+          "major": 0,
+          "minor": 8,
+          "root": "/",
+          "mount_point": "/fictional/work",
+          "fs_type": "tmpfs",
+          "read_only": false,
+          "owner_uid": 10001,
+          "owner_gid": 10001,
+          "mode": "0700"
+        }
+      ],
+      "quota": {
+        "kind": "shared-tmpfs-v1",
+        "max_bytes": 67108864,
+        "max_inodes": 133,
+        "max_regular_entries": 128,
+        "file_max_bytes": 16777216,
+        "hardlinks": "DENY_KERNEL_POLICY",
+        "pool_mount_id": 108
+      },
+      "host_floor": {
+        "threshold_bytes": 8589934592,
+        "before": [
+          {
+            "storage_id": "NOTREAL-physical-storage",
+            "measured_ms": 99900,
+            "free_bytes": 17179869184
+          }
+        ],
+        "monitor_interval_ms": 1000,
+        "max_sample_gap_ms": 1500,
+        "on_failure": "KILL_AND_REJECT",
+        "after_required": true
+      },
+      "controller": {
+        "policy_path": "/inputs/policy/execute-policy.json",
+        "admission_sealed": true,
+        "kernel_policy_loaded": true,
+        "external_watchdog_armed": true,
+        "wall_ms": 180000,
+        "stdout_stderr_max_bytes": 8388608,
+        "cpu_hard_seconds": 150,
+        "memory_max_bytes": 2147483648,
+        "file_hard_bytes": 16777216,
+        "fd_hard_limit": 96,
+        "pids_max": 1,
+        "euid": 0
+      }
+    },
+    {
+      "format": "elsy.partner-dx.kernel-final.v1",
+      "phase": "FINAL",
+      "clock": "CLOCK_MONOTONIC_MS",
+      "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "admission_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "runner_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_head": "0000000000000000000000000000000000000000",
+      "exit_code": 0,
+      "termination_signal": 0,
+      "host_floor": {
+        "storage_results": [
+          {
+            "storage_id": "NOTREAL-physical-storage",
+            "before_free": 17179869184,
+            "minimum_observed_during_free": 17179869184,
+            "after_free": 17179869184,
+            "samples": 2,
+            "max_gap_ms": 1000
+          }
+        ],
+        "status": "PASS"
+      },
+      "output_bytes": 0,
+      "artifacts_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_before_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_after_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime_before_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "runtime_after_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "decision": "SAFETY_ACCEPTED"
+    }
+  ]
+}
