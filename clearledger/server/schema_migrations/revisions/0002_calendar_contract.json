@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "namespace": "core",
+  "legacy_sent_before": 2000000000,
+  "table": "calendar_events",
+  "managed_check": "ck_calendar_event_protocol_sequence",
+  "managed_expression": "protocol_sequence >= 0 AND protocol_sequence <= 2147483647",
+  "managed_column": {"name": "protocol_sequence", "type": "int4", "typmod": -1, "not_null": true, "default": "2000000000"},
+  "legacy_columns": [
+    {"name": "id", "type": "uuid", "typmod": -1, "not_null": true, "default": null},
+    {"name": "company_id", "type": "uuid", "typmod": -1, "not_null": true, "default": null},
+    {"name": "organizer_id", "type": "uuid", "typmod": -1, "not_null": true, "default": null},
+    {"name": "title", "type": "varchar", "typmod": 304, "not_null": true, "default": null},
+    {"name": "description", "type": "text", "typmod": -1, "not_null": false, "default": null},
+    {"name": "starts_at", "type": "timestamptz", "typmod": -1, "not_null": true, "default": null},
+    {"name": "ends_at", "type": "timestamptz", "typmod": -1, "not_null": true, "default": null},
+    {"name": "all_day", "type": "bool", "typmod": -1, "not_null": true, "default": null},
+    {"name": "tz", "type": "varchar", "typmod": 68, "not_null": true, "default": null},
+    {"name": "location", "type": "varchar", "typmod": 304, "not_null": false, "default": null},
+    {"name": "conference_url", "type": "text", "typmod": -1, "not_null": false, "default": null},
+    {"name": "visibility", "type": "varchar", "typmod": 24, "not_null": true, "default": null},
+    {"name": "status", "type": "varchar", "typmod": 24, "not_null": true, "default": null},
+    {"name": "cancel_reason", "type": "varchar", "typmod": 304, "not_null": false, "default": null},
+    {"name": "subject_ref", "type": "varchar", "typmod": 124, "not_null": false, "default": null},
+    {"name": "recurrence", "type": "jsonb", "typmod": -1, "not_null": false, "default": null},
+    {"name": "recurrence_until", "type": "date", "typmod": -1, "not_null": false, "default": null},
+    {"name": "series_id", "type": "uuid", "typmod": -1, "not_null": false, "default": null},
+    {"name": "created_at", "type": "timestamptz", "typmod": -1, "not_null": true, "default": "now()"},
+    {"name": "updated_at", "type": "timestamptz", "typmod": -1, "not_null": true, "default": "now()"}
+  ]
+}

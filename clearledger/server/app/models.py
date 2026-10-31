@@ -11373,10 +11373,16 @@ class CalendarEvent(Base):
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Новая встреча начинает с 0. Старый ORM не знает колонки и получает
+    # совместимый legacy baseline от БД; cutover выполняет explicit revision 0002.
+    protocol_sequence: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("2000000000"))
 
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ck_calendar_event_span"),
         Index("ix_calendar_events_span", "company_id", "starts_at", "ends_at"),
+        CheckConstraint("protocol_sequence >= 0 AND protocol_sequence <= 2147483647",
+                        name="ck_calendar_event_protocol_sequence"),
     )
 
 

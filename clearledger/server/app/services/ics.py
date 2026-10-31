@@ -179,6 +179,7 @@ def calendar_ics(events: list[dict], *, name: str = "Трек") -> str:
             f"UID:{e['uid']}",
             f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
             *_when(e["starts_at"], e["ends_at"], e.get("all_day", False), e.get("tz")),
+            f"SEQUENCE:{e.get('sequence', 0)}",
             f"SUMMARY:{_escape(e['title'])}",
             f"STATUS:{'CANCELLED' if e.get('cancelled') else 'CONFIRMED'}",
         ]

@@ -27,10 +27,10 @@ def delivery(monkeypatch):
     import aiosmtplib
 
     messages, chats = [], []
-    # Разные секунды намеренно: строгий SEQUENCE в пределах одной секунды
-    # требует отдельного исправления и здесь не моделируется.
+    # Исторический clock seam сохранён для characterization. Нативная версия
+    # теперь живёт в строке; same-second покрывает test_calendar_protocol_version.
     clock = [1793400000]
-    monkeypatch.setattr(meeting_notice, "_sequence", lambda: clock[0])
+    monkeypatch.setattr(meeting_notice, "_sequence", lambda: clock[0], raising=False)
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.test")
     monkeypatch.setattr(settings, "smtp_from", "Calendar <calendar@example.test>")
     monkeypatch.setattr(settings, "calendar_reply_mailbox", "replies@example.test")

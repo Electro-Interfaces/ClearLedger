@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 from schema_migrations import catalog, journal
 from schema_migrations.errors import MigrationError
-from schema_migrations.manifest import load
+from schema_migrations.manifest import CALENDAR_ID, ID, load
 
 LOCK = (434532, 1)
 
@@ -61,6 +61,18 @@ async def identity(conn, config):
 
 async def state(conn, config, package):
     await identity(conn, config)
+    if package.parent is not None:
+        parent_package = package.parent
+        parent = await catalog.inspect_prerequisites(conn, parent_package.contract, config.user)
+        budget = await catalog.verify_budget(conn, parent_package.contract, config.user, parent)
+        ledger = await catalog.verify_journal(conn, parent_package.contract, config.user)
+        if budget is None or ledger is None:
+            raise MigrationError(4, "parent_unapplied")
+        complete = await journal.read_verified_history(conn, package, config.user, True)
+        calendar = await catalog.inspect_calendar(conn, package.contract, config.user)
+        if complete and not calendar["present"]:
+            raise MigrationError(4, "missing_applied_column")
+        return calendar, budget, ledger, complete
     parent = await catalog.inspect_prerequisites(conn, package.contract, config.user)
     budget = await catalog.verify_budget(conn, package.contract, config.user, parent)
     ledger = await catalog.verify_journal(conn, package.contract, config.user)
@@ -71,12 +83,17 @@ async def state(conn, config, package):
     return parent, budget, ledger, complete
 
 
-async def execute(config, mode):
+async def execute(config, mode, *, revision=ID, legacy_sent_before=None):
     """Return a safe receipt; never retries. check takes no advisory lock or write transaction."""
-    package = load()
+    package = load(revision=revision)
     if mode not in {"check", "apply"}:
         raise MigrationError(2, "mode")
     config.validate()
+    if legacy_sent_before is not None and (package.parent is None or mode != "apply"):
+        raise MigrationError(2, "arguments")
+    if package.parent is not None and mode == "apply" and (
+            type(legacy_sent_before) is not int or legacy_sent_before != package.contract["legacy_sent_before"]):
+        raise MigrationError(2, "legacy_acknowledgement")
     # Import only after explicit invocation, offline integrity and target checks.
     import asyncpg
     connection = None
@@ -102,6 +119,24 @@ async def execute(config, mode):
                 parent, budget, ledger, complete = await state(connection, config, package)
                 if complete:
                     return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+                if package.parent is not None:
+                    # Application writers need not take the migration owner lock.
+                    # Hold the relation lock through cutover, catalog checks and history.
+                    await connection.execute("LOCK TABLE core.calendar_events IN ACCESS EXCLUSIVE MODE")
+                    calendar, _, _, complete = await state(connection, config, package)
+                    if complete:
+                        return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+                    await catalog.verify_calendar_cutover(connection, package.contract, legacy_sent_before)
+                    action = "adopted" if calendar["present"] else "created"
+                    if not calendar["present"]:
+                        await connection.execute(package.sql)
+                    after = await catalog.inspect_calendar(connection, package.contract, config.user)
+                    if not after["present"]:
+                        raise MigrationError(6, "postcondition")
+                    await catalog.verify_calendar_preserved(calendar, after)
+                    await journal.append_applied(connection, package, config.user, action)
+                    await journal.read_verified_history(connection, package, config.user, True)
+                    return {"ok": True, "action": action, "revision": package.entry["id"]}
                 # Invalid prerequisites/catalog/history have already refused before first DDL.
                 if ledger is None:
                     await connection.execute(package.journal_sql)
@@ -141,10 +176,14 @@ def main(argv=None, environ=None):
         parser.add_argument("--database")
         parser.add_argument("--user")
         parser.add_argument("--namespace")
+        parser.add_argument("--revision", choices=(ID, CALENDAR_ID), default=ID)
+        parser.add_argument("--legacy-sent-before", type=int)
         args = parser.parse_args(argv)
-        package = load()
+        package = load(revision=args.revision)
+        if args.legacy_sent_before is not None and (args.revision != CALENDAR_ID or args.mode != "apply"):
+            raise MigrationError(2, "arguments")
         if args.mode == "plan":
-            if any((args.dsn_env, args.database, args.user, args.namespace)):
+            if any((args.dsn_env, args.database, args.user, args.namespace, args.legacy_sent_before)):
                 raise MigrationError(2, "arguments")
             print(json.dumps({"ok": True, "foundation_only": True, "namespace": "core",
                 "revision": package.entry["id"], "artifact_sha256": package.entry["artifact_sha256"]}, sort_keys=True))
@@ -158,7 +197,8 @@ def main(argv=None, environ=None):
         dsn = environ.get(args.dsn_env)
         if not dsn:
             raise MigrationError(2, "credential_input")
-        receipt = asyncio.run(execute(Config(dsn, args.database, args.user, args.namespace), args.mode))
+        receipt = asyncio.run(execute(Config(dsn, args.database, args.user, args.namespace), args.mode,
+                                     revision=args.revision, legacy_sent_before=args.legacy_sent_before))
         print(json.dumps(receipt, sort_keys=True))
         return 0
     except MigrationError as error:
