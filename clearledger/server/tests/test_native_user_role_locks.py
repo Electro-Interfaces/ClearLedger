@@ -26,7 +26,8 @@ def functions(path):
 
 
 def calls(node, name):
-    return [n for n in ast.walk(node) if isinstance(n, ast.Call)
+    # Только вызовы из тела, без метаданных определения функции.
+    return [n for n in ast.walk(ast.Module(body=node.body, type_ignores=[])) if isinstance(n, ast.Call)
             and ((isinstance(n.func, ast.Name) and n.func.id == name)
                  or (isinstance(n.func, ast.Attribute) and n.func.attr == name))]
 

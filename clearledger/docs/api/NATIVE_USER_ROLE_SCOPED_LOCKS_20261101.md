@@ -54,3 +54,21 @@ PG guard требует два одинаковых явно одобренны�
 `/srv/projects/preview/external-developer-experience-20261031/inputs/API-MODERNIZATION-PLAN.md` — SHA-256 `2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352`, 29956 bytes, строки 1–238.
 
 Этот bounded пакет не объявляет all-writer closure, общий B PASS, M00–M19/11 closure или рабочий runtime. Дальше требуется независимое source review, helper B1 handoff и отдельное ROOT решение об исполнении.
+
+## Followup: AST oracle, 01.11.2026
+
+Точная reviewed combined база: `d73d46fcdcb902d09e0a1aee12676296efbcfd8b`. Authority `msg_8d9ef1e3552f`, Task `task_b6ec9d1d13f3`, Dispatch `ctx_572bde69059a`. Новый successor меняет ровно три пути: unit/source test и эту пару MD/JSON. В `calls()` изменён только регион обхода на `ast.Module(body=node.body, type_ignores=[])`: собственные decorators, annotations и defaults функции исключены; docstrings не содержат AST Call. Поиск вызовов по имени/атрибуту сохранён.
+
+Независимый stdlib AST-подсчёт исходников, без импорта или вызова test/helper functions:
+
+| Handler | `delete` в прежнем whole-function обходе → теле | `prepare_native_write` → реальные `db.delete`, строки | Commit в теле |
+|---|---|---|---|
+| `remove_user` | 3 → 2 | 795 → 805, 816 | 0, владелец get_db |
+| `revoke_company` | 2 → 1 | 857 → 865 | 0, владелец get_db |
+| `delete_role` | 2 → 1 | 126 → 152 | 1, строка 153 |
+
+Лишние вызовы были собственными `@router.delete` на строках 778, 843 и 116 соответственно. Ни один `db.delete` не исключён. Все 6 unit/source и 13 PG test functions, включая декораторы, параметризации и assertions, byte/AST равны базе; commit-ownership oracle сохранён целиком. PG-файл и все app-файлы byteequal базе. Статические проверки: AST и compile в памяти без exec пяти code/test файлов, raw SHA-256/Git blob pins и независимый подсчёт body calls; collection и тесты не запускались.
+
+ROOT сообщил **18 FAIL / 9 PASS из 27 native cases** только для композиции `326457edd0b8029b2739cf5563c492f4f8169a10`: два source-oracle failures относятся к этому исправлению, остальные 16 — к отдельной SQLAlchemy OptionEngine работе helper owner `ctx_c0ef2f5caaa8`. Это исторический результат конкретной ROOT-композиции; он не переписан в PASS и здесь не воспроизводился. Minimal-helper 99 PASS не означает native PASS. **Runtime AFTERFIX: NOTRUN; closure OPEN**. Models/schema и final runtime остаются вне этого Task; старые raw reports/commits immutable.
+
+Обновлённый raw pin unit/source test: `7f10c2876687d2a32504d90e2a3e181b6c7e1c85f4e3b75b3e4304df4fa45759`, 6747 bytes, строки 1–127. Commit этого снимка определяется содержащим successor commit, а содержимое — raw SHA-256 и Git blob в JSON, без циклической ссылки на собственный commit hash. Исторический test pin сохранён в `ast_oracle_followup.historical_unit_test_pin`; app source base `c9e841c…`, source commit `cdef933b…`, before/after traces и исходные M00–M19/11 pins не изменены. Полные новые pins и статические доказательства — `ast_oracle_followup` парного JSON.
