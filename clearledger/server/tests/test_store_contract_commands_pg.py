@@ -34,7 +34,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models import Company, Contract, ContractLocation, Counterparty, Organization
 from app.services.store_contract_commands import (
-    create_store_partner_contract, prepare_store_partner_contract, save_store_contract,
+    create_store_partner_contract, prepare_store_partner_contract, prepare_store_contract,
+    save_store_contract as execute_store_contract,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -43,7 +44,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 @pytest_asyncio.fixture(loop_scope="session")
 async def world(db):
     token = uuid.uuid4().hex
-    companies = [Company(name="Синтетическая компания Store", slug=f"store-contract-{token}-{i}") for i in range(2)]
+    companies = [Company(name="Синтетическая компания Store", slug=f"store-contract-{token}-{i}", profile_id="energy") for i in range(2)]
     db.add_all(companies)
     await db.flush()
     cid, foreign = (row.id for row in companies)
@@ -64,6 +65,11 @@ def body(w, **changes):
     return {"counterparty_id": str(w.cp), "organization_id": str(w.org),
             "title": " Синтетический паспорт ", "number": " Store-PG-1 ",
             "date": "2026-02-03T04:05:06", **changes}
+
+
+async def save_store_contract(db, cid, data):
+    prepared = await prepare_store_contract(db, cid, data)
+    return await execute_store_contract(db, cid, data, prepared=prepared)
 
 
 async def count(w):
@@ -131,12 +137,14 @@ async def test_matcher_exact_tenant_parties_identity_and_incomplete_distinct(wor
                 await save_store_contract(db, w.cid, body(w))
             assert error.value.status_code == 409 and not db.new
         else:
-            row = await save_store_contract(db, w.foreign if case == "tenant" else w.cid, body(w, **changes))
+            tenant = w.foreign if case == "tenant" else w.cid
+            prepared = await prepare_store_contract(db, tenant, body(w, **changes))
+            row = await execute_store_contract(db, tenant, body(w, **changes), prepared=prepared)
             assert row.id != uid
             if case == "incomplete":
                 await db.flush()
                 assert not db.new and not db.dirty and not db.deleted
-                again = await save_store_contract(db, w.cid, body(w, **changes))
+                again = await execute_store_contract(db, w.cid, body(w, **changes), prepared=prepared)
                 assert again.id not in {row.id, uid}
         await db.rollback()
 

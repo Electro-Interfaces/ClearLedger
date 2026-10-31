@@ -1,0 +1,30 @@
+{
+  "status": "SOURCE_ONLY_NOTRUN_RECHECK_PENDING",
+  "base": "8b512be5f54bc88340dfd0d20ff8129f829cb0cc",
+  "helper_source": "18d9061f5a9fa6671c128f3ad97d77490360f3cc",
+  "plan": {
+    "Company": "SHARED",
+    "RefComposite": "EXCLUSIVE"
+  },
+  "freshness": "exact Contract/Counterparty/Organization instance expiry after all barriers, rechecked clean; never later authorized pending",
+  "STORE-B-R1": "SOURCE fix; independent recheck pending",
+  "tests": "ALL NOTRUN including imports/collection",
+  "open": [
+    "full Store authority",
+    "entire B",
+    "INN P1",
+    "M00-M19",
+    "all11 conditions"
+  ],
+  "CREATE": "OFF",
+  "runtime_working_data_merge_deploy_GO": false,
+  "KNOWN_DEPENDENCY_RUNTIME_BLOCKER": {
+    "reported_by": "ROOT msg_84045dd397a5 via coordinator msg_c6e76cd28484",
+    "composition": "OptionEngine(schema_translate_map), SQLAlchemy 2.0.36",
+    "failure": "event.listen Connection(commit), nested joined dispatch",
+    "execution_by_this_worker": "NOTRUN; no helper/app/test imports or attempts",
+    "fix_owner": "separate helper owner; exact5 helper18d remains immutable here",
+    "runtime": "HELD regardless of SOURCE verdict",
+    "base": "8b512be5 retained; no rebase/foreign source transfer"
+  }
+}
