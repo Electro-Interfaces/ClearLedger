@@ -1,0 +1,81 @@
+{
+  "base": "d7a99c3182e39e8baea0fc638959f5ece9d033da",
+  "status": "SOURCE_CANDIDATE; 20/M11 OPEN; no B closure or runtime GO",
+  "checks": {
+    "AST_memorycompile": "PASS; no exec/import",
+    "protected_bytes": "PASS",
+    "CRLF": "preserved",
+    "unit_PG_HTTP": "NOT RUN",
+    "SQL_network_build": "NOT RUN"
+  },
+  "files": [
+    {
+      "path": "clearledger/server/app/services/store_contract_commands.py",
+      "bytes": 7719,
+      "sha256": "842a9bbeba9fa6e33b32092a3fc6242def6558d2273a5ddbd16442b851cc2b6f"
+    },
+    {
+      "path": "clearledger/server/app/routers/store_router.py",
+      "bytes": 534141,
+      "sha256": "f3f1ed79b1d87e08b3a5f8e6e337f870d526f905db45d26bad465750c5d08641"
+    },
+    {
+      "path": "clearledger/server/tests/test_store_contract_commands_unit.py",
+      "bytes": 11641,
+      "sha256": "69cc96bcdee7fb1c572af1fef0b01d0216ff3c141c5eec79ae293d67e8759fa4"
+    },
+    {
+      "path": "clearledger/server/tests/test_store_contract_commands_pg.py",
+      "bytes": 9970,
+      "sha256": "ba2ea901840ba7bc7037ecc57075fd3090f3eda490a2807df5dc01f979af29e6"
+    }
+  ],
+  "router_protected": {
+    "bytes": 528203,
+    "sha256_before_after": "dd8ca622feef9b873887741be03697d55a306f876823aba874da44715a700926"
+  },
+  "router_spans": {
+    "partner_auth_early_INN": {
+      "bytes": 2480,
+      "before": "020d52c8fa9e2fe6fa015ee085c3692a590adf0bcbaba90573adf84426843dba",
+      "after": "020d52c8fa9e2fe6fa015ee085c3692a590adf0bcbaba90573adf84426843dba"
+    },
+    "partner_CP_edge_stations": {
+      "bytes": 1382,
+      "before": "923eca6c5d20bdd82c0e05743a938774ecec2ebb12e7a356959635adedd047b1",
+      "after": "923eca6c5d20bdd82c0e05743a938774ecec2ebb12e7a356959635adedd047b1"
+    },
+    "contract_save_auth": {
+      "bytes": 887,
+      "before": "16db52e05f2640057cdde453bd0c0b8715a24a30f9e65d5af9a7520942cbf71e",
+      "after": "16db52e05f2640057cdde453bd0c0b8715a24a30f9e65d5af9a7520942cbf71e"
+    }
+  },
+  "protected_files_sha256": "64788995e73109be37f8af3b36205d67555ec62e9d049e399f3a3be35c0e5d29",
+  "cases_status": "AUTHORed NOT RUN; expectations only",
+  "case_expectations": [
+    "Unit: CP→contract→parties→matcher→creator; no adapter commit/rollback",
+    "Unit: required 400 before locks/writes; title/number/date[:10]/null/empty/falsy defaults",
+    "Unit: UPDATE current parties/type against body, current-id exclusion, raw/manual_overrides unchanged",
+    "Unit: missing UPDATE 404; complete duplicate 409; incomplete identity skips matcher",
+    "Unit: mixed locks+org validation before first CP add; foreign/missing org 400 with no mutations",
+    "Unit: router network403 and caller commit/response; mixed success ordering",
+    "Unit: empty contract station links/response and early existing-INN three-key response preserved",
+    "PG: real varchar/JSONB bind, persisted title/raw/defaults, no locations/replay metadata",
+    "PG: caller commit visibility and rollback removes card; mixed CP/card rollback atomicity",
+    "PG: missing/cross-tenant parties400 and tenant-owned UPDATE404",
+    "PG: exact tenant/cp/org/date/type; repeated incomplete distinct after caller flush and empty new/dirty/deleted assertion",
+    "PG: UPDATE self excluded; actual cp/org/type against body; other current-party duplicate409 before mutation"
+  ],
+  "PG_guard": {
+    "database": "api_store_contract_writers_test_20261101",
+    "host": "127.0.0.1",
+    "query_fragment_fallback": false,
+    "executor": "ROOT pre-import approval required; no runner provided"
+  },
+  "known_limit": "Inherited INN pre-lock lookup race: no repeat lookup under CP lock; CP/edge duplicates possible; contract matcher across different CP does not merge. Code unchanged.",
+  "source_review_corrections": [
+    "M06-SR-01 authored PG reentry flush/clean session",
+    "M06-SR-02 document inherited INN race; no production changes"
+  ]
+}
