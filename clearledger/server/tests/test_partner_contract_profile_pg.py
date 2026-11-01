@@ -224,11 +224,25 @@ async def test_commit_ack_loss_is_unknown_and_fresh_readback_recovers(world, mon
     assert (await put(w)).status_code == 409  # Blind recreate is never successful replay.
 
 
-async def test_actual_flush_fault_rolls_back_profile_children_and_audit(world):
-    w = world
-    # The event runs AFTER actual INSERTs on the actual Session; no authority is mocked.
+def own_root_counts(db, w):
+    """Actual SQL state in the writer root; no mapper/spy stands in for INSERTs."""
+    pid = db.scalar(select(Profile.id).where(Profile.installation_id == w.iid))
+    children = tuple(db.scalar(select(func.count()).select_from(model).where(model.profile_id == pid))
+                     for model in (Principal, Ref, Type))
+    audit = db.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.company_id == w.company))
+    return (int(pid is not None), *children, audit)
+
+
+@pytest.mark.parametrize("phase", ["parent", "children_audit"])
+async def test_actual_flush_fault_rolls_back_profile_children_and_audit(world, phase):
+    w, seen = world, []
+    expected = (1, 0, 0, 0, 0) if phase == "parent" else (1, 2, 3, 1, 1)
+    marker = Profile if phase == "parent" else AuditEvent
     def after_flush(db, context):
-        if any(type(row) is Profile for row in db.identity_map.values()):
+        if any(type(row) is marker for row in db.identity_map.values()):
+            actual = own_root_counts(db, w)
+            assert actual == expected
+            seen.append(actual)
             raise RuntimeError("Synthetic post-flush failure")
     from sqlalchemy.orm import Session
     event.listen(Session, "after_flush_postexec", after_flush)
@@ -236,6 +250,7 @@ async def test_actual_flush_fault_rolls_back_profile_children_and_audit(world):
         assert (await put(w)).status_code == 500
     finally:
         event.remove(Session, "after_flush_postexec", after_flush)
+    assert seen == [expected]  # Failure AFTER the asserted real SQL rows existed.
     assert await counts(w) == (None, 0, (0, 0, 0))
 
 
@@ -376,7 +391,8 @@ async def test_current_public_native_authority_is_checked_after_actual_flush(wor
     w = world
     from sqlalchemy.orm import Session
     def revoke_in_actual_root(db, context):
-        if any(type(row) is Profile for row in db.identity_map.values()):
+        if any(type(row) is AuditEvent for row in db.identity_map.values()):
+            assert own_root_counts(db, w) == (1, 2, 3, 1, 1)
             # A negative injection into the actual DB root, not a mocked verifier:
             # fresh public native session_valid must observe the changed version.
             db.execute(text("UPDATE core.users SET token_version=token_version+1 WHERE id=:u"), {"u": w.admin})
@@ -438,11 +454,17 @@ async def test_actual_capability_is_not_transferable_or_live_after_root_ends(wor
             locks.require_scoped_locks(first.sync_session, cap, plan.requests)
 
 
-async def test_cancellation_after_actual_flush_rolls_back_all_rows(world):
-    w = world
+@pytest.mark.parametrize("phase", ["parent", "children_audit"])
+async def test_cancellation_after_actual_flush_rolls_back_all_rows(world, phase):
+    w, seen = world, []
+    expected = (1, 0, 0, 0, 0) if phase == "parent" else (1, 2, 3, 1, 1)
+    marker = Profile if phase == "parent" else AuditEvent
     from sqlalchemy.orm import Session
     def cancel_after_flush(db, context):
-        if any(type(row) is Profile for row in db.identity_map.values()):
+        if any(type(row) is marker for row in db.identity_map.values()):
+            actual = own_root_counts(db, w)
+            assert actual == expected
+            seen.append(actual)
             raise asyncio.CancelledError()
     event.listen(Session, "after_flush_postexec", cancel_after_flush)
     try:
@@ -450,4 +472,5 @@ async def test_cancellation_after_actual_flush_rolls_back_all_rows(world):
             await put(w)
     finally:
         event.remove(Session, "after_flush_postexec", cancel_after_flush)
+    assert seen == [expected]
     assert await counts(w) == (None, 0, (0, 0, 0))

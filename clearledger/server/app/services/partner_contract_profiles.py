@@ -280,6 +280,11 @@ def replace_partner_contract_create_profile(db, installation_id, actor, native, 
     profile.user_enabled = profile.service_enabled = False
     profile.revoked = body.revoked
     db.add(profile)
+    # Models intentionally have no ORM relationships. Establish the FK parent
+    # explicitly before child INSERTs, retaining the SAME root and atomicity.
+    operation.expected = (tuple(getattr(profile, n) for n in _PROFILE), operation.expected[1])
+    db.flush()
+    writer.checkpoint()  # Current native authority after the parent FK wait.
     # Explicit IDs keep the expected SQL snapshot independent from DB output.
     principals = [Principal(id=uuid4(), profile_id=profile.id, actor_kind="user", user_id=uid)
                   for uid in body.userIds]
@@ -295,10 +300,11 @@ def replace_partner_contract_create_profile(db, installation_id, actor, native, 
     operation.expected = (tuple(getattr(profile, n) for n in _PROFILE), tuple(
         _tuples(tuple(getattr(row, n) for n in names) for row in rows)
         for (model, names), rows in zip(_CHILDREN, (principals, refs, types))))
-    db.add(AuditEvent(company_id=operation.company_id, user_id=str(writer.actor.id),
+    audit = AuditEvent(company_id=operation.company_id, user_id=str(writer.actor.id),
         user_name=writer.actor.name, action="partner.contract_profile.replace",
         details=json.dumps({"profileId": str(profile.id), "generation": profile.policy_generation,
-                            "revoked": profile.revoked}, sort_keys=True)))
+                            "revoked": profile.revoked}, sort_keys=True))
+    db.add(audit)
     db.flush()  # Profile, children and audit use this actual root; NO COMMIT here.
     writer.checkpoint()  # Every unique/FK/flush wait has finished; recheck public auth.
     result = operation.readback(profile)
