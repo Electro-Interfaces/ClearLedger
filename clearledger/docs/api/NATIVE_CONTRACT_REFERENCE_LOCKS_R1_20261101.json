@@ -1,0 +1,2346 @@
+{
+  "schema": "native-contract-reference-locks-r1-source-v6",
+  "status": "SOURCE REVISION F1/F2/F3 AUTHORED; NOT ACCEPTED; separate OneC composition dependency HELD; no GO",
+  "runtime": {
+    "imports": 0,
+    "collections": 0,
+    "executions": 0,
+    "unit": "AUTHORED / NOTRUN",
+    "pg": "AUTHORED / NOTRUN",
+    "ci": "NOTRUN",
+    "merge_deploy_go": false
+  },
+  "scope": {
+    "roots": [
+      "create_contract",
+      "update_contract",
+      "delete_contract",
+      "set_contract_scope",
+      "link_contract_location",
+      "unlink_contract_location",
+      "add_contract_link",
+      "delete_contract_link",
+      "set_contract_dimension"
+    ],
+    "api": "create_native_contract(db, body, current_user) -> Contract; three positional arguments retained",
+    "purpose": "internal native policy; no partner principal/HTTP activation",
+    "ownership": "nine root bodies and necessary imports; native use case; new helper; new unit/PG tests; this MD/JSON pair",
+    "outside": "auth/deps/models/schema/roles/identities/frozen helpers/other writers/old tests unchanged"
+  },
+  "plan": {
+    "modes": "Company S: target and actual existing actor/reference User homes; User S: actor, old/proposed responsible and participating old creator UUID; actor Member S only; RefComposite S; exact nonempty old/new TypeCatalog S for actual type reads/changes",
+    "no_role_key": "native assert_company_member/get_owned do not read named CompanyRole; foreign named-role pointer adds no rejection",
+    "discovery": "clean no_autoflush MVCC; old Contract responsible/creator pointers and actual existing User/home pointers before the complete LockPlan; invalid responsible UUID discovery is no-raise and does not replace legacy _req_val; missing valid User gets a logical User S, no invented Company or new 404",
+    "sequence": "B once -> CP -> contract -> sorted actual Company SHARE -> all planned Users SHARE in numeric UUID order -> actor Member SHARE -> old/new CP -> Org -> readonly locations -> Contract UPDATE/INSERT as applicable; final child waits followed by actual claims/visit and original admission",
+    "authority": "canonical populate_existing; target Company must exist; actual User/home parent unchanged; Member absence has logical guard; HTTP claims-present repeats native_user_from_claims/native_visit_from_claims without presence/commit; direct claims=None accepted",
+    "freshness": "canonical populate_existing; all reference User existence/home pointers and Contract responsible/creator/type pointers compared after waits; changed pointer requires whole-root abort, no extension; same planned company for slug before membership admission",
+    "lifetime": "actual helper issuer/session/root/connection; synchronous require at command boundaries; no second acquisition, extension, upgrade, reentry, retry or internal commit/rollback",
+    "organization": "capture actual incoming ContextVar selector before first legacy admission; restore it before each fresh original policy; current own_org overrides via unchanged assert_company_member; None/admin/superadmin preserve legal incoming selector, never blindly clear it",
+    "reference_user_policy": "Foreign User identities remain allowed by the historical FK contract; no new reference Member/Role/tenant admission, no new 404 for a missing valid reference UUID; retain original FK error if DML actually references it"
+  },
+  "compatibility": {
+    "hash": "SHA256 of body.model_dump(mode=json, exclude={company_id, creationKey}); sorted compact JSON; expression unchanged",
+    "create_order": "native member -> CP/org -> hash -> waits -> fresh native policy/parties -> key replay/hash409 -> duplicate409 -> active type422 -> responsible UUID400 -> actual CardValues/create flush",
+    "update_order": "parse400/get_owned404; readonly party preflight; waits; fresh get_owned404/parties400; original setters/null/falsy/type422; overrides/flush/refresh",
+    "types": "exact codes without trimming; no active check during plan; inactive historical replay remains before active validation; None/empty keep clear semantics",
+    "other_errors": "actual 400/403 versus get_owned404; location404 then company scope409; app/project actual SQL422; contract usage409; changed planned parent/pointer409 requires whole-root abort; invalid responsible discovery defers error: CREATE replay/duplicate/type before _req_val, PATCH _req_val before type",
+    "owners": "original responses, no new native audit, flush owner retained, caller owns commit/rollback",
+    "native_old_source_test_methods": 16,
+    "native_old_source_assert_nodes": 54,
+    "count_caveat": "AST counts are not collected/runtime cases; historical scenario run is not claimed"
+  },
+  "inverse_edges": [
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "create_contract",
+        "line": 834,
+        "end_line": 840,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "7365778dcc4e368857c3ecabbaca26217e54e3277e5980f7a9f0cb779dc91250"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "CP/Org SHARE; replay/duplicates MVCC; Contract INSERT and FK checks",
+      "reverse_assessment": "CONCRETE SOURCE INVERSION OPEN: OneC Organization DML -> CP versus this root CP -> Organization SHARE",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "CONCRETE SOURCE INVERSE edge; HELD on separate upstream catalog-root initial Company S + Ref X before any DML; pinned source remains unchanged",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "update_contract",
+        "line": 844,
+        "end_line": 930,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "5a62037ad651fd72631479cc7574609578184957ca349f3f11a6b7102c8c038a"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "sorted current/new CP SHARE then Org SHARE; Contract UPDATE; overrides/flush/refresh",
+      "reverse_assessment": "CONCRETE SOURCE INVERSION OPEN: OneC Organization DML -> CP versus this root CP -> Organization SHARE",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "CONCRETE SOURCE INVERSE edge; HELD on separate upstream catalog-root initial Company S + Ref X before any DML; pinned source remains unchanged",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "delete_contract",
+        "line": 934,
+        "end_line": 961,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "8a9856349e6dbdcaef8321e08d11cc28c634f379141beb745c791bea59fce926"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "Contract UPDATE; actual usage SELECT; DELETE (caller flush/commit)",
+      "reverse_assessment": "Usage sources do not wait parent rows; concurrent soft references/writers remain UNKNOWN",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/contract_usage.py",
+          "symbol": "contract_usage",
+          "line": 203,
+          "end_line": 214,
+          "file_sha256": "0ab4dcc1295994042c1ddbaade3eb864f7c23dcf82abd0e8e846be58fb97815c",
+          "source_sha256": "23450188510ab95632ca0e5c70f2c9025832e646467a4969ce2fece86e13b3c9"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "set_contract_scope",
+        "line": 1176,
+        "end_line": 1226,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "d516f9a1e8e7a31a43a9f85694f4be9874ada9a10f0f3b26230bdf2f7d0e9ae9"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "sorted opaque ServiceLocation SHARE; Contract UPDATE; child DELETE/INSERT",
+      "reverse_assessment": "location _assert_visible joins ContractLocation/Contract using MVCC SELECT, no Contract lock; other location writers UNKNOWN",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/location_commands.py",
+          "symbol": "_reload_location",
+          "line": 334,
+          "end_line": 338,
+          "file_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+          "source_sha256": "4807fe188c10be86abc4894526218548842536378314a3692b1d6e284e82641b"
+        },
+        {
+          "path": "clearledger/server/app/services/location_commands.py",
+          "symbol": "_locked",
+          "line": 341,
+          "end_line": 349,
+          "file_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+          "source_sha256": "c71d5729f1a0424ecd7ffd848a7c07a360293af959d2045fa8308fe19d19578f"
+        },
+        {
+          "path": "clearledger/server/app/services/location_commands.py",
+          "symbol": "_assert_visible",
+          "line": 352,
+          "end_line": 364,
+          "file_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+          "source_sha256": "fda4809d5e76b0bc1b687aef3b0e784f32211cda8a0a1cf0771afb3fbd0869f1"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "link_contract_location",
+        "line": 1230,
+        "end_line": 1272,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "c3f46a3b40036dedde1484059568f7dca8eb7c2ad403a502bc7cdd32a9f64954"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "opaque ServiceLocation SHARE; Contract UPDATE; child SELECT/INSERT",
+      "reverse_assessment": "location _locked waits Location UPDATE, then _assert_visible performs MVCC SELECT only; no Contract lock in scanned path",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/location_commands.py",
+          "symbol": "_reload_location",
+          "line": 334,
+          "end_line": 338,
+          "file_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+          "source_sha256": "4807fe188c10be86abc4894526218548842536378314a3692b1d6e284e82641b"
+        },
+        {
+          "path": "clearledger/server/app/services/location_commands.py",
+          "symbol": "_locked",
+          "line": 341,
+          "end_line": 349,
+          "file_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+          "source_sha256": "c71d5729f1a0424ecd7ffd848a7c07a360293af959d2045fa8308fe19d19578f"
+        },
+        {
+          "path": "clearledger/server/app/services/location_commands.py",
+          "symbol": "_assert_visible",
+          "line": 352,
+          "end_line": 364,
+          "file_sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836",
+          "source_sha256": "fda4809d5e76b0bc1b687aef3b0e784f32211cda8a0a1cf0771afb3fbd0869f1"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "unlink_contract_location",
+        "line": 1276,
+        "end_line": 1313,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "600db2f5a83395422c29619460c0df56789f7ac2c0a6f109153d6b163b21f421"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "Contract UPDATE; child DELETE/count; no ServiceLocation wait",
+      "reverse_assessment": "no Location row/advisory/LocationSet wait; child writers outside scanned barrier paths UNKNOWN",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "add_contract_link",
+        "line": 1050,
+        "end_line": 1088,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "b985ea2dda609efc8595cae613f248af1ac83b1bf3babe1df0c1558a49d8e9cf"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "Contract UPDATE; existing app code/project SQL SELECT; child INSERT",
+      "reverse_assessment": "no AppKey, no App row lock; catalog/project DML participation UNKNOWN; scanned root does not wait a reverse App lock",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "delete_contract_link",
+        "line": 1092,
+        "end_line": 1123,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "9ad1045e5356336fe4a88ac61cb3bfb43164158b00caff183a3a56c2263b4e79"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "Contract UPDATE; tenant+contract ContractLink UPDATE/DELETE; AFTER child wait repeat actual native claims/visit and original get_owned before DELETE",
+      "reverse_assessment": "same native barrier serializes link roots; other child writers UNKNOWN",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ]
+    },
+    {
+      "root": {
+        "path": "clearledger/server/app/routers/references_router.py",
+        "symbol": "set_contract_dimension",
+        "line": 2120,
+        "end_line": 2164,
+        "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+        "source_sha256": "8b1b554619eddaecd1cef8d32462b9d0923f8c5eccd9d52fde215c77a44c6613"
+      },
+      "ref_composite_mode": "SHARED",
+      "scope_of_proof": "bounded scanned source only; no global deadlock freedom",
+      "holds": "complete B S -> legacy counterparty -> legacy contract",
+      "canonical_waits": "sorted actual Company SHARE -> actor/old/proposed responsible/participating creator Users SHARE in numeric UUID order -> actor Member SHARE; NO new Member/Role policy for reference Users",
+      "tail": "Contract UPDATE; child DELETE/INSERT; legacy dim type/ref normalization",
+      "reverse_assessment": "same native barrier serializes native roots; no dimension-catalog row/advisory wait; other writers UNKNOWN",
+      "cross_edges": [
+        {
+          "owner": "Store mixed CP/contracts",
+          "holds_then_waits": "B Ref X -> legacy CP -> contract -> ref/card DML",
+          "assessment": "Ref S conflicts before native rows; Store cannot pass its B X while native holds S; native cannot pass S while Store holds X",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_store_lock_requests",
+              "line": 49,
+              "end_line": 52,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "539555ffb63c989fe592ab8daad3b319cd3519b8a6c771a802bdeaf4c70bac19"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_prepare_store_contract_write",
+              "line": 62,
+              "end_line": 83,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "33dfd6e361fb882d62397f0871158113695216c648800f5aa50da18644854069"
+            },
+            {
+              "path": "clearledger/server/app/services/store_contract_commands.py",
+              "symbol": "_lock_store_references",
+              "line": 93,
+              "end_line": 102,
+              "file_sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb",
+              "source_sha256": "13ba5953d35115d8ae2be22d161440b550f15c0ad39f7720da633706afe36f8a"
+            }
+          ]
+        },
+        {
+          "owner": "native user/member writer",
+          "holds_then_waits": "complete sorted B -> Company/User/Role/Member rows",
+          "assessment": "shared actor/member/company keys conflict with relevant X before rows; set_member_contracts reads Contracts by MVCC without Contract row locks; other authority writers UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "set_member_contracts",
+              "line": 596,
+              "end_line": 636,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "1123a7a207a7e4b34d3fc7f268662f953416e96365c5c5705d9e731ca888e2aa"
+            }
+          ]
+        },
+        {
+          "owner": "legacy counterparty PATCH/delete",
+          "holds_then_waits": "PATCH CP barrier -> CP DML; delete CP UPDATE -> usage SELECT",
+          "assessment": "native CP barrier precedes canonical rows; delete usage scanner SELECT has no Contract row wait; outer callers/otherwriters UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "update_counterparty",
+              "line": 314,
+              "end_line": 364,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "1a2f1dd5a2377f8ecf2b0861b37dd3cc15918d5b0dcfac9897773f3219fc6d8f"
+            },
+            {
+              "path": "clearledger/server/app/routers/references_router.py",
+              "symbol": "delete_counterparty",
+              "line": 368,
+              "end_line": 385,
+              "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+              "source_sha256": "3910961b375659f215d5d4e6bbb2aa658c3a4b7369bb01c178cb08fc76883f1e"
+            },
+            {
+              "path": "clearledger/server/app/services/counterparty_usage.py",
+              "symbol": "counterparty_usage",
+              "line": 8,
+              "end_line": 50,
+              "file_sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250",
+              "source_sha256": "7b17b41983b1d59ebfcb0ab96535af8434f2ee5a1cddc9e885f7b2d855f94ee1"
+            }
+          ]
+        },
+        {
+          "owner": "OneC outer catalog synchronization",
+          "holds_then_waits": "Org DML/autoflush -> CP barrier -> contract barrier",
+          "assessment": "this root does not acquire Org row; no reverse Org wait here; other OneC interactions UNKNOWN",
+          "pins": [
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "sync_catalogs",
+              "line": 290,
+              "end_line": 304,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_organizations",
+              "line": 1383,
+              "end_line": 1426,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_counterparties",
+              "line": 1144,
+              "end_line": 1237,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+            },
+            {
+              "path": "clearledger/server/app/services/onec/sync_service.py",
+              "symbol": "_sync_contracts",
+              "line": 1239,
+              "end_line": 1381,
+              "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+              "source_sha256": "7b03aa5c4d0de67abd6fcc41dc62e7023c6b1c74f39d9a8d36d6db82d4143abc"
+            }
+          ]
+        },
+        {
+          "owner": "actual remove_user and declared creator/responsible User FK SET NULL",
+          "holds_then_waits": "managed remove_user holds target User X in full B and User UPDATE before DELETE may update Contract creator/responsible fields",
+          "assessment": "R1 declares actual old/proposed reference User S and actual existing home Company S upfront; User X/S conflict before either side acquires its rows. Canonical reference User SHARE also precedes Contract UPDATE. Exact changed User/home/Contract pointer aborts whole root. Conditional source edge may predate R1; no runtime deadlock/regression/security claim.",
+          "pins": [
+            {
+              "path": "clearledger/server/app/routers/users_router.py",
+              "symbol": "remove_user",
+              "line": 779,
+              "end_line": 816,
+              "file_sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4",
+              "source_sha256": "082390dda4dd81befdbda14ba2f765977000c3646afcc75112e4cf0eff711625"
+            },
+            {
+              "path": "clearledger/server/app/services/native_user_role_locks.py",
+              "symbol": "prepare_native_write",
+              "line": 76,
+              "end_line": 180,
+              "file_sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363",
+              "source_sha256": "9d1be60996663fb1aae545d4c5d9adc64410908528ec2c9aba2442ee3b4253c1"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "prepare_native_reference_write",
+              "line": 130,
+              "end_line": 222,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+            },
+            {
+              "path": "clearledger/server/app/services/native_reference_locks.py",
+              "symbol": "lock_native_reference_rows",
+              "line": 247,
+              "end_line": 304,
+              "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+              "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+            }
+          ]
+        }
+      ],
+      "root_specific_pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "R1-ORG-CP-INVERSE",
+      "priority": "P1 SOURCE order question",
+      "state": "OPEN; HELD on separate upstream OneC catalog-root ordering dependency",
+      "claim": "Concrete inverse SOURCE order, NOT a reproduced runtime deadlock/security claim",
+      "affected": [
+        "create_contract",
+        "update_contract"
+      ],
+      "evidence": [
+        {
+          "path": "clearledger/server/app/services/onec/sync_service.py",
+          "symbol": "sync_catalogs",
+          "line": 290,
+          "end_line": 304,
+          "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+          "source_sha256": "ccbae3aa2d030336f4dbbb6e71ea60b548aca07ebe9a11c8f86758805de20458"
+        },
+        {
+          "path": "clearledger/server/app/services/onec/sync_service.py",
+          "symbol": "_sync_organizations",
+          "line": 1383,
+          "end_line": 1426,
+          "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+          "source_sha256": "044d553c27f145a65c3d1bfe213971d8c9d95e3ab2f8b4109a9697422b824ff0"
+        },
+        {
+          "path": "clearledger/server/app/services/onec/sync_service.py",
+          "symbol": "_sync_counterparties",
+          "line": 1144,
+          "end_line": 1237,
+          "file_sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af",
+          "source_sha256": "df43ed8040f88ce3f36c368a402e6708fa4727c002adb7ce03214cffc49a1281"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "lock_native_reference_rows",
+          "line": 247,
+          "end_line": 304,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "fbd168e9c4909e5fd4d78718f16dcc30100b008b54fab439c280572b01b7636d"
+        }
+      ],
+      "why": "OneC sync_catalogs invokes Organization loop before CP barrier; next ORM SELECT can autoflush prior Organization change and hold NO KEY UPDATE; native waits Organization SHARE while holding CP. No B participation in OneC source. Global Ref X alone cannot serialize a nonparticipant.",
+      "next": "Upstream owner must add initial Company S + RefComposite X before _start_log/any DML; common SOURCE composition and authored actual OneC-vs-R1 PG schedule required. Preserve native Org SHARE and CP->canonical order; no NOWAIT409 substitution."
+    },
+    {
+      "id": "R1-ALL-WRITERS",
+      "priority": "UNKNOWN",
+      "state": "OPEN",
+      "claim": "all Company/User/Member/catalog/startup/CP/Org/location/import/soft-reference writer participation unproven; no serializability/deadlock-freedom claim"
+    },
+    {
+      "id": "R1-DYNAMIC-CALLERS",
+      "priority": "UNKNOWN",
+      "state": "OPEN",
+      "claim": "tracked literal baseline callers: references_router.create_contract and test_native_contract_create direct use case; dynamic/outside registrations and consumers UNKNOWN"
+    },
+    {
+      "id": "R1-RUNTIME",
+      "priority": "UNKNOWN",
+      "state": "OPEN",
+      "claim": "authored unit/PG schedules, actual SQL/error/audit/rollback behavior not executed or accepted"
+    },
+    {
+      "id": "R1-REFERENCE-USER-FK",
+      "priority": "P1 SOURCE correction",
+      "state": "AUTHORED; NOT independently accepted; runtime unverified",
+      "claim": "specific conditional remove_user FK source inverse addressed in current revision; no new-regression/vulnerability/runtime deadlock claim",
+      "schema_source": [
+        {
+          "path": "clearledger/server/app/models.py",
+          "lines": [
+            1355,
+            1356,
+            1418,
+            1419
+          ]
+        },
+        {
+          "path": "clearledger/server/app/database.py",
+          "lines": [
+            3623,
+            4400
+          ]
+        }
+      ],
+      "remaining": "actual schema/trigger state, other authority writers and runtime schedules remain UNKNOWN"
+    }
+  ],
+  "test_review": {
+    "meaning": "actual typed/helper issuance and actual nine router roots/direct native use case; PG uses real sessions, advisory waits and pg_blocking_pids; no stubbed B or roots",
+    "new_schedules": "Company/User/Member/Ref and old/new exact Type waits; legacy barrier ordering; fresh membership/scope; direct ordinary member/no JWT; unused named role; missing Company; slug rebound; retained deleted/reparented refs; final target pointer; visit/session revocation including final location wait; replay/default literal hash/error order/app SQL/opaque location; cap lifetime and partial acquisition; actual native remove_user vs real R1 with distinct A/D/R, both ownership/release orders; old creator/responsible guards; foreign and nonexistent FK behavior; numeric User row ordering; parent moves; invalid CREATE/PATCH precedence and missing-user inactive replay; child visit revoke after ContractLink wait; own-org clear/admin/superadmin/legal incoming selector asserted inside operation task",
+    "hazard": "repository tests/conftest imports app.database/app.main/app.seed before target guards; overrides DATABASE_URL; setup_database drops edge/public CASCADE; autouse imports app.rate_limit; ordinary pytest collection unsafe",
+    "gate": "ROOT isolated preimport composition review BEFORE application/helper/test/conftest imports; module URL guard alone insufficient; no runner change or execution permission",
+    "joint_dependency": "Actual OneC catalog-root-versus-native R1 integration schedule is a required separate upstream/composition deliverable; current raw row-peer tests do not establish it.",
+    "test_function_counts_source_only": {
+      "clearledger/server/tests/test_native_reference_locks_unit.py": 8,
+      "clearledger/server/tests/test_native_reference_locks_pg.py": 42
+    },
+    "counts_caveat": "function AST counts only; no collection/execution or derived scenario counts"
+  },
+  "source_checks": {
+    "kind": "stdlib AST/JSON/SHA and compile in memory only; no exec/import of project",
+    "router_complement": "byte-identical after nine body masks plus necessary native_reference_locks/current_organization imports; all old headers/decorators/signatures/helpers unchanged",
+    "protected_tracked_files_unchanged": 3208,
+    "old_python_test_files_unchanged": 411
+  },
+  "source_pins": [
+    {
+      "path": "clearledger/server/app/services/native_reference_locks.py",
+      "bytes": 16076,
+      "sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd"
+    },
+    {
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "bytes": 4741,
+      "sha256": "c17a8f441988f8a3fcc9c4a20aab5bd4af10025a6d34c52fd6148809d2602ad5"
+    },
+    {
+      "path": "clearledger/server/app/routers/references_router.py",
+      "bytes": 108191,
+      "sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330"
+    },
+    {
+      "path": "clearledger/server/app/services/contract_write_locks.py",
+      "bytes": 16309,
+      "sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54"
+    },
+    {
+      "path": "clearledger/server/app/services/native_user_role_locks.py",
+      "bytes": 9038,
+      "sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363"
+    },
+    {
+      "path": "clearledger/server/app/services/store_contract_commands.py",
+      "bytes": 12286,
+      "sha256": "e4152123cca188315e503407081cfb157ddde34a5c0e568df43c260829adfbfb"
+    },
+    {
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "bytes": 8885,
+      "sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97"
+    },
+    {
+      "path": "clearledger/server/app/services/reference_validation.py",
+      "bytes": 2558,
+      "sha256": "fec7fca58c47db80683e8bd39bc0394377c1be35d832061e1d0a004b98192d7b"
+    },
+    {
+      "path": "clearledger/server/app/services/reference_overrides.py",
+      "bytes": 1407,
+      "sha256": "37962f4615cd9c46e9f8e926c08167dfccfe2a0705beef082d46257d62ab08aa"
+    },
+    {
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "bytes": 4136,
+      "sha256": "9a18628d5e6f701dab13c30fced65ef711ce8aa3d7fef4a0ae51ecf8cf5b4158"
+    },
+    {
+      "path": "clearledger/server/app/services/contract_usage.py",
+      "bytes": 14850,
+      "sha256": "0ab4dcc1295994042c1ddbaade3eb864f7c23dcf82abd0e8e846be58fb97815c"
+    },
+    {
+      "path": "clearledger/server/app/services/counterparty_usage.py",
+      "bytes": 2663,
+      "sha256": "c92f1f15a3009bfcaaa51491da95c06694f748994532a5056d48f914e0ac9250"
+    },
+    {
+      "path": "clearledger/server/app/services/location_commands.py",
+      "bytes": 37793,
+      "sha256": "28a02dfb18db53cdf615a20d895b9ad765b32530c90ea3457194b941ada33836"
+    },
+    {
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "bytes": 88694,
+      "sha256": "568d7dfd104a848e1a548599f7bcf79ed3716f91a4760c580cdb4cfacdfa75af"
+    },
+    {
+      "path": "clearledger/server/app/services/reestr_normalize.py",
+      "bytes": 14935,
+      "sha256": "6020b20cfd13f1c8a21d5f0d3f60dc11a490daa0802d28595e93f84ff6ea12ed"
+    },
+    {
+      "path": "clearledger/server/app/services/reestr_rushydro.py",
+      "bytes": 60993,
+      "sha256": "bcd5f19389047d57ed5dc8ecf7d4b066879443f180e8bb1f24895e42ae8883cf"
+    },
+    {
+      "path": "clearledger/server/app/services/charge_sessions_normalize.py",
+      "bytes": 55253,
+      "sha256": "6951409b98dcc572478e2051d7975f8e8fc622b600a56ebd0dd2c6623d174fc3"
+    },
+    {
+      "path": "clearledger/server/app/services/space_links.py",
+      "bytes": 8235,
+      "sha256": "1665f2a7c14abd1a23fd77be387ff0da8afc4b1160cfeca67ba60e6d928fff84"
+    },
+    {
+      "path": "clearledger/server/app/services/ops_terms.py",
+      "bytes": 22920,
+      "sha256": "3961eb367a2ef7162766ebfe7acee4f66da5ac7414b420db54c2ff9934d0b288"
+    },
+    {
+      "path": "clearledger/server/app/routers/users_router.py",
+      "bytes": 45729,
+      "sha256": "d799e032fd480d3d2b8bf212c6ab64e88d71b240c62efb387d43e40060d49ba4"
+    },
+    {
+      "path": "clearledger/server/app/auth.py",
+      "bytes": 38400,
+      "sha256": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889"
+    },
+    {
+      "path": "clearledger/server/app/deps.py",
+      "bytes": 7194,
+      "sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c"
+    },
+    {
+      "path": "clearledger/server/app/utils.py",
+      "bytes": 5951,
+      "sha256": "32e4e3e50eb0251d8c0d371a1963c6e799243b3307fcb990554257af2d2c80f3"
+    },
+    {
+      "path": "clearledger/server/app/models.py",
+      "bytes": 966529,
+      "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682"
+    },
+    {
+      "path": "clearledger/server/app/schemas.py",
+      "bytes": 64151,
+      "sha256": "561493cfd444ad27f0ee673fb3dd96156d891966451bcd7345e609bcb31cbe7d"
+    },
+    {
+      "path": "clearledger/server/app/scope.py",
+      "bytes": 12361,
+      "sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b"
+    },
+    {
+      "path": "clearledger/server/app/database.py",
+      "bytes": 388263,
+      "sha256": "c2c028fc528b7260c69de441e41a564595d07c23c74e4433f02fc9f04db005af"
+    },
+    {
+      "path": "clearledger/server/tests/conftest.py",
+      "bytes": 9612,
+      "sha256": "32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b"
+    },
+    {
+      "path": "clearledger/server/tests/test_native_contract_create.py",
+      "bytes": 24288,
+      "sha256": "bf4cf2d7c22d478c2235aaead82e208bab84a4c31be3c95524c200c089152408"
+    },
+    {
+      "path": "clearledger/server/tests/test_native_reference_locks_unit.py",
+      "bytes": 5100,
+      "sha256": "1d9b38c9d7e2c533a555a73305b14b537d9533c125c04cfbbc326fcac952e6e9"
+    },
+    {
+      "path": "clearledger/server/tests/test_native_reference_locks_pg.py",
+      "bytes": 58677,
+      "sha256": "91d6244e84ef773831e53de6ff5c987d1169a0599292ec4d78d9b6cfd065aacc"
+    }
+  ],
+  "program_status": {
+    "sections": [
+      {
+        "id": "M00",
+        "state": "OPEN"
+      },
+      {
+        "id": "M01",
+        "state": "OPEN"
+      },
+      {
+        "id": "M02",
+        "state": "OPEN"
+      },
+      {
+        "id": "M03",
+        "state": "OPEN"
+      },
+      {
+        "id": "M04",
+        "state": "OPEN"
+      },
+      {
+        "id": "M05",
+        "state": "OPEN"
+      },
+      {
+        "id": "M06",
+        "state": "OPEN"
+      },
+      {
+        "id": "M07",
+        "state": "OPEN"
+      },
+      {
+        "id": "M08",
+        "state": "OPEN"
+      },
+      {
+        "id": "M09",
+        "state": "OPEN"
+      },
+      {
+        "id": "M10",
+        "state": "OPEN"
+      },
+      {
+        "id": "M11",
+        "state": "OPEN"
+      },
+      {
+        "id": "M12",
+        "state": "OPEN"
+      },
+      {
+        "id": "M13",
+        "state": "OPEN"
+      },
+      {
+        "id": "M14",
+        "state": "OPEN"
+      },
+      {
+        "id": "M15",
+        "state": "OPEN"
+      },
+      {
+        "id": "M16",
+        "state": "OPEN"
+      },
+      {
+        "id": "M17",
+        "state": "OPEN"
+      },
+      {
+        "id": "M18",
+        "state": "OPEN"
+      },
+      {
+        "id": "M19",
+        "state": "OPEN"
+      }
+    ],
+    "conditions": [
+      {
+        "id": "FULL-SCOPE",
+        "state": "OPEN"
+      },
+      {
+        "id": "SOURCE",
+        "state": "OPEN"
+      },
+      {
+        "id": "DOMAIN",
+        "state": "OPEN"
+      },
+      {
+        "id": "CONTRACT",
+        "state": "OPEN"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "state": "OPEN"
+      },
+      {
+        "id": "MIGRATION",
+        "state": "OPEN"
+      },
+      {
+        "id": "CONSUMERS",
+        "state": "OPEN"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "state": "OPEN"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "state": "OPEN"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "state": "OPEN"
+      },
+      {
+        "id": "RELEASE",
+        "state": "OPEN"
+      }
+    ],
+    "completion_asserted": false
+  },
+  "dependency": {
+    "state": "HELD",
+    "owner": "separate upstream OneC catalog-root source owner",
+    "required_entry": "complete Company S + RefComposite X at actual sync_catalogs root BEFORE _start_log flush and every Organization/CP/Contract DML/FK; preserve legacy CP->contract barriers",
+    "integration": "separate source composition required; do not silently apply another branch or claim current pinned OneC corrected",
+    "acceptance": "joint frozen source plus authored real two-session actual OneC catalog-root vs actual R1 native schedule; independent SOURCE review and ROOT-only isolated runtime gate",
+    "no_substitution": "no NOWAIT409; no dropped Organization SHARE; no otherwriter edits in native scope; all-writer breadth remains UNKNOWN"
+  },
+  "review_corrections": [
+    {
+      "id": "F3",
+      "state": "AUTHORED SOURCE correction; independent recheck required",
+      "reason": "conditional responsible FK versus remove_user creator/responsible SET NULL inverse",
+      "change": "full old/proposed reference User and actual home Company upfront plan; canonical numeric UUID Users before refs/Contract; changed pointer abort; invalid discovery no-raise; missing/foreign identity policy unchanged",
+      "pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "discover_native_reference_user",
+          "line": 85,
+          "end_line": 92,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "93fe88cdaac06a201f316f812edf7f2197d825813f0ebf29a51a8ce56ed8f20a"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "native_reference_plan",
+          "line": 70,
+          "end_line": 82,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "727f8331264c60911122fe743d20efb43e948e6b666b757876a77ca5d12a601e"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "prepare_native_reference_write",
+          "line": 130,
+          "end_line": 222,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "b9b9c8ae7e1c4b55ef6d8aa904d7847166926a7a5b46dda4aa7784656759f123"
+        }
+      ]
+    },
+    {
+      "id": "F1",
+      "state": "AUTHORED SOURCE correction; independent recheck required",
+      "change": "delete_contract_link repeats actual native claims/visit and original get_owned after its final child FOR UPDATE before DELETE",
+      "pins": [
+        {
+          "path": "clearledger/server/app/routers/references_router.py",
+          "symbol": "delete_contract_link",
+          "line": 1092,
+          "end_line": 1123,
+          "file_sha256": "a9f595b9faddcc2c9bfa6c53ad059581f4f5fe25832c1e2c806677f61baf6330",
+          "source_sha256": "9ad1045e5356336fe4a88ac61cb3bfb43164158b00caff183a3a56c2263b4e79"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "check_native_reference_authority",
+          "line": 225,
+          "end_line": 244,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "1d5f6b9f24beaea1c19ca6ba16cd270b793869ee3bb74a2413b70a72e367b7eb"
+        }
+      ]
+    },
+    {
+      "id": "F2",
+      "state": "AUTHORED SOURCE correction; independent recheck required",
+      "change": "incoming actual org selector captured before preflight and restored before fresh original policy, preserving legal selector and current own_org/role behavior",
+      "pins": [
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "assert_native_reference_member",
+          "line": 113,
+          "end_line": 127,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "3a8952df4e36dbf6af4976b38bbb19755c52535c3ed73b5f63b481280f2a5b0c"
+        },
+        {
+          "path": "clearledger/server/app/services/native_reference_locks.py",
+          "symbol": "check_native_reference_authority",
+          "line": 225,
+          "end_line": 244,
+          "file_sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd",
+          "source_sha256": "1d5f6b9f24beaea1c19ca6ba16cd270b793869ee3bb74a2413b70a72e367b7eb"
+        },
+        {
+          "path": "clearledger/server/app/services/native_contract_commands.py",
+          "symbol": "create_native_contract",
+          "line": 31,
+          "end_line": 98,
+          "file_sha256": "c17a8f441988f8a3fcc9c4a20aab5bd4af10025a6d34c52fd6148809d2602ad5",
+          "source_sha256": "00f0a736dca254f7663eca6fa9b23810c91cd34d58ff1c097fb89ec8ad4ea81a"
+        }
+      ]
+    }
+  ]
+}
