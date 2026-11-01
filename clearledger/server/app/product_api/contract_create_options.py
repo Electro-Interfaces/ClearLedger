@@ -278,7 +278,9 @@ async def request_lifetime(request: Request):
                     connection = await db.connection(execution_options={
                         "isolation_level": "REPEATABLE READ", "postgresql_readonly": True})
                     owner = (db.sync_session.get_transaction(), connection.sync_connection)
-                    remaining = max(1, int((deadline.when() - asyncio.get_running_loop().time()) * 1000))
+                    remaining = int((deadline.when() - asyncio.get_running_loop().time()) * 1000)
+                    if remaining <= 0:
+                        _unavailable()
                     await db.execute(text("SELECT set_config('statement_timeout', :ms, true), pg_current_snapshot()"), {"ms": str(remaining)})
                     token, context = await access.options_preflight(request, db, bearer, bind=True)
                     request.scope.update({_DB: db, _CONTEXT: context, _TOKEN: token, _BEARER: bearer, _OWNER: owner})
