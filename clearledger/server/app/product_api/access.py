@@ -172,11 +172,12 @@ async def create_preflight(request: Request, db, bearer: str, *, bind: bool = Fa
     kind = PrincipalKind.SERVICE if token.is_machine else PrincipalKind.PARTNER
     principal = Principal(kind, token.subject, token.client_id,
                           str(token.installation_id), str(token.grant_id))
-    grants = MappingProxyType({key: scope_of(token.resource_scopes.get(key)) for key in RESOURCES})
     descriptor = CreateNewbornPreflight(request, str(token.company_id), principal, POLICY_VERSION) if bind else None
+    # Newborn admission carries no read permissions. Keep the canonical token's
+    # lossless resource grants for the real SQL issuer, without projecting
+    # unrelated read grants through ResourceScope's identifier validation.
     context = AccessContext(principal, str(token.company_id), POLICY_VERSION, token.scopes,
-        tuple(ResourcePermission(resource, "read", grants[resource], ResourceScope.all())
-              for resource in RESOURCES), valid=True, create_preflight=descriptor)
+        (), valid=True, create_preflight=descriptor)
     if bind:
         request.scope[CREATE_PREFLIGHT_KEY] = descriptor
     return token, context

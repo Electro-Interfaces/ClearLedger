@@ -10,6 +10,7 @@ from copy import copy
 from dataclasses import replace
 import json
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -18,14 +19,17 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_contracts.context import CREATE_PREFLIGHT_KEY, ScopeMode
-from app.models import UserCompany
-from app.models_partner import PartnerGrant, PartnerResourceScope
-from app.models_partner_contracts import PartnerContractCreateProfile as Profile
+from app.models import ContractLocation, ServiceLocation, UserCompany
+from app.models_partner import (PartnerGrant, PartnerInstallationLocation,
+    PartnerResourceItem, PartnerResourceScope)
+from app.models_partner_contracts import (PartnerContractCreateProfile as Profile,
+    PartnerContractCreateRef as Ref, PartnerContractIntentLocation as IntentLocation,
+    PartnerContractSuccessIntent as Intent)
 from app.product_api import access, budget, dto
 from app.product_api.app import create_product_api, curated_openapi, public_client_openapi
 from app.services import partner_contract_authority as authority, partner_contract_commands as commands
 from app.services import partner_identity as identity, contract_write_locks as locks
-from tests.partner_contract_issuer_fixture import issuer_world, issue_machine, make_body, state
+from tests.partner_contract_issuer_fixture import issuer_world, issue_machine, issue_user, make_body, state
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -135,6 +139,53 @@ async def test_actual_http_authlib_create_replay_empty_read_scope_and_five_parts
     read_token = await issue_machine(w, scope="contracts:create contracts:read")
     denied = await request(h, bearer=read_token, method="GET")
     problem(denied, 403, "access_denied")  # Default read guard still requires resources.
+
+
+async def test_actual_user_and_machine_create_ignore_unrequested_whitespace_object_grant(http_world):
+    h, w, extra = http_world, http_world.w, " "
+    # A real same-company parent and BOTH live ceilings contain this exact ID.
+    # It is deliberately absent from ProfileRef/body: schema4 forbids a blank
+    # profile location, whereas canonical installation/object grants allow it.
+    async with w.factory() as db:
+        db.add(ServiceLocation(id=extra, company_id=w.company, code="synthetic-extra-blank",
+            name="Synthetic unrequested object", source_bindings=[]))
+        await db.flush()
+        db.add(PartnerInstallationLocation(installation_id=w.iid, location_id=extra))
+        db.add(PartnerResourceItem(installation_id=w.iid, kind="objects", object_id=extra))
+        (await db.get(UserCompany, (w.user, w.company))).object_scope = [w.loc, extra]
+        await db.commit()
+    tokens = (await issue_user(w), await issue_machine(w))  # Real Authlib flows.
+    for is_machine, token in zip((False, True), tokens):
+        async with w.factory() as db:
+            current = await identity.verify_partner_access_token(token, db)
+            assert current.is_machine is is_machine
+            assert current.resource_scopes["objects"].mode == "SET"
+            assert current.resource_scopes["objects"].ids == frozenset((w.loc, extra))
+            assert current.location_ids == frozenset((w.loc, extra))
+            assert current.resource_scopes["contracts"].mode == "EMPTY"
+            refs = tuple(await db.scalars(select(Ref.location_id).where(
+                Ref.profile_id == w.profile, Ref.kind == "location")))
+            assert refs == (w.loc,) and extra not in refs
+        body = make_body(w)
+        assert body.coverage.locationIds == (w.loc,)
+        raw, before = body.model_dump_json().encode(), await state(w)
+        first = await request(h, bearer=token, raw=raw)
+        assert first.status == 201 and first.body_reads == 1
+        assert set(first.body) == {"contractId", "replayed"} and first.body["replayed"] is False
+        assert await state(w) == tuple(n + 1 for n in before)  # All five actual parts.
+        second = await request(h, bearer=token, raw=raw)
+        assert second.status == 200 and second.body_reads == 1
+        assert second.body == {**first.body, "replayed": True}
+        assert await state(w) == tuple(n + 1 for n in before)
+        async with w.factory() as db:
+            assert tuple(await db.scalars(select(ContractLocation.location_id).where(
+                ContractLocation.contract_id == UUID(first.body["contractId"])))) == (w.loc,)
+            assert not tuple(await db.scalars(select(IntentLocation.location_id).join(
+                Intent, Intent.id == IntentLocation.intent_id).where(
+                Intent.company_id == w.company, IntentLocation.location_id == extra)))
+            scopes = await db.scalar(select(PartnerResourceScope).where(
+                PartnerResourceScope.installation_id == w.iid, PartnerResourceScope.kind == "contracts"))
+            assert scopes.mode == "EMPTY"
 
 
 async def test_same_actual_session_root_connection_complete_one_b_and_lifetime(http_world, monkeypatch):
