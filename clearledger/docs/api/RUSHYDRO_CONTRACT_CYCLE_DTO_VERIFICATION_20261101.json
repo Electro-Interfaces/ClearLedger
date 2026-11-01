@@ -1,0 +1,32 @@
+{
+  "status": "PASS_ROOT_CONTRACT_CYCLE_DTO50",
+  "source": "e9641d7f56c959e90c028d4bd374a30360636ed5",
+  "cases": 50,
+  "definitions": 50,
+  "phases": 150,
+  "exitCode": 0,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "seconds": 0.7555162347853184,
+  "denied": [],
+  "appImports": [],
+  "conftest": [],
+  "pytestVersion": "9.2.0",
+  "pydanticVersion": "2.14.2",
+  "noSQLorHTTP": true,
+  "standaloneExactModule": "rushydro_contract_cycle_dto_isolated",
+  "authorCommit": "eb6298259fbd3fd5304fd1a2557d99b7aa23ba77",
+  "schemaOperationsUnchanged": 18,
+  "authorityOrPersistenceVerified": false,
+  "firstAttempt": "Root harness blocked before collection: service logging outside owned directory; corrected only log/tmp paths and capture; source unchanged",
+  "notCovered": [
+    "HTTP application composition",
+    "DB authority and resource existence",
+    "command receipts",
+    "native term window/closed period",
+    "migration",
+    "production dependency installation",
+    "partner pilot"
+  ]
+}
