@@ -260,8 +260,8 @@ async def test_actual_register_commit_constraint_failure_rolls_back_all_effects(
             assert not session.new and not session.dirty and not session.deleted
             assert not register_dispatch_spy
             observed.append(root)
-            # Real late before_commit DML: the clean seal must reject the
-            # ensuing native flush before SQL can reach the NOT NULL constraint.
+            # Настоящий поздний DML в before_commit: защита чистой сессии должна отклонить
+            # последующий нативный flush до проверки NOT NULL в SQL.
             session.add(AuditEvent(company_id=cid, user_id="system", user_name="Платформа",
                                    action=None, details="synthetic constraint failure"))
         event.listen(db.sync_session, "before_commit", fail_native_flush)
@@ -275,7 +275,7 @@ async def test_actual_register_commit_constraint_failure_rolls_back_all_effects(
             assert native._SEALS[db.sync_session][0]() is root
         finally:
             event.remove(db.sync_session, "before_commit", fail_native_flush)
-            await db.rollback()  # ScopedLockError leaves whole-root cleanup to the owner.
+            await db.rollback()  # После ScopedLockError владелец откатывает весь корень.
         assert deferred._STATE not in db.sync_session.info
         assert db.sync_session not in native._SEALS
         assert db.sync_session.get_transaction() is None and not register_dispatch_spy
@@ -310,8 +310,8 @@ async def test_actual_register_final_flush_not_null_failure_rolls_back_all_effec
             assert session.get_transaction() is root
             assert session not in native._SEALS
             if not pending:
-                # ensure_token flushes precede log_audit and its DocNotice queue;
-                # injecting there would escape register_doc's IntegrityError catch.
+                # Ранние flush в ensure_token предшествуют log_audit и очереди DocNotice;
+                # внедрённая там ошибка вышла бы за обработчик IntegrityError в register_doc.
                 assert deferred._STATE not in session.info
                 early_flushes.append(root)
                 return
@@ -330,7 +330,7 @@ async def test_actual_register_final_flush_not_null_failure_rolls_back_all_effec
             assert any(isinstance(row, DocEvent) and row.doc_id == doc_id
                        and row.kind == "registered" for row in session.new)
             injected.append(root)
-            # Only add invalid data: real flush/driver/DB must produce 23502.
+            # Добавляем лишь некорректные данные: реальный flush/драйвер/БД должны дать 23502.
             session.add(AuditEvent(company_id=cid, user_id="system", user_name="Платформа",
                                    action=None, details="synthetic final flush NOT NULL failure"))
 
@@ -338,7 +338,7 @@ async def test_actual_register_final_flush_not_null_failure_rolls_back_all_effec
             commits.append(session.get_transaction())
 
         def observe_database_error(context):
-            # Observation only: no SQL, replacement exception or synthetic raise.
+            # Только наблюдение: без SQL, подмены исключения и искусственного raise.
             database_errors.append((context.original_exception, context.sqlalchemy_exception,
                                     context.connection, db.sync_session in native._SEALS))
 
@@ -359,7 +359,7 @@ async def test_actual_register_final_flush_not_null_failure_rolls_back_all_effec
             assert getattr(original.__cause__, "table_name", None) == "audit_events"
             assert getattr(original.__cause__, "column_name", None) == "action"
             assert failed_connection is connection and sealed is False
-            # The handler, not Session.close(), must have rolled back the root.
+            # Корень должен откатить обработчик до вызова Session.close().
             assert db.sync_session.get_transaction() is None
             assert db.sync_session not in native._SEALS
             assert deferred._STATE not in db.sync_session.info
@@ -368,7 +368,7 @@ async def test_actual_register_final_flush_not_null_failure_rolls_back_all_effec
             event.remove(engine, "handle_error", observe_database_error)
             event.remove(db.sync_session, "before_commit", observe_commit)
             event.remove(db.sync_session, "before_flush", inject_at_final_flush)
-            await db.rollback()  # Cleanup also if an assertion or unexpected error escapes.
+            await db.rollback()  # Очистка также при нарушении проверки или неожиданном исключении.
         assert deferred._STATE not in db.sync_session.info
     async with audit_pg_factory() as independent:
         doc = await independent.get(DocCard, doc_id)
