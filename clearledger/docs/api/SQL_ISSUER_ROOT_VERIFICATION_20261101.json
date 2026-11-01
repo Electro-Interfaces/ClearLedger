@@ -1,0 +1,180 @@
+{
+  "status": "ACCEPT_SQL_ISSUER_122_SCOPED_SOURCE_AND_RAW_WITH_LIMITATIONS",
+  "asOfUTC": "2026-11-01T08:21:37.962377+00:00",
+  "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+  "integrationHeadAtCheckpoint": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+  "acceptance": {
+    "status": "ROOT_ACCEPTED_SQL122_SOURCE_RAW_WITH_EXPLICIT_LIMITATIONS",
+    "at": "2026-11-01T08:02:49.878937+00:00",
+    "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+    "cases": 122,
+    "defs": 37,
+    "phases": 366,
+    "separateSeries": 7,
+    "sumSeriesSeconds": 934.5795660661533,
+    "reviewMD": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/sql-issuer-full122-root-raw-review-20261101/REVIEW.md",
+    "reviewMDSHA256": "fddf9eb523beb115d13d3add8622d28003e0d235d1d358d9f738e56166d23304",
+    "reviewJSON": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/sql-issuer-full122-root-raw-review-20261101/REVIEW.json",
+    "reviewJSONSHA256": "c624d57adf81be75b113fc26fa255aea77e6459021652f3b36cbcd7117efe6ab",
+    "reviewVerdict": "ACCEPT_SCOPED_SOURCE_RAW_WITH_EXPLICIT_LIMITATIONS",
+    "findings": [
+      {
+        "id": "E1",
+        "severity": "medium",
+        "kind": "evidence_limit",
+        "blocking_for_scoped_verdict": false,
+        "title": "Нет независимого публичного preimport Role/OID наблюдения",
+        "evidence": "Внешний controller создаёт ordinary role и сверяет полную identity до app.config; identity хранится только в запрещённом control/contract.json. Отдельного публичного Role/OID-файла эта серия не публикует.",
+        "requirement": "Сохранять формулировку code + Root receipt attestation only; не публиковать выдуманные независимо наблюдённые значения OID/role flags."
+      },
+      {
+        "id": "E2",
+        "severity": "medium",
+        "kind": "coverage_limit",
+        "blocking_for_scoped_verdict": false,
+        "title": "Объединение семи миров не является одним запуском 122 или общей приёмкой",
+        "evidence": "Срезы 20+20+20+20+20+20+2 запускаются в семи отдельных БД; SQL consumer вызывается напрямую, OAuth и native Org DELETE проходят ASGITransport.",
+        "requirement": "Не переносить результат на 47da804b, forthcoming native G1, combined CI, HTTP POST70, SDK, activation, live deployment или общий native OrgDelete closure."
+      },
+      {
+        "id": "E3",
+        "severity": "low",
+        "kind": "maintenance",
+        "blocking_for_scoped_verdict": false,
+        "title": "Сохранены предупреждения fixture API и отрицательных lifetime случаев",
+        "evidence": "В stdout каждого среза class-scoped fixture as instance method deprecation; в первом также два SAWarning transaction already deassociated from connection. stderr каждого среза содержит два SyntaxWarning invalid escape \\S из AST-прохода books_links.py.",
+        "requirement": "Не называть логи чистыми от предупреждений. Перед сменой pytest/SQLAlchemy отдельно оценить совместимость; текущие poolErrors пусты, ни одна фаза не скрыта."
+      }
+    ],
+    "limits": [
+      "Seven separate series; no single122 run",
+      "Role/OID preimport numeric identity not independently observed; code+Root only",
+      "Root parent88996 exit0/reaped receipt attestation; no live process inspection",
+      "Weak ownership reviewed in source; no GC/liveness test claimed",
+      "Dedicated late FK wait is not tested: parent SHARE + participating protocol only, no arbitrary-writer proof",
+      "Postflush faults run in writer transaction; not proof of unrestricted concurrent phantoms",
+      "State counts cover five atomic parts; not full equality of every business column or all audit payloads",
+      "Foreign41 comparison restricted to Id/Image/Running/StartedAt, not full state",
+      "Snapshot manifests/runtime modules verify reported pins/origins; no dependency supply-chain audit or hermetic completeness claim",
+      "No future CI/API70/SDK/activation/current47da/nativeG1 transfer"
+    ],
+    "task": "task_323fb43e736c",
+    "dispatch": "ctx_17b59b72d458",
+    "lifecycle": "Root readfullMD+allcriticalJSONmetadata/hashes; acceptscomponentONLY; workerreleasebeforeACKnext",
+    "noTransfer": "Current47da/HTTP70/nativeG1/wholeAPI/CI/SDK/activation NOTacceptedby122"
+  },
+  "series": [
+    {
+      "bounds": [
+        0,
+        20
+      ],
+      "cases": 20,
+      "defs": 6,
+      "phases": 60,
+      "seconds": 102.02016712725163,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-0-20-8cda12d9-fullnative-pg-20261101-02dc381d20b4",
+      "resultSHA256": "9d29fa7398369a0c8bd17929d10228603b8fb38f0f1a7df7219db750660e8be3"
+    },
+    {
+      "bounds": [
+        20,
+        40
+      ],
+      "cases": 20,
+      "defs": 4,
+      "phases": 60,
+      "seconds": 148.344980253838,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-20-40-8cda12d9-fullnative-pg-20261101-25a5d7a527be",
+      "resultSHA256": "c3dc144ea6e97db2c9b1d9561c6c50fa068b87b787d70e45bb2120097911c619"
+    },
+    {
+      "bounds": [
+        40,
+        60
+      ],
+      "cases": 20,
+      "defs": 2,
+      "phases": 60,
+      "seconds": 158.4186011767015,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-40-60-8cda12d9-fullnative-pg-20261101-9dd6470f1480",
+      "resultSHA256": "2cbfb7f27a578781bc9582161a9b7eeca014774611a7ad305a1d1c0a4376d351"
+    },
+    {
+      "bounds": [
+        60,
+        80
+      ],
+      "cases": 20,
+      "defs": 7,
+      "phases": 60,
+      "seconds": 154.5109654897824,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-60-80-8cda12d9-fullnative-pg-20261101-007f8595c7ef",
+      "resultSHA256": "fa2514ed3a933055fa3cf38830b163c2977f485e6b485f04c2e3563b19407087"
+    },
+    {
+      "bounds": [
+        80,
+        100
+      ],
+      "cases": 20,
+      "defs": 9,
+      "phases": 60,
+      "seconds": 185.7832343960181,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-80-100-8cda12d9-fullnative-pg-20261101-bf0bdda8acb6",
+      "resultSHA256": "9b6fb2ba675b4201aa9c4238c974d80c018f37ad21499b2627c9f0868f8d073a"
+    },
+    {
+      "bounds": [
+        100,
+        120
+      ],
+      "cases": 20,
+      "defs": 10,
+      "phases": 60,
+      "seconds": 136.86118002794683,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-100-120-8cda12d9-fullnative-pg-20261101-25ecfda7b004",
+      "resultSHA256": "948740a14f8a0ee08cb4c74b91032510aba1cef604180a57b6dd9bfc8c927cca"
+    },
+    {
+      "bounds": [
+        120,
+        122
+      ],
+      "cases": 2,
+      "defs": 2,
+      "phases": 6,
+      "seconds": 48.64043759461492,
+      "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-120-122-8cda12d9-fullnative-pg-20261101-40598f3fce4b",
+      "resultSHA256": "ea6fcc1040bee9a87cfa4240fe089d673c47a08c7c5062e729ee88f198703b62"
+    }
+  ],
+  "totals": {
+    "cases": 122,
+    "definitions": 37,
+    "phases": 366,
+    "separateWorlds": 7,
+    "sumSeriesSeconds": 934.5795660661533,
+    "sourceFiles": 562
+  },
+  "physicalSchema": {
+    "models": 341,
+    "tables": 347,
+    "foreignKeyConstraints": 803,
+    "normalizedFKEdges": 802,
+    "riTriggers": 3212
+  },
+  "HTTPCurrent": {
+    "source47da": "Two20series +independentlast10 =50uniquePASS3separateworlds; failedthird20 18diagnosticPASS2negativeobserverFAIL preserved; NOT70PASS",
+    "correctedSource4a4": "Actualtwo negativeobservercases PASS; independentwholeHTTPSourceacceptance pending; realcopy/otherRequest403prebody/noSQLchanges",
+    "currentManifest16": "SOURCE9accepted/integrated117ee3d; real6GETmodule/schema/streaming checks NOTRUN newcomposition; originalstrictperpathAllowconsts preserved, onlylistContractsdescriptioncorrected",
+    "allFailedReceiptsRetained": true
+  },
+  "nativeRegister": {
+    "integratedSource": "715df7c3b2f80943e88fba23656656716dd39c19",
+    "SOURCE": "Accepted fullV1 +focusedV2, peeracd3788d, exact11",
+    "actualInitial7": "0call/7setupERROR onnativeCompanyslug51>50, no registerbodyreached; fixture-onlyprefixfixunderindependentreview; no productionSchemachange",
+    "status": "NOT_ACCEPTED_RUNTIME"
+  },
+  "remaining": "FullcurrentHTTP70/GET/streaming/schema/SDK, newnative89/Case/G3/Profile regressions, options andadminactivation, allM00-M19+11 stillrequired; noCI/GO/merge/deploy/workingflags"
+}
