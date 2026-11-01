@@ -307,9 +307,17 @@ async def test_actual_inbound_acquaint_parent_card_before_children(world, first)
         async with running(first_call) as first_task:
             await blocked(observer, owner_pid, bp)
             async with running(second_call) as second_task:
-                await blocked(observer, follower_pid, bp)
+                await blocked(observer, follower_pid, owner_pid, relation="doc_cards")
+                assert await observer.scalar(text("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid=:pid "
+                    "AND locktype='tuple' AND mode='AccessExclusiveLock' AND NOT granted "
+                    "AND relation='core.doc_cards'::regclass)"), {"pid": follower_pid})
                 assert not any(label == "inbound" and sql.lstrip().startswith(("insert ", "update ", "delete "))
                                for label, sql, _ in w.sql)
+                assert await observer.scalar(text(
+                    "SELECT (SELECT count(*) FROM core.doc_acquaints WHERE doc_id=:doc) + "
+                    "(SELECT count(*) FROM core.doc_events WHERE doc_id=:doc) + "
+                    "(SELECT count(*) FROM core.eco_approval_requests WHERE doc_id=:doc)"), {"doc": w.doc}) == 0
+                await blocked(observer, owner_pid, bp)
                 await blocker.rollback()
                 assert await asyncio.wait_for(first_task, 10)
                 try:
