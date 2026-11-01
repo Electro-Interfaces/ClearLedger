@@ -696,9 +696,8 @@ async def test_existing17_retain_source_contracts_and_public_outcomes(env):
         assert response.headers["cache-control"] == "no-store"
     before_hint = await state(data)
     hint = await env["client"].post("/api/oauth2/revoke", data={"client_id": data.client_id, "token": data.access, "token_type_hint": "unknown"})
-    # Preserve the installed Authlib response here; RFC7009 hint handling is a
-    # separate protocol change, not part of the Docs logout lock conversion.
-    assert hint.status_code == 401 and hint.json() == {"error": "unsupported_token_type"}, (hint.status_code, hint.text)
+    # RFC7009 ignores unknown hints; this family was already revoked above.
+    assert hint.status_code == 200 and hint.json() == {}, (hint.status_code, hint.text)
     assert hint.headers["cache-control"] == "no-store"
     assert await state(data) == before_hint
     closed_wire(await env["client"].delete(URL, headers=proof(data.raw)))

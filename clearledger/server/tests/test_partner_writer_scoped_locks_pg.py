@@ -882,9 +882,6 @@ async def test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint
     unknown = await env["client"].post("/api/oauth2/revoke",
         data={**form, "token": "unknown-" + uuid4().hex}, auth=auth)
     assert unknown.status_code == 200 and unknown.json() == {}
-    invalid_hint = await env["client"].post("/api/oauth2/revoke",
-        data={**form, "token_type_hint": "unsupported"}, auth=auth)
-    assert invalid_hint.status_code == 400 and invalid_hint.json()["error"] == "unsupported_token_type"
     foreign_auth = (other["client_id"], other["secret"]) if confidential else None
     foreign_form = dict(form)
     if foreign_auth is None:
@@ -896,6 +893,15 @@ async def test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint
         assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
     assert (await env["client"].get("/api/oauth2/userinfo",
         headers={"Authorization": "Bearer " + issued["access_token"]})).status_code == 200
+    # Keep the foreign-client and live UserInfo checks before legitimate revoke.
+    ignored_hint = await env["client"].post("/api/oauth2/revoke",
+        data={**form, "token_type_hint": "unsupported"}, auth=auth)
+    assert ignored_hint.status_code == 200 and ignored_hint.json() == {}
+    assert ignored_hint.headers["cache-control"] == "no-store"
+    async with _test_session_factory() as db:
+        assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is True
+        assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
+        assert (await db.get(PartnerCode, identity.digest(other_code))).consumed is False
     for _ in range(2):
         response = await env["client"].post("/api/oauth2/revoke", data=form, auth=auth)
         assert response.status_code == 200 and response.json() == {}

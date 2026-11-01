@@ -953,6 +953,12 @@ class PartnerOpenIDCode(OpenIDCode):
 class RevokeEndpoint(RevocationEndpoint):
     CLIENT_AUTH_METHODS = ["client_secret_basic", "none"]
 
+    def check_params(self, request, client):
+        # RFC 7009: token is required; token_type_hint is only a hint.
+        # query_token already searches both supported token types.
+        if "token" not in request.form:
+            raise InvalidRequestError()
+
     def query_token(self, token_string, token_type_hint):
         db = self.server.db
         self.server.checkpoint()
