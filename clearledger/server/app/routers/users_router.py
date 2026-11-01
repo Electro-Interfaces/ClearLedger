@@ -42,6 +42,8 @@ from app.schemas import (
 )
 from app.services.station_roster import enqueue_station_roster, refresh_company_rosters
 from app.services.native_user_role_locks import assert_native_clean, prepare_native_write
+from app.services.native_user_role_locks import _refresh_native_scope
+from app.services.contract_write_locks import require_scoped_locks
 
 logger = logging.getLogger(__name__)
 
@@ -433,43 +435,34 @@ async def set_member_scope(
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     cid = await require_company_admin(payload.company_id, current_user, db)
-    await prepare_native_write(db, current_user, company_id=cid, target_id=uid)
-    m = await db.get(UserCompany, (uid, cid))
-    if m is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
-    target = await db.get(User, uid)
-    # `service_locations.id` — строковый nanoid, не UUID; валидация здесь одна:
-    # объект должен принадлежать этой компании. Чужой id ничего не открыл бы (запросы
-    # и так фильтруются по company_id), но и хранить его незачем.
+    prepared = await prepare_native_write(
+        db, current_user, company_id=cid, target_id=uid, scope_org=True,
+        scope_company_ref=payload.company_id,
+        scope_organization_id=payload.own_organization_id,
+    )
+    require_scoped_locks(db.sync_session, prepared.capability, prepared.plan.requests)
+    # Никаких pending setters до завершения object/Org чтений и проверок доступа.
     raw_ids = [str(x).strip() for x in (payload.object_scope or []) if str(x).strip()]
     ids: list[str] = []
-    if raw_ids:
-        own = (await db.execute(select(ServiceLocation.id).where(
-            ServiceLocation.company_id == cid, ServiceLocation.id.in_(raw_ids)))).scalars().all()
-        ids = [str(x) for x in own]
+    with db.no_autoflush:
+        if raw_ids:
+            own = (await db.execute(select(ServiceLocation.id).where(
+                ServiceLocation.company_id == cid, ServiceLocation.id.in_(raw_ids)))).scalars().all()
+            require_scoped_locks(db.sync_session, prepared.capability, prepared.plan.requests)
+            ids = [str(x) for x in own]
+        prepared = await _refresh_native_scope(db, prepared)
+    require_scoped_locks(db.sync_session, prepared.capability, prepared.plan.requests)
+    m, target = prepared.member, prepared.target
     m.object_scope = ids or None
+    m.own_organization_id = prepared.scope_organization_id
 
-    # Юрлицо участника: у аутсорсера в одной базе несколько организаций одного
-    # владельца, и «бухгалтер ИП» не обязан видеть обороты ООО. Чужая организация
-    # молча игнорируется — проверяем принадлежность компании, а не доверяем запросу.
-    if payload.own_organization_id is not None:
-        raw = (payload.own_organization_id or "").strip()
-        org_uid = None
-        if raw:
-            try:
-                cand = uuid.UUID(raw)
-            except ValueError:
-                cand = None
-            if cand is not None:
-                org_uid = (await db.execute(select(Organization.id).where(
-                    Organization.company_id == cid, Organization.id == cand))).scalar_one_or_none()
-        m.own_organization_id = org_uid
-
-    await log_audit(db, actor=current_user, company_id=cid, action="member.scope",
+    require_scoped_locks(db.sync_session, prepared.capability, prepared.plan.requests)
+    await log_audit(db, actor=prepared.actor, company_id=cid, action="member.scope",
                     target=(target.email if target else user_id),
                     details={"objects": len(ids) if ids else "вся сеть",
                              "организация": str(m.own_organization_id) if m.own_organization_id
                              else "все юрлица"})
+    require_scoped_locks(db.sync_session, prepared.capability, prepared.plan.requests)
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
 

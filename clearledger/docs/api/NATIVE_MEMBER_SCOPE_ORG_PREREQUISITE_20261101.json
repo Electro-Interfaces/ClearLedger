@@ -1,0 +1,522 @@
+{
+  "schema": "native-member-scope-org-prerequisite/v1",
+  "language": "ru",
+  "state": "SOURCE authored; runtime/collection NOTRUN; source freeze reviewed separately",
+  "scope": {
+    "paths": [
+      "clearledger/server/app/services/native_user_role_locks.py",
+      "clearledger/server/app/routers/users_router.py",
+      "clearledger/server/tests/test_native_member_scope_org_locks_unit.py",
+      "clearledger/server/tests/test_native_member_scope_org_locks_pg.py",
+      "clearledger/docs/api/NATIVE_MEMBER_SCOPE_ORG_PREREQUISITE_20261101.md",
+      "clearledger/docs/api/NATIVE_MEMBER_SCOPE_ORG_PREREQUISITE_20261101.json"
+    ],
+    "changed_route": "users_router.set_member_scope",
+    "unchanged": "Другие 15 root bodies, прежние tests/conftest, models/schema/startup, kernel, identity и OrgDELETE",
+    "public_data": "Только исходники и синтетические fixtures"
+  },
+  "runtime": {
+    "app_imports": 0,
+    "helper_imports": 0,
+    "test_collection": 0,
+    "test_execution": 0,
+    "sql": 0,
+    "network": 0,
+    "runtime_cases_passed": 0,
+    "old_tests": "NOTRUN",
+    "authored_tests": "NOTRUN",
+    "validation_allowed": "stdlib AST/hash/JSON/memory compile; без исполнения code objects"
+  },
+  "protocol": {
+    "flag": "scope_org=False по умолчанию; True только set_member_scope",
+    "initial_B": [
+      "User actor/target S (совпадение объединяется)",
+      "Company scope и actual actor/target homes S",
+      "Role actual old actor/target S (прежняя политика native helper)",
+      "Member actor S, target X (self объединяется)",
+      "RefCompositeKey(scope company) S только scope_org=True"
+    ],
+    "one_acquisition": true,
+    "no_late_extension": true,
+    "precedes": [
+      "authority/Company/User/Role/Member/Org row locks",
+      "legacy waits",
+      "pending setter/add/delete",
+      "autoflush"
+    ],
+    "discovery": "Только clean no_autoflush MVCC: user parents, member role/existence, actual old ownOrg; proposed UUID и owner/existence. Foreign retained old не запрещён.",
+    "freshness": "После всех ожиданий и object SELECT: clean retained expiry; actual user homes/is_superadmin, members/roles/existence/old ownOrg, original company UUID-or-slug -> тот же UUID, scoped proposed Org, fresh native JWT/session/token_version/visit/admin. Drift discovery/parents -> whole-root409 без повторного входа. Повторная private readonly _refresh_native_scope после helper rows и object SELECT; clean expiry не отбрасывает pending state.",
+    "capability": "Live root/connection и точное coverage проверяются после ожиданий, перед первым setter/audit/commit; helper не завершает транзакцию.",
+    "physical_row_order": "Complete initial B -> Company SHARE -> User SHARE -> Role SHARE -> readonly known-error admission -> scoped proposed Org SHARE -> все Member rows (actor SHARE/target UPDATE), defaultFalse schedule прежний.",
+    "transaction": "Setter после всех чтений; прежние audit/action/target/details; explicit route commit, затем прежний _resp; rollback принадлежит caller.",
+    "audit_limit": "log_audit вызывает background dispatch_async до commit; новая outbox-гарантия отсутствует.",
+    "candidate_drift": "Фиксируются initial proposed owner/existence и фактически row-locked scalar candidate. После Org-фазы новый effective nonNone SET вне held candidate -> whole-root409 до setter, без late lock/retry; raw None/omitted RETAIN и disappearing/foreign/invalid CLEAR исключены из этого сравнения."
+  },
+  "compatibility": {
+    "claims_None": "401 по прежнему nativeUserRole контракту",
+    "authority": "superadmin или actual Member.role=admin; named Role и business grants не заменяют этот check",
+    "error_order": "clean -> UUID400 -> company/admin -> native admission -> member404 -> target -> objects -> setters -> audit -> explicitcommit -> response",
+    "object_scope": {
+      "omitted": null,
+      "null": null,
+      "empty": null,
+      "meaning": "ALL/вся сеть; opaque чужие IDs молча отфильтровываются по company"
+    },
+    "own_organization_id": {
+      "omitted": "RETAIN old, включая foreign legacy",
+      "null": "RETAIN old, включая foreign legacy",
+      "empty": "CLEAR None",
+      "whitespace": "CLEAR None",
+      "invalid_UUID": "CLEAR None",
+      "missing": "CLEAR None",
+      "foreign_proposed": "CLEAR None",
+      "valid_same_company": "SET proposed UUID"
+    },
+    "no_new_bans": [
+      "foreign retained old",
+      "named Role policy",
+      "CompanyX/RefX для producer"
+    ],
+    "frontend": "undefined опускает поле; существующий клиент преобразует null в пустую строку; frontend не меняется"
+  },
+  "dependencies": [
+    {
+      "id": "UUID-STRICT-KEYS",
+      "state": "OPEN",
+      "owner": "Общий владелец UUID/identity/lock kernel",
+      "fact": "Actual ORM может возвращать UUID subclass: exact stdlib type False при isinstance True. Текущий strict CompanyKey отвергает такой тип.",
+      "restriction": "Нет локальных casts/coercions, driver imports/changes или ослабления kernel; runtime integration требует общего решения."
+    },
+    {
+      "id": "RUNTIME-ISOLATION",
+      "state": "OPEN",
+      "fact": "Нужны изолированный conftest и одобренная отдельная synthetic PG; отсутствие prerequisites не считается skip/pass."
+    }
+  ],
+  "future_delete": {
+    "state": "OPEN; actual delete_organization byte-frozen",
+    "P1_claim": "Только producer prerequisite; ни runtime deadlock-fix, ни OrgDELETE closure не заявлены.",
+    "required_initial_B": "MVCC discover всех Member referrers по ownOrg без company filter; их companies/home Users; соответствующие Company S/User S/Member X; actual native authority; RefComposite реальной Org company X. Role keys из SET NULL ownOrg не следуют.",
+    "postwait": "Полное повторное сравнение referrer set после RefX; changed set ->409 до DML; участвующий producer RefS блокирует поздний phantom.",
+    "future_acceptance_NOTRUN": [
+      {
+        "id": "DELETE-BOTH-ORDERS",
+        "case": "actual final OrgDELETE vs actual producer, оба порядка, наблюдаемые pg_locks/blocking_pids; без40P01; отдельные commit/rollback/cancel."
+      },
+      {
+        "id": "INFLIGHT",
+        "case": "Новое прежде отсутствовавшее Member referrer во время discovery/B wait; final delete обнаруживает полный set mismatch и409 до DML."
+      },
+      {
+        "id": "PHANTOM",
+        "case": "Поздний producer после RefX/comparison ждёт до parent deletion; после освобождения проверяет fresh proposed Org и выполняет legacy clear."
+      },
+      {
+        "id": "FOREIGN-LEGACY",
+        "case": "Member другой компании и foreign home User включены в discovery без tenantban; unchanged foreign old pointer разрешён."
+      },
+      {
+        "id": "PHYSICAL",
+        "case": "Все22 FK и реальные triggers в одобренной isolated DB; NO ACTION/RESTRICT сохраняют ошибки; sealed archive SET NULL, TP/profile CASCADE и softrefs отдельно."
+      },
+      {
+        "id": "CP-SOURCE-PEER-BOTH-ORDERS",
+        "case": "После появления и согласования actual CP/Org composer проверить оба порядка actual producer vs composer Member actor S -> Org X с его полным initial B. Same actor/target Member S/X конфликтуют до physical rows. Здесь composer отсутствует, он не подменён unjoined SQL producer и его closure не заявлена."
+      }
+    ],
+    "child_owners_OPEN": [
+      "documents create/register/action",
+      "TP handover reconcile/workflow",
+      "DocCase create/rollover",
+      "archive destruction sealed-act trigger",
+      "TP shared files + SourceFile/байты",
+      "profile issuance/generation CASCADE",
+      "contract/GL/accounting/offledger/pulse/warehouse/store receipts/manual/import/startup",
+      "softrefs BankAccount/StoreDocumentProjection/raw tax/JSON/success snapshots",
+      "Contact/LocationContact и CP source owner boundaries"
+    ],
+    "peer_test_limit": "PG RefX-peer использует настоящий kernel только для барьера; он не является отсутствующим final OrgDELETE root и не доказывает inflight/phantom closure."
+  },
+  "acceptance_backlog": [
+    {
+      "id": "A01",
+      "description": "actual prepare_native_write + actual set_member_scope through HTTP and direct native caller with claims: complete initial B precedes every row/FK/DML; default False unchanged for all15 other UserRole root owners; self actor target merges upfront",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A02",
+      "description": "two SQL sessions, actual producer/helper vs final actual OrgDELETE in BOTH arrival orders, observable lock wait edges (not sleeps) and separate commit/rollback/cancel releases; no 40P01/no late B or Member physical lock before Ref wait",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A03",
+      "description": "inflight claim creates previously absent referrer during discovery/B wait; delete detects set mismatch409 before DML; late claim after RefX must wait; test proves phantom fence, not only static set comparison",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A04",
+      "description": "actual old pointer A->B/NULL and proposed org deleted/foreign/missing/empty/invalid/omitted/null; effective fresh pointer per historical clear/retain semantics; foreign retained old stays permitted; foreign member company and user home included in future delete plan",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A05",
+      "description": "Company slug reassigned, actor/target User home changes, role/admin/superadmin/token-version/visit revoked during B AND authority/child row waits: recheck actual policy after last wait, same company resolution or409; no new admin/JWT ban",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A06",
+      "description": "pending new/dirty/deleted rejects before SQL without flushing/discarding; previous completed/failed entrance, nested SAVEPOINT, borrowed root, second entrance, upgrade and changed plan rejected by real frozen helper; cancellation rolls back whole root",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A07",
+      "description": "retained clean actor/member/Org/Company/role references preloaded before waits, expire_on_commit False, no stale owner/ACL/default despite identity-map; audit once, same transaction ownership and response semantics",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A08",
+      "description": "object None/[]/foreign ids preserves silently filtered all network behavior; ownOrg schema null-comment mismatch characterized; frontend undefined omission vs null-to-empty clear characterized; native admin+ordinary+superadmin errors ordered",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A09",
+      "description": "each of22 incoming FK declarations mapped to actual installed constraint in isolated approved future runner; NO ACTION/RESTRICT preserves rejection; SET NULL/CASCADE branch, sealed archive trigger, TP source-file/profile effects characterized before final OrgDELETE",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A10",
+      "description": "Contact->LocationContact CASCADE and CP usage metadata/softrefs are separate source8 owner acceptance; do not claim new LocationSet or usage checker globally serializes FK producers",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A11",
+      "description": "INN/KPP mutation/race belongs source8 CP verified owner; set_member_scope does not write INN and must not add its policy. Org delete of INN referenced soft identity/matcher requires separate preserved-link characterization; no accepted R1/OneC change",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    },
+    {
+      "id": "A12",
+      "description": "audit dispatch_async before commit already schedules sideeffect; rollback/cancel assertions must characterize actual existing behavior without changing notify/outbox owner; no runtime success reported from source-only plan",
+      "status": "AUTHORPLANNED/NOTRUN",
+      "dependencies": [
+        "ROOT exact bounded protocol authorization",
+        "approved source composition",
+        "separate explicitly authorized safe runtime runner; not this dispatch"
+      ]
+    }
+  ],
+  "original_program": {
+    "verbatim_JSON": {
+      "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "sections": [
+        {
+          "id": "M00",
+          "title": "P0: актуальный совместимый source/runtime baseline",
+          "owner": "Выпуск + Core/Support",
+          "dependencies": "Нет",
+          "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+        },
+        {
+          "id": "M01",
+          "title": "P0: завершить реестр поверхностей и владельцев",
+          "owner": "API + владельцы доменов",
+          "dependencies": "M00",
+          "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+        },
+        {
+          "id": "M02",
+          "title": "P0: characterization и измеряемые сценарии",
+          "owner": "Домены + проверка",
+          "dependencies": "M00, уточнения M01",
+          "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+        },
+        {
+          "id": "M03",
+          "title": "P0: общий проверенный контекст/route policy",
+          "owner": "Identity + домены",
+          "dependencies": "M00, M02",
+          "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+        },
+        {
+          "id": "M04",
+          "title": "P0: границы слоёв и владение транзакцией",
+          "owner": "Core/Support architecture",
+          "dependencies": "M02, M03 skeleton",
+          "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+        },
+        {
+          "id": "M05",
+          "title": "P0: объекты, scopes, population и temporal identity",
+          "owner": "Core objects/equipment",
+          "dependencies": "M03, M04",
+          "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+        },
+        {
+          "id": "M06",
+          "title": "P0: контрагенты, договоры и идентичность",
+          "owner": "Core references/contracts",
+          "dependencies": "M03, M04",
+          "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+        },
+        {
+          "id": "M07",
+          "title": "P0: документы и файлы",
+          "owner": "Core documents/files",
+          "dependencies": "M03, M04",
+          "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+        },
+        {
+          "id": "M08",
+          "title": "P0: энергия, начисления и мониторинг",
+          "owner": "Core energy/ops",
+          "dependencies": "M05, M06",
+          "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+        },
+        {
+          "id": "M09",
+          "title": "P0: протокольный профиль и product OpenAPI",
+          "owner": "API contracts + домены",
+          "dependencies": "M01, M03, соответствующие M05–M08",
+          "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+        },
+        {
+          "id": "M10",
+          "title": "P0: OAuth/OIDC и developer access",
+          "owner": "Identity + integrations",
+          "dependencies": "M03, M09 profile",
+          "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+        },
+        {
+          "id": "M11",
+          "title": "P0: защищённый Swagger и quickstart",
+          "owner": "API docs + Identity",
+          "dependencies": "M09, M10, sandbox",
+          "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+        },
+        {
+          "id": "M12",
+          "title": "P1: клиентские transports и typed operations",
+          "owner": "Core/Support frontend",
+          "dependencies": "M02, M09",
+          "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+        },
+        {
+          "id": "M13",
+          "title": "P1: Support factories и service adapters",
+          "owner": "Support + Core integration",
+          "dependencies": "M03, M04, M06",
+          "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+        },
+        {
+          "id": "M14",
+          "title": "P1: доставка событий и change feed",
+          "owner": "Domain owners + integrations",
+          "dependencies": "M03, M04, применимые M13",
+          "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+        },
+        {
+          "id": "M15",
+          "title": "P1: ограничение нагрузки и оптимизация",
+          "owner": "Backend/DB + домены",
+          "dependencies": "M02 и зрелые queries",
+          "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+        },
+        {
+          "id": "M16",
+          "title": "P1/P2: migration/schema ownership",
+          "owner": "Persistence + выпуск",
+          "dependencies": "M00, M02",
+          "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+        },
+        {
+          "id": "M17",
+          "title": "P1: перевести собственные приложения",
+          "owner": "Владельцы продуктов",
+          "dependencies": "M05–M13 по домену",
+          "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+        },
+        {
+          "id": "M18",
+          "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+          "owner": "Партнёрский пилот + проверка",
+          "dependencies": "M09–M17 применимо",
+          "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+        },
+        {
+          "id": "M19",
+          "title": "P2: deprecation и удаление дублей",
+          "owner": "Домены + выпуск",
+          "dependencies": "M17, M18, usage evidence",
+          "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+        }
+      ],
+      "cross_cutting_requirements": [
+        {
+          "id": "FULL-SCOPE",
+          "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+          "completion": "unproven"
+        },
+        {
+          "id": "SOURCE",
+          "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+          "completion": "unproven"
+        },
+        {
+          "id": "DOMAIN",
+          "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+          "completion": "unproven"
+        },
+        {
+          "id": "CONTRACT",
+          "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+          "completion": "unproven"
+        },
+        {
+          "id": "CHARACTERIZATION",
+          "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+          "completion": "unproven"
+        },
+        {
+          "id": "MIGRATION",
+          "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+          "completion": "unproven"
+        },
+        {
+          "id": "CONSUMERS",
+          "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+          "completion": "unproven"
+        },
+        {
+          "id": "MEASUREMENTS",
+          "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+          "completion": "unproven"
+        },
+        {
+          "id": "FINAL-COMPOSITION",
+          "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+          "completion": "unproven"
+        },
+        {
+          "id": "LIVE-PILOT",
+          "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+          "completion": "unproven"
+        },
+        {
+          "id": "RELEASE",
+          "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+          "completion": "unproven"
+        }
+      ],
+      "completion_asserted": false,
+      "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+    },
+    "section_status": {
+      "M00": "OPEN",
+      "M01": "OPEN",
+      "M02": "OPEN",
+      "M03": "OPEN",
+      "M04": "OPEN",
+      "M05": "OPEN",
+      "M06": "OPEN",
+      "M07": "OPEN",
+      "M08": "OPEN",
+      "M09": "OPEN",
+      "M10": "OPEN",
+      "M11": "OPEN",
+      "M12": "OPEN",
+      "M13": "OPEN",
+      "M14": "OPEN",
+      "M15": "OPEN",
+      "M16": "OPEN",
+      "M17": "OPEN",
+      "M18": "OPEN",
+      "M19": "OPEN"
+    },
+    "condition_status": {
+      "FULL-SCOPE": "OPEN",
+      "SOURCE": "OPEN",
+      "DOMAIN": "OPEN",
+      "CONTRACT": "OPEN",
+      "CHARACTERIZATION": "OPEN",
+      "MIGRATION": "OPEN",
+      "CONSUMERS": "OPEN",
+      "MEASUREMENTS": "OPEN",
+      "FINAL-COMPOSITION": "OPEN",
+      "LIVE-PILOT": "OPEN",
+      "RELEASE": "OPEN"
+    },
+    "completion_asserted": false
+  },
+  "completion_asserted": false,
+  "authored_definitions": {
+    "unit": {
+      "path": "clearledger/server/tests/test_native_member_scope_org_locks_unit.py",
+      "top_level_test_function_count": 7,
+      "parameterized_runtime_case_count": "NOT COLLECTED; не выводится из числа функций",
+      "executed": 0,
+      "collection": "NOTRUN"
+    },
+    "pg": {
+      "path": "clearledger/server/tests/test_native_member_scope_org_locks_pg.py",
+      "top_level_test_function_count": 17,
+      "parameterized_runtime_case_count": "NOT COLLECTED; не выводится из числа функций",
+      "executed": 0,
+      "collection": "NOTRUN"
+    },
+    "pg_limits": "Только восемь синтетических ORM-column tables с релевантными FK; не полная схема/trigger closure. Настоящие helper/route/audit/response; substituted только background notify dispatch. RefX peer не OrgDELETE."
+  }
+}
