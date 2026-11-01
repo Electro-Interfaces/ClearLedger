@@ -1,4 +1,5 @@
 """Public allowlists. No ORM/raw/secret objects are serialized implicitly."""
+import datetime as _datetime
 from datetime import date, datetime
 import re
 from typing import Annotated, Generic, Literal, TypeAliasType, TypeVar
@@ -674,7 +675,7 @@ class Contract(DTO):
             'Native contract number; q searches this field.'
         ),
         examples=['DEMO-001'])
-    date: date | None = Field(
+    date: _datetime.date | None = Field(
         description=(
             'Nullable parsed contract business date; dateFrom/dateTo filter created_at instead.'
         ),
