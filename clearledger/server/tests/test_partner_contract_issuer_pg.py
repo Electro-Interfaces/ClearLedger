@@ -282,11 +282,29 @@ async def test_autocommit_connection_cannot_issue_stamp(issuer_world):
 
 async def test_multibind_root_cannot_issue_stamp(issuer_world):
     w = issuer_world
-    async with w.factory.kw["bind"].connect() as other:
-        async with AsyncSession(bind=w.factory.kw["bind"], binds={AuditEvent: other}) as db:
+    before = await state(w)
+    engine = w.factory.kw["bind"]
+    # A Connection from the same Engine aliases that Engine in Session's
+    # enlistment map. Use a distinct Engine identity and prove two real roots.
+    option_engine = engine.execution_options()
+    assert option_engine.sync_engine is not engine.sync_engine
+    async with option_engine.connect() as other:
+        async with AsyncSession(bind=engine, binds={AuditEvent: other}) as db:
             await db.execute(select(AuditEvent).where(AuditEvent.company_id == w.company))
+            await db.execute(select(User).where(User.id == w.user))
+            def actual_pids(session):
+                root = session.get_transaction()
+                assert root is not None and root.is_active
+                connections = {record[0] for record in root._connections.values()}
+                assert len(connections) == 2
+                transactions = {connection.get_transaction() for connection in connections}
+                assert len(transactions) == 2 and all(transaction.is_active for transaction in transactions)
+                return {connection.scalar(text("SELECT pg_backend_pid()")) for connection in connections}
+            assert len(await db.run_sync(actual_pids)) == 2
             with pytest.raises(locks.ScopedLockError):
                 await authority.prepare_create(db, w.bearer, w.body)
+            assert not db.in_transaction()
+    assert await state(w) == before
 
 
 @pytest.mark.parametrize("finish", ["commit", "rollback"])
