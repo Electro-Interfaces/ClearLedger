@@ -612,6 +612,11 @@ async def test_schema_has_fourteen_routes_and_user_only_document_relation(env):
     registry = export_runtime_registry(env.product)
     from tests.test_product_http_profile import assert_product_manifest
     assert_product_manifest(schema, registry)
+    options = schema["paths"]["/contracts/create-options"]["get"]
+    assert options["operationId"] == "getContractCreateOptions"
+    assert options["x-access-policy"]["resourceStage"] == "create-options"
+    assert options["x-access-policy"]["scopes"] == ["contracts:create"]
+    assert "requestBody" not in options
     operation = schema["paths"]["/contracts/{contractId}/documents"]["get"]
     assert operation["operationId"] == "listContractDocuments"
     assert operation["security"] == [{"ProductOAuth": SCOPES}]

@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException
 from app.api_contracts import (AccessContext, PolicyRouter, PrincipalKind, RoutePolicy,
                                create_policy_app, get_access_context, policy_registry)
 from app.security_context import current as current_security_context
-from . import access, budget, contract_create, dto, files, monitoring
+from . import access, budget, contract_create, contract_create_options, dto, files, monitoring
 from .contract_create_body import ContractCreateBody
 from app.api_contracts.routing import ResourceStage
 from .queries import Query
@@ -551,6 +551,39 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                 "schema": {"$ref": "#/components/schemas/ContractCreateBody"}}}}})
     async def contract_create_post(request: Request):
         return await contract_create.create(request)
+
+    options_policy = RoutePolicy(owner="contracts", accepted_kinds={PrincipalKind.PARTNER, PrincipalKind.SERVICE},
+        resource_type="contracts", action="create-options", required_scopes={"contracts:create"},
+        policy_version=access.POLICY_VERSION, tenant_required=True, security_scheme="ProductOAuth",
+        resource_stage=ResourceStage.CREATE_OPTIONS)
+
+    @router.operation("/contracts/create-options", policy=options_policy, methods=["GET"],
+        request_lifetime=contract_create_options.request_lifetime, operation_id="getContractCreateOptions",
+        tags=[RESOURCE_TAGS["contracts"]], response_model=dto.ContractCreateOptions,
+        responses={**problems, 200: {"description": "Fictional complete advisory response, not a captured runtime result.",
+            "content": {"application/json": {"examples": {"fictional": {"value": {
+                "resource": "type", "items": [{"value": "fictional-type"}],
+                "selectionVersion": "fictional-opaque-version", "nextCursor": None}}}}}}},
+        summary="List current advisory CREATE choices",
+        description="Canonical user or approved machine with contracts:create and a current CREATE profile. "
+            "No contracts:read grant is required. Whole profile closure and all choices share one read-only "
+            "REPEATABLE READ snapshot t0, after separate preflight and committed quota. Revocations committed "
+            "before t0 deny; revocations after t0 may not appear. The same canonical verifier checks JWT expiry "
+            "and process gates again before DTO, with database reads still at t0. POST rechecks current authority. "
+            "resource is organization, counterparty, location or type; pageSize 1..100, default 50. Exact UTF8 "
+            "values only, UUIDs canonical; no labels or internal authority. Opaque cursor <=2048, TTL <=300s, "
+            "bound to the whole current profile, token and page context. Changed/stale/expired cursor: "
+            "400 invalid_cursor after current auth; omit cursor to restart. Legal empty selection returns 200. "
+            "Timeout (global 10s) or closure overflow returns generic 503 api_unavailable, never partial data. "
+            "401 invalid_credentials, 403 access_denied, 422 invalid_request, quota 429 rate_limited; "
+            "known-path unsupported methods use 405 method_not_allowed with Allow: GET. "
+            "Cache-Control: no-store and X-Request-Id apply; 401/403 carry Bearer, quota 429 carries Retry-After. "
+            "Selections are advisory, with no reservation, receipt or write admission.",
+        openapi_extra={"x-elsy-owner": "contracts", "x-elsy-access-class": "partner",
+            "x-elsy-resource-policy": "contracts:create-options", "x-elsy-readiness": "candidate"})
+    async def contract_create_options_get(request: Request,
+            params: Annotated[dto.ContractCreateOptionsQuery, QueryParams()]):
+        return await contract_create_options.options(request, params)
 
     @operation("/contracts", "contracts", "listContracts", dto.Page[dto.Contract],
                summary='List authorized contracts',

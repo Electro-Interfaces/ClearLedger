@@ -584,10 +584,10 @@ async def test_schema_required_nullability_format_and_fifteen_auth_profiles(env)
     assert operation["security"] == [{"ProductOAuth": SCOPES}, {"ProductServiceOAuth": SCOPES}]
     assert "requestBody" not in operation
     entries = policy_registry(env.product)
-    from tests.test_product_http_profile import assert_product_manifest, assert_product_policy_manifest
+    from tests.test_product_http_profile import assert_product_manifest, assert_product_policy_manifest, read_entries
     assert_product_manifest(schema, export_runtime_registry(env.product))
     assert_product_policy_manifest(entries)
-    reads = [e for e in entries if "GET" in e["methods"]]
+    reads = read_entries(entries)
     assert sum("service" in e["principalKinds"] for e in reads) == 11
     assert sum("service" not in e["principalKinds"] for e in reads) == 4
     browser = public_client_openapi(schema)

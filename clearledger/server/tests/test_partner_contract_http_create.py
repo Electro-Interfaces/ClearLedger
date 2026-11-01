@@ -483,7 +483,27 @@ async def test_schema_exact_post_canonical_body_and_protected_public_projection(
     schema = curated_openapi(http_world.child)
     operations = [(method, path, item["operationId"]) for path, methods in schema["paths"].items()
         for method, item in methods.items() if method in {"get", "post", "put", "patch", "delete", "options", "head", "trace"}]
-    assert len(operations) == 16 and sum(m == "get" for m, _, _ in operations) == 15
+    fixed_reads = {
+        ('get', '/objects', 'listObjects'),
+        ('get', '/objects/{objectId}', 'getObject'),
+        ('get', '/objects/{objectId}/monitoring', 'getObjectMonitoring'),
+        ('get', '/equipment', 'listEquipment'),
+        ('get', '/equipment/{equipmentId}', 'getEquipment'),
+        ('get', '/counterparties', 'listCounterparties'),
+        ('get', '/counterparties/{counterpartyId}', 'getCounterparty'),
+        ('get', '/contracts', 'listContracts'),
+        ('get', '/contract-types', 'getContractTypeMetadata'),
+        ('get', '/contracts/{contractId}', 'getContract'),
+        ('get', '/contracts/{contractId}/objects', 'listContractObjects'),
+        ('get', '/contracts/{contractId}/documents', 'listContractDocuments'),
+        ('get', '/documents', 'listDocuments'),
+        ('get', '/documents/{docId}', 'getDocument'),
+        ('get', '/documents/{docId}/versions/{versionId}/content', 'downloadDocumentVersion'),
+    }
+    assert len(fixed_reads) == 15
+    assert len(operations) == 17 and sum(m == "get" for m, _, _ in operations) == 16
+    assert set(operations) == fixed_reads | {("post", "/contracts", "createContract"),
+        ("get", "/contracts/create-options", "getContractCreateOptions")}
     assert ("post", "/contracts", "createContract") in operations
     assert schema["info"]["version"] == "1.1.0"
     post = schema["paths"]["/contracts"]["post"]

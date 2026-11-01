@@ -63,6 +63,26 @@ def _permits(scope, identifier):
         scope.mode == "SET" and identifier in scope.ids))
 
 
+
+def select_create_domains(current, refs, types, catalog, member_object_scope):
+    """Pure existing CREATE intersections; neither SQL nor write authority.
+
+    Input parents have already been checked by the owning SQL loader. Keep
+    opaque IDs literal and distinguish None (unrestricted) from an empty set.
+    Inactive/unrelated types narrow their domain, never veto another type.
+    """
+    orgs = frozenset(r[3] for r in refs if r[2] == "organization"
+        and (current.own_organization_id is None or current.own_organization_id == r[3]))
+    cps = frozenset(r[4] for r in refs if r[2] == "counterparty"
+        and _permits(current.resource_scopes.get("counterparties"), str(r[4])))
+    locs = frozenset(r[5] for r in refs if r[2] == "location"
+        and _permits(current.resource_scopes.get("objects"), r[5])
+        and (current.location_ids is None or r[5] in current.location_ids)
+        and (member_object_scope is None or r[5] in member_object_scope))
+    codes = frozenset(r[1] for r in types if catalog.get(r[1]) == ((r[1], True),))
+    return orgs, cps, locs, codes
+
+
 def _require_coarse_create(db, current, expected_profile):
     if WRITE_SCOPE not in current.scopes:
         _deny()
@@ -242,26 +262,19 @@ class CreateOperation:
 
     def policy(self, db, current):
         refs, types = _require_coarse_create(db, current, self.expected_profile)
-        orgs = {r[3] for r in refs if r[2] == "organization"}
-        cps = {r[4] for r in refs if r[2] == "counterparty"}
-        locs = {r[5] for r in refs if r[2] == "location"}
-        allowed_types = {r[1] for r in types}
         requests = [(self.body.organizationId, self.body.counterpartyId,
                      self.body.typeCode, self.body.coverage.locationIds)]
         if self.previous:
             requests.append((self.previous.created_organization_id, self.previous.created_counterparty_id,
                              self.previous.created_type_code, self.previous_locations))
         member = identity.fresh(db, UserCompany, (current.user_id, self.company_id)) if current.user_id else None
+        orgs, cps, locs, allowed_types = select_create_domains(current, refs, types, self.types,
+            member.object_scope if member is not None else None)
         for org, cp, code, locations in requests:
-            if (org not in orgs or cp not in cps or not locations or code not in allowed_types
-                    or self.types.get(code) != ((code, True),)
-                    or (current.own_organization_id is not None and current.own_organization_id != org)
-                    or not _permits(current.resource_scopes.get("counterparties"), str(cp))):
+            if (org not in orgs or cp not in cps or not locations or code not in allowed_types):
                 _deny()
             for loc in locations:
-                if (loc not in locs or not _permits(current.resource_scopes.get("objects"), loc)
-                        or (current.location_ids is not None and loc not in current.location_ids)
-                        or (member is not None and member.object_scope is not None and loc not in member.object_scope)):
+                if loc not in locs:
                     _deny()
         # contracts read resources intentionally do not confer CREATE or veto a
         # newborn's own immutable intent receipt. verify_access still validates
