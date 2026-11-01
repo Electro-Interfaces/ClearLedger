@@ -26,7 +26,7 @@
   "exactModelOverlay": {
     "app/models.py": {
       "baseline": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
-      "reviewed": "0a171c80ed0b990f4abf6e71c1fc5fdb57a5623a4a9ef1b264a1bf4c43b7859b"
+      "reviewed": "1a48c7d296134818f098d68116e5a7ae97b1bf11a96c9d034903b339be7a3e41"
     },
     "app/models_partner.py": {
       "baseline": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -55,5 +55,13 @@
     "PGDefinitionsUnchanged": 17,
     "productionUnchanged": true,
     "runtime": "Pending new controlled Root execution; original39014 failed artifact immutable"
+  },
+  "contactUUIDOverlay": {
+    "source": "56a911478b9007b038e0cf20798151f255c198b0",
+    "path": "app/models.py",
+    "column": "CounterpartyContact.company_id",
+    "previousReviewedSHA256": "0a171c80ed0b990f4abf6e71c1fc5fdb57a5623a4a9ef1b264a1bf4c43b7859b",
+    "reviewedSHA256": "1a48c7d296134818f098d68116e5a7ae97b1bf11a96c9d034903b339be7a3e41",
+    "scope": "Same existing adapter; independent Source review pending; previous 7fa9 runtime Source remains separate"
   }
 }
