@@ -5,6 +5,7 @@ not dependency defaults/decorators. Parent conftest remains unsafe to collect
 without a separate ROOT-owned composition/admission.
 """
 import ast
+from copy import deepcopy
 import hashlib
 from pathlib import Path
 
@@ -27,6 +28,17 @@ INTEGRATED_SOURCE_PINS = ('9841890a3fd19f51a2ae388ce845c3bd19ea328e', '5b27ed4de
 INTEGRATED_BYTE_OVERLAY = {'app/routers/partner_admin_router.py': {'baseline': 'ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff', 'reviewed': '1d097bfca261e25dd6a482cd2b041fde4f6ef593ef29252c55335a5e15ca97db'}, 'app/services/partner_identity.py': {'baseline': '1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724', 'reviewed': 'cac8be62a1fdf840c0f285574d0c3266a1404f984b597aa9111fab62f6d1fe22'}, 'tests/test_partner_writer_scoped_locks_pg.py': {'baseline': '756372a2bab417a81bb6fc30bdaf4e85e2ce6b68f8dc5d621624bb6575163819', 'reviewed': '5fb0e0c14074a9aeecb4ae65a515289b57debc22969b18bc6c7ea7f5b663f0a7'}}
 
 CANONICAL_12 = {'verify_access': '8dd700eaa560771a2890ca0837ee2e8c419bccdaad8bbdde2d3643726a7d4250', 'live_grant': '9a24d316c20290bc90a329fe3d2652ee8072028798182ac680b34e94a6881448', 'eligible_scopes': '1524bb5ebec7869c2ac8c742c830da0fd234e9433fcc70f7ed7809c76ef78107', 'admin': '86fdeba221d4968b5ed9c049630703aff94ba1f828a05440ce2ef25d008badba', 'active_user': '3d80e091fce1dfbd10fec98006522ff13181ff6a719a4a900485b99bfa0ff213', 'require_core_user': '29b605e7083c0a2eaa1188a96a8c3fed73af9888a1326ba49943dc4c79dbcb7d', 'signing_key': 'b83ebc8f9da51577d3ebceb5ee7e8bd3bd07c042f6642bd362447893c4852ad7', 'public_jwks': 'a13616725b2fed83b969875b2f9f4913095e6888dbedaab063667a0091d66e0d', 'validate_scopes': '8fe53fb297112853ce73ca204cac1e47f47bccd816e1566d4a90c9c2ec0bbaca', 'validate_redirect': '95eb275ad222abff1ceec38efc6e30ef29809095122270968ad7c4a52e9ede36', 'pairwise_subject': '26e6db2c84bf2f0d6de6f5d70e86a3fecff0e22a4dc0a536c4c5d318aa53a6a1', 'user_info': 'fdd0f58ed887398692f83d3eba178b939a6a04bfeffd65c93d4c1bbc25eb9ade'}
+# Explicit ROOT policy extension, not a historical repin. Original 19/17/12
+# literals above/below remain authoritative for their baseline projection.
+ACCEPTED_CREATE_EXTENSION = {
+    "base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+    "ratification": ("msg_d78d5ba7a19d", "msg_4bc270231cbd", "msg_c014d327b3a5"),
+    "scope": "contracts:create", "module": "references",
+    "baseline_file": "cac8be62a1fdf840c0f285574d0c3266a1404f984b597aa9111fab62f6d1fe22",
+    "extended_file": "11624851e39b2dbf2671b46d349ed5f627a23f2b6359c716583c8c724fd651d9",
+    "baseline_eligible": "1524bb5ebec7869c2ac8c742c830da0fd234e9433fcc70f7ed7809c76ef78107",
+    "extended_eligible": "cb9fc729c9b13a563f43c79161e3aba7983c1b45dd6600a20a20e1e4201724d9",
+}
 PROTECTED_17 = [('admin.register', 'app/routers/partner_admin_router.py', 'register', 'babffd869487681577361145bb2fed6f9d34da74a7e84bfcfb0e64063b156f57'), ('admin.client_status', 'app/routers/partner_admin_router.py', 'client_status', 'ecae87c5e9f16b287b94710e8afebb665784a9522fa98305e6a734586d182fd0'), ('admin.issue_credential', 'app/routers/partner_admin_router.py', 'issue_credential', 'd99a543f3e3b2c5935c53842837712a596242fb540c161709e05c394ba985fab'), ('admin.revoke_credential', 'app/routers/partner_admin_router.py', 'revoke_credential', '191517e884f64724b52b58240a72d14bd41903c5ef284e9d0df3712ce43ecfe8'), ('admin.approve_installation', 'app/routers/partner_admin_router.py', 'approve_installation', '0aa0fba2a41483db29ac285ee7c34b95aefdc190c37df0205aa7135a2374d1f5'), ('admin.revoke_installation', 'app/routers/partner_admin_router.py', 'revoke_installation', '79819f21a5df17c66dd4f017246cb6a5f9cb4c0d15edd6d3ebac06ae862c6ac7'), ('admin.machine_grant', 'app/routers/partner_admin_router.py', 'machine_grant', 'eb33e31712ac4bc3a8940925cf198bdbc05f599ef23711b893c4a2da59a68616'), ('admin.revoke_grant', 'app/routers/partner_admin_router.py', 'revoke_grant', '39a21684593bda9fad770cccc244aba5f3fe5f826f7fd4b2a0455f14c02075e7'), ('oauth.authorize', 'app/routers/partner_oauth_router.py', 'authorize', 'a73573447f15f9843a47020eeafeb04cd3c0f638d68dd5e3190dadb4d8facdf3'), ('consent.get_request', 'app/routers/partner_oauth_router.py', 'get_request', '94ae42b6e06ea61e0a88478390c0e9d0670700139b9f4c7531afeb58d2e8560f'), ('consent.approve', 'app/routers/partner_oauth_router.py', 'approve', '759e25b36da56bec7c4fa9abf58f80d87e0b08848b65aefaab62df7e0475b941'), ('consent.deny', 'app/routers/partner_oauth_router.py', 'deny', '6c9fea08b4d9eec59484d9fa80098a43dfa004ad02f980a21d47de6942117250'), ('oauth.token-code', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.token-refresh', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.token-machine', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.revoke', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.userinfo', 'app/routers/partner_oauth_router.py', 'userinfo', 'a1fcf03561c44c6bef7ce5c9b6f8138cb3faecaad8b8504f218fc7789bc4bd2e')]
 
 
@@ -80,6 +92,38 @@ def stable_ast_dump(value):
 
 def digest_node(node):
     return hashlib.sha256(stable_ast_dump(node).encode()).hexdigest()
+
+
+def baseline_create_policy_projection(node):
+    """Remove exactly the reviewed new mapping; preserve every old decision."""
+    assert node.name == "eligible_scopes"
+    assert digest_node(node) == ACCEPTED_CREATE_EXTENSION["extended_eligible"]
+    projected, removed = deepcopy(node), 0
+    for item in ast.walk(projected):
+        if isinstance(item, ast.Dict):
+            for index, key in enumerate(item.keys):
+                if isinstance(key, ast.Constant) and key.value == "contracts:create":
+                    assert isinstance(item.values[index], ast.Constant)
+                    assert item.values[index].value == "references"
+                    item.keys.pop(index); item.values.pop(index); removed += 1
+                    break
+    assert removed == 1
+    assert digest_node(projected) == ACCEPTED_CREATE_EXTENSION["baseline_eligible"]
+    return projected
+
+
+def test_accepted_create_scope_extension_preserves_old_eligible_policy_projection():
+    assert ACCEPTED_CREATE_EXTENSION["baseline_eligible"] == CANONICAL_12["eligible_scopes"]
+    assert ACCEPTED_CREATE_EXTENSION["baseline_file"] == INTEGRATED_BYTE_OVERLAY["app/services/partner_identity.py"]["reviewed"]
+    current = definition(IDENTITY, "eligible_scopes")
+    old = baseline_create_policy_projection(current)
+    assert digest_node(old) == CANONICAL_12["eligible_scopes"]
+    assert digest_node(current) != digest_node(old)
+    descriptions = next(n for n in tree(IDENTITY).body if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "SCOPE_DESCRIPTIONS" for t in n.targets))
+    additions = [(key.value, value.value) for key, value in zip(descriptions.value.keys, descriptions.value.values)
+                 if isinstance(key, ast.Constant) and key.value == "contracts:create"]
+    assert additions == [("contracts:create", "Создание карточек договоров по отдельному профилю допуска")]
 
 
 def test_source_digest_keeps_legacy_pin_and_detects_semantic_changes():
@@ -213,6 +257,9 @@ def test_logout_preserves_existing17_and_canonical12():
             change = UUID_MODEL_OVERLAY[path]
             assert expected == change["baseline"], path
             expected = change["reviewed"]
+        if path == "app/services/partner_identity.py":
+            assert expected == ACCEPTED_CREATE_EXTENSION["baseline_file"]
+            expected = ACCEPTED_CREATE_EXTENSION["extended_file"]
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, path
     for path, expected in UUID_SUPPORT_BYTES.items():
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, path
@@ -223,7 +270,10 @@ def test_logout_preserves_existing17_and_canonical12():
         assert digest_node(definition(ROOT / path, name)) == expected, branch
     assert len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
     for name, expected in CANONICAL_12.items():
-        assert digest_node(definition(IDENTITY, name)) == expected, name
+        current = definition(IDENTITY, name)
+        if name == "eligible_scopes":
+            current = baseline_create_policy_projection(current)
+        assert digest_node(current) == expected, name
 
 
 def test_logout_adds_no_runner_config_fixture_or_authority_surface():

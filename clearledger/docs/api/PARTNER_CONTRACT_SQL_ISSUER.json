@@ -1,0 +1,721 @@
+{
+  "kind": "SQL_ISSUER_SOURCE_AUTHOR_FREEZE",
+  "status": "R01_FIX_AUTHORED_INDEPENDENT_REVIEW_PENDING",
+  "base_commit": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+  "source_test_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+  "runtime": 0,
+  "imports_executed": 0,
+  "project_calls_executed": 0,
+  "test_collection": false,
+  "tests_executed": 0,
+  "independent_review": "PENDING",
+  "api_acceptance": false,
+  "exact_git_paths": [
+    "clearledger/server/app/services/partner_identity.py",
+    "clearledger/server/app/services/partner_contract_authority.py",
+    "clearledger/server/app/services/partner_contract_commands.py",
+    "clearledger/server/tests/test_partner_contract_issuer_unit.py",
+    "clearledger/server/tests/test_partner_contract_issuer_pg.py",
+    "clearledger/server/tests/partner_contract_issuer_fixture.py",
+    "clearledger/server/tests/partner_contract_issuer_cases.py",
+    "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
+    "clearledger/docs/PARTNER_CONTRACT_SQL_ISSUER.md",
+    "clearledger/docs/api/PARTNER_CONTRACT_SQL_ISSUER.json"
+  ],
+  "source_files": [
+    {
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "raw_sha256": "11624851e39b2dbf2671b46d349ed5f627a23f2b6359c716583c8c724fd651d9",
+      "bytes": 62550,
+      "lines": [
+        1,
+        1254
+      ],
+      "definitions": {
+        "eligible_scopes": [
+          206,
+          236
+        ],
+        "_PartnerWrite": [
+          456,
+          494
+        ],
+        "_prepare_partner_write": [
+          497,
+          760
+        ]
+      }
+    },
+    {
+      "path": "clearledger/server/app/services/partner_contract_authority.py",
+      "immutable_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+      "raw_sha256": "1b62359305c87a2f6de0c44adf83eef2286b280b191dcd24850067ffe0d8c741",
+      "bytes": 20576,
+      "lines": [
+        1,
+        388
+      ],
+      "definitions": {
+        "_deny": [
+          40,
+          41
+        ],
+        "_rows": [
+          44,
+          46
+        ],
+        "_location_rows": [
+          49,
+          52
+        ],
+        "_one": [
+          55,
+          56
+        ],
+        "_permits": [
+          59,
+          63
+        ],
+        "CreateOperation": [
+          66,
+          300
+        ],
+        "_SQLStamp": [
+          304,
+          306
+        ],
+        "CreateAdmission": [
+          310,
+          312
+        ],
+        "_Issued": [
+          316,
+          325
+        ],
+        "_prepare": [
+          331,
+          348
+        ],
+        "prepare_create": [
+          351,
+          359
+        ],
+        "_require": [
+          362,
+          380
+        ],
+        "require_create": [
+          383,
+          388
+        ],
+        "CreateOperation.receipt_snapshot": [
+          94,
+          99
+        ],
+        "CreateOperation.recheck": [
+          240,
+          271
+        ]
+      }
+    },
+    {
+      "path": "clearledger/server/app/services/partner_contract_commands.py",
+      "immutable_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+      "raw_sha256": "db8a09e824eb2f2171356d5ea9d164b080f9300e1ea7ed3813b1eedafebedaea",
+      "bytes": 7197,
+      "lines": [
+        1,
+        120
+      ],
+      "definitions": {
+        "PartnerContractCreateResult": [
+          31,
+          33
+        ],
+        "create_partner_contract": [
+          36,
+          120
+        ]
+      }
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_contract_issuer_unit.py",
+      "immutable_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+      "raw_sha256": "9ceb167fe73b3b87b26b273ce1df41f78ab96cd8e7e79d77c26716895f8f4ca4",
+      "bytes": 9598,
+      "lines": [
+        1,
+        167
+      ],
+      "definitions": {
+        "node": [
+          16,
+          20
+        ],
+        "calls": [
+          23,
+          26
+        ],
+        "test_single_b_discovery_freeze_and_legacy_seam_precede_canonical_rows": [
+          29,
+          39
+        ],
+        "test_create_purpose_is_exact_and_does_not_change_native_profile_cleanup": [
+          42,
+          50
+        ],
+        "test_sql_stamp_and_admission_are_exact_registered_instances_not_dataclass_values": [
+          53,
+          64
+        ],
+        "test_full_sql_sets_and_original_absence_are_requeried_before_live_policy": [
+          67,
+          75
+        ],
+        "test_empty_scopes_and_every_location_have_explicit_intersections": [
+          78,
+          89
+        ],
+        "test_replay_original_binding_checked_before_hash_conflict_or_return": [
+          92,
+          102
+        ],
+        "test_actual_card_primitives_and_atomic_parent_before_child_flushes": [
+          105,
+          118
+        ],
+        "test_no_secondary_session_engine_issuer_or_http_activation_surface": [
+          121,
+          129
+        ],
+        "test_both_location_snapshots_and_expected_rows_use_same_lossless_ordering": [
+          132,
+          149
+        ],
+        "test_location_rows_preserve_exact_ids_cardinality_and_duplicates": [
+          152,
+          167
+        ]
+      }
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_contract_issuer_pg.py",
+      "immutable_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+      "raw_sha256": "0664c5258bda1e81261a317daa3240ac5e20e9c878b5498c25309e77b50d110c",
+      "bytes": 38615,
+      "lines": [
+        1,
+        724
+      ],
+      "definitions": {
+        "execute": [
+          38,
+          43
+        ],
+        "test_real_authlib_sql_issuer_consumer_atomic_commit_and_native_nulls": [
+          47,
+          61
+        ],
+        "test_service_leaves_commit_to_caller_and_fresh_reader_sees_atomic_rollback": [
+          64,
+          68
+        ],
+        "test_one_complete_original_b_and_legacy_order_before_any_row_lock": [
+          71,
+          89
+        ],
+        "test_profile_false_empty_or_unlisted_denies_real_token": [
+          93,
+          110
+        ],
+        "test_actual_current_policy_and_every_reference_intersection": [
+          115,
+          146
+        ],
+        "test_explicit_all_set_empty_are_not_collapsed": [
+          151,
+          164
+        ],
+        "test_read_scope_and_hash_or_receipt_never_authorize_create": [
+          167,
+          173
+        ],
+        "test_machine_requires_actual_confidential_grant_user_null": [
+          176,
+          189
+        ],
+        "test_original_actor_binding_does_not_transfer_between_user_and_machine": [
+          192,
+          199
+        ],
+        "test_canonical_public_auth_remains_live_for_create": [
+          203,
+          220
+        ],
+        "test_only_exact_issued_instance_body_namespace_and_session_work": [
+          224,
+          240
+        ],
+        "test_sql_stamp_lifetime_uses_existing_capability_lifetime": [
+          244,
+          253
+        ],
+        "test_borrowed_db_root_cannot_be_reentered_by_another_session": [
+          256,
+          269
+        ],
+        "test_autocommit_connection_cannot_issue_stamp": [
+          272,
+          277
+        ],
+        "test_multibind_root_cannot_issue_stamp": [
+          280,
+          286
+        ],
+        "test_actual_connection_end_invalidates_stamp_even_if_session_retains_root": [
+          290,
+          297
+        ],
+        "test_no_reentry_or_savepoint_before_issuance": [
+          300,
+          309
+        ],
+        "test_same_key_same_original_grant_new_family_replays_without_read_scope": [
+          312,
+          319
+        ],
+        "test_new_credential_in_same_grant_can_replay_after_real_reauth": [
+          322,
+          332
+        ],
+        "test_renewed_grant_never_inherits_original_receipt": [
+          335,
+          347
+        ],
+        "test_hash_mismatch_conflict_only_after_current_full_create_authorization": [
+          350,
+          362
+        ],
+        "test_replay_rechecks_current_original_refs_and_has_no_read_fallback": [
+          365,
+          375
+        ],
+        "test_unknown_commit_recovery_new_root_same_key_current_auth": [
+          378,
+          389
+        ],
+        "test_current_generation_issued_on_each_new_root_not_historical_intent": [
+          392,
+          402
+        ],
+        "blocked": [
+          405,
+          414
+        ],
+        "test_full_sets_and_absence_rechecked_after_actual_b_wait": [
+          418,
+          463
+        ],
+        "test_actual_profile_row_wait_rechecks_whole_current_policy": [
+          467,
+          494
+        ],
+        "test_each_actual_flush_checks_current_generation_and_auth_or_rolls_back": [
+          499,
+          533
+        ],
+        "test_cancel_actual_b_wait_rolls_back_entire_root": [
+          536,
+          556
+        ],
+        "test_native_duplicate_matcher_serialization_and_hidden_ids": [
+          559,
+          571
+        ],
+        "test_dedicated_fk_wait_is_not_claimed_by_flush_observation": [
+          574,
+          589
+        ],
+        "test_multiple_opaque_locations_ignore_snapshot_order_and_same_key_replays": [
+          593,
+          631
+        ],
+        "test_multiple_location_snapshot_drift_keeps_exact_cardinality_and_rolls_back": [
+          636,
+          659
+        ],
+        "test_multiple_locations_one_uncovered_exact_id_denies_whole_create": [
+          663,
+          683
+        ],
+        "test_multiple_locations_actual_sql_child_drift_after_flush_rolls_back": [
+          687,
+          724
+        ]
+      }
+    },
+    {
+      "path": "clearledger/server/tests/partner_contract_issuer_fixture.py",
+      "immutable_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+      "raw_sha256": "9f36e434e06be41ad9ac8a74e8368d5a65a230ea3883ea54e5545f2f2023605c",
+      "bytes": 12476,
+      "lines": [
+        1,
+        197
+      ],
+      "definitions": {
+        "issue_machine": [
+          40,
+          44
+        ],
+        "issue_user": [
+          47,
+          63
+        ],
+        "make_body": [
+          66,
+          72
+        ],
+        "state": [
+          75,
+          81
+        ],
+        "add_opaque_locations": [
+          84,
+          104
+        ],
+        "issuer_world": [
+          108,
+          197
+        ]
+      }
+    },
+    {
+      "path": "clearledger/server/tests/partner_contract_issuer_cases.py",
+      "immutable_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+      "raw_sha256": "e65ed3ce18106ce7601591cfd2f7e55dabcc0f149717d7bed14aa1b92b180769",
+      "bytes": 7231,
+      "lines": [
+        1,
+        76
+      ],
+      "definitions": {}
+    },
+    {
+      "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "raw_sha256": "09cfe4cf275f9b6db25d8b253d75617692995b40bc7371765108a95d8cef7232",
+      "bytes": 23328,
+      "lines": [
+        1,
+        289
+      ],
+      "definitions": {
+        "baseline_create_policy_projection": [
+          97,
+          112
+        ],
+        "test_accepted_create_scope_extension_preserves_old_eligible_policy_projection": [
+          115,
+          126
+        ],
+        "test_logout_preserves_existing17_and_canonical12": [
+          250,
+          276
+        ]
+      }
+    }
+  ],
+  "frozen_dependencies": [
+    {
+      "path": "clearledger/server/app/models_partner_contracts.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "d38d57424373220d358f5411bb566c62a6dbd30212be9bc482d8f7358e4cf2de",
+      "lines": [
+        1,
+        132
+      ]
+    },
+    {
+      "path": "clearledger/server/schema_migrations/revisions/0004_partner_contract_create.sql",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "1ef5de696b75f79ca58cd4c32844bb3281dcaa249d4b89e588b0e207fed02ae8",
+      "lines": [
+        1,
+        182
+      ]
+    },
+    {
+      "path": "clearledger/server/schema_migrations/revisions/0004_partner_contract_create_contract.json",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "1ced9ff25109a510bc3c9f2adabfa63537c9956fb549793a0ff5aee4e5a1ea53",
+      "lines": [
+        1,
+        1015
+      ]
+    },
+    {
+      "path": "clearledger/server/app/services/contract_write_locks.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
+      "lines": [
+        1,
+        416
+      ]
+    },
+    {
+      "path": "clearledger/server/app/services/partner_contract_profiles.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "6fdc93816c6ba7af22b97dc6c1e8e1bc91f1563cec1c0672e82e17a11c23abef",
+      "lines": [
+        1,
+        332
+      ]
+    },
+    {
+      "path": "clearledger/server/app/services/contract_card_creation.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "9a18628d5e6f701dab13c30fced65ef711ce8aa3d7fef4a0ae51ecf8cf5b4158",
+      "lines": [
+        1,
+        109
+      ]
+    },
+    {
+      "path": "clearledger/server/app/services/reference_identity.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "e3d68cde68cbceb973eef2d52788b9e947eb0b3186bd056f4631debe78616e97",
+      "lines": [
+        1,
+        199
+      ]
+    },
+    {
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "c17a8f441988f8a3fcc9c4a20aab5bd4af10025a6d34c52fd6148809d2602ad5",
+      "lines": [
+        1,
+        98
+      ]
+    },
+    {
+      "path": "clearledger/server/app/auth.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889",
+      "lines": [
+        1,
+        730
+      ]
+    },
+    {
+      "path": "clearledger/server/app/product_api/contract_create_body.py",
+      "immutable_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+      "equal_to_base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+      "raw_sha256": "07c5b7976bc6284a6dc10b43579aaa41047c41e8581d34a19f5f93338b824a8e",
+      "lines": [
+        1,
+        233
+      ]
+    }
+  ],
+  "policy_extension": {
+    "base": "011f0c571912aa7c5d972e851b0d0e3acdf645a9",
+    "ratification": [
+      "msg_d78d5ba7a19d",
+      "msg_4bc270231cbd",
+      "msg_c014d327b3a5"
+    ],
+    "scope": "contracts:create",
+    "module": "references",
+    "baseline_file": "cac8be62a1fdf840c0f285574d0c3266a1404f984b597aa9111fab62f6d1fe22",
+    "extended_file": "11624851e39b2dbf2671b46d349ed5f627a23f2b6359c716583c8c724fd651d9",
+    "baseline_eligible": "1524bb5ebec7869c2ac8c742c830da0fd234e9433fcc70f7ed7809c76ef78107",
+    "extended_eligible": "cb9fc729c9b13a563f43c79161e3aba7983c1b45dd6600a20a20e1e4201724d9",
+    "before": {
+      "scope_registered": false,
+      "references_modules": [
+        "counterparties:read",
+        "contracts:read"
+      ]
+    },
+    "after": {
+      "scope_registered": true,
+      "references_modules": [
+        "counterparties:read",
+        "contracts:read",
+        "contracts:create"
+      ]
+    },
+    "description_ast_before": "9e9978fbc8e55eefbe1217d14e181333ac6c100ca75c9051027e700058d2b38c",
+    "description_ast_after": "fd4475962b86c08dab5b3119cbfe8820b6f8ceb0dfcb9a6d04c027092caa470f",
+    "projection": "Remove exactly contracts:create:references from eligible_scopes AST; compare original CANONICAL_12 literal. Full new file SHA and extended eligible AST SHA required independently. Original 19/17/12 literals and old overlay source pins unchanged. Other 11 canonical functions unchanged."
+  },
+  "implementation": {
+    "consumer": "async create_partner_contract(AsyncSession, bearer, ContractCreateBody) -> PartnerContractCreateResult(contract_id, replayed)",
+    "source_caller": "ROOT-admitted test composition only; no HTTP CREATE/options/activation endpoint",
+    "create_scope": "contracts:create",
+    "user": "Actual native eligible_scopes/current Membership/Role plus user_enabled=true and exact User principal",
+    "machine": "Actual confidential machine grant/user NULL plus service_enabled=true and exact machine_grant principal",
+    "default_and_admin_flags": "Both false defaults and admin PUT always false unchanged; no activation surface",
+    "intersections": [
+      "requested org = profile org and current company and actual own-org restriction",
+      "CP = profile CP and verified counterparty scope and current company",
+      "EVERY opaque location = profile location and verified objects and grant locations and native object_scope and current company",
+      "type = profile types and actual active catalog",
+      "EMPTY and empty sets deny; canonical ALL/SET/EMPTY retained; contracts resource scope not CREATE authority"
+    ],
+    "protocol": "One full original B, existing legacy company-counterparty then company-contract barriers before canonical rows; full scalar graph, absence and child-set rechecks after each wait/flush and before return; no late keys/reentry/upgrades/new parents/retry",
+    "evidence": "Private exact registered stamp/admission bound to actual Session/root/Connection/capability/current generation/canonical body bytes/namespace; evidence alone not write policy; existing kernel lifetime reused",
+    "replay": "Current full CREATE plus original app/client/install/grant.id/exact actor and original refs/type/locations/result. New family/credential in same grant requires real current verification. Renewed grant/read fallback denied. Hash mismatch 409 only after auth. Unknown commit: new root/same key/current reauth; no portable old proof.",
+    "atomic_parts": [
+      "Contract with native creation_key/actor/hash NULL",
+      "ContractLocation",
+      "immutable success intent",
+      "intent locations",
+      "AuditEvent in same root"
+    ],
+    "completion": "Caller commits; every command/prepare/require error or cancellation rolls back whole root. No log_audit/notify/background work.",
+    "generation_storage": "Current SQL-issued stamp only; models/schema0004 unchanged; no historical generation column in intent"
+  },
+  "definitions": {
+    "status": "AUTHORED_NOTRUN_INCLUDING_IMPORTS_AND_COLLECTION",
+    "pg_definitions": 34,
+    "pg_static_variants": 117,
+    "unit_definitions": 10,
+    "dpl_total_definitions": 9,
+    "dpl_new_extension_definitions": 1,
+    "new_definitions_total": 45,
+    "matrix_records": 34,
+    "all_static_variants_in_three_test_modules": 136,
+    "positive_authority": "Actual HTTP/Authlib tokens, synthetic SQL profiles, original verifiers/B/capabilities/issuer; authority observers delegate originals. R01 positive _rows observer delegates SQL and changes only order; negative projections explicitly inject drift.",
+    "wait_observations": "Actual writer/blocker PID via pg_blocking_pids/pg_locks plus fresh-reader SQL. Authored only, no observation executed.",
+    "dedicated_fk_wait": "Separate named definition; participating FK parents already SHARE locked before INSERT, so competing key DELETE/UPDATE must wait at earlier parent phase. Reachability and actual server triggers require independent ROOT review. Post-flush faults are NOT dedicated FK-wait evidence. NOTRUN.",
+    "historical_parity": "Native duplicate definition authored; complete historical native/import/profile/DPL runtime suites remain ROOT work.",
+    "r01_added_unit_definitions": 2,
+    "r01_added_pg_definitions": 4,
+    "r01_added_pg_static_variants": 14
+  },
+  "static_checks_only": [
+    "stdlib AST parse and in-memory compile of 8 Python files without exec",
+    "stdlib AST exact baseline projection for eligible_scopes; unchanged other 11 canonical functions",
+    "stdlib AST equality of original DPL 19/17/12 literals and historical overlays/source pins",
+    "AST definition/parameter-list counts and one-to-one 34 PG matrix mapping",
+    "raw file SHA-256 and immutable Git byte equality; git diff --check",
+    "R01: identical lossless Python row sort at both SQL/expected snapshot sites; reverse AST comparison restores original CreateOperation and consumer; exact original identity/DPL bytes unchanged"
+  ],
+  "pending_root_work": [
+    "controlled preimports/admission/schema4/Core/READ COMMITTED target",
+    "execution of authored definitions and historical regression suites",
+    "raw PID/SQL evidence and bounded synthetic cleanup",
+    "dedicated FK-wait reachability/server-trigger review",
+    "fresh independent source review after freeze",
+    "draft publication decision by coordinator"
+  ],
+  "out_of_scope": [
+    "models/schema0004/kernel/driver/native adapters/Profile admin/config/CI/SDK/flags changes",
+    "HTTP CREATE/options/activation and external acceptance promises",
+    "SQL/DB/HTTP/browser/SSH/Docker/Node/build/install/CI/env/DSN runtime by author",
+    "push/PR/merge/deploy and other Run/tasks/executors/private controls",
+    "RFC113 branches/reports; common memory and ai-base mutation"
+  ],
+  "original_program": {
+    "ref": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "counts": [
+      20,
+      11
+    ],
+    "completion": false,
+    "preservation": "reference only; original large JSON not duplicated"
+  },
+  "prior_components": {
+    "Profile95_RawSource95": "ROOT reported accepted for that component only; no issuer readiness transfer"
+  },
+  "plan_reference": {
+    "md": "/srv/projects/preview/partner-contract-sql-issuer-plan-20261101/plan.md",
+    "json": "/srv/projects/preview/partner-contract-sql-issuer-plan-20261101/plan.json",
+    "override": "Task literal ROOT ratification resolves old G0/G1/G2 and extends exact8 to exact10."
+  },
+  "history": {
+    "first_source_test_commit": "5c0b5028fd197151b17b877c6fbdf9c2259b83f1",
+    "first_docs_only_child": "a741cc0eb2634abd965a376c304b6cb18d728ed3",
+    "first_review_status": "CHANGES_REQUESTED_SOURCE",
+    "artifacts": [
+      {
+        "path": "/srv/projects/preview/partner-contract-sql-issuer-author-20261101/report.md",
+        "raw_sha256": "45731f6028f91bf8c390cee4420a23cf35c2601b0e69b28b3755638b86cabfe3",
+        "preserved": true
+      },
+      {
+        "path": "/srv/projects/preview/partner-contract-sql-issuer-author-20261101/report.json",
+        "raw_sha256": "f3fab6ca1223db435d339d8c4f452006d055ce05eabd4bd034661b3f3622d5a5",
+        "preserved": true
+      },
+      {
+        "path": "/srv/projects/preview/partner-contract-sql-issuer-review-20261101/review.md",
+        "raw_sha256": "3d58e0a2c5ea24111776b096795c9f798edf953e373f1a3c1afb7ac8f5eedc57",
+        "preserved": true
+      },
+      {
+        "path": "/srv/projects/preview/partner-contract-sql-issuer-review-20261101/review.json",
+        "raw_sha256": "218d3f93bb74011861556c583054bd06527415fed5bc7b42fdec2782b7cc04f7",
+        "preserved": true
+      }
+    ]
+  },
+  "r01_fix": {
+    "id": "R01",
+    "priority": "P2",
+    "status": "AUTHORED_NOTRUN_INDEPENDENT_REVIEW_PENDING",
+    "current_target_affected": "UNKNOWN",
+    "replay_affected_by_original_cause": "NOT_ASSERTED",
+    "parent": "a741cc0eb2634abd965a376c304b6cb18d728ed3",
+    "source_test_commit": "35cf501f82af40242a112bec8a44ea70ad370859",
+    "helper": "_location_rows(rows) = tuple(sorted(rows))",
+    "both_real_checks": [
+      "CreateOperation.receipt_snapshot: children",
+      "CreateOperation.recheck: own ContractLocation pairs"
+    ],
+    "both_expected_checks": [
+      "operation.own_locations",
+      "operation.expected_receipt: children"
+    ],
+    "proof": "Both real snapshots and both expected children use identical Python full-row sort. Permutations leave sorted tuples unchanged; no projection/dedup/ID normalization, exact cardinality retained. Reverse AST comparison restores original CreateOperation and consumer after removing only helper wrappers/import.",
+    "runtime": 0,
+    "tests": "AUTHORED_NOTRUN_INCLUDING_IMPORTS_AND_COLLECTION",
+    "root_next": "Record actual collation and pair with SQL/Python order difference under controlled ROOT admission; run definitions with raw evidence and bounded cleanup."
+  },
+  "coverage_gaps": [
+    {
+      "id": "G-LOC",
+      "status": "AUTHORED_COVERAGE_ONLY_NOTRUN"
+    },
+    {
+      "id": "G-FK",
+      "status": "OPEN"
+    },
+    {
+      "id": "G-FOREIGN",
+      "status": "OPEN"
+    },
+    {
+      "id": "G-WAITS",
+      "status": "OPEN"
+    },
+    {
+      "id": "G-PARITY",
+      "status": "OPEN"
+    }
+  ]
+}
