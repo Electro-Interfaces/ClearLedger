@@ -25,10 +25,17 @@ class AuditNotification:
     details: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class DocNotice:
+    """Доверенная ссылка регистрации без снимка реквизитов из аудита."""
+    company_id: UUID
+    doc_id: UUID
+
+
 @dataclass
 class _Queue:
     root: SessionTransaction
-    items: dict[SessionTransaction, list[tuple[int, AuditNotification]]] = field(default_factory=dict)
+    items: dict[SessionTransaction, list[tuple[int, AuditNotification | DocNotice]]] = field(default_factory=dict)
     successful: set[SessionTransaction] = field(default_factory=set)
     sequence: int = 0
     physical_root: bool = False
@@ -199,8 +206,12 @@ def _after_transaction_end(session: Session, transaction: SessionTransaction) ->
         for _, payload in batch:
             try:
                 from app.services.notify import dispatch_async
-                dispatch_async(payload.company_id, payload.action,
-                               who=payload.who, details=payload.details)
+                if isinstance(payload, DocNotice):
+                    dispatch_async(payload.company_id, "doc.register",
+                                   doc_notice_id=payload.doc_id)
+                else:
+                    dispatch_async(payload.company_id, payload.action,
+                                   who=payload.who, details=payload.details)
             except Exception:  # Scheduling cannot turn a committed command into an error.
                 logger.exception("Audit notification scheduling failed after root commit")
         return
@@ -220,6 +231,7 @@ def _after_transaction_end(session: Session, transaction: SessionTransaction) ->
 def enqueue_audit_notification(
     db: AsyncSession, *, company_id: UUID, action: str,
     who: str | None, details: str | None,
+    doc_notice_id: UUID | None = None,
 ) -> None:
     """Snapshot four immutable values in the current root/SAVEPOINT scope.
 
@@ -231,6 +243,9 @@ def enqueue_audit_notification(
             or (who is not None and type(who) is not str)
             or (details is not None and type(details) is not str)):
         raise TypeError("audit notification payload must contain immutable UUID/text values")
+    if doc_notice_id is not None:
+        if action != "doc.register" or not isinstance(doc_notice_id, UUID):
+            raise TypeError("document notice requires doc.register and a native UUID")
     session = db.sync_session
     root = session.get_transaction()
     scope = _scope(session)
@@ -252,6 +267,8 @@ def enqueue_audit_notification(
         session.info[_STATE] = queue
     if queue.root is not root:
         raise ValueError("audit queue root identity changed without transaction end")
-    queue.items.setdefault(scope, []).append((queue.sequence, AuditNotification(
-        company_id=company_id, action=action, who=who, details=details)))
+    payload = (DocNotice(company_id=company_id, doc_id=UUID(bytes=doc_notice_id.bytes))
+               if doc_notice_id is not None else AuditNotification(
+                   company_id=company_id, action=action, who=who, details=details))
+    queue.items.setdefault(scope, []).append((queue.sequence, payload))
     queue.sequence += 1

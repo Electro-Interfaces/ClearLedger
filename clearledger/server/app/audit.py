@@ -20,11 +20,17 @@ async def log_audit(
     target: str | None = None,
     details: dict[str, Any] | None = None,
     notification_timing: Literal["immediate", "after_root_commit"] = "immediate",
+    doc_notice_id: uuid.UUID | None = None,
 ) -> None:
     """Добавить событие в журнал (без commit — коммитит вызывающий эндпоинт).
     action — маркер вида `role.create` / `member.access` / `user.create`."""
     if notification_timing not in ("immediate", "after_root_commit"):
         raise ValueError("unknown audit notification timing")
+    if doc_notice_id is not None:
+        if action != "doc.register" or notification_timing != "after_root_commit":
+            raise ValueError("document notices require deferred doc.register opt-in")
+        if not isinstance(doc_notice_id, uuid.UUID):
+            raise TypeError("document notice requires a native UUID")
     if notification_timing == "after_root_commit":
         from app.services.after_root_commit import validate_audit_notification_session
         validate_audit_notification_session(db)
@@ -51,7 +57,7 @@ async def log_audit(
     if notification_timing == "after_root_commit":
         from app.services.after_root_commit import enqueue_audit_notification
         enqueue_audit_notification(db, company_id=company_id, action=action,
-                                   who=who, details=text)
+                                   who=who, details=text, doc_notice_id=doc_notice_id)
         return
     from app.services.notify import dispatch_async   # локально: иначе кольцо импортов
     dispatch_async(company_id, action, who=actor.name if actor else None, details=text)

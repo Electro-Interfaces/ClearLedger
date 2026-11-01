@@ -2445,6 +2445,7 @@ async def register_doc(
                     to_value=number, note=reason or None))
     await log_audit(db, actor=current_user, company_id=cid, action="doc.register",
                     notification_timing="after_root_commit",
+                    doc_notice_id=d.id,
                     target=number, details={"title": d.title[:200], "kind": kind.code,
                                              "manual": bool(manual_number),
                                              "manual_reason": reason or None})
