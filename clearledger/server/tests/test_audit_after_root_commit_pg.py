@@ -52,10 +52,10 @@ async def audit_pg_company(audit_pg_factory):
 
 @pytest.fixture
 def audit_dispatch_spy(monkeypatch, audit_pg_factory):
-    calls = []
+    calls, attempts, failures = [], [], []
     engine = audit_pg_factory.kw["bind"].sync_engine
 
-    def record(cid, action, who=None, details=None):
+    def verify_and_record(cid, action, who=None, details=None):
         # Runs in SQLAlchemy's real commit greenlet: a separate connection sees
         # committed native data BEFORE this callback records a notification.
         with Session(engine) as independent:
@@ -64,8 +64,20 @@ def audit_dispatch_spy(monkeypatch, audit_pg_factory):
             assert any(row.details == details for row in rows)
         calls.append((cid, action, who, details))
 
+    def record(cid, action, who=None, details=None):
+        attempts.append((cid, action, who, details))
+        try:
+            verify_and_record(cid, action, who, details)
+        except BaseException as error:
+            # Production deliberately catches scheduler Exception. Preserve
+            # oracle failures outside that catch, including negative paths.
+            failures.append(error)
+            raise
+
     monkeypatch.setattr(notify, "dispatch_async", record)
-    return calls
+    yield calls
+    assert failures == [], f"callback oracle failures: {failures!r}; attempts={attempts!r}"
+    assert attempts == calls, "every callback attempt must pass independent visibility"
 
 
 async def _enqueue(db, cid, label):
@@ -327,3 +339,75 @@ async def test_existing_per_statement_alternate_bind_rejected_before_add(
             await db.rollback()
     finally:
         await alternate.dispose()
+
+
+async def test_core_savepoint_before_optin_rejects_before_add(
+        audit_pg_factory, audit_pg_company, audit_dispatch_spy):
+    async with audit_pg_factory() as db:
+        connection = await db.connection()
+        core_savepoint = await connection.begin_nested()
+        with pytest.raises(ValueError, match="Core SAVEPOINT"):
+            await _enqueue(db, audit_pg_company, "core_before")
+        assert not db.new and not audit_dispatch_spy
+        _empty(db)
+        await core_savepoint.rollback()
+        await db.commit()
+        _empty(db)
+    async with audit_pg_factory() as independent:
+        assert not list(await independent.scalars(select(AuditEvent).where(
+            AuditEvent.company_id == audit_pg_company)))
+
+
+async def test_late_core_savepoint_blocks_flush_and_poisons_root_until_rollback(
+        audit_pg_factory, audit_pg_company, audit_dispatch_spy):
+    async with audit_pg_factory() as db:
+        await _enqueue(db, audit_pg_company, "core_after")
+        connection = await db.connection()
+        core_savepoint = await connection.begin_nested()
+        with pytest.raises(ValueError, match="Core SAVEPOINT"):
+            await db.flush()  # Reject BEFORE AuditEvent SQL inside Core scope.
+        await core_savepoint.rollback()
+        with pytest.raises(ValueError, match="roll back the entire root"):
+            await db.commit()  # Catching the first guard cannot revive this root.
+        assert not audit_dispatch_spy
+        await db.rollback()
+        _empty(db)
+        await db.execute(text("SELECT 1"))
+        await db.commit()
+        assert not audit_dispatch_spy
+    async with audit_pg_factory() as independent:
+        assert not list(await independent.scalars(select(AuditEvent).where(
+            AuditEvent.company_id == audit_pg_company)))
+
+
+@pytest.mark.parametrize("configuration", ["engine", "connection", "late_connection"])
+async def test_autocommit_configuration_has_no_audit_or_notification_effect(
+        audit_pg_factory, audit_pg_company, audit_dispatch_spy, configuration):
+    engine = audit_pg_factory.kw["bind"]
+    selected = create_async_engine(engine.url, isolation_level="AUTOCOMMIT") if configuration == "engine" else engine
+    try:
+        async with AsyncSession(selected) as db:
+            if configuration == "connection":
+                # Same Engine, but actual enlisted Connection has unsafe mode.
+                await db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+            if configuration == "late_connection":
+                await _enqueue(db, audit_pg_company, "autocommit_late")
+                with pytest.raises(ValueError, match="AUTOCOMMIT"):
+                    await db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+                with pytest.raises(ValueError, match="roll back the entire root"):
+                    await db.commit()
+                await db.rollback()
+            else:
+                with pytest.raises(ValueError, match="AUTOCOMMIT"):
+                    await _enqueue(db, audit_pg_company, "autocommit")
+                assert not db.new
+                _empty(db)
+                await db.rollback()
+            _empty(db)
+            assert not audit_dispatch_spy
+    finally:
+        if selected is not engine:
+            await selected.dispose()
+    async with audit_pg_factory() as independent:
+        assert not list(await independent.scalars(select(AuditEvent).where(
+            AuditEvent.company_id == audit_pg_company)))

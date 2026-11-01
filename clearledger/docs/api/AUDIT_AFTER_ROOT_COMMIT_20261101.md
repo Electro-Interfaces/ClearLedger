@@ -27,10 +27,21 @@ mapper binds, get_bind overrides, twophase и изменённого join mode. 
 соединения проверяются по actual enlistment: Engine, RootTransaction, should_commit,
 autoclose и identity физической транзакции. Connection-bound и неизвестное владение
 закрыты. Transaction hooks Engine, способные вернуть уже открытое соединение,
-не поддерживаются. Проверки повторяются до commit и при enlistment соединения.
+не поддерживаются. Engine AUTOCOMMIT (включая регистр значения) отвергается до add; AUTOCOMMIT
+фактического Connection проверяется по cached isolation/execution options без SQL.
+Текущий стек Core SAVEPOINT должен точно соответствовать материализованным ORM
+nested scopes. Неучтённый Core SAVEPOINT до opt-in отвергается до add. Проверки
+повторяются перед flush, commit и при enlistment соединения. Перед flush guard
+не позволяет AuditEvent попасть в чужой Core SAVEPOINT. Ошибка поздней проверки
+помечает очередь до полного root rollback: откат одного Core SAVEPOINT и перехват
+ошибки не разрешают последующий commit этого корня. Обычные ORM SAVEPOINT,
+включая ещё не материализованный внутренний scope, сохраняют свой lifecycle.
 Проверка не приобретает соединение и не делает begin/commit/rollback за вызывающего;
 обычный AuditEvent add может установить логический root через autobegin.
 Если физический root так и не подтверждён, отправки нет.
+Поддерживаются SQLAlchemy Session/AsyncSession transaction APIs и наблюдаемый
+стек Connection; raw transaction SQL и прямое изменение driver isolation
+не входят в контракт. Метаданные не подтверждают скрытые driver/SQL манипуляции.
 
 Обработчики событий не читают ORM, не выполняют SQL, await и сеть. Ошибка scheduler
 после commit только логируется; пакет не восстанавливается и повтор не запускается.
@@ -47,7 +58,12 @@ cancel/reuse/reentrance, scheduler failure, внешний bind и сосуще�
 scoped-lock transaction-end listener. Native register определения используют
 настоящий handler, policy, таблицы и ограничения: auto/manual, repeat/collision409,
 ordinary ACL, strict superadmin read break-glass и реальный constraint failure
-в commit flush после enqueue. Подменяется только `dispatch_async`, сеть не нужна.
+в commit flush после enqueue. Подменяется только `dispatch_async`, сеть не нужна. Обе PG spy-фикстуры сохраняют
+каждую попытку ДО assertion видимости, а ошибки проверяют при teardown вне
+production log-only catch; phantom callback не может исчезнуть из negative oracle.
+Дополнительно определены реальные PG сценарии Core SAVEPOINT до opt-in и после
+enqueue/до flush, AUTOCOMMIT Engine и same-Engine Connection execution options,
+включая позднее enlistment. Новые определения не запускались.
 
 В этой работе выполнены только stdlib AST/JSON/hash и compile в памяти на Python
 3.13 без исполнения объектов проекта. Импорты приложения/SQLAlchemy/тестов,

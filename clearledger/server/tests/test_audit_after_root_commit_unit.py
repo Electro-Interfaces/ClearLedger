@@ -141,3 +141,16 @@ async def test_unsafe_configuration_before_add(configuration):
         assert not db.new and deferred._STATE not in db.sync_session.info
         await db.close()
     await engine.dispose()
+
+
+@pytest.mark.parametrize("level", ["AUTOCOMMIT", "autocommit"])
+async def test_engine_autocommit_rejected_before_add_without_connection(level):
+    engine = create_async_engine("postgresql+asyncpg://example:example@localhost/example_test",
+                                 isolation_level=level)
+    async with AsyncSession(engine) as db:
+        with pytest.raises(ValueError, match="AUTOCOMMIT"):
+            await log_audit(db, actor=None, company_id=uuid4(), action="sample",
+                            notification_timing="after_root_commit")
+        assert not db.new and not db.in_transaction()
+        assert deferred._STATE not in db.sync_session.info
+    await engine.dispose()

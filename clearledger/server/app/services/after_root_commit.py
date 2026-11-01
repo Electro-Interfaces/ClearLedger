@@ -8,7 +8,7 @@ import logging
 from uuid import UUID
 
 from sqlalchemy import __version__, event
-from sqlalchemy.engine import Engine, RootTransaction
+from sqlalchemy.engine import Engine, NestedTransaction, RootTransaction
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
@@ -32,6 +32,11 @@ class _Queue:
     successful: set[SessionTransaction] = field(default_factory=set)
     sequence: int = 0
     physical_root: bool = False
+    poisoned: bool = False
+
+
+def _autocommit(level: object) -> bool:
+    return isinstance(level, str) and level.replace("_", " ").upper() == "AUTOCOMMIT"
 
 
 def _configuration(session: Session) -> Engine:
@@ -45,11 +50,39 @@ def _configuration(session: Session) -> Engine:
             or type(session.bind) is not Engine):
         raise ValueError("after_root_commit requires a single Engine-bound owned Session")
     engine = session.bind
+    if (_autocommit(engine.get_execution_options().get("isolation_level"))
+            or _autocommit(engine.dialect._on_connect_isolation_level)):
+        raise ValueError("after_root_commit does not support AUTOCOMMIT")
     # Such hooks can supply an already-open transaction even for Engine binding.
     # Do not acquire a connection or guess ownership from an Engine-like object.
     if engine.dispatch.engine_connect or engine.dispatch.begin:
         raise ValueError("after_root_commit does not support connection transaction hooks")
     return engine
+
+
+def _nested_ownership(session: Session, connection) -> None:
+    # A Core SAVEPOINT has no Session rollback event. Match the entire live
+    # physical stack to materialized ORM scopes, including outer scopes when
+    # a new logical inner scope has not acquired its SAVEPOINT yet.
+    expected = []
+    scope = session.get_nested_transaction()
+    while scope is not None:
+        if scope.nested:
+            record = scope._connections.get(connection)
+            if record is not None:
+                _, transaction, should_commit, _ = record
+                if (type(transaction) is not NestedTransaction
+                        or not transaction.is_active or should_commit is not True):
+                    raise ValueError("after_root_commit ORM SAVEPOINT ownership changed")
+                expected.append(transaction)
+        scope = scope.parent
+    actual = connection.get_nested_transaction()
+    for transaction in expected:
+        if actual is not transaction:
+            raise ValueError("after_root_commit cannot track a Core SAVEPOINT")
+        actual = actual._previous_nested
+    if actual is not None:
+        raise ValueError("after_root_commit cannot track a Core SAVEPOINT")
 
 
 def _physical_root(session: Session, root: SessionTransaction) -> bool:
@@ -61,6 +94,10 @@ def _physical_root(session: Session, root: SessionTransaction) -> bool:
                 or connection.get_transaction() is not transaction
                 or not transaction.is_active):
             raise ValueError("after_root_commit cannot own an external or joined transaction")
+        if (connection._is_autocommit_isolation()
+                or _autocommit(connection.get_execution_options().get("isolation_level"))):
+            raise ValueError("after_root_commit does not support Connection AUTOCOMMIT")
+        _nested_ownership(session, connection)
         found = True
     return found
 
@@ -70,6 +107,9 @@ def validate_audit_notification_session(db: AsyncSession) -> None:
     if type(db) is not AsyncSession:
         raise ValueError("after_root_commit requires an actual AsyncSession")
     session = db.sync_session
+    queue = session.info.get(_STATE)
+    if queue is not None and queue.poisoned:
+        raise ValueError("after_root_commit ownership changed; roll back the entire root")
     _configuration(session)
     if not session.is_active:
         raise ValueError("after_root_commit requires an active Session")
@@ -95,16 +135,33 @@ def _discard(queue: _Queue, scope: SessionTransaction) -> None:
     queue.successful.discard(scope)
 
 
-def _after_begin(session: Session, transaction: SessionTransaction, connection) -> None:
+def _guard_queue(session: Session) -> None:
     queue = session.info.get(_STATE)
     if queue is not None:
-        queue.physical_root = _physical_root(session, queue.root)
+        if queue.poisoned:
+            raise ValueError("after_root_commit ownership changed; roll back the entire root")
+        try:
+            queue.physical_root = _physical_root(session, queue.root)
+        except Exception:
+            # A before_flush exception leaves the Session root usable. Keep a
+            # sticky failure even if the caller rolls back only a Core SAVEPOINT
+            # and catches the error; this root must never later dispatch.
+            queue.poisoned = True
+            raise
+
+
+def _after_begin(session: Session, transaction: SessionTransaction, connection) -> None:
+    _guard_queue(session)
+
+
+def _before_flush(session: Session, flush_context, instances) -> None:
+    # Every queued AuditEvent is an ORM add. Check BEFORE its DML so a late Core
+    # SAVEPOINT cannot contain the audit row while its payload remains in root.
+    _guard_queue(session)
 
 
 def _before_commit(session: Session) -> None:
-    queue = session.info.get(_STATE)
-    if queue is not None:
-        _physical_root(session, queue.root)
+    _guard_queue(session)
 
 
 def _after_commit(session: Session) -> None:
@@ -136,7 +193,7 @@ def _after_transaction_end(session: Session, transaction: SessionTransaction) ->
         # Detach before any callback, including a reentrant new transaction.
         session.info.pop(_STATE, None)
         batch = tuple(sorted(queue.items.get(transaction, ()))) if (
-            transaction in queue.successful and queue.physical_root) else ()
+            transaction in queue.successful and queue.physical_root and not queue.poisoned) else ()
         queue.items.clear()
         queue.successful.clear()
         for _, payload in batch:
@@ -181,7 +238,8 @@ def enqueue_audit_notification(
         raise ValueError("AuditEvent must establish the caller root before enqueue")
     if not getattr(session, _INSTALLED, False):
         for name, listener in (
-            ("after_begin", _after_begin), ("before_commit", _before_commit),
+            ("after_begin", _after_begin), ("before_flush", _before_flush),
+            ("before_commit", _before_commit),
             ("after_commit", _after_commit), ("after_rollback", _after_rollback),
             ("after_soft_rollback", _after_soft_rollback),
             ("after_transaction_end", _after_transaction_end),

@@ -40,7 +40,7 @@
     "immediate_remaining": 105
   },
   "ownership": {
-    "supported": "single actual Engine-bound AsyncSession/Session SQLAlchemy 2.0.36, owned physical RootTransaction",
+    "supported": "single actual Engine-bound AsyncSession/Session SQLAlchemy 2.0.36, owned physical RootTransaction, corresponding ORM/Core nested stack",
     "reject_before_add": [
       "invalid timing",
       "Connection-bound/external join",
@@ -48,17 +48,23 @@
       "get_bind overrides",
       "twophase",
       "unknown session/engine/configuration",
-      "borrowed/foreign current-root connections"
+      "borrowed/foreign current-root connections",
+      "Engine AUTOCOMMIT (case normalized)",
+      "current Connection AUTOCOMMIT",
+      "untracked Core SAVEPOINT/changed ORM nested ownership"
     ],
-    "later_enlistment": "revalidate on before_commit/after_begin; unsupported ownership aborts caller transaction",
-    "helper_begins_commits_rollbacks": false
+    "later_enlistment": "metadata-only revalidation before_flush/before_commit/after_begin; sticky poisoned queue requires whole-root rollback after late ownership error; no dispatch from poisoned root",
+    "helper_begins_commits_rollbacks": false,
+    "isolation_detection": "cached Engine dialect connect isolation + Engine/Connection execution options + Connection._is_autocommit_isolation; no SQL",
+    "transaction_API_boundary": "SQLAlchemy Session/AsyncSession transaction APIs with matching Connection nested stack; raw transaction SQL/direct driver isolation mutation unsupported"
   },
   "events": {
     "after_commit": "mark exact current scope successful only",
     "after_transaction_end": "nested merge by enqueue sequence; rollback subtree discard; flush child ignored; exact owned root end detaches before scheduling",
     "failure": "discard on rollback/flush failure/close/invalidate; no stale root reuse",
     "scheduler_failure": "log only; committed command stays successful; no retry/requeue",
-    "hook_SQL_ORM_await_network": false
+    "hook_SQL_ORM_await_network": false,
+    "before_flush": "reject untracked Core nested boundaries before AuditEvent DML; ownership failure poisons queue until root rollback"
   },
   "unchanged": [
     "AuditEvent persistence/serialization/system actor",
@@ -78,7 +84,8 @@
         "test_invalid_mode_rejected_before_add_or_enqueue",
         "test_payload_freezes_four_primitives_without_uuid_cast",
         "test_optin_system_actor_snapshot",
-        "test_unsafe_configuration_before_add"
+        "test_unsafe_configuration_before_add",
+        "test_engine_autocommit_rejected_before_add_without_connection"
       ],
       "clearledger/server/tests/test_audit_after_root_commit_pg.py": [
         "test_physical_root_visibility_flush_and_dependency_second_commit",
@@ -93,7 +100,10 @@
         "test_expiry_and_close_leave_primitive_actor_payload",
         "test_external_connection_rejected_before_add",
         "test_scoped_lock_transaction_end_listener_coexists",
-        "test_existing_per_statement_alternate_bind_rejected_before_add"
+        "test_existing_per_statement_alternate_bind_rejected_before_add",
+        "test_core_savepoint_before_optin_rejects_before_add",
+        "test_late_core_savepoint_blocks_flush_and_poisons_root_until_rollback",
+        "test_autocommit_configuration_has_no_audit_or_notification_effect"
       ],
       "clearledger/server/tests/test_doc_register_after_root_commit_pg.py": [
         "test_native_register_atomic_success_and_repeat_409",
@@ -108,7 +118,15 @@
     "schema": "native; no DDL or FK stripping",
     "notification_boundary_spy": "dispatch_async only",
     "physical_visibility": "fresh independent Session checks native committed rows before callback records",
-    "commit_cancellation_ambiguity": "UNKNOWN; no guessed physical result"
+    "commit_cancellation_ambiguity": "UNKNOWN; no guessed physical result",
+    "callback_oracle": "both PG fixtures record every attempt/failure before independent visibility assertion and assert their ledger at teardown outside production scheduler catch",
+    "new_ownership_families": [
+      "Core SAVEPOINT before opt-in rejects before add",
+      "Core SAVEPOINT after enqueue blocks flush; SAVEPOINT rollback cannot unpoison root; root rollback/reuse no stale",
+      "Engine AUTOCOMMIT rejects before add",
+      "same-Engine Connection AUTOCOMMIT rejects before add",
+      "late Connection AUTOCOMMIT enlistment poisons queue before AuditEvent DML"
+    ]
   },
   "validation": {
     "mode": "SOURCE-ONLY",

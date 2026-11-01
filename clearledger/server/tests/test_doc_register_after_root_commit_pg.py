@@ -59,10 +59,10 @@ async def native_register_data(audit_pg_factory, audit_pg_company):
 
 @pytest.fixture
 def register_dispatch_spy(monkeypatch, audit_pg_factory):
-    calls = []
+    calls, attempts, failures = [], [], []
     engine = audit_pg_factory.kw["bind"].sync_engine
 
-    def record(cid, action, who=None, details=None):
+    def verify_and_record(cid, action, who=None, details=None):
         assert action == "doc.register"
         # Independent Session/connection, before recording callback invocation.
         with Session(engine) as independent:
@@ -83,8 +83,18 @@ def register_dispatch_spy(monkeypatch, audit_pg_factory):
                     DocEvent.doc_id == doc.id, DocEvent.kind == "registered")).first()
         calls.append((cid, action, who, details))
 
+    def record(cid, action, who=None, details=None):
+        attempts.append((cid, action, who, details))
+        try:
+            verify_and_record(cid, action, who, details)
+        except BaseException as error:
+            failures.append(error)
+            raise
+
     monkeypatch.setattr(notify, "dispatch_async", record)
-    return calls
+    yield calls
+    assert failures == [], f"callback oracle failures: {failures!r}; attempts={attempts!r}"
+    assert attempts == calls, "every callback attempt must pass independent visibility"
 
 
 async def _register(factory, data, *, actor_id=None, doc_id=None, **payload):
