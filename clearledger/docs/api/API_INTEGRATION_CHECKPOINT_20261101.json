@@ -828,5 +828,152 @@
     },
     "open": "Full Core/schema4/StoreB/native55/Auth PG/real identity/receipt SQL/admin/create options/POST transport/OpenAPI17/official SDK/combinedCI/external pilots/all20+11 not completed",
     "deployment": "no merge/deploy/activation/working schema changes"
+  },
+  "authAndFullNativeSchema4Checkpoint20261101": {
+    "status": "SEPARATE_COMPONENTS_ACCEPTED_NOT_OVERALL_GO",
+    "asOfUTC": "2026-11-01 00:56 UTC",
+    "originalScope": {
+      "sections": 20,
+      "crossCutting": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "rootLedgerSourceHead": "98fab81ef13340081369d96e68801f0af9db285b",
+    "auth": {
+      "source": "0bc1af34b4f45b170213fb3742dd6a76009f65dd",
+      "rootSource": "87ee36e518d23617b3a321f5bd6d9a827813558e",
+      "artifact": "native-auth-pg-20261101-87902c65ef57",
+      "status": "ROOT_SIX_TABLE_COMPONENT_ACCEPTED_AFTER_REVIEW",
+      "actualCases": 138,
+      "unit": 43,
+      "PG": 95,
+      "functions": 46,
+      "phases": 414,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 98.54464386031032,
+      "resultSHA256": "043cd7f1cb366360cdb4f24fe6288181f553743b5019ad9f1900e689f6b3977c",
+      "executionSHA256": "0dda2799d02ff483c4a2f065958c44a50f292edee9ebdddf3cbc5c231b9f9e8b",
+      "independentReview": {
+        "verdict": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "110ff11ae461af833c4f235a98422b1934d4c5922059b22c89a2ab26c5b7c079",
+        "jsonSHA256": "5611256916ec7a7064f457ea282da8cc8e43d675caac031a9a7f7f880c9ce3f5",
+        "source": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/native-auth-root-review-20261101",
+        "overallGO": false
+      },
+      "limits": "synthetic six-table nullable/FK subset; real handlers/bcrypt/TOTP/audit; external delivery/security substituted; no full HTTP/JWT/production/CI"
+    },
+    "schema4": {
+      "status": "ROOT_FOUR_NATIVE_COMPONENT_CASES_ACCEPTED_AFTER_REVIEW",
+      "fixtureSource": "ff6a4028baa0de560617bb1442d4b92fe5956f49",
+      "rootFixture": "98fab81e",
+      "appBase": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "onlyAppOverlay": "be49c4e688c80b3d7c40aedc6b283b477732b01e:clearledger/server/app/product_api/dto.py",
+      "immutableFiles": 535,
+      "immutableBytes": 14634482,
+      "immutableSHA256": "040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56",
+      "models": 341,
+      "registrySHA256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a",
+      "beforeTables": 341,
+      "afterTables": 347,
+      "physicalFKs": 803,
+      "actualDTOUnitTests": 4,
+      "versionedORMFullColumnSelects": 6,
+      "cases": [
+        {
+          "case": "smoke-prefix3",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-smoke-prefix3-20261101-e5aa29cf49fb",
+          "seconds": 33.93229422997683,
+          "sqlCount": 6784,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "82a0e9b958c5162c6a6a71c24f8cdc0cb35a67d54f04a234ce610ef42c32449a",
+          "executionSHA256": "afe321fb47f0f63275731d41b9d6a4af2acc56bf422db7e9a48b621a50631046",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "current-fk-tombstones",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-current-fk-tombstones-20261101-87b760c47cd3",
+          "seconds": 32.097433945164084,
+          "sqlCount": 5538,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "e4ea68f5c89459ba3c6952852f3c3276bbc5942af71c98cff2a2e824d0456b8d",
+          "executionSHA256": "247021d70fa2b9b89fb2a090dad86f38fdc7f51cec50ea42475cb885141f5567",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "approval-ref-deletes",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-approval-ref-deletes-20261101-3b6baab8ec44",
+          "seconds": 30.767367414198816,
+          "sqlCount": 5086,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "bb3ccdf4e34180165905c5d290a56864399d666b2137b31610a88bd42ad20f84",
+          "executionSHA256": "a857d0c477218ecd86652a5a462286103abb5fcebe926dff91fa201c84fff924",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "parent-history-retention",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-parent-history-retention-20261101-166a263417f0",
+          "seconds": 31.651295457035303,
+          "sqlCount": 5091,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "8436a34ff04325cd650828a8a2e169139d7db0b885f6bb64f1ebd013615d9619",
+          "executionSHA256": "b579710c5fdedb3e4f9655fc2506229da0e0c7931792a6491b5e09974192102f",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        }
+      ],
+      "independentReview": {
+        "verdict": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "eb8191ed56a708f073d6f17a15f7d082c2b43b387280e531dcdd95435962d93e",
+        "jsonSHA256": "c1a11abbf0cd5629933ce8adfade409cdf0648c4996eb4442728fd4c4bab5865",
+        "source": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/schema4-native-root-review-20261101",
+        "overallGO": false
+      },
+      "controllerSHA256": "d7a41687e11d62a18e4e8da02eb061c636d896567c569b355f8a72d095337459",
+      "history": "five refused/failed native trials retained: exacthost representation, DTO import, incomplete337 source registry; current341 includes4 models outside models*.py",
+      "limits": "cold empty-edge energy native Core profile; legacy extra columns/FKs explicit; no all13groups/originalprefix0–2, old-binaries/restore, full latestRoot composition/HTTP/CI/production"
+    },
+    "remaining": [
+      "original13group matrix and prefix0–2",
+      "Core old-binaries and restore",
+      "StoreB actual PG and full authority closure",
+      "native contract/reference + OneC fixes/re-review/joint two-session PG",
+      "partner identity revoke fix/re-review/current combined runtime and coverage gaps",
+      "partner contract POST/admin/receipt SQL/query/options/OpenAPI17/official SDK",
+      "final joint CI and external pilots"
+    ],
+    "mergeDeployActivation": false
   }
 }
