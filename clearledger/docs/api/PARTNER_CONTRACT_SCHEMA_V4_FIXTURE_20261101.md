@@ -1,10 +1,65 @@
 # Native fixture schema0004: исходники для отдельного прогона ROOT
 
 Статус текущего successor: **SOURCE-only, AFTER_FIX_NOTRUN; runtime NOTRUN**.
-Base `220c4e32eec1111505ac0da0b45e2d987b57825a`, Task `task_8fa731254d5e`,
-Dispatch `ctx_5afe573e64e7`. Изменены ровно три пути: fixture, этот MD и парный
-JSON. Единственная правка кода — host-выражение SELECT в `preflight_identity`.
-Approval, все cases и 535 app/schema source files сохранены побайтно.
+Base рабочего дерева `aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3`, Task `task_839265468ed1`,
+Dispatch `ctx_39ba6806031c`. Первый локальный коммит `be49c4e688c80b3d7c40aedc6b283b477732b01e`
+содержит ровно `app/product_api/dto.py` и новый
+`tests/test_product_contract_date_dto.py`. Второй локальный коммит содержит ровно
+approval и эти MD/JSON; push не выполняется. Admission-код изменён только в двух
+literal constants `IMMUTABLE_SHA256` / `IMMUTABLE_BYTES`; guards не ослаблены.
+Fixture, cases и bytes всех 13 групп сохранены относительно `aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3`.
+
+## Текущий DTO overlay и законный repin
+
+Источник приложения остаётся Git base `aaf472b8123bf1d01538049ef8b5308c9b72fd6b`.
+К нему применяется ровно один source overlay из коммита `be49c4e688c80b3d7c40aedc6b283b477732b01e`:
+`app/product_api/dto.py`. Добавлен `import datetime as _datetime`, только
+аннотация `Contract.date` стала `_datetime.date | None`; RHS Field, остальные
+поля, validators, descriptions, examples, package init и public wire сохранены.
+Глобальный future annotations не добавлен.
+
+Manifest построен чтением всех **535** app/schema blobs из указанного Git base,
+затем заменой единственного DTO raw blob. Не использован полный текущий HEAD.
+Все 535 paths прежние; 534 записи побайтно равны base; schema_migrations,
+models, main и database неизменны. Новый профиль: **14,634,482 bytes**,
+SHA256 `040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56`. AST registry восстановлен независимо из Git blobs:
+337 models, SHA256 `908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49`.
+Полный список 535 записей сохранён в JSON; изменена лишь запись DTO и aggregate.
+
+Предыдущий профиль **535 / 14634443**,
+`0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1` остаётся явно историческим, вместе с previous DTO pin в JSON.
+Его прежние результаты и review не превращаются в результат текущего overlay.
+
+Новый unittest импортирует `app.product_api.dto` обычным production import,
+без fake app/DTO, patch или extracted execution. Authored проверки охватывают
+реальную annotation date/null, validation/serialization JSON Schema ISO date
+без enum, model_validate ISO/null/invalid и JSON wire roundtrip, а также прежние
+ISO-only и date-window validators ListQuery/ContractListQuery. Он **NOTRUN**:
+worker не импортировал application/test modules и не выполнял collection/tests.
+Test pin отдельный, вне helper closure3 и app/schema535:
+`tests/test_product_contract_date_dto.py`, 4195 bytes,
+SHA256 `d53665951e990408cc9049fe7b2cdd4ee51e48cb852e26c4a01a84f5d21a6fae`.
+
+ROOT самостоятельно после полного review обновляет внешний immutable contract и
+controller: app base плюс exact DTO overlay, новый aggregate и approval pin.
+Approval/fixture/cases остаются ровно тремя helpers; test не расширяет closure.
+Это изменение исходников и integrity expectations, **не execution approval**.
+
+## Последний реальный отказ ROOT после hostfix
+
+Исторический isolated run `schema4-native-smoke-prefix3-20261101-4162e71e93e6`
+использовал app base `aaf472b8123bf1d01538049ef8b5308c9b72fd6b` и fixture source `aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3`.
+`evidence/result.json`: `FAIL_COMPONENT_CASE`, 1034 SQL; `execution.json`
+(в корне artifact directory): `NOT_ACCEPTED`. Actual target preflight прошёл;
+после migration work реальный `app.main` import упал в
+`app/product_api/dto.py`, class Contract line677:
+`TypeError: unsupported operand type(s) for |: 'FieldInfo' and 'NoneType'`.
+Ни полный native bootstrap, ни schema4 не получили PASS.
+Result SHA256 `38b9dbae7cc809827846a7e2cef4236640d24e4dde3a64e3d591e88bb39c1260`;
+execution SHA256 `d57afa4aa79b08730ee86b536e8117e4f128cd6cdc72a8dfcd3d6394e278bf26`. Оба безопасных файла прочитаны как JSON;
+private approval/env/секреты не читались. Owned namespaces удалены, процессы
+reaped, PG clients=0/locks=0 по ROOT dispatch; foreign unchanged по execution.
+Текущий DTO fix после этого запуска **AFTER_FIX_NOTRUN**.
 
 Историческая исходная оснастка создана от
 `aaf472b8123bf1d01538049ef8b5308c9b72fd6b` в Task `task_eda7770863f3`,
@@ -13,7 +68,7 @@ admit-import/comment cases. Все остальные байты cases, вклю
 варианты, DSN, SQL и assertions, сохранены. Schema/DDL/catalog/manifest/database/
 models/main и frozen Core3 не менялись.
 
-## Исторический отказ ROOT и узкое исправление SOURCE
+## Предыдущий исторический отказ ROOT и hostfix SOURCE
 
 ROOT на исходнике `220c4e32` реально выполнил два isolated PG16.15 запуска:
 `schema4-native-smoke-prefix3-20261101-7b43b3b8e135` и
@@ -42,7 +97,8 @@ namespace/search_path `core`/`core`, port33546; `inet_server_addr()::text`
 Root SOURCE review REVIEW.md/JSON с SHA256 `a60ecb7a`/`6da63176` прочитан;
 его вердикт и прежние snapshots/results остаются историческими. P2 docfix
 `220c4e32` сохранён: filesystem admission предшествует unsupported-prefix отказу.
-После host fix runtime **NOTRUN**, execution approval worker не выдавал.
+На момент hostfix runtime был **NOTRUN**; поздний реальный отказ описан выше.
+Execution approval worker не выдавал.
 ROOT отдельно должен freeze новый контракт ровно трёх прежних helpers с новым
 fixture pin и выполнить новый реальный запуск; прежнее разрешение не переносится.
 
@@ -122,9 +178,9 @@ calendar в «доревизионный» не применяется. `head.pa
 
 ## Полнота и native lifecycle
 
-Frozen source inventory: **535** app/schema source files, **14 634 443** bytes,
-канонический SHA256
-`0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1`.
+Frozen source inventory текущего DTO overlay: **535** app/schema source files,
+**14 634 482** bytes, канонический SHA256
+`040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56`.
 Формат manifest — отсортированный JSON-массив `[relative_path, bytes, sha256]`,
 `separators=(',', ':')`, ASCII. Включены `.py/.sql/.json/.yml/.yaml` под `app/`
 и `schema_migrations/`; executable runtime dependencies/envelope ROOT проверяет
@@ -267,7 +323,7 @@ network отсутствуют. Private approval и живой execution envelop
 
 | Source | Bytes | SHA256 |
 |---|---:|---|
-| tests/partner_contract_schema_v4_approval.py | 8363 | b04d51a5f7dcf9bc58d743e3ef4b05cac9dfa123dff27d1d4bbfdf0091d40958 |
+| tests/partner_contract_schema_v4_approval.py | 8363 | e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920 |
 | tests/partner_contract_schema_v4_fixture.py | 26294 | 63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20 |
 | tests/partner_contract_schema_v4_cases.py | 28676 | 9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7 |
 

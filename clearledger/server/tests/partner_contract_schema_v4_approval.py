@@ -16,8 +16,8 @@ PROFILE = 'partner-contract-schema4-native-v1'
 CONTROL = Path('/test/control/partner-schema4-approval.json')
 TARGET = 'api_partner_contract_schema_v4_test_20261101'
 EXACT_DSN = 'postgresql+asyncpg://clearledger:api_test_only@127.0.0.1:33546/' + TARGET
-IMMUTABLE_SHA256 = '0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1'
-IMMUTABLE_BYTES = 14634443
+IMMUTABLE_SHA256 = '040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56'
+IMMUTABLE_BYTES = 14634482
 IMMUTABLE_FILES = 535
 HELPERS = ('tests/partner_contract_schema_v4_approval.py',
            'tests/partner_contract_schema_v4_fixture.py',

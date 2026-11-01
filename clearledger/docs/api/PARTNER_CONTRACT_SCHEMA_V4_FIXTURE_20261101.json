@@ -1,18 +1,20 @@
 {
   "format": 1,
   "status": "SOURCE_ONLY_AFTER_FIX_NOTRUN",
-  "base": "220c4e32eec1111505ac0da0b45e2d987b57825a",
-  "task_id": "task_8fa731254d5e",
-  "dispatch_id": "ctx_5afe573e64e7",
+  "base": "aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3",
+  "task_id": "task_839265468ed1",
+  "dispatch_id": "ctx_39ba6806031c",
   "scope": "M00–M19 +11 original criteria retained, not wholly completed",
   "files_modified": [
-    "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
+    "clearledger/server/app/product_api/dto.py",
+    "clearledger/server/tests/test_product_contract_date_dto.py",
+    "clearledger/server/tests/partner_contract_schema_v4_approval.py",
     "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
     "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.json"
   ],
   "helper_pins": {
     "tests/partner_contract_schema_v4_approval.py": {
-      "sha256": "b04d51a5f7dcf9bc58d743e3ef4b05cac9dfa123dff27d1d4bbfdf0091d40958",
+      "sha256": "e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920",
       "bytes": 8363
     },
     "tests/partner_contract_schema_v4_fixture.py": {
@@ -26,13 +28,13 @@
   },
   "markdown_pin": {
     "path": "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
-    "sha256": "ec243bfdff7a9d63ec552da3ba7b46b510d28d6da50290b015a32b3b3502702e",
-    "bytes": 24127
+    "sha256": "b0b4441fe628061be73d45256c60543f5d6277b7069bfec696b7c94855deae85",
+    "bytes": 28837
   },
   "immutable_source": {
     "files": 535,
-    "bytes": 14634443,
-    "sha256": "0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1",
+    "bytes": 14634482,
+    "sha256": "040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56",
     "canonical": "sorted [relative_path,bytes,sha256], JSON ASCII separators comma/colon",
     "entries": [
       [
@@ -217,8 +219,8 @@
       ],
       [
         "app/product_api/dto.py",
-        29838,
-        "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c"
+        29877,
+        "cd1cc7231cc6c81a595f3e800b3fe62163837c6044f3e117379ad8af83fb8cff"
       ],
       [
         "app/product_api/files.py",
@@ -7630,9 +7632,9 @@
       "process run lease"
     ],
     "expected_immutable_source": {
-      "sha256": "0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1",
+      "sha256": "040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56",
       "files": 535,
-      "bytes": 14634443
+      "bytes": 14634482
     },
     "helper_expected_hash_authority": "ROOT independently freezes exact three helpers including approval itself; no worker approval generator",
     "db_admin_prerequisites": [
@@ -7669,8 +7671,9 @@
   },
   "verification": {
     "stdlib_ast_and_in_memory_compile_without_exec": {
-      "files": 3,
-      "result": "syntax accepted"
+      "files": 5,
+      "result": "syntax accepted; no exec/import/test/collection",
+      "scope": "DTO, regression test, approval, unchanged fixture and cases"
     },
     "minimal_cases_transition_and_13_function_byte_equality": true,
     "live_imports": 0,
@@ -7683,9 +7686,14 @@
     "runtime_verdict": "NOTRUN",
     "source_only_is_not_schema4_or_program_PASS": true,
     "fixture_ast_equality_except_exact_host_sql": true,
-    "current_runtime_status": "AFTER_FIX_NOTRUN"
+    "current_runtime_status": "AFTER_FIX_NOTRUN",
+    "dto_ast_equal_except_one_import_and_Contract_date_annotation": true,
+    "approval_ast_equal_except_IMMUTABLE_SHA256_and_BYTES_literals": true,
+    "base535_from_git_plus_exact_dto_overlay_only": true,
+    "fixture_cases_and_13_groups_bytes_unchanged_from_task_base": true
   },
   "remaining": [
+    "ROOT full source review, external immutable contract/controller update for exact app base + DTO overlay and repinned helper; new independent test/bootstrap/runtime authorization (worker grants none)",
     "ROOT source review and independent execution-envelope freeze",
     "Root-only physical PG16 DDL/ORM/native lifecycle execution",
     "full-native prefix0/1/2 lawful source recipe, preserving original cases",
@@ -7712,7 +7720,7 @@
     "other_helper_bytes_and_ast_unchanged": true,
     "exact_target_comparison_oids_roleflags_replication_extensions_unchanged": true,
     "target_admission_runtime_limits_unchanged": true,
-    "current_runtime": "AFTER_FIX_NOTRUN",
+    "current_runtime": "Historical host-fixed smoke reached 1034 SQL then failed on Contract.date; current DTO overlay AFTER_FIX_NOTRUN",
     "worker_execution_approval_issued": false,
     "root_next_action": "Independently freeze a new contract for the same three helper names with the updated fixture pin, then perform a new real isolated run."
   },
@@ -7747,6 +7755,31 @@
       "result_sha256": "dffd6293a563c3aeb87a11665f2b85562c1e95dea18cf5c5df2773be827c6b98",
       "independent_wire_diagnostic": true,
       "cleanup": "owned namespaces removed; processes reaped; PG clients=0/locks=0; foreign unchanged"
+    },
+    {
+      "artifact_directory": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-4162e71e93e6",
+      "app_base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "fixture_source": "aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3",
+      "result_path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-4162e71e93e6/evidence/result.json",
+      "result_pin": {
+        "sha256": "38b9dbae7cc809827846a7e2cef4236640d24e4dde3a64e3d591e88bb39c1260",
+        "bytes": 15229
+      },
+      "execution_path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-4162e71e93e6/execution.json",
+      "execution_pin": {
+        "sha256": "d57afa4aa79b08730ee86b536e8117e4f128cd6cdc72a8dfcd3d6394e278bf26",
+        "bytes": 12709
+      },
+      "result_status": "FAIL_COMPONENT_CASE",
+      "execution_status": "NOT_ACCEPTED",
+      "sql_count": 1034,
+      "actual_target_preflight_passed": true,
+      "failure": "unsupported operand type(s) for |: 'FieldInfo' and 'NoneType'",
+      "failure_site": "actual app.main import -> app.product_api.dto.Contract.date line677",
+      "native_bootstrap_pass": false,
+      "schema4_pass": false,
+      "cleanup": "owned namespaces removed; processes reaped; PG clients=0/locks=0 per ROOT dispatch; foreign unchanged",
+      "not_current_fix_runtime_proof": true
     }
   ],
   "historical_independent_wire_identity": {
@@ -7762,5 +7795,94 @@
       "port": 33546
     },
     "not_current_fix_runtime_proof": true
+  },
+  "previous_immutable_source_profiles": [
+    {
+      "status": "PREVIOUS_PROFILE_HISTORICAL_NOT_CURRENT",
+      "app_base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "files": 535,
+      "bytes": 14634443,
+      "sha256": "0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1",
+      "replaced_entry": [
+        "app/product_api/dto.py",
+        29838,
+        "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c"
+      ],
+      "all_other_534_entries_identical": true
+    }
+  ],
+  "separate_regression_test_pin": {
+    "path": "tests/test_product_contract_date_dto.py",
+    "sha256": "d53665951e990408cc9049fe7b2cdd4ee51e48cb852e26c4a01a84f5d21a6fae",
+    "bytes": 4195,
+    "commit": "be49c4e688c80b3d7c40aedc6b283b477732b01e",
+    "runtime": "NOTRUN",
+    "part_of_helper_closure": false,
+    "part_of_535_app_schema_inventory": false
+  },
+  "dto_source_overlay": {
+    "app_base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+    "source_overlay_commit": "be49c4e688c80b3d7c40aedc6b283b477732b01e",
+    "source_overlay_path": "app/product_api/dto.py",
+    "source_overlay_pin": {
+      "sha256": "cd1cc7231cc6c81a595f3e800b3fe62163837c6044f3e117379ad8af83fb8cff",
+      "bytes": 29877
+    },
+    "previous_dto_entry": [
+      "app/product_api/dto.py",
+      29838,
+      "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c"
+    ],
+    "construction": "Read all app/schema source blobs from Git app_base, then replace only app/product_api/dto.py with exact source_overlay_commit raw bytes; never all current HEAD",
+    "base_manifest_reconstructed_from_git": true,
+    "base_manifest_sha256": "0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1",
+    "all_535_paths_equal_to_base": true,
+    "changed_entries": [
+      "app/product_api/dto.py"
+    ],
+    "unchanged_entries": 534,
+    "file_count": 535,
+    "source_registry_models": 337,
+    "source_registry_sha256": "908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49",
+    "schema_migrations_models_main_database_unchanged": true,
+    "other_dto_fields_validators_descriptions_examples_wire_unchanged": true,
+    "approval_ast_only_literal_changes": [
+      "IMMUTABLE_SHA256",
+      "IMMUTABLE_BYTES"
+    ],
+    "helper_closure_names_unchanged": true,
+    "fixture_cases_and_13_function_byte_pins_unchanged": true,
+    "worker_runtime": "AFTER_FIX_NOTRUN",
+    "worker_execution_approval_issued": false
+  },
+  "previous_source_successor": {
+    "status": "SOURCE_ONLY_AFTER_FIX_NOTRUN",
+    "base": "220c4e32eec1111505ac0da0b45e2d987b57825a",
+    "task_id": "task_8fa731254d5e",
+    "dispatch_id": "ctx_5afe573e64e7",
+    "files_modified": [
+      "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
+      "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.json"
+    ],
+    "helper_pins": {
+      "tests/partner_contract_schema_v4_approval.py": {
+        "sha256": "b04d51a5f7dcf9bc58d743e3ef4b05cac9dfa123dff27d1d4bbfdf0091d40958",
+        "bytes": 8363
+      },
+      "tests/partner_contract_schema_v4_fixture.py": {
+        "sha256": "63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20",
+        "bytes": 26294
+      },
+      "tests/partner_contract_schema_v4_cases.py": {
+        "sha256": "9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7",
+        "bytes": 28676
+      }
+    },
+    "markdown_pin": {
+      "path": "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
+      "sha256": "ec243bfdff7a9d63ec552da3ba7b46b510d28d6da50290b015a32b3b3502702e",
+      "bytes": 24127
+    }
   }
 }
