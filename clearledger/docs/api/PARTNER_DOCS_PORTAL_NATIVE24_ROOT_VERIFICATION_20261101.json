@@ -1,0 +1,62 @@
+{
+  "status": "BOUNDED_NATIVE24_FUNCTIONAL_ACCEPTANCE_HAPPY_GLOBAL_FAIL_PRESERVED",
+  "source": "7e988068f768ba424ebebb0d11b5caea051cbfbb",
+  "review": {
+    "mdSHA256": "8ab67613b1b03d86c19aa037701c5dc094885dbffa09d2bb225e825905f0859a",
+    "jsonSHA256": "58d37f170ee0f0d9fafcf63da349f4c49c4eea48a9eb7116a6763047b4351aa4",
+    "pinsReverifiedByRoot": 46,
+    "newRuntimeByReviewer": false
+  },
+  "worlds": [
+    {
+      "label": "happyV3",
+      "cases": 1,
+      "definitions": 1,
+      "phases": 3,
+      "seconds": 37.51230182964355,
+      "pytestExit": 0,
+      "hostExit": 1,
+      "executionStatus": "ROOT_FOREIGN_PARITY_FAIL"
+    },
+    {
+      "label": "rest23V2",
+      "cases": 23,
+      "definitions": 8,
+      "phases": 69,
+      "seconds": 134.02266872115433,
+      "pytestExit": 0,
+      "hostExit": 0,
+      "executionStatus": "ROOT_M11_REST23V2_OBSERVED_PENDING_REVIEW"
+    }
+  ],
+  "uniqueCases": 24,
+  "definitions": 9,
+  "jointCI": false,
+  "claims": [
+    "ordinary native employee JWT via auth.token_for; not passwordlogin",
+    "actualAuthlib authorize/consent/CodePKCE/token withSQL grants andIDtokenRS256 nonce",
+    "SQL docs-cookie,180smax,8protectedASGI surfaces andcurrent17server/browserprojection",
+    "2bearerNoCookie/5invalidprotocol/2wrongcodebinding/2consentdrift/6currentauthorityrevokes/4docsNoProduct/machine1/logout1",
+    "positive200object+coarseCREATE controls, validbody, no false422; no successfulproductCREATE implied"
+  ],
+  "bounds": [
+    "SQLshapeaggregate and originalpassedassertions; no HTTPbody/SQLparameters/chronologicaltrace capture",
+    "productdenial compares five selected businesscounts, notallrowfields",
+    "newissuance afterrevoke means docs-sessionbootstrap, notnewcode-tokenexchange",
+    "HappyV3 pytest0/3phases butouterEXIT1 GLOBAL42→45; original42fullsafeRowsunchanged,3newIDsdisjointown2; fullglobalFAILpreserved",
+    "Rest23 exact43→43safeprojection, allownremoved/pools/clientslocks0; hostexit0Roottoolobservation notseparateFSargvreceipt",
+    "frozen579files perworld andordinaryrole/native341347, factory8/READCOMMITTED verified; externalhelper/dependencybytesnotindependentlyread",
+    "baseissuer_world leftoversownedbyfullydestroyedsyntheticPG; nofuturecancelcleanupguarantee",
+    "oldtest_docs_portal alreadyrealPG/Authlib/admin; thisaddsordinaryemployee/current17, notoldcoverageabsence"
+  ],
+  "history": [
+    "Source681 selected1/testsRun0/setupERROR22001 App.code45>40 preserved",
+    "Root7e changesApp.code seedonly37; clients37/45 unchanged, production/schema/oraclesunchanged",
+    "earlierhappyfunctionalPASS38.5286s+outerFAIL missingafter/execution preserved, notcountedagain",
+    "restcontrollerV1SyntaxError beforecollection, zerotestexecution; fixedV2wholeRUNNERline andexpected8defs23cases"
+  ],
+  "allM11Complete": false,
+  "all20MPlus11Complete": false,
+  "browserIngressSSOPilot": false,
+  "mergeDeployFlags": false
+}
