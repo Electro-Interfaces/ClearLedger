@@ -188,7 +188,11 @@ def test_create_parent_stage_is_explicit_after_prefix_even_without_members():
     assert "spec.model not in before_member and spec.model not in contract_profile.parent_models" in source
     assert calls(composer, "freeze")[0].lineno < calls(composer, "acquire_scoped_locks")[0].lineno
     assert calls(composer, "after_b")[0].lineno < stage_loop.lineno
-    assert calls(composer, "checkpoint")[-1].lineno > boundary.lineno
+    # ast.walk is breadth-first, so its last match need not be the final call.
+    final_check = composer.body[-2]
+    assert isinstance(final_check, ast.Expr)
+    assert ast.unparse(final_check) == "writer.checkpoint()"
+    assert stage_loop.end_lineno < final_check.lineno
 
 
 def test_parent_stage_uses_only_frozen_union_fixed_order_and_checks_each_wait():
