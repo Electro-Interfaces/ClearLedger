@@ -18,7 +18,7 @@ https://www.rfc-editor.org/rfc/rfc7009.html#section-2.2
 17 прежних OAuth ветвей и12 canonical policies не изменены.
 
 В тесте удаления контактного лица до вызова actual handler создавался объект
-с48-символьным id/code для VARCHAR(40). Новый синтетический id — строка
+с49-символьным id для VARCHAR(40); поле code допускает100 символов. Новый id — строка
 opaque: плюс32hex, всего39 символов; это по-прежнему непрозрачная строка,
 не UUID. Схема, драйвер, реальные FK, handler и CASCADE assertions прежние.
 
