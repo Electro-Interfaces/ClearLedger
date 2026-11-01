@@ -328,3 +328,66 @@ def test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields():
     dispatcher = text(OAUTH, "_protocol_response")
     assert 'mutation = "revoke" if revocation else' in dispatcher
     assert len(calls(symbol(OAUTH, "_protocol_response"), "_prepare_partner_write")) == 1
+
+
+def test_installation_preflight_clean_guard_precedes_actor_and_all_sql():
+    node = symbol(ADMIN, "_installation_selection")
+    guard = next(n for n in node.body if not isinstance(n, ast.Expr))
+    assert ast.unparse(guard.test) == "sync.new or sync.dirty or sync.deleted"
+    assert calls(guard, "ScopedLockError")
+    context, = [n for n in node.body if isinstance(n, ast.With)]
+    assert ast.unparse(context.items[0].context_expr) == "sync.no_autoflush"
+    assert all(guard.end_lineno < call.lineno for call in calls(node, "admin") + calls(node, "get") + calls(node, "scalars"))
+    for forbidden in ("flush", "expire", "expire_all", "rollback", "commit", "add", "add_all",
+                      "execute", "with_for_update", "_prepare_partner_write", "acquire_scoped_locks"):
+        assert not calls(node, forbidden)
+
+
+def test_installation_single_policy_preserves_legacy_error_precedence():
+    node = symbol(ADMIN, "_installation_selection")
+    context, = [n for n in node.body if isinstance(n, ast.With)]
+    client = next(n for n in context.body if isinstance(n, ast.If)
+                  and "client is None" in ast.unparse(n.test))
+    location = next(n for n in context.body if isinstance(n, ast.If) and ast.unparse(n.test) == "ids")
+    resource = next(n for n in context.body if isinstance(n, ast.For))
+    assert calls(node, "admin")[0].lineno < client.lineno < location.lineno < resource.lineno
+    assert 'HTTPException(422, \'Invalid client or scopes\', headers=NO_STORE)' in ast.unparse(client)
+    assert 'HTTPException(422, \'Invalid company resource IDs\', headers=NO_STORE)' in ast.unparse(location)
+    mode, parse, ownership = [n for n in resource.body if isinstance(n, (ast.If, ast.Try))]
+    assert "SET requires IDs; ALL/EMPTY forbid IDs" in ast.unparse(mode)
+    assert "Invalid resource ID type" in ast.unparse(parse)
+    assert "Invalid company resource IDs" in ast.unparse(ownership)
+    assert mode.lineno < parse.lineno < ownership.lineno
+    assert ast.unparse(resource.iter) == "body.resourceScopes.items()"
+    assert "kind == 'objects'" in ast.unparse(parse) and calls(parse, "UUID")
+    assert len(calls(node, "admin")) == 1
+
+
+def test_installation_closed_selection_revalidated_after_one_complete_plan():
+    node = symbol(ADMIN, "approve_installation")
+    first, second = calls(node, "_installation_selection")
+    prepare, = calls(node, "_prepare_partner_write")
+    dml = calls(node, "execute")[0]
+    assert first.lineno < prepare.lineno < second.lineno < calls(node, "checkpoint")[0].lineno < dml.lineno
+    assert ast.unparse(first.args[3]) == "user" and ast.unparse(second.args[3]) == "writer.actor"
+    assert next(k.value.id for k in prepare.keywords if k.arg == "selections") == "selections"
+    assert not calls(node, "admin")  # Policy lives only in the reused validator.
+    raw = text(ADMIN, "approve_installation")
+    assert "((ServiceLocation, ids),) + tuple" in raw
+    assert "RESOURCE_MODELS[kind][0], values" in raw
+    assert "body.locationIds is None" in raw and "for v in ids" in raw
+    helper = text(ADMIN, "_installation_selection")
+    assert "populate_existing=True" in helper and "return client, ids, tuple(resources)" in helper
+    assert "frozenset(body.locationIds or [])" in helper and "frozenset(selection.ids)" in helper
+    assert not calls(symbol(ADMIN, "_installation_selection"), "LockPlan")
+
+
+def test_installation_revalidation_retains_current_native_after_query_waits():
+    prepare = symbol(IDENTITY, "_prepare_partner_write")
+    assert calls(prepare, "checkpoint")[-1].lineno > calls(prepare, "with_for_update")[-1].lineno
+    checkpoint = symbol(IDENTITY, "checkpoint", "_PartnerWrite")
+    assert calls(checkpoint, "native") and calls(checkpoint, "admin")
+    node = symbol(ADMIN, "approve_installation")
+    second = calls(node, "_installation_selection")[-1]
+    assert second.lineno < calls(node, "checkpoint")[0].lineno < calls(node, "execute")[0].lineno
+    assert calls(symbol(ADMIN, "finish"), "checkpoint")[-1].lineno > calls(symbol(ADMIN, "finish"), "flush")[0].lineno

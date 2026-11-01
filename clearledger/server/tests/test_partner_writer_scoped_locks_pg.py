@@ -34,10 +34,13 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import token_for
-from app.models import App, CompanyApp, CompanyRole, PartnerSpace, User, UserCompany
+from app.models import App, CompanyApp, CompanyRole, PartnerSpace, ServiceLocation, User, UserCompany
 from app.models_partner import (PartnerAuthorizationRequest, PartnerClient, PartnerCode, PartnerCredential,
-    PartnerGrant, PartnerInstallation, PartnerResourceScope, PartnerSubject, PartnerToken, PartnerTokenFamily)
+    PartnerGrant, PartnerInstallation, PartnerInstallationLocation, PartnerResourceItem, PartnerResourceScope,
+    PartnerSubject, PartnerToken, PartnerTokenFamily)
+from app.routers import partner_admin_router as administration
 from app.routers import partner_oauth_router as oauth
+from app.schemas_partner import ApproveInstallation
 from app.services import partner_identity as identity
 from app.services import contract_write_locks as locks
 from tests.conftest import _test_engine, _test_session_factory
@@ -964,3 +967,239 @@ async def test_token_branch_ignores_fields_of_other_protocol_branches(env, monke
         assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
         assert (await db.get(PartnerToken, decoy.tid)).refresh_used is False
         assert (await db.get(PartnerCode, identity.digest(other_code))).consumed is False
+
+
+
+@pytest.mark.parametrize("client_state", ["unknown", "disabled", "scope"])
+@pytest.mark.parametrize("selection", [{"mode": "SET", "ids": ["not-a-uuid"]}, {"mode": "SET", "ids": []}])
+async def test_installation_client_error_precedes_resource_parse_without_plan(env, monkeypatch, client_state, selection):
+    app = await registration(env, installation=False)
+    client_id = app["client_id"]
+    if client_state == "unknown":
+        client_id = "missing-" + uuid4().hex
+    else:
+        async with _test_session_factory() as setup:
+            client = await setup.get(PartnerClient, client_id)
+            if client_state == "disabled": client.enabled = False
+            else: client.allowed_scopes = ["openid"]
+            await setup.commit()
+    original, prepared = administration._prepare_partner_write, []
+    def trace(sync, **kwargs):
+        prepared.append(kwargs)
+        return original(sync, **kwargs)
+    monkeypatch.setattr(administration, "_prepare_partner_write", trace)
+    response = await env["client"].post(f"/api/developer/clients/{client_id}/installations", headers=env["headers"],
+        json={"companyId": str(env["company"].id), "scopes": SCOPES,
+            "locationIds": [env["foreign_location"].id], "resourceScopes": {"equipment": selection}})
+    assert response.status_code == 422 and response.json() == {"detail": "Invalid client or scopes"}
+    assert response.headers["cache-control"] == "no-store" and response.headers["pragma"] == "no-cache"
+    assert not prepared
+    async with _test_session_factory() as db:
+        assert await db.scalar(select(CompanyApp.id).where(CompanyApp.app_id == app["app_id"])) is None
+
+
+@pytest.mark.parametrize("location", ["foreign", "missing"])
+async def test_installation_location_error_precedes_malformed_uuid_without_plan(env, monkeypatch, location):
+    app = await registration(env, installation=False)
+    original, prepared = administration._prepare_partner_write, []
+    def trace(sync, **kwargs):
+        prepared.append(kwargs)
+        return original(sync, **kwargs)
+    monkeypatch.setattr(administration, "_prepare_partner_write", trace)
+    response = await env["client"].post(f"/api/developer/clients/{app['client_id']}/installations", headers=env["headers"],
+        json={"companyId": str(env["company"].id), "scopes": SCOPES,
+            "locationIds": [env["foreign_location"].id if location == "foreign" else "missing-" + uuid4().hex],
+            "resourceScopes": {"equipment": {"mode": "SET", "ids": ["not-a-uuid"]}}})
+    assert response.status_code == 422 and response.json() == {"detail": "Invalid company resource IDs"}
+    assert response.headers["cache-control"] == "no-store" and not prepared
+
+
+@pytest.mark.parametrize("case", ["foreign-first", "missing-first", "uuid-first", "mode-first", "opaque-object"])
+async def test_installation_resource_iteration_mode_type_ownership_order(env, case):
+    app = await registration(env, installation=False)
+    bad_uuid = {"mode": "SET", "ids": ["not-a-uuid"]}
+    objects = {"mode": "SET", "ids": [env["foreign_location"].id if case == "foreign-first" else "opaque-missing"]}
+    resources = {"objects": objects, "equipment": bad_uuid}
+    expected = "Invalid company resource IDs"
+    if case == "uuid-first":
+        resources, expected = {"equipment": bad_uuid, "objects": objects}, "Invalid resource ID type"
+    if case == "mode-first":
+        resources, expected = {"contracts": {"mode": "ALL", "ids": ["not-a-uuid"]}, "equipment": bad_uuid}, "SET requires IDs; ALL/EMPTY forbid IDs"
+    if case == "opaque-object": resources = {"objects": objects}
+    response = await env["client"].post(f"/api/developer/clients/{app['client_id']}/installations", headers=env["headers"],
+        json={"companyId": str(env["company"].id), "scopes": SCOPES, "locationIds": [], "resourceScopes": resources})
+    assert response.status_code == 422 and response.json() == {"detail": expected}
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("kind", ["equipment", "counterparties", "contracts", "documents"])
+@pytest.mark.parametrize("value", ["malformed", "missing"])
+async def test_installation_all_uuid_resource_kinds_keep_type_then_ownership_error(env, kind, value):
+    app = await registration(env, installation=False)
+    resource_id = "not-a-uuid" if value == "malformed" else str(uuid4())
+    response = await env["client"].post(f"/api/developer/clients/{app['client_id']}/installations", headers=env["headers"],
+        json={"companyId": str(env["company"].id), "scopes": SCOPES,
+            "resourceScopes": {kind: {"mode": "SET", "ids": [resource_id]}}})
+    assert response.status_code == 422 and response.json() == {"detail":
+        "Invalid resource ID type" if value == "malformed" else "Invalid company resource IDs"}
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("location_mode", ["all", "empty", "set"])
+async def test_installation_valid_selection_one_real_complete_plan_and_exact_replacement(env, monkeypatch, location_mode):
+    app = await registration(env, resources={"objects": {"mode": "ALL", "ids": []}})
+    location = env["location"].id
+    locations = None if location_mode == "all" else ([] if location_mode == "empty" else [location, location])
+    original, prepared = administration._prepare_partner_write, []
+    validate, validations = administration._installation_selection, []
+    def checked(sync, client_id, body, user, scopes):
+        result = validate(sync, client_id, body, user, scopes)
+        assert isinstance(result[1], frozenset) and isinstance(result[2], tuple)
+        assert all(isinstance(item[3], frozenset) for item in result[2])
+        validations.append(result)
+        return result
+    def inspect_real_plan(sync, **kwargs):
+        assert kwargs["selections"] == ((ServiceLocation, frozenset(locations or [])),
+            (ServiceLocation, frozenset({location})), (identity.RESOURCE_MODELS["equipment"][0], frozenset()))
+        writer = original(sync, **kwargs)
+        locks.require_scoped_locks(sync, writer.capability, writer.capability.plan.requests)
+        keys = {request.key for request in writer.capability.plan.requests}
+        assert keys == {locks.AppKey(app["app_id"]), locks.ClientKey(app["client_id"]),
+            locks.CompanyKey(env["company"].id), locks.UserKey(env["user"].id),
+            locks.MemberKey(env["company"].id, env["user"].id), locks.InstallationKey(app["installation_id"])}
+        assert writer.discovered(ServiceLocation, location)
+        assert writer.discovered(CompanyApp, app["installation_id"]) and writer.discovered(PartnerInstallation, app["installation_id"])
+        prepared.append(writer)
+        return writer
+    monkeypatch.setattr(administration, "_installation_selection", checked)
+    monkeypatch.setattr(administration, "_prepare_partner_write", inspect_real_plan)
+    response = await env["client"].post(f"/api/developer/clients/{app['client_id']}/installations", headers=env["headers"],
+        json={"companyId": str(env["company"].id), "scopes": SCOPES, "locationIds": locations,
+            "resourceScopes": {"objects": {"mode": "SET", "ids": [location, location]}, "equipment": {}}})
+    assert response.status_code == 201 and len(prepared) == 1 and len(validations) == 2
+    assert response.json() == {"installationId": str(app["installation_id"]), "companyId": str(env["company"].id),
+        "scopes": sorted(SCOPES), "approved": True}
+    async with _test_session_factory() as db:
+        install = await db.get(PartnerInstallation, app["installation_id"])
+        assert install.all_locations == (location_mode == "all")
+        assert set((await db.scalars(select(PartnerInstallationLocation.location_id).where(
+            PartnerInstallationLocation.installation_id == install.id))).all()) == set(locations or [])
+        assert set((await db.execute(select(PartnerResourceScope.kind, PartnerResourceScope.mode).where(
+            PartnerResourceScope.installation_id == install.id))).all()) == {("objects", "SET"), ("equipment", "EMPTY")}
+        items = (await db.scalars(select(PartnerResourceItem).where(PartnerResourceItem.installation_id == install.id))).all()
+        assert len(items) == 1 and items[0].kind == "objects" and items[0].object_id == location
+
+
+@pytest.mark.parametrize("pending_state", ["new", "dirty", "deleted"])
+async def test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load(env, pending_state):
+    app = await registration(env, installation=False)
+    async with _test_session_factory() as db:
+        user = await db.get(User, env["user"].id)
+        client = await db.get(PartnerClient, app["client_id"])
+        body = ApproveInstallation(companyId=env["company"].id, scopes=SCOPES)
+        if pending_state == "new": db.add(App(id=uuid4(), code="pending-" + uuid4().hex, name="Pending", kind="partner"))
+        if pending_state == "dirty": client.enabled = False
+        if pending_state == "deleted": await db.delete(client)
+        root = db.sync_session.get_transaction()
+        db.expire(user, ["id"])
+        statements, flushes, expirations = [], [], []
+        def sql(*args): statements.append(args[2])
+        def flush(*args): flushes.append(True)
+        def expired(target, attrs):
+            if target is user: expirations.append(attrs)
+        event.listen(_test_engine.sync_engine, "before_cursor_execute", sql)
+        event.listen(db.sync_session, "before_flush", flush)
+        event.listen(User, "expire", expired)
+        try:
+            with pytest.raises(locks.ScopedLockError):
+                await db.run_sync(administration._installation_selection, app["client_id"], body, user, set(SCOPES))
+            assert not statements and not flushes and not expirations
+            assert db.sync_session.get_transaction() is root
+            assert getattr(db.sync_session, pending_state)
+        finally:
+            event.remove(_test_engine.sync_engine, "before_cursor_execute", sql)
+            event.remove(db.sync_session, "before_flush", flush)
+            event.remove(User, "expire", expired)
+            await db.rollback()
+
+
+@pytest.mark.parametrize("gate", ["nonadmin", "expired"])
+async def test_installation_native_and_admin_gate_precede_mixed_invalid_selection(env, monkeypatch, gate):
+    app = await registration(env, installation=False)
+    bearer = token_for(env["member"]) if gate == "nonadmin" else token_for(env["user"], expires_at=identity.now() - timedelta(seconds=1))
+    original, prepared = administration._prepare_partner_write, []
+    def trace(sync, **kwargs):
+        prepared.append(kwargs)
+        return original(sync, **kwargs)
+    monkeypatch.setattr(administration, "_prepare_partner_write", trace)
+    response = await env["client"].post(f"/api/developer/clients/missing-{uuid4().hex}/installations",
+        headers={"Authorization": "Bearer " + bearer}, json={"companyId": str(env["company"].id), "scopes": SCOPES,
+            "resourceScopes": {"equipment": {"mode": "SET", "ids": ["not-a-uuid"]}}})
+    assert response.status_code == (403 if gate == "nonadmin" else 401)
+    if gate == "nonadmin": assert response.json() == {"detail": "Company administrator required"}
+    assert response.headers["cache-control"] == "no-store" and not prepared
+
+
+@pytest.mark.parametrize("stage", ["typed", "row"])
+@pytest.mark.parametrize("change", ["client", "scopes", "location", "resource", "admin", "jwt"])
+async def test_installation_preflight_never_authorizes_after_wait(env, monkeypatch, stage, change):
+    app = await registration(env, resources={"objects": {"mode": "ALL", "ids": []}})
+    key = locks.ClientKey(app["client_id"])
+    native_bearer = token_for(env["user"], expires_at=identity.now() + timedelta(minutes=1))
+    real_acquire, acquisitions, request_sql = identity.acquire_scoped_locks, [], []
+    real_validate, validations = administration._installation_selection, []
+    def validate(sync, *args):
+        validations.append(True)
+        return real_validate(sync, *args)
+    monkeypatch.setattr(administration, "_installation_selection", validate)
+    def acquire(sync, plan):
+        connection = sync.connection()
+        def record(conn, cursor, statement, parameters, context, executemany): request_sql.append(statement)
+        event.listen(connection, "before_cursor_execute", record)
+        acquisitions.append(plan)
+        return real_acquire(sync, plan)
+    monkeypatch.setattr(identity, "acquire_scoped_locks", acquire)
+    async with _test_session_factory() as owner, _test_session_factory() as observer:
+        if stage == "typed":
+            await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        else:
+            await owner.scalar(select(PartnerClient).where(PartnerClient.id == app["client_id"]).with_for_update())
+        owner_pid = await pid(owner)
+        async with contender(lambda: env["client"].post(f"/api/developer/clients/{app['client_id']}/installations",
+                headers={"Authorization": "Bearer " + native_bearer}, json={"companyId": str(env["company"].id),
+                    "scopes": SCOPES, "locationIds": [] if change == "resource" else [env["location"].id],
+                    "resourceScopes": {"objects": {"mode": "SET", "ids": [env["location"].id]}}})) as (task, info):
+            try:
+                await observed_wait(observer, task, info["pid"], owner_pid, key if stage == "typed" else None)
+                if change in {"client", "scopes"}:
+                    client = await owner.get(PartnerClient, app["client_id"])
+                    if change == "client": client.enabled = False
+                    else: client.allowed_scopes = ["openid"]
+                if change in {"location", "resource"}:
+                    (await owner.get(ServiceLocation, env["location"].id)).company_id = env["other"].id
+                if change == "admin": (await owner.get(UserCompany, (env["user"].id, env["company"].id))).role = "user"
+                if change == "jwt":
+                    from datetime import datetime, timezone
+                    import jwt.api_jwt
+                    future = datetime.now(timezone.utc) + timedelta(hours=1)
+                    class Clock(datetime):
+                        @classmethod
+                        def now(cls, tz=None): return future
+                    monkeypatch.setattr(jwt.api_jwt, "datetime", Clock)
+                await owner.commit()
+                response = await task
+            finally:
+                await owner.rollback()
+        assert len(acquisitions) == 1  # No late plan or reacquisition.
+        assert len(validations) == (2 if change in {"client", "scopes"} else 1)
+        assert not any(sql.lstrip().upper().startswith(("INSERT ", "UPDATE ", "DELETE ")) for sql in request_sql)
+        assert response.status_code == (422 if change in {"client", "scopes"} else 409 if change in {"location", "resource"} else 403 if change == "admin" else 401)
+        if change in {"client", "scopes"}: assert response.json() == {"detail": "Invalid client or scopes"}
+        assert response.headers["cache-control"] == "no-store"
+    async with _test_session_factory() as db:
+        install = await db.get(PartnerInstallation, app["installation_id"])
+        assert install.approved and install.all_locations and install.scopes == sorted(SCOPES)
+        assert not (await db.scalars(select(PartnerInstallationLocation).where(
+            PartnerInstallationLocation.installation_id == install.id))).all()
+        assert (await db.execute(select(PartnerResourceScope.kind, PartnerResourceScope.mode).where(
+            PartnerResourceScope.installation_id == install.id))).all() == [("objects", "ALL")]

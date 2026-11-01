@@ -19,6 +19,7 @@ from app.schemas_partner import ApproveInstallation, ApproveMachineGrant, Regist
 from app.services.partner_identity import (IDENTITY_SCOPES, NO_STORE, RESOURCE_MODELS, PartnerRoute, admin, digest, now,
     require_core_user, validate_redirect, validate_scopes, _prepare_partner_write,
     _native_authority, _writer_drift)
+from app.services.contract_write_locks import ScopedLockError
 
 router = APIRouter(prefix="/developer", tags=["Partner administration"], route_class=PartnerRoute)
 
@@ -120,33 +121,55 @@ async def revoke_credential(client_id: str, credential_id: uuid.UUID, user=Depen
     return await committed_response(db, revoke)
 
 
-@router.post("/clients/{client_id}/installations", status_code=201)
-async def approve_installation(client_id: str, body: ApproveInstallation, user=Depends(require_core_user), db: AsyncSession = Depends(get_db), credentials=Depends(bearer_scheme)):
-    scopes = scope_set(body.scopes)
-    native = _native_authority(db, credentials, user)
-    def approve(sync):
-        # Read-only preliminary policy preserves original error precedence;
-        # the same admin rule is repeated from current rows after all waits.
-        with sync.no_autoflush:
-            admin(sync, user, body.companyId)
-        ids, resources = set(body.locationIds or []), []
+def _installation_selection(sync, client_id, body, user, scopes):
+    """Read-only legacy policy, before discovery and again from held current rows.
+
+    The first guard precedes even an expired actor attribute load. Returned IDs
+    close discovery, but never authorize a write without the second validation.
+    """
+    if sync.new or sync.dirty or sync.deleted:
+        raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
+    with sync.no_autoflush:
+        admin(sync, user, body.companyId)
+        client = sync.get(PartnerClient, client_id, populate_existing=True)
+        if client is None or not client.enabled or not scopes <= set(client.allowed_scopes):
+            raise HTTPException(422, "Invalid client or scopes", headers=NO_STORE)
+        ids = frozenset(body.locationIds or [])
+        if ids:
+            valid = set(sync.scalars(select(ServiceLocation.id).where(
+                ServiceLocation.company_id == body.companyId, ServiceLocation.id.in_(ids))).all())
+            if ids != valid:
+                raise HTTPException(422, "Invalid company resource IDs", headers=NO_STORE)
+        resources = []
         for kind, selection in body.resourceScopes.items():
             model, column = RESOURCE_MODELS[kind]
             if (selection.mode == "SET") != bool(selection.ids):
                 raise HTTPException(422, "SET requires IDs; ALL/EMPTY forbid IDs", headers=NO_STORE)
             try:
-                typed_ids = set(selection.ids) if kind == "objects" else {uuid.UUID(v) for v in selection.ids}
+                typed_ids = frozenset(selection.ids) if kind == "objects" else frozenset(uuid.UUID(v) for v in selection.ids)
             except ValueError:
                 raise HTTPException(422, "Invalid resource ID type", headers=NO_STORE) from None
+            actual = set(sync.scalars(select(model.id).where(model.company_id == body.companyId,
+                model.id.in_(typed_ids))).all()) if typed_ids else set()
+            if actual != typed_ids:
+                raise HTTPException(422, "Invalid company resource IDs", headers=NO_STORE)
             resources.append((kind, selection.mode, column, typed_ids))
+        return client, ids, tuple(resources)
+
+
+@router.post("/clients/{client_id}/installations", status_code=201)
+async def approve_installation(client_id: str, body: ApproveInstallation, user=Depends(require_core_user), db: AsyncSession = Depends(get_db), credentials=Depends(bearer_scheme)):
+    scopes = scope_set(body.scopes)
+    native = _native_authority(db, credentials, user)
+    def approve(sync):
+        _, ids, resources = _installation_selection(sync, client_id, body, user, scopes)
         selections = ((ServiceLocation, ids),) + tuple((RESOURCE_MODELS[kind][0], values)
             for kind, mode, column, values in resources)
         writer = _prepare_partner_write(sync, client_id=client_id, company_id=body.companyId,
             actor=user, native=native, admin_company=body.companyId, mutation="approve_installation", selections=selections)
-        admin(sync, user, body.companyId)
-        client = sync.get(PartnerClient, client_id)
-        if client is None or not client.enabled or not scopes <= set(client.allowed_scopes):
-            raise HTTPException(422, "Invalid client or scopes", headers=NO_STORE)
+        # _prepare has acquired the complete plan, canonical rows and current
+        # native actor. Reuse the exact policy; preflight is not write authority.
+        client, ids, resources = _installation_selection(sync, client_id, body, writer.actor, scopes)
         ca_id = writer.ca_id
         writer.checkpoint()
         sync.execute(insert(CompanyApp).values(id=ca_id, app_id=client.app_id, company_id=body.companyId,
