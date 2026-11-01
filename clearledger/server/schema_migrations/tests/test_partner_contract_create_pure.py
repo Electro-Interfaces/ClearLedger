@@ -38,7 +38,7 @@ class PartnerContractCreatePure(unittest.TestCase):
             'c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d',
             '58ff7a0cf33f7fb55fa080e4efe60c1a4aece67588cf1bfe8b44bc75e92c7e31',
             '99d6c539f5a5e4962926e6d8978db3a5487bab0d5fb20531b31cd95daf59d42d'])
-        self.assertEqual(chain[6].entry['artifact_sha256'], '38e2c901ef62cec3a96755616f9b319ad11e7deeeb760c8c739c243fedb787a8')
+        self.assertEqual(chain[6].entry['artifact_sha256'], '94f830704cee4366dfe9565370aac00de74143691e99b9b8f797d48ff51f4b7d')
         for ordinal, target in ((3, manifest.PULSE_ID), (4, manifest.CONTRACT_CREATE_ID),
                 (5, manifest.CONTRACT_CYCLE_RECEIPTS_ID), (6, manifest.SITE_AUTHORITY_ID)):
             head, *_ = runner._sequence_source(target, None, 2000000000)

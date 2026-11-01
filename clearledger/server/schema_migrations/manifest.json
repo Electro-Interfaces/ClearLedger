@@ -77,11 +77,11 @@
       "source_commit": "cfd804c469d203c505b57668af8b57d9b4a866a2"
     },
     {
-      "artifact_sha256": "38e2c901ef62cec3a96755616f9b319ad11e7deeeb760c8c739c243fedb787a8",
+      "artifact_sha256": "94f830704cee4366dfe9565370aac00de74143691e99b9b8f797d48ff51f4b7d",
       "files": {
         "revisions/0006_site_authority.sql": "941411d96992790189cc2153c584282cf322832859686ec922f0d625b4e70387",
         "revisions/0006_site_authority_contract.json": "475fdcffdb7195996d258d61118880bbaf1a94d3cf5fecbc865fbca2fa315c56",
-        "revisions/catalog_site_authority_v1.py": "fa2f640a859b556e3768e5820b824afe810119184c33e13392ff8bf3ec464764",
+        "revisions/catalog_site_authority_v1.py": "4224b64414d354c5081bf1cbbd03af198e15674afb0f199f146bf526216a310e",
         "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
       },
       "id": "0006_site_authority",

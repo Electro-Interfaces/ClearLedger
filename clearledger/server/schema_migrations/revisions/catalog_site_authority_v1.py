@@ -50,7 +50,10 @@ async def own_table(conn, spec, row, parents, owner):
         kind, wanted = expected[key['name']]
         require(key['kind'] == kind, 'site_constraint_kind')
         extra = await conn.fetchrow('SELECT connoinherit,conparentid FROM pg_catalog.pg_constraint WHERE oid=$1', key['oid'])
-        require(not extra['connoinherit'] and extra['conparentid'] == 0, 'site_constraint_flags')
+        # PG16 marks PK/UNIQUE/FK non-inheritable; ordinary CHECK is inheritable.
+        # Keep the exact expected flag, rejecting an unexpected CHECK NO INHERIT.
+        require(extra['connoinherit'] is (kind != 'c') and extra['conparentid'] == 0,
+                'site_constraint_flags')
         if kind in {'p', 'u'}:
             require([names.get(n) for n in key['keys']] == wanted, 'site_key')
         elif kind == 'c':

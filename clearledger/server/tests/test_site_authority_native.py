@@ -164,6 +164,16 @@ async def test_catalogue_drift_denies(site_authority_pg, drift):
     await pg.connection.execute(drift)
     with pytest.raises(MigrationError):
         await require_site_prefix(pg.connection)
+    if drift == 'ALTER TABLE core.site_authority_contexts ALTER COLUMN approved SET DEFAULT true':
+        # Restoring the default must restore the actual strict catalogue first.
+        await pg.connection.execute('ALTER TABLE core.site_authority_contexts ALTER COLUMN approved SET DEFAULT false')
+        assert await require_site_prefix(pg.connection) == 6
+        # The same expression with NO INHERIT is a distinct, forbidden CHECK.
+        await pg.connection.execute('ALTER TABLE core.site_authority_contexts DROP CONSTRAINT ck_site_context_generation')
+        await pg.connection.execute('ALTER TABLE core.site_authority_contexts ADD CONSTRAINT ck_site_context_generation CHECK(policy_generation > 0) NO INHERIT')
+        with pytest.raises(MigrationError) as error:
+            await require_site_prefix(pg.connection)
+        assert error.value.phase == 'site_constraint_flags'
 
 
 async def test_partial_unrecorded6_refuses_without_journal_append(site_authority_pg):
