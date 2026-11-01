@@ -1,11 +1,14 @@
 {
   "classification": "AUTHOR_FIX_SOURCE_CONTRACT_NOT_RUNTIME_ACCEPTANCE",
   "source_base": "cdb65361f3207f82283c88da8b431625a5b1804c",
-  "source_commit": "0b873aba12265075c40b7c32e786401bc741449a",
+  "source_commit": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
   "ratifications": [
     "msg_dc2f907bf07e",
     "msg_85a4864d991c",
-    "msg_243863d23160"
+    "msg_243863d23160",
+    "msg_a0b500c56fd9",
+    "msg_8b65b5c01830",
+    "msg_3fe7c1c9e78a"
   ],
   "operation": {
     "method": "POST",
@@ -29,8 +32,12 @@
     "wire_reader_count": 1,
     "content_length_authority": false,
     "automatic_fastapi_body": false,
-    "openapi_source": "same model_json_schema(by_alias=True,mode=validation); same canonical nested definitions",
-    "new_model_schema_hash": false
+    "openapi_source": "exact $ref #/components/schemas/ContractCreateBody; curated_openapi injects full canonical model_json_schema(by_alias=True,mode=validation,ref_template=#/components/schemas/{model}) and ALL defs unchanged",
+    "new_model_schema_hash": false,
+    "requestBody_schema": {
+      "$ref": "#/components/schemas/ContractCreateBody"
+    },
+    "schema_oracle": "exact reference, dereference, full canonical component equality including comment.default:null, ALL defs equality; protected/public/405 retained"
   },
   "success": {
     "201": "new",
@@ -65,7 +72,8 @@
     "quota_retry_after": true,
     "generic_retry_after": "only trusted supplied header for 429/503",
     "collection_allow": "GET, POST",
-    "other_existing_allow": "GET"
+    "other_existing_allow": "GET",
+    "implementation": "pure ASGI wrapper; trusted current_security_context or uuid into same scope.state; MutableHeaders only response.start; original scope/receive/messages/bytes; nonHTTP passthrough; no receive calls/tasks/catches/auth/transaction changes; _problem unchanged"
   },
   "lifecycle": [
     "short canonical read Session + shared coarse gate",
@@ -115,21 +123,38 @@
     "offline_import_guards": "unchanged; runtime identity/authority/consumer imports lazy"
   },
   "tests": {
-    "definitions": 22,
-    "parameterized_cases": 58,
+    "definitions": 27,
+    "parameterized_cases": 70,
     "fixture": "tests.partner_contract_issuer_fixture.issuer_world",
     "factory": "ROOT-owned external partner_contract_issuer_factory",
     "positive_auth_or_authority_mocks": false,
     "runtime_status": "NOTRUN_INCLUDING_IMPORTS_COLLECTION",
-    "count_method": "independent stdlib AST only; new user/machine loop is one static variant; NOT collection",
+    "count_method": "stdlib AST only; literal parametrization products; loops count once; NOT collection",
     "old_HTTP_definitions_preserved": 21,
     "issuer_unit_definitions": 13,
     "issuer_unit_oracles_updated": 1,
     "regression": "actual same-company extra space ID parent + installation/object grants; membership retains it for user; confidential machine has no native-member intersection; original verifier confirms both ceilings; real CREATE/replay and five-part SQL deltas, contracts EMPTY",
     "coverage_limits": [
+      "current definitions NOTRUN; real streaming download and complete GET runtime compatibility remain unverified"
+    ],
+    "prior_R01_R02_counts": {
+      "definitions": 22,
+      "static_variants": 58
+    },
+    "prior_coverage_limits": [
       "no dedicated Session-close-fault definition",
       "no dedicated parser-disconnect definition"
-    ]
+    ],
+    "close_observer": "delegates original AsyncSession.close, appends closed only after successful await for tracked Session; no success marker on negative close fault; separate real cleanup",
+    "external_cancel": "ASGI2.3/2.4; real consumer ready then cancel; test readiness30s per ROOT prior5.9–6.3s; original atomic/noRoot/closed/CancelledError assertions retained",
+    "new_definitions": [
+      "negative actual Session.close failure after real consumer and denial before commit",
+      "receive-disconnect on actual request root for ASGI2.3/2.4",
+      "actual prebody401/GET405/CREATE/500 metadata for ASGI2.3/2.4",
+      "protocol-only trusted context/generated UUID and streaming messages/header identity for ASGI2.3/2.4; synthetic206 is not Range API promise",
+      "nonHTTP lifespan/websocket identity passthrough"
+    ],
+    "prior22_definitions": "all retained; schema oracle exact ref + full equality; external task-cancel parametrized2.3/2.4/readiness30s; other20 unchanged AST to correction_base"
   },
   "deferred": [
     "GET create-options",
@@ -167,11 +192,15 @@
     "source_test_paths": 12,
     "docs_paths": 2,
     "repair_source_test_paths": [
+      "clearledger/server/app/product_api/app.py",
+      "clearledger/server/tests/test_partner_contract_http_create.py"
+    ],
+    "commits": "schema source/test logical commit; ratified middleware+test logical commit; final exact2 docs-only child; hooks OFF, skip ci; no push/PR/merge/rebase",
+    "prior_repair_source_test_paths": [
       "clearledger/server/app/product_api/access.py",
       "clearledger/server/tests/test_partner_contract_http_create.py",
       "clearledger/server/tests/test_partner_contract_issuer_unit.py"
-    ],
-    "commits": "source/test fix first, then docs-only child; hooks OFF, skip ci; no push/merge/rebase"
+    ]
   },
   "history": {
     "original_source": "0e0cc68ab702e73695b3b0a48325e6fc52e7d8a3",
@@ -187,7 +216,31 @@
     },
     "historical_reports_overwritten": false,
     "fresh_independent_review": "PENDING",
-    "author_SOURCE_PASS": false
+    "author_SOURCE_PASS": false,
+    "prior_R01_R02_source": "0b873aba12265075c40b7c32e786401bc741449a",
+    "prior_R01_R02_docs_head": "68322c9c3c9885a49de47369f364ac1642b59080",
+    "ROOT_observations_provenance": "coordinator messages only; private .artifacts not read; prior results not transferred to latest code",
+    "initial17": {
+      "integrated_pin_abbreviated": "8cda",
+      "diagnosticPASS": 16,
+      "schemaFAIL": 1,
+      "failure": "inline body loses canonical comment.default:null",
+      "ROOT_authority": "msg_a0b500c56fd9"
+    },
+    "actualfault6": {
+      "ROOT_message": "msg_8b65b5c01830",
+      "delivery": "msg_edde37721876",
+      "calls": 6,
+      "diagnosticPASS": 1,
+      "FAIL": 5,
+      "seconds": 86.128,
+      "host": "exit1/reaped",
+      "cleanup": "normal PG/factory/global0/0; foreign41same",
+      "close_marker_FAIL": 3,
+      "inner_CancelledError": "DIDNOTRAISE",
+      "external_task_cancel": "timeout5 before ready; actual consumer5.9–6.3s; cancelpointNOTREACHED",
+      "unknown_commit_new_root_same_key_current_auth_replay": "diagnosticPASS"
+    }
   },
   "fixes": {
     "R01": {
@@ -206,6 +259,30 @@
       "oracle": "single exact first _require_coarse_create(db,current,self.expected_profile) call binds refs/types; WRITE_SCOPE/flags stay asserted on shared helper; ALL old body-aware intersections and _permits checks retained",
       "other_definitions_fixtures_locks_replay_atomic_assertions": "unchanged",
       "production_issuer_changed_for_oracle": false
+    },
+    "R03": {
+      "source_commit": "b8ce04764f35914898d6e769adf713f1f8876db4",
+      "finding": "inline canonical default loss",
+      "change": "exact requestBody component ref and strict dereference/full component/ALL defs equality oracle",
+      "curated_component_defs_injection": "unchanged"
+    },
+    "R04": {
+      "source_commit": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
+      "ROOT_ratification": "msg_3fe7c1c9e78a",
+      "change": "pure ASGI requestId/noStore middleware only; no catch/read/task/auth/transaction changes; GET15 and _problem unchanged",
+      "test_changes": "faithful close observer, bounded readiness30s, negative close/disconnect and metadata ASGI2.3/2.4 definitions",
+      "runtime": "UNKNOWN/NOTRUN"
     }
+  },
+  "correction_base": "68322c9c3c9885a49de47369f364ac1642b59080",
+  "schema_ref_commit": "b8ce04764f35914898d6e769adf713f1f8876db4",
+  "static_checks": {
+    "schema_commit_inverse_app_AST": true,
+    "middleware_commit_inverse_app_AST": true,
+    "GET15_decorators_registry_and_problem_preserved": true,
+    "compile_without_exec": 2,
+    "diff_check": "clean",
+    "imports_collection_tests_exporter_generator": "NOTRUN",
+    "independent_fresh_whole14_source_review": "PENDING"
   }
 }
