@@ -23,6 +23,7 @@ from app.models import (
     Warehouse,
 )
 from app.services.onec.com_client import OneCComClient
+from app.services.onec.catalog_root_locks import prepare_catalog_root, require_catalog_root
 from app.services.onec.crypto import decrypt_password
 from app.services.onec.exceptions import OneCError
 from app.services.reference_overrides import apply_import_values
@@ -288,17 +289,29 @@ class OneCSyncService:
             return {"available": False, "catalogs": [], "error": f"{type(exc).__name__}: {exc}"}
 
     async def sync_catalogs(self, connection: OneCConnection) -> OneCSyncLog:
+        prepared = await prepare_catalog_root(self.session, connection)
+        connection = prepared.connection
+        require_catalog_root(self.session, prepared)
         log = await self._start_log(connection, sync_type="catalogs")
+        require_catalog_root(self.session, prepared)
         details: dict[str, Any] = {}
         try:
             async with await self._open_client(connection) as client:
+                require_catalog_root(self.session, prepared)
                 details["organizations"] = await self._sync_organizations(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["counterparties"] = await self._sync_counterparties(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["contracts"] = await self._sync_contracts(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["warehouses"] = await self._sync_warehouses(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["nomenclature"] = await self._sync_nomenclature(client, connection, log)
+                require_catalog_root(self.session, prepared)
+            require_catalog_root(self.session, prepared)
             await self._finish_log(log, "completed", details)
         except Exception as exc:
+            require_catalog_root(self.session, prepared)
             await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
             raise
         return log

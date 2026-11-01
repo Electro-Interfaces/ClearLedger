@@ -1,0 +1,211 @@
+{
+  "kind": "ONEC_CATALOG_ROOT_SOURCE_DESIGN",
+  "date": "2026-11-01",
+  "source_base": "e51876f994172c1d8306b934840541d2700486a6",
+  "status": "HELD_PENDING_INDEPENDENT_JOINT_SOURCE_REVIEW",
+  "execution": {
+    "application_imports": 0,
+    "helper_imports": 0,
+    "test_imports": 0,
+    "collection": 0,
+    "runtime": 0,
+    "sql": 0,
+    "network": 0,
+    "tests": "AUTHORED_NOTRUN",
+    "runtime_result": "UNKNOWN"
+  },
+  "owned_paths": [
+    "clearledger/server/app/services/onec/sync_service.py",
+    "clearledger/server/app/services/onec/catalog_root_locks.py",
+    "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+    "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+    "clearledger/docs/api/ONEC_CATALOG_ROOT_LOCKS_20261101.md",
+    "clearledger/docs/api/ONEC_CATALOG_ROOT_LOCKS_20261101.json"
+  ],
+  "manifest": [
+    {
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "bytes": 89485,
+      "sha256": "f816e1e9e3f11e929b4290f1b6deb5da9975b83061493f069ae08e18c9130345"
+    },
+    {
+      "path": "clearledger/server/app/services/onec/catalog_root_locks.py",
+      "bytes": 5114,
+      "sha256": "ef250f29154f6c32566b21b9c7c1d6cda1bd054b7196975c49e779339eeb3dea"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "bytes": 3803,
+      "sha256": "48b724a180cbd6694b615f13bb10bdaf8f83dcd160625f53634a18554dd68eba"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "bytes": 22477,
+      "sha256": "b4572ec736bc444bba2f55d283f78719405866714d7703b6d3836f35b6429526"
+    }
+  ],
+  "plan": [
+    {
+      "key": "CompanyKey(server_connection.company_id)",
+      "mode": "SHARED"
+    },
+    {
+      "key": "RefCompositeKey(server_connection.company_id)",
+      "mode": "EXCLUSIVE"
+    }
+  ],
+  "entrance_order": [
+    "reject pending new/dirty/deleted without SQL, flush or discard",
+    "persisted OneCConnection ORM identity only; detached/other-session object supported",
+    "fresh scalar DB company discovery, no row locks/no autoflush",
+    "one full scoped plan using frozen shared helper",
+    "fresh scalar DB company revalidation; reject movement/deletion",
+    "Company SHARE then scoped OneCConnection SHARE populate_existing",
+    "expire clean retained Organization/Counterparty/Contract once before first write",
+    "historical start_log and flush",
+    "historical organizations/counterparties/contracts/warehouses/nomenclature",
+    "caller owns completion"
+  ],
+  "known_callers": [
+    {
+      "path": "clearledger/server/app/routers/onec_router.py",
+      "symbol": "sync_catalogs",
+      "base_call_line": 230,
+      "prior_state": "readonly get_owned; auth presence owns any earlier commit/rollback"
+    },
+    {
+      "path": "clearledger/server/app/routers/onec_router.py",
+      "symbol": "sync_full",
+      "base_call_line": 307,
+      "prior_state": "catalogs first; readonly get_owned; auth presence owns any earlier commit/rollback"
+    },
+    {
+      "path": "clearledger/server/scripts/smoke_full_sync.py",
+      "symbol": "main",
+      "base_call_line": 89,
+      "prior_state": "explicit commit at base line 75; test_connection then reads/network only"
+    }
+  ],
+  "distinct_homonym": "backend/app/services/onec/sync_service.py has separate sync_catalogs(connection_id), not this class",
+  "source_inverse": {
+    "before": "Org row changes -> next ORM SELECT autoflush UPDATE -> legacy CP -> legacy contract",
+    "native_r1": "RefComposite SHARED -> legacy CP -> legacy contract -> Organization SHARE",
+    "after": "OneC Company SHARED + RefComposite EXCLUSIVE precedes log flush and Org changes; native R1 waits on Ref before CP",
+    "runtime_deadlock_observed": false
+  },
+  "compatibility": {
+    "service_signature": "sync_catalogs(self, connection: OneCConnection) -> OneCSyncLog",
+    "http_policy": "UNCHANGED; fresh ACL after waits not claimed",
+    "transaction_owner": "UNCHANGED caller; service/adapter have no commit/rollback/retry",
+    "network": "UNCHANGED positions after log; B held across external calls",
+    "other_service_methods": "BYTE_EXACT_REQUIRED",
+    "shared_helper_identity_matcher_card_models_routers_conftest_old_tests": "IMMUTABLE"
+  },
+  "joint_pg_requirement": {
+    "composition": "actual OneC candidate + actual native R1 candidate + unchanged common scoped helper",
+    "pins": "ROOT private freeze metadata, not embedded private identifiers",
+    "source_schedule": "actual OneC two existing org items produce first UPDATE via second SELECT autoflush; actual R1 create/update waits on Ref SHARE before CP/rows/DML; release/commit/rollback and read fresh retained references",
+    "mocking": "external OneC client only; no core guard/capability/Session.info fakes",
+    "preimport_gate": "ROOT must review conftest application imports and DROP SCHEMA; module guard does not authorize ordinary pytest"
+  },
+  "authored_test_functions": [
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "symbol": "test_catalog_plan_excludes_native_actor_authority_and_separates_companies",
+      "line": 21,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "symbol": "test_company_identity_never_coerces",
+      "line": 31,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "symbol": "test_new_entry_is_refused_without_flush_or_discard",
+      "line": 37,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "symbol": "test_transient_connection_has_no_server_identity",
+      "line": 49,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "symbol": "test_actual_sync_entrance_precedes_first_log_and_preserves_stage_order",
+      "line": 56,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_unit.py",
+      "symbol": "test_adapter_and_catalog_root_do_not_take_transaction_ownership",
+      "line": 69,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_real_onec_autoflush_blocks_real_r1_before_cp",
+      "line": 208,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_dirty_root_refusal_keeps_pending_state_and_emits_no_sql",
+      "line": 271,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_detached_persisted_connection_and_retained_references_reload",
+      "line": 292,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_fresh_connection_after_wait_never_admits_unplanned_company",
+      "line": 321,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_real_capability_lifetime_and_connection_pointer",
+      "line": 354,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_real_capability_cannot_cross_session_or_plan",
+      "line": 371,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_second_attempt_is_refused_until_root_rollback",
+      "line": 382,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_cancelled_partial_plan_requires_rollback_before_reuse",
+      "line": 395,
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "symbol": "test_source_error_retains_historical_log_and_caller_rollback",
+      "line": 423,
+      "status": "AUTHORED_NOTRUN"
+    }
+  ],
+  "open": [
+    "independent review of exact combined frozen composition",
+    "all runtime and dynamic caller behavior",
+    "already-flushed outer writes/locks cannot be detected by clean identity map",
+    "broad authority/ACL and all-writer coverage",
+    "INN/warehouse/locations and wider program",
+    "release and production acceptance"
+  ]
+}
