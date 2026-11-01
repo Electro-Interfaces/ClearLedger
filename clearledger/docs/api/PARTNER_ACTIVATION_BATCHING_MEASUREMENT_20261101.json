@@ -127,5 +127,35 @@
     "historicalFailure": "Source120firstparent36 33PASS3FAIL immutable, testlistener mismatch not productionbypass; historicalsmallpair/offline60/fresh31 retainownSource",
     "remaining": "CPC93 separately Root-observedPASS on2d, notindependentlyacceptedhere; CPD62/scaling20/original139optimizedcomposition andwhole497/fullCI stillopen",
     "wholeM15OrAllAPIComplete": false
+  },
+  "last155Acceptance20261101": {
+    "source": "2d1b6454350515e546a8da26e9abc24af302e568",
+    "status": "INDEPENDENT_BOUNDED_LAST155_SOURCE_RAW_ACCEPTED",
+    "worlds": [
+      {
+        "label": "cpc",
+        "cases": 93,
+        "phases": 279,
+        "seconds": 313.0886475807056,
+        "pytestExit": 0
+      },
+      {
+        "label": "cpdv2",
+        "cases": 62,
+        "phases": 186,
+        "seconds": 223.41137928888202,
+        "pytestExit": 0
+      }
+    ],
+    "reviewMDsha256": "e4d61f1ef0cc53c4525be48e967c2e3fcbbe9f1f33ae214ac748c9bc94191c9c",
+    "reviewJSONsha256": "9fcc6df6e9419d7ee4c602a2aa40f1aa9426b684d03c824c2d85222cca7a35b6",
+    "pinsReverifiedByRoot": 43,
+    "disjointness": "155 distinctID and prioraccepted280 arepairwisedisjoint;435 arithmeticcoverage insixseparateworlds,notjointCI435",
+    "stateOracleLimit": "originalstate verifiesgeneration/flags, fullchildstrsortedrows,audit actiondetails, Contract/Intent/Grantcounts; notdirectfreshreadofallfaultmutatedcolumns; whole-rootrollback fromsource+boundedpassedassertions",
+    "sameRootNegativeSQL": "oneactual TextClause per ID, originalcheckpointdelegated; notexternalcommittedwrite throughheldSHARElocks",
+    "safety": "native341347/ordinaryPGrole/factory8, pools/clientslocks0, ownremoved/fullforeignsafeprojectionparity",
+    "hostExit": "Rootobservedreaped91637/83987EXIT0; no separateFSargvreceipt reviewer",
+    "remaining": "20scalingNOTRUN; original139newoptimizedcomposition runningthree55/41/43selections(A55observedPASS, B41running, C43NOTRUN); full497/M15/all20+11unproven",
+    "wholeM15OrCurrentCI": false
   }
 }
