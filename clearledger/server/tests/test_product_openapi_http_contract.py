@@ -40,6 +40,60 @@ def local_schema_gate(document):
     OpenAPIV31SpecValidator(document).validate()
 
 
+def local_examples_gate(document):
+    """Validate local response/header example payloads against their exact schemas."""
+    local_schema_gate(document)
+
+    def resolve(value):
+        seen = set()
+        while True:
+            if "externalValue" in value:
+                raise ValueError("External example values are not supported")
+            if "$ref" not in value:
+                return value
+            ref = value["$ref"]
+            if not isinstance(ref, str) or not ref.startswith("#/"):
+                raise ValueError("Only local references are supported")
+            if ref in seen:
+                raise ValueError("Cyclic example/response/header reference")
+            seen.add(ref)
+            value = document
+            for part in ref[2:].split("/"):
+                value = value[part.replace("~1", "/").replace("~0", "~")]
+
+    def examples(container):
+        values = []
+        if "example" in container:
+            values.append(container["example"])
+        for example in container.get("examples", {}).values():
+            example = resolve(example)
+            if "value" not in example:
+                raise ValueError("Local Example Object must contain value")
+            values.append(example["value"])
+        if values:
+            validator = Draft202012Validator(
+                {**container["schema"], "components": document["components"]},
+                format_checker=FormatChecker())
+            for value in values:
+                validator.validate(value)
+
+    def response(contract):
+        contract = resolve(contract)
+        for media in contract["content"].values():
+            examples(media)
+        for header in contract.get("headers", {}).values():
+            examples(resolve(header))
+
+    for path in document["paths"].values():
+        for operation in path.values():
+            for contract in operation["responses"].values():
+                response(contract)
+    for header in document["components"]["headers"].values():
+        examples(resolve(header))
+    for contract in document["components"]["responses"].values():
+        response(contract)
+
+
 class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
     # Reuse only fixture lifecycle/helpers; do not inherit or rediscover its test cases.
     request = fixtures.ProductHTTPProfile.request
@@ -112,22 +166,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
             yield
 
     async def test_formal_oas_local_refs_formats_and_examples(self):
-        local_schema_gate(self.schema)
-        for path in self.schema["paths"].values():
-            for operation in path.values():
-                for response in operation["responses"].values():
-                    response = self.dereference(response)
-                    for media in response["content"].values():
-                        if "example" in media:
-                            self.validate_value(media["example"], media["schema"])
-        for header in self.schema["components"]["headers"].values():
-            for example in header.get("examples", {}).values():
-                self.validate_value(example["value"], header["schema"])
-            if "example" in header:
-                self.validate_value(header["example"], header["schema"])
-        for response in self.schema["components"]["responses"].values():
-            for media in response["content"].values():
-                self.validate_value(media["example"], media["schema"])
+        local_examples_gate(self.schema)
 
     async def test_gate_rejects_external_refs_unknown_formats_and_bad_examples(self):
         for poisoned in ({"$ref": "https://untrusted.invalid/schema"},
@@ -146,6 +185,53 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         invalid = {**response["example"], "status": "500"}
         with self.assertRaises(ValidationError):
             self.validate_value(invalid, response["schema"])
+
+        # Keep these inside the existing primary test: no extra subtest reports.
+        for path, status, media_type, name, location, invalid in (
+                ("/objects", "200", "application/json", "fictional", ("total",), "1"),
+                ("/objects", "200", "application/json", "fictional", ("items", 0, "latitude"), "55.75"),
+                ("/objects/{objectId}/monitoring", "200", "application/json", "fictional",
+                 ("window", "start"), "not-a-date-time"),
+                ("/objects", "429", "application/problem+json", "quotaExhausted", ("status",), "429"),
+                ("/objects", "429", "application/problem+json", "injectedHTTP429", ("status",), "429")):
+            schema = deepcopy(self.schema)
+            media = schema["paths"][path]["get"]["responses"][status]["content"][media_type]
+            target = media["examples"][name]["value"]
+            for part in location[:-1]:
+                target = target[part]
+            target[location[-1]] = invalid
+            with self.assertRaises(ValidationError) as rejected:
+                local_examples_gate(schema)
+            self.assertEqual(list(rejected.exception.absolute_path), list(location))
+
+        # A chained local Example reference must be validated at the use site's
+        # schema, including nested component refs.
+        schema = deepcopy(self.schema)
+        media = schema["paths"]["/objects"]["get"]["responses"]["200"]["content"]["application/json"]
+        schema["components"]["examples"] = {
+            "ResponseExample": media["examples"]["fictional"],
+            "Alias": {"$ref": "#/components/examples/ResponseExample"}}
+        media["examples"]["fictional"] = {"$ref": "#/components/examples/Alias"}
+        local_examples_gate(schema)
+        payload = schema["components"]["examples"]["ResponseExample"]["value"]
+        payload["items"][0]["latitude"] = "55.75"
+        with self.assertRaises(ValidationError) as rejected:
+            local_examples_gate(schema)
+        self.assertEqual(list(rejected.exception.absolute_path), ["items", 0, "latitude"])
+
+        for example, message in (
+                ({"$ref": "https://untrusted.invalid/example"}, "Only local references"),
+                ({"externalValue": "https://untrusted.invalid/payload.json"}, "External example values"),
+                ({"$ref": "#/components/examples/Blocked"}, "External example values"),
+                ({"$ref": "#/components/examples/Cycle"}, "Cyclic")):
+            schema = deepcopy(self.schema)
+            schema["components"]["examples"] = {
+                "Blocked": {"externalValue": "https://untrusted.invalid/payload.json"},
+                "Cycle": {"$ref": "#/components/examples/Cycle"}}
+            media = schema["paths"]["/objects"]["get"]["responses"]["200"]["content"]["application/json"]
+            media["examples"]["fictional"] = example
+            with self.assertRaisesRegex(ValueError, message):
+                local_examples_gate(schema)
 
     async def test_actual_positive_12_handlers_match_response_headers_and_schemas(self):
         async with self.transport_projection():
