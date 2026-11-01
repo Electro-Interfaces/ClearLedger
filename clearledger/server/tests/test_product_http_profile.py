@@ -356,7 +356,15 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operation["requestBody"], {"required": True, "content": {"application/json": {
             "schema": {"$ref": "#/components/schemas/ContractCreateBody"}}}})
         self.assertEqual(set(operation["responses"]),
-                         {"200", "201", "401", "403", "409", "413", "415", "422", "429", "500", "503"})
+                         {"200", "201", "401", "403", "405", "409", "413", "415", "422", "429", "500", "503"})
+        self.assertEqual(operation["responses"]["405"],
+                         {"$ref": "#/components/responses/ProductContractsMethodNotAllowed"})
+        self.assertEqual(schema["components"]["responses"]["ProductContractsMethodNotAllowed"]["headers"]["Allow"],
+                         {"$ref": "#/components/headers/ProductContractsAllow"})
+        allow = schema["components"]["headers"]["ProductContractsAllow"]
+        self.assertIs(allow["required"], True)
+        self.assertEqual(allow["schema"], {"type": "string", "const": "GET, POST"})
+        self.assertEqual(allow["example"], "GET, POST")
         self.assertEqual(self.state["sessions"], 0)
         self.assertEqual(self.state["domain"], [])
 

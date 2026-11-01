@@ -177,6 +177,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         local_examples_gate(public)
         for document in (self.schema, public):
             checked = 0
+            checked_create_options = 0
             for route in routes:
                 for method in route.methods:
                     operation = document["paths"][route.path_format][method.lower()]
@@ -197,8 +198,26 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
                                                      dumps(expected, sort_keys=True, allow_nan=False))
                                     if isinstance(expected, (dict, list)):
                                         self.assertIsNot(actual, expected)
-                                    checked += 1
+                                    identity = (route.path_format, method, status_key, section, name, keyword)
+                                    if identity == ("/contracts/create-options", "GET", "200", "content",
+                                                    "application/json", "examples"):
+                                        self.assertEqual(actual, {"fictional": {"value": {
+                                            "resource": "type", "items": [{"value": "fictional-type"}],
+                                            "selectionVersion": "fictional-opaque-version", "nextCursor": None}}})
+                                        self.assertIn("nextCursor", actual["fictional"]["value"])
+                                        self.assertIsNone(actual["fictional"]["value"]["nextCursor"])
+                                        checked_create_options += 1
+                                    else:
+                                        checked += 1
             self.assertEqual(checked, 14)
+            self.assertEqual(checked_create_options, 1)
+            options_media = document["paths"]["/contracts/create-options"]["get"]["responses"]["200"][
+                "content"]["application/json"]
+            self.assertEqual(options_media["schema"], {"$ref": "#/components/schemas/ContractCreateOptions"})
+            options_schema = document["components"]["schemas"]["ContractCreateOptions"]
+            self.assertEqual(options_schema["required"], ["resource", "items", "selectionVersion", "nextCursor"])
+            self.assertEqual(options_schema["properties"]["nextCursor"]["anyOf"],
+                             [{"type": "string"}, {"type": "null"}])
 
         # Mutating either schema must not alter route declarations or the other view.
         canonical_value = self.schema["paths"]["/objects"]["get"]["responses"]["200"]["content"][
