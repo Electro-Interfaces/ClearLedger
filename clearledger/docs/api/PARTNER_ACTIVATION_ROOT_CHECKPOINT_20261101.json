@@ -1,0 +1,123 @@
+{
+  "sourcePackage": "94959136470775314f4ca2f5eaeadabed855b215",
+  "rootIntegrated": "3127e6ad5e2bda68a88931e7d35a4c7d98916d8d",
+  "sourceReview": "SOURCE_PASS",
+  "staticOnly": {
+    "unitDefinitions": 8,
+    "unitVariants": 37,
+    "pgDefinitions": 19,
+    "pgVariants": 102
+  },
+  "initial51NotAccepted": {
+    "status": "NOT_ACCEPTED_INITIAL51_49DIAGNOSTIC_PASS_2FAIL",
+    "sut": "3127e6ad5e2bda68a88931e7d35a4c7d98916d8d",
+    "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation-initial51-3127e6ad-fullnative-pg-20261101-c54a20fd8ba9",
+    "host": {
+      "session": 4453,
+      "exit": 1,
+      "reaped": true
+    },
+    "testsRun": 51,
+    "diagnosticPass": 49,
+    "failures": [
+      {
+        "id": "tests/test_docs_portal_logout_scoped_locks.py::test_logout_preserves_existing17_and_canonical12",
+        "when": "call",
+        "outcome": "failed",
+        "duration": 0.054894670844078064,
+        "error": "def test_logout_preserves_existing17_and_canonical12():\n        for path, expected in PROTECTED_BYTES.items():\n            if path in INTEGRATED_BYTE_OVERLAY:\n                change = INTEGRATED_BYTE_OVERLAY[path]\n                assert expected == change[\"baseline\"], path\n                expected = change[\"reviewed\"]\n            if path in UUID_MODEL_OVERLAY:\n                change = UUID_MODEL_OVERLAY[path]\n                assert expected == change[\"baseline\"], path\n                expected = change[\"reviewed\"]\n            if path == \"app/services/partner_identity.py\":\n                assert expected == ACCEPTED_CREATE_EXTENSION[\"baseline_file\"]\n                expected = ACCEPTED_CREATE_EXTENSION[\"extended_file\"]\n                assert expected == ACCEPTED_G_ORG_ORDER_EXTENSION[\"baseline_file\"]\n                expected = ACCEPTED_G_ORG_ORDER_EXTENSION[\"extended_file\"]\n            actual = (activation_baseline_digest(ROOT / path) if path in ACTIVATION_RAW_OVERLAY\n>                     else hashlib.sha256((ROOT / path).read_bytes()).hexdigest())\n                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntest/repo/clearledger/server/tests/test_docs_portal_logout_scoped_locks.py:289: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nhome/mag/.local/share/uv/python/cpython-3.13.7-linux-x86_64-gnu/lib/python3.13/pathlib/_abc.py:625: in read_bytes\n    with self.open(mode='rb') as f:\n         ^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nself = PosixPath('/test/repo/clearledger/server/tests/test_partner_writer_scoped_locks.py')\nmode = 'rb', buffering = -1, encoding = None, errors = None, newline = None\n\n    def open(self, mode='r', buffering=-1, encoding=None,\n             errors=None, newline=None):\n        \"\"\"\n        Open the file pointed to by this path and return a file object, as\n        the built-in open() function does.\n        \"\"\"\n        if \"b\" not in mode:\n            encoding = io.text_encoding(encoding)\n>       return io.open(self, mode, buffering, encoding, errors, newline)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       FileNotFoundError: [Errno 2] No such file or directory: '/test/repo/clearledger/server/tests/test_partner_writer_scoped_locks.py'\n\nhome/mag/.local/share/uv/python/cpython-3.13.7-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py:537: FileNotFoundError"
+      },
+      {
+        "id": "tests/test_partner_contract_activation_pg.py::test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union",
+        "when": "call",
+        "outcome": "failed",
+        "duration": 3.248222847469151,
+        "error": "world = namespace(factory=async_sessionmaker(class_='AsyncSession', bind=<sqlalchemy.ext.asyncio.engine.AsyncEngine object at ...92d71427eae63396417b6189b', 'ai-437e9fd92d71427eae63396417b6189b']}, http=<httpx.AsyncClient object at 0x7fcba012efd0>)\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fcba0471550>\n\n    async def test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union(world, monkeypatch):\n        w, observed, sql, dml = world, [], [], []\n        original = identity.acquire_scoped_locks\n        original_activation = activation.activate_partner_contract_create_profile\n        contexts = []\n        def observe(db, plan):\n            cap = original(db, plan)\n            locks.require_scoped_locks(db, cap, plan.requests)\n            observed.append((db, db.get_transaction(), db.connection(), cap, plan))\n            return cap\n        def on_actual_session(db, *args):\n            root, connection = db.get_transaction(), db.connection()\n            result = original_activation(db, *args)\n            assert len(observed) == 1\n            actual, acquired_root, acquired_connection, cap, plan = observed[0]\n            assert actual is db and acquired_root is root and acquired_connection is connection\n            assert db.get_transaction() is root and db.connection() is connection\n            locks.require_scoped_locks(db, cap, plan.requests)\n            contexts.append((db, root, connection))\n            return result\n        def statements(conn, cursor, statement, params, context, many):\n            if \"FOR SHARE\" in statement or \"FOR UPDATE\" in statement:\n                sql.append((statement, str(params)))\n            if statement.lstrip().upper().startswith((\"INSERT \", \"UPDATE \", \"DELETE \")):\n                dml.append(statement)\n        monkeypatch.setattr(identity, \"acquire_scoped_locks\", observe)\n        monkeypatch.setattr(activation, \"activate_partner_contract_create_profile\", on_actual_session)\n        engine = w.factory.kw[\"bind\"].sync_engine\n        event.listen(engine, \"before_cursor_execute\", statements)\n        try:\n            assert (await put(w)).status_code == 200\n        finally:\n            event.remove(engine, \"before_cursor_execute\", statements)\n        assert len(observed) == 1\n        assert len(contexts) == 1\n        assert len(dml) == 2\n>       assert all(\"core.partner_contract_create_profiles\" in statement or \"core.audit_events\" in statement for statement in dml)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError\n\ntest/repo/clearledger/server/tests/test_partner_contract_activation_pg.py:266: AssertionError"
+      }
+    ],
+    "secondsIncludingBootstrap": 54.598989808000624,
+    "poolCleanup": {
+      "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+      "before": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "after": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "loopAlive": true,
+      "poolErrors": []
+    },
+    "factoryCleanup": {
+      "status": "PASS_PROFILE_FACTORY_CLEANUP",
+      "before": {
+        "checkedout": 0,
+        "checkedin": 1
+      },
+      "after": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "loopAlive": true,
+      "syntheticKeyOnly": true
+    },
+    "db": {
+      "clients": 0,
+      "locks": 0
+    },
+    "ownedRemoved": true,
+    "rootCorrectionRequired": "copy complete source bytes required by DPL but never import conftest",
+    "productionDiagnosis": "second SQL name oracle requires actual DML evidence; no successclaim"
+  },
+  "diagnostic2NotAcceptance": {
+    "status": "DIAGNOSTIC2_EXPECTED_ORIGINAL_ORACLE_FAIL_NOT_ACCEPTANCE",
+    "sut": "3127e6ad5e2bda68a88931e7d35a4c7d98916d8d",
+    "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation-dml2-3127e6ad-fullnative-pg-20261101-fc909b224787",
+    "hostSession": 19394,
+    "hostExit": 1,
+    "reaped": true,
+    "diagnosticPass": 1,
+    "originalCallFailure": 1,
+    "actualDML": [
+      {
+        "nodeid": "tests/test_partner_contract_activation_pg.py::test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union",
+        "phase": "call",
+        "sql": "INSERT INTO audit_events (id, entry_id, company_id, user_id, user_name, action, details) VALUES ($1::UUID, $2::UUID, $3::UUID, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::VARCHAR) RETURNING audit_events.timestamp",
+        "table": "audit_events",
+        "schema": null
+      },
+      {
+        "nodeid": "tests/test_partner_contract_activation_pg.py::test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union",
+        "phase": "call",
+        "sql": "UPDATE partner_contract_create_profiles SET user_enabled=$1::BOOLEAN, service_enabled=$2::BOOLEAN, policy_generation=$3::BIGINT WHERE partner_contract_create_profiles.id = $4::UUID",
+        "table": "partner_contract_create_profiles",
+        "schema": null
+      }
+    ],
+    "secondsIncludingBootstrap": 50.253234283067286,
+    "denied": [],
+    "poolCleanup": {
+      "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+      "before": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "after": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "loopAlive": true,
+      "poolErrors": []
+    },
+    "ownedRemoved": true,
+    "noSourceOrOracleChanges": true
+  },
+  "openCorrections": [
+    "Root source-only DPL dependencies manifest (10 files, never import/collect conftest)",
+    "exact1PG observer actual compiled table metadata, no production changes"
+  ],
+  "full139NotAccepted": true,
+  "workingFlagsChanged": false,
+  "overallCompletion": false
+}

@@ -199,8 +199,17 @@
     "sut": "48a4988a17e1fd680ad9ab3b8049c0fc06cdade4",
     "cases": 22,
     "subtests": 152,
-    "status": "ACTUAL_PASS_INDEPENDENT_REVIEW_PENDING",
-    "fakeAuthAndProjection": true
+    "status": "RECORDED_TRANSPORT_PASS_WITH_OPEN_P2_R1",
+    "fakeAuthAndProjection": true,
+    "finding": "named response examples payloads were not validated",
+    "sourceFix": "9a6abac9c6887fb41ca726e1df20304269bcaf5d SOURCE_ACCEPTED_WITH_P3_LIMIT",
+    "rootIntegrated": "b0aa31e2d9e8da8890bff53fcfebc6c5a157d416",
+    "newActual": "V3_NOT_ACCEPTED_20PRIMARY_DIAGNOSTIC_PASS_152SUBTEST_PASS_2FAIL_REAL_EXAMPLE_DEFECT",
+    "hostSession": 8328,
+    "hostExit": 1,
+    "reaped": true,
+    "examplesFix": "AUTHOR_ACTIVE_VALUES_ONLY",
+    "seconds": 36.847527774982154
   },
   "nativeG1": {
     "status": "V3_NOT_ACCEPTED_6_DIAGNOSTIC_PASS_1_CONSTRAINT_ORACLE_FAIL",
@@ -228,8 +237,28 @@
         "setupErrors": 7,
         "cause": "pendingOrgBeforeDocCaseFK23503"
       }
-    ]
+    ],
+    "v4": {
+      "source": "681f1ea4a47f07630006ec61c0054c9b637b8941",
+      "hostSession": 73769,
+      "status": "RUNNING",
+      "sourceOracle": "3b66e024c0850e51438f715f7c1d00938a43406b SOURCE_ACCEPTED"
+    }
   },
   "preview": "http://10.10.70.56:8000/api-platform-20261029/contracts-http.html",
-  "overallCompletion": false
+  "overallCompletion": false,
+  "sdk16": {
+    "head": "fe5048c666a04955615b903506c3b38392172d43",
+    "status": "ACCEPTED_SDK16_WIRE_TYPES_SCOPED_SOURCE_AND_RECORDED_RAW",
+    "negativeCompileControls": 10,
+    "schemaSHA256": "c2b0a03d5af0f24670c35d3b7eaf381f80ac6a9e9e895af8cc3fd4e8df93faee",
+    "wireSHA256": "bab793ef2f30131cbcd8fd5541c8d7275ee5c6a4c9a7217e0ea940dce48c690e",
+    "networkClient": false,
+    "review": {
+      "REVIEW.md": "62a5854ac51a059934d35bbdf175438f7406445676f42f68f17ee9611db55496",
+      "REVIEW.json": "d69b85601fd21e8bc344ddb8a351225a67cb9ae6c668b13333dd4823b9953b58"
+    },
+    "canonicalReport": "PARTNER_SDK16_ROOT_VERIFICATION_20261101.md/json"
+  },
+  "activationCheckpoint": "PARTNER_ACTIVATION_ROOT_CHECKPOINT_20261101.md/json"
 }
