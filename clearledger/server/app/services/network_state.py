@@ -69,6 +69,80 @@ def _возраст(последняя: datetime | None, сейчас: datetime)
     return max(0, (сейчас.date() - последняя.date()).days)
 
 
+def _mismatch(статус: str, дней: int | None) -> bool:
+    return статус == "working" and (дней is None or дней > НЕДЕЛЯ)
+
+
+class NetworkStateAdmissionExceeded(Exception):
+    """The authorized current network exceeds the operational read bound."""
+
+
+async def operational_network_state(
+    db: AsyncSession, company_id: uuid.UUID, *, selector,
+    region: str | None = None, only_problems: bool = False,
+    as_of: date | None = None, empty_point: datetime | None = None,
+) -> dict[str, Any]:
+    """Bounded, non-financial owner projection; selector is mandatory SQL ACL.
+
+    Admission counts authorized current-network candidates BEFORE the Python
+    owner/region rules. All observation queries use E, including when E is empty.
+    empty_point only carries a signed first-page clock for an unobserved network;
+    it never replaces an observed boundary or reconstructs the current catalog.
+    """
+    from sqlalchemy import and_
+    from app.services.ops_monitor_context import session_boundary
+
+    # JSON ->> alone would stringify objects/lists. Only an actual JSON string
+    # may supply the native fallback when the normalized region is absent.
+    metadata_region = ServiceLocation.extra_metadata["federalSubject"]
+    safe_region = func.left(case((func.jsonb_typeof(metadata_region) == "string",
+                                  metadata_region.astext), else_=None), 201)
+    candidates = (await db.execute(select(
+        ServiceLocation.id, ServiceLocation.owner,
+        ServiceLocation.operational_status, func.left(Region.name, 201), safe_region,
+    ).outerjoin(Region, and_(Region.id == ServiceLocation.region_id,
+                           Region.company_id == company_id))
+        .where(ServiceLocation.company_id == company_id, *selector, *в_сети())
+        .limit(10001))).all()
+    if len(candidates) > 10000:
+        raise NetworkStateAdmissionExceeded()
+    eligible = [(identifier, status or "unknown")
+                for identifier, owner, status, region_name, fallback in candidates
+                if обслуживаем(owner) and region_matches(region_name or fallback, region)]
+    ids = {identifier for identifier, _ in eligible}
+    boundary = await session_boundary(db, company_id, location_ids=ids)
+    point, native_context = monitor_context(
+        boundary, as_of, now=empty_point if boundary is None else None)
+    last_charges = dict((await db.execute(select(
+        ChargeSession.location_id, func.max(ChargeSession.started_at),
+    ).where(ChargeSession.company_id == company_id,
+            ChargeSession.location_id.in_(ids),
+            ChargeSession.started_at <= point, ChargeSession.energy_kwh > 0)
+        .group_by(ChargeSession.location_id))).all())
+    items = []
+    by_status = dict.fromkeys(СОСТОЯНИЯ, 0)
+    for identifier, status in eligible:
+        last = last_charges.get(identifier)
+        silent_days = _возраст(last, point)
+        mismatch = _mismatch(status, silent_days)
+        if only_problems and not mismatch:
+            continue
+        public_status = status if status in СОСТОЯНИЯ else "unknown"
+        by_status[public_status] += 1
+        items.append({"objectId": identifier, "status": public_status,
+                      "lastChargeAt": session_time_iso(last),
+                      "silentDays": silent_days, "mismatch": mismatch})
+    items.sort(key=lambda item: item["objectId"].encode("utf-8"))
+    return {"items": items,
+            "summary": {"stations": len(items),
+                        "mismatch": sum(item["mismatch"] for item in items),
+                        "byStatus": by_status},
+            "context": {key: native_context[key] for key in (
+                "asOf", "dataThrough", "dataLagHours", "requestedDate", "catalogMode")}
+            | {"boundaryScope": "authorizedOperatedRegion",
+               "availability": "observed" if boundary is not None else "unknown"}}
+
+
 async def network_state(
     db: AsyncSession, company_id: uuid.UUID, *,
     region: str | None = None,
@@ -232,7 +306,7 @@ async def network_state(
             "connectors": s.connectors_count,
             # Расхождение: витрина считает станцию рабочей, а энергии нет неделю.
             # Ради этого списка экран и заводится.
-            "mismatch": статус == "working" and (дней is None or дней > НЕДЕЛЯ),
+            "mismatch": _mismatch(статус, дней),
             "lifeStatus": s.status,
         })
 

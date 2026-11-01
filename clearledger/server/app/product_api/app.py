@@ -20,7 +20,7 @@ from starlette.exceptions import HTTPException
 from app.api_contracts import (AccessContext, PolicyRouter, PrincipalKind, RoutePolicy,
                                create_policy_app, get_access_context, policy_registry)
 from app.security_context import current as current_security_context
-from . import access, budget, contract_create, contract_create_options, dto, files, monitoring
+from . import access, budget, contract_create, contract_create_options, dto, files, monitoring, network_state
 from .contract_create_body import ContractCreateBody
 from app.api_contracts.routing import ResourceStage
 from .queries import Query
@@ -257,6 +257,30 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                })
     async def object_detail(objectId: dto.ObjectId, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("objects", [await query.detail("objects", objectId)]))[0]
+
+    @operation("/monitoring/network-state", "objects", "getNetworkState", dto.NetworkState,
+               extra_scopes={monitoring.SCOPE}, tags=[MONITORING_TAG],
+               summary="Read authorized operated network state",
+               description=(
+                   "Energy profile; current user or approved service, objects:read AND monitoring:read. "
+                   "Current catalog and exact native mismatch; no financial selection or ordering. "
+                   "Summary covers the full authorized operated region after onlyProblems, before page. "
+                   "Exact UTF-8 objectId order; pageSize 1..200, default 50. Live signed continuation "
+                   "binds current rights, filters, pageSize, scoped dataThrough and effective MSK point; "
+                   "changed binding/boundary requires restart (400), revoked access is checked first. "
+                   "No snapshot promise. asOf is ISO date 2000-01-01..today MSK; region has at most "
+                   "20 nonempty exact tokens separated by | (1..200 characters); onlyProblems is "
+                   "true/false. Unknown query keys and nonempty GET bodies return 422. "
+                   "Authorized current-network candidates are capped at 10000 before owner/region; "
+                   "business read and local SQL timeout are 5 seconds, safe 503 on admission/timeout. "
+                   "These are engineering admission limits, not measured capacity or SLA. "
+                   "Current product Problem/Bearer/quota/no-store/X-Request-Id profile applies. "
+                   "Generated Swagger/SDK and consumer migration await independent Root acceptance."
+               ))
+    async def get_network_state(request: Request,
+                                params: Annotated[dto.NetworkStateQuery, QueryParams()],
+                                context: AccessContext = Depends(get_access_context)):
+        return await network_state.read(request, context, params)
 
     @operation("/objects/{objectId}/monitoring", "objects", "getObjectMonitoring", dto.Monitoring,
                extra_scopes={monitoring.SCOPE},

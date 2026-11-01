@@ -349,6 +349,91 @@ class MonitoringQuery(BaseModel):
         return ListQuery.iso_date_only(value)
 
 
+class NetworkStateQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pageSize: int = Field(default=50, ge=1, le=200)
+    cursor: str | None = Field(default=None, min_length=1, max_length=4096)
+    asOf: date | None = Field(default=None, description="ISO date, 2000-01-01..today MSK; current catalog.")
+    region: str | None = Field(default=None, min_length=1, max_length=200,
+                              description="Up to 20 nonempty exact region tokens separated by |.")
+    onlyProblems: bool = Field(default=False, description="Exact native non-financial mismatch only.")
+
+    @field_validator("asOf", mode="before")
+    @classmethod
+    def calendar_date(cls, value):
+        return ListQuery.iso_date_only(value)
+
+    @field_validator("asOf")
+    @classmethod
+    def date_bounds(cls, value):
+        today = _datetime.datetime.now(_datetime.timezone(_datetime.timedelta(hours=3))).date()
+        if value is not None and not date(2000, 1, 1) <= value <= today:
+            raise ValueError("Date outside supported range")
+        return value
+
+    @field_validator("region")
+    @classmethod
+    def exact_regions(cls, value):
+        if value is not None and (len(value.split("|")) > 20 or any(token == "" for token in value.split("|"))):
+            raise ValueError("Invalid region selection")
+        return value
+
+    @field_validator("onlyProblems", mode="before")
+    @classmethod
+    def exact_boolean(cls, value):
+        if type(value) is bool:
+            return value
+        if value not in ("true", "false"):
+            raise ValueError("Use true or false")
+        return value == "true"
+
+
+NetworkStateStatus = Literal["working", "no_link", "disabled", "decommissioned", "on_repair",
+                             "maintenance", "not_working", "unknown"]
+
+
+class NetworkStateItem(DTO):
+    object_id: ObjectId = Field(min_length=1, max_length=40)
+    status: NetworkStateStatus
+    last_charge_at: datetime | None
+    silent_days: int | None = Field(ge=0)
+    mismatch: bool
+
+
+class NetworkStateStatusCounts(DTO):
+    working: int = Field(ge=0)
+    no_link: int = Field(ge=0, alias="no_link")
+    disabled: int = Field(ge=0)
+    decommissioned: int = Field(ge=0)
+    on_repair: int = Field(ge=0, alias="on_repair")
+    maintenance: int = Field(ge=0)
+    not_working: int = Field(ge=0, alias="not_working")
+    unknown: int = Field(ge=0)
+
+
+class NetworkStateSummary(DTO):
+    stations: int = Field(ge=0)
+    mismatch: int = Field(ge=0)
+    by_status: NetworkStateStatusCounts
+
+
+class NetworkStateContext(DTO):
+    as_of: datetime
+    data_through: datetime | None
+    data_lag_hours: float | None = Field(ge=0)
+    requested_date: date | None
+    catalog_mode: Literal["current"]
+    boundary_scope: Literal["authorizedOperatedRegion"]
+    availability: Literal["observed", "unknown"]
+
+
+class NetworkState(DTO):
+    items: list[NetworkStateItem]
+    summary: NetworkStateSummary
+    context: NetworkStateContext
+    next_cursor: str | None
+
+
 class MonitoringWindow(DTO):
     days: int = Field(
         ge=1,
