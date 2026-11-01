@@ -1,12 +1,12 @@
 {
   "format": "partner-writer-scoped-locks-source-only-v1",
-  "status": "PW_R2_P3_SOURCE_FIX_AUTHORED_RECHECK_PENDING_PW_R1_CLOSED_SOURCE_PRESERVED",
+  "status": "PW_R3_P3_QUALITY_ERROR422_ORDER_SOURCE_FIX_AUTHORED_RECHECK_PENDING_PW_R1_R2_CLOSED_SOURCE_PRESERVED",
   "base": "e51876f994172c1d8306b934840541d2700486a6",
-  "source_commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
-  "task_id": "task_ad8c1d20f601",
-  "dispatch_id": "ctx_237d651b9574",
+  "source_commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
+  "task_id": "task_c53be9bcf471",
+  "dispatch_id": "ctx_b4074b0f7abb",
   "run": "run_1e4d8306c273",
-  "workspace": "/home/mag/orca/workspaces/ledger-app/partner-writer-auth-errors-fix-20261101",
+  "workspace": "/home/mag/orca/workspaces/ledger-app/partner-installation-preflight-fix-20261101",
   "scope": {
     "exact7": [
       "clearledger/server/app/routers/partner_admin_router.py",
@@ -33,7 +33,8 @@
     "temporary_hold": "msg_86c386e19e87 hold; partial exact2 diff preserved, no commit/runtime; lifted by msg_e07898532950 on same Task/Dispatch. One identity patch shared an exec with inbox read before hold was sampled; reported transparently as msg_81c6b7c4f874.",
     "successor_authorization": "Live task relays ROOT msg_5397173e27b5 user quote «Разрешаю код, тесты и документацию в отдельных ветках», exact7 msg_0ef070c034f0, ROOT msg_93f6338e53ea same7 PW-R1 fix + negative OAuth definitions + independent recheck; runtime0. Parent history not independently accessed.",
     "temporary_hold_context": "The preceding temporary_hold field describes the initial author run only; no current hold inferred.",
-    "pw_r2_successor_authorization": "Live dispatch relays ROOT msg_1a7c64c0e6db and msg_254271836893: narrow PW-R2 same exact7 + negative oracles + targeted independent recheck, runtime0; direct user permission ROOT msg_5397173e27b5 and scope msg_0ef070c034f0. No ROOT run management/subworkers/pull/rebase."
+    "pw_r2_successor_authorization": "Live dispatch relays ROOT msg_1a7c64c0e6db and msg_254271836893: narrow PW-R2 same exact7 + negative oracles + targeted independent recheck, runtime0; direct user permission ROOT msg_5397173e27b5 and scope msg_0ef070c034f0. No ROOT run management/subworkers/pull/rebase.",
+    "pw_r3_successor_authorization": "Live Dispatch: direct user broader code permission ROOT msg_5397173e27b5; strict legacy readonly preflight decision ROOT msg_39f732a32d74 after question msg_cb581733777e, candidate msg_e2a212b78c70. Same cumulative exact7; RUNTIME0; no subworkers/main ROOT management/pull/rebase/push/PR/merge/deploy."
   },
   "proposal": {
     "path": "/srv/projects/preview/partner-writer-scope-proposal-20261101/proposal.json",
@@ -44,145 +45,151 @@
   "source_files": [
     {
       "path": "clearledger/server/app/routers/partner_admin_router.py",
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
-      "raw_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c",
-      "bytes": 13161,
-      "lines": 235,
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
+      "raw_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
+      "bytes": 14539,
+      "lines": 258,
       "symbols": [
         {
           "symbol": "committed_response",
-          "start": 26,
-          "end": 29,
+          "start": 27,
+          "end": 30,
           "raw_span_sha256": "d2c988b6474b86c7e8b265cfcd7968d26b8499ae732c3325f274383bb26ec65b"
         },
         {
           "symbol": "scope_set",
-          "start": 32,
-          "end": 36,
+          "start": 33,
+          "end": 37,
           "raw_span_sha256": "ac6b385cccad939928e494e59988b4ef77ecc02272d918f7ec33e162a1de162e"
         },
         {
           "symbol": "finish",
-          "start": 39,
-          "end": 43,
+          "start": 40,
+          "end": 44,
           "raw_span_sha256": "a20f4caba376fcb93f9d67e452830cb914f1d2ecd91653aceab00f1a9ea7a25b"
         },
         {
           "symbol": "owned_client",
-          "start": 46,
-          "end": 54,
+          "start": 47,
+          "end": 55,
           "raw_span_sha256": "32e202c4f9bfa9b94e6b75968219ae5b385f63ded0ffead3b30be04271da5566"
         },
         {
           "symbol": "register",
-          "start": 58,
-          "end": 79,
+          "start": 59,
+          "end": 80,
           "raw_span_sha256": "d2e04839ea99776eeea3d4b0e0a938c8c5def6d358f576202c811d9049c479b9"
         },
         {
           "symbol": "register.create",
-          "start": 64,
-          "end": 78,
+          "start": 65,
+          "end": 79,
           "raw_span_sha256": "84d739a08a457ebb70c8c53e64d47673d992061e6d048506b62eb968a6a4eef8"
         },
         {
           "symbol": "client_status",
-          "start": 83,
-          "end": 89,
+          "start": 84,
+          "end": 90,
           "raw_span_sha256": "893d1447035b6b7efea646547a4767e71048ed9c6ed9e9b0fd107338a3d52c27"
         },
         {
           "symbol": "client_status.change",
-          "start": 85,
-          "end": 88,
+          "start": 86,
+          "end": 89,
           "raw_span_sha256": "d88b86eabfd5a2543904ee0a6dd858c49308b5cd124ffae647d9f77793b48bf1"
         },
         {
           "symbol": "issue_credential",
-          "start": 93,
-          "end": 107,
+          "start": 94,
+          "end": 108,
           "raw_span_sha256": "f1b1421e6a678ab052c1c67236ee55038e2e86e8db64626b6a3aa0f8e325bdb5"
         },
         {
           "symbol": "issue_credential.issue",
-          "start": 95,
-          "end": 105,
+          "start": 96,
+          "end": 106,
           "raw_span_sha256": "fafe8c7e9a170628b800bd778e27d832ba84e70669b80f07819beb6eab57ce44"
         },
         {
           "symbol": "revoke_credential",
-          "start": 111,
-          "end": 120,
+          "start": 112,
+          "end": 121,
           "raw_span_sha256": "93419e1b0534a8fed143acc20a888e78ff90d4d7d12789825b8f12d2e80221fb"
         },
         {
           "symbol": "revoke_credential.revoke",
-          "start": 113,
-          "end": 119,
+          "start": 114,
+          "end": 120,
           "raw_span_sha256": "a1192e65336725f3c38f3062dc9f681a0c99433005b132b931ef04fad177ceb1"
         },
         {
-          "symbol": "approve_installation",
+          "symbol": "_installation_selection",
           "start": 124,
-          "end": 180,
-          "raw_span_sha256": "c70d51ba1f0964d66070010aa6426996119b4f94b0220f3b9906a67798753b55"
+          "end": 157,
+          "raw_span_sha256": "0acbf70a3f5950ef3e68fd264ed756664d7e5bbfcad60b8791dacf1ee5a5b2f0"
+        },
+        {
+          "symbol": "approve_installation",
+          "start": 161,
+          "end": 203,
+          "raw_span_sha256": "eb9fe7cbe8a07a2561541cbbf19252631dff90fe06204a37bcb76a76cd3db7aa"
         },
         {
           "symbol": "approve_installation.approve",
-          "start": 127,
-          "end": 179,
-          "raw_span_sha256": "5fa0c4295194255adf5e00fcee6526c0fd6fb1348fe55aa2ed5a85918ba3215f"
+          "start": 164,
+          "end": 202,
+          "raw_span_sha256": "c0088e8d3f5c76bf6ddaa8a44e1930d9c3d097bc64849a2a5b2576f58902c609"
         },
         {
           "symbol": "admin_install",
-          "start": 183,
-          "end": 191,
+          "start": 206,
+          "end": 214,
           "raw_span_sha256": "fc88216927c2830cdeb08c3b8454b5d1edb7c26375ad6ef99ea8e2a27b197414"
         },
         {
           "symbol": "revoke_installation",
-          "start": 195,
-          "end": 201,
+          "start": 218,
+          "end": 224,
           "raw_span_sha256": "5141860bc0248151fd8476f65d243ce5581b83711cf6a27a4768f0fcc044618f"
         },
         {
           "symbol": "revoke_installation.revoke",
-          "start": 197,
-          "end": 200,
+          "start": 220,
+          "end": 223,
           "raw_span_sha256": "f49a5b15a74f3ee513d1ea3aaf0a38193105042bddb27da4b448bf8474623955"
         },
         {
           "symbol": "machine_grant",
-          "start": 205,
-          "end": 220,
+          "start": 228,
+          "end": 243,
           "raw_span_sha256": "a027708d1fd4c7069f985463917a52f6727d281ed46069f2425a89764fb89083"
         },
         {
           "symbol": "machine_grant.approve",
-          "start": 208,
-          "end": 219,
+          "start": 231,
+          "end": 242,
           "raw_span_sha256": "d0467a3915afb44ded079d3f4fb177f585fd1fb195bca14dca3c35121a6ab137"
         },
         {
           "symbol": "revoke_grant",
-          "start": 224,
-          "end": 235,
+          "start": 247,
+          "end": 258,
           "raw_span_sha256": "f10bcd6c343eaf1eab2a7af6adcb71e440f14391026e8758cb61615891004b3e"
         },
         {
           "symbol": "revoke_grant.revoke",
-          "start": 226,
-          "end": 234,
+          "start": 249,
+          "end": 257,
           "raw_span_sha256": "f01c29357f111596eff901245080d6ec0614e06bea647304a5145baca555cd61"
         }
       ],
       "authored_test_functions": [],
-      "all_function_definitions": 21,
+      "all_function_definitions": 22,
       "test_function_definitions": 0
     },
     {
       "path": "clearledger/server/app/routers/partner_oauth_router.py",
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
       "raw_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
       "bytes": 20304,
       "lines": 390,
@@ -326,7 +333,7 @@
     },
     {
       "path": "clearledger/server/app/services/partner_identity.py",
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
       "raw_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
       "bytes": 59546,
       "lines": 1206,
@@ -938,10 +945,10 @@
     },
     {
       "path": "clearledger/server/tests/test_partner_writer_scoped_locks.py",
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
-      "raw_sha256": "744aa378f193b001f8451ba1e065658a2bec0004ec735f1635de851127ff1eaf",
-      "bytes": 20265,
-      "lines": 330,
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
+      "raw_sha256": "b2ca00492ddf2f669306fba5eb1e931df0b081b4f1f4be457dcfdc3784f1ccf2",
+      "bytes": 24337,
+      "lines": 393,
       "symbols": [
         {
           "symbol": "tree",
@@ -1080,6 +1087,30 @@
           "start": 299,
           "end": 330,
           "raw_span_sha256": "7eee4bdf72f7b72a45f1559138c4c7fbef38e6f74fbfc9851ac1b0d59d16f733"
+        },
+        {
+          "symbol": "test_installation_preflight_clean_guard_precedes_actor_and_all_sql",
+          "start": 333,
+          "end": 343,
+          "raw_span_sha256": "00d8d958077a6bfed16b9cf37987d8f675783c4e75be1d7c2e841eb33930c871"
+        },
+        {
+          "symbol": "test_installation_single_policy_preserves_legacy_error_precedence",
+          "start": 346,
+          "end": 363,
+          "raw_span_sha256": "36c98d9ded9205187436f320c0cb43aa2fa0077c35c23f9c1afa89be88266025"
+        },
+        {
+          "symbol": "test_installation_closed_selection_revalidated_after_one_complete_plan",
+          "start": 366,
+          "end": 382,
+          "raw_span_sha256": "2e535720545f9470d5f5769897ae9e9af5566181ba51d0f099863635a8eaeea2"
+        },
+        {
+          "symbol": "test_installation_revalidation_retains_current_native_after_query_waits",
+          "start": 385,
+          "end": 393,
+          "raw_span_sha256": "80a51c0a365fcf6acd541a6e0eb1fb4410bf59264db8d6a2b521d7af864b3fc3"
         }
       ],
       "authored_test_functions": [
@@ -1100,335 +1131,465 @@
         "test_final_callbacks_and_native_checks_never_acquire_another_plan",
         "test_protocol_nonce_and_subject_uniqueness_are_preserved",
         "test_absent_members_roles_and_parent_pointer_drift_are_explicit",
-        "test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields"
+        "test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields",
+        "test_installation_preflight_clean_guard_precedes_actor_and_all_sql",
+        "test_installation_single_policy_preserves_legacy_error_precedence",
+        "test_installation_closed_selection_revalidated_after_one_complete_plan",
+        "test_installation_revalidation_retains_current_native_after_query_waits"
       ],
-      "all_function_definitions": 23,
-      "test_function_definitions": 18
+      "all_function_definitions": 27,
+      "test_function_definitions": 22
     },
     {
       "path": "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
-      "raw_sha256": "a85f471f9f1fcdefe5a1c50d8b8479dd08ad2ee9c6211baaee35c8473876fb15",
-      "bytes": 58540,
-      "lines": 966,
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
+      "raw_sha256": "756372a2bab417a81bb6fc30bdaf4e85e2ce6b68f8dc5d621624bb6575163819",
+      "bytes": 74481,
+      "lines": 1205,
       "symbols": [
         {
           "symbol": "pid",
-          "start": 51,
-          "end": 52,
+          "start": 54,
+          "end": 55,
           "raw_span_sha256": "b5b347af720a97b5321a593b215caba9b424ec1fec0d96fd23a0e710be77b8ae"
         },
         {
           "symbol": "contender",
-          "start": 56,
-          "end": 80,
+          "start": 59,
+          "end": 83,
           "raw_span_sha256": "27bae1333b81d47f3c5a8fe2889d5d3f1dcc06241f4e7c6494aeb2abf1316a58"
         },
         {
           "symbol": "contender.record",
-          "start": 63,
-          "end": 67,
+          "start": 66,
+          "end": 70,
           "raw_span_sha256": "601d5f1ad70a47d3f543f2e2149e906d2f579a1e6ff72a4b5e715f8af015e585"
         },
         {
           "symbol": "observed_wait",
-          "start": 83,
-          "end": 94,
+          "start": 86,
+          "end": 97,
           "raw_span_sha256": "cec54dd383389154fee493f864dc46dd87789b3f70fab7588931dba85f3f03e4"
         },
         {
           "symbol": "token_rows",
-          "start": 97,
-          "end": 103,
+          "start": 100,
+          "end": 106,
           "raw_span_sha256": "0838b959a4a03b4da91025abec4e97c0c15687a023f8d39847675e9535ef5a98"
         },
         {
           "symbol": "counts",
-          "start": 106,
-          "end": 112,
+          "start": 109,
+          "end": 115,
           "raw_span_sha256": "d081040acd921a4d3efc9f5fb55934e0f4c32aac9703881bbecce9a9b3f9c043"
         },
         {
           "symbol": "test_real_seam_same_session_optionengine_original_cap_and_fresh_resources",
-          "start": 115,
-          "end": 136,
+          "start": 118,
+          "end": 139,
           "raw_span_sha256": "b60f656306ebda93d6f302fe3047cb59f62b4b1fb563703fd187787842eafa79"
         },
         {
           "symbol": "test_issued_cap_not_transferable_to_another_real_session_or_after_root_end",
-          "start": 139,
-          "end": 151,
+          "start": 142,
+          "end": 154,
           "raw_span_sha256": "2f64a57f3584b4dc93e0489542d056077ebf56cf27fc420a5cfb1041a66053ef"
         },
         {
           "symbol": "test_access_rechecks_actual_current_authority_after_client_wait",
-          "start": 155,
-          "end": 180,
+          "start": 158,
+          "end": 183,
           "raw_span_sha256": "864d18702f8e1f16e58a46cfba9394a3a0e771bf3b30e5fa68ca867a82b5fa2a"
         },
         {
           "symbol": "test_access_expiry_after_real_family_row_wait",
-          "start": 184,
-          "end": 220,
+          "start": 187,
+          "end": 223,
           "raw_span_sha256": "ac074b6ec5e005e4aefb07a65dc0fc14dc4f851884c23ebdc8de9a90d7b721ee"
         },
         {
           "symbol": "test_access_expiry_after_real_family_row_wait.Clock",
-          "start": 212,
-          "end": 214,
+          "start": 215,
+          "end": 217,
           "raw_span_sha256": "cfb3c9f8fdc4b0fa2e25c255d82908af59ffbc16d8448a1c03f68b3f549b9314"
         },
         {
           "symbol": "test_access_expiry_after_real_family_row_wait.Clock.now",
-          "start": 214,
-          "end": 214,
+          "start": 217,
+          "end": 217,
           "raw_span_sha256": "470a376adf84ee260d9185f2243c1a7338f463ed66b0dee5cb13b1390a10e294"
         },
         {
           "symbol": "test_family_then_old_token_rotation_and_durable_reuse_error",
-          "start": 223,
-          "end": 245,
+          "start": 226,
+          "end": 248,
           "raw_span_sha256": "480850c24606592209cd2adc6b6f9e134c13b0d0ed3b5b9e088de4bf73adeea1"
         },
         {
           "symbol": "test_code_single_use_and_nonce_request_single_completion",
-          "start": 248,
-          "end": 261,
+          "start": 251,
+          "end": 264,
           "raw_span_sha256": "c976a8d5c64e214c878b3d6863325cd66ddc2b9cb9cc0eed16dd5e6ad5499e6b"
         },
         {
           "symbol": "test_real_protocol_principals_do_not_construct_core_users",
-          "start": 265,
-          "end": 282,
+          "start": 268,
+          "end": 285,
           "raw_span_sha256": "0873dbdea5557467fb8302b8aad83c209c0b840f09c6d369130aec50ac4e48e9"
         },
         {
           "symbol": "test_revocation_unknown_repeated_and_pre_revoked_grant_remain_idempotent",
-          "start": 285,
-          "end": 296,
+          "start": 288,
+          "end": 299,
           "raw_span_sha256": "7548c082f03566302fb23908bca00bf3e53e30cd083d0784ec0a3aabd373d196"
         },
         {
           "symbol": "test_native_actual_bearer_expiry_after_nonce_wait",
-          "start": 300,
-          "end": 335,
+          "start": 303,
+          "end": 338,
           "raw_span_sha256": "c9616f2e248b5db2e4c7cf87bd27bf5258660e36b51877181771d6d19ef51d4b"
         },
         {
           "symbol": "test_native_actual_bearer_expiry_after_nonce_wait.Clock",
-          "start": 323,
-          "end": 325,
+          "start": 326,
+          "end": 328,
           "raw_span_sha256": "07a3fe8fced4296bb9149a3e221fb0738a703dcf93e0dfb58a5bbcd6be0a11a5"
         },
         {
           "symbol": "test_native_actual_bearer_expiry_after_nonce_wait.Clock.now",
-          "start": 325,
-          "end": 325,
+          "start": 328,
+          "end": 328,
           "raw_span_sha256": "df6fd1e458a043eada8a17427b973f794787f9c5a15f9e79186cef669007edd0"
         },
         {
           "symbol": "test_real_visit_bearer_is_rejected_before_identity_writer",
-          "start": 338,
-          "end": 352,
+          "start": 341,
+          "end": 355,
           "raw_span_sha256": "62ae5c7af0cfa514166b41513f69c50a9f093ab1d5b482483fe97448d3e49f66"
         },
         {
           "symbol": "test_native_membership_role_and_session_after_typed_wait",
-          "start": 356,
-          "end": 379,
+          "start": 359,
+          "end": 382,
           "raw_span_sha256": "19768f2aad6444ffe289e3c2a0d343a4762352a242b4926da6c06cba0215c718"
         },
         {
           "symbol": "test_missing_ca_conflict_rolls_back_whole_root_without_other_install_key",
-          "start": 382,
-          "end": 401,
+          "start": 385,
+          "end": 404,
           "raw_span_sha256": "4d5efc1ad722c844f0a208e9d345922d299c0d578a6077951e9a8cf84f262878"
         },
         {
           "symbol": "test_same_client_blocks_and_different_client_progresses_without_global_lock",
-          "start": 404,
-          "end": 419,
+          "start": 407,
+          "end": 422,
           "raw_span_sha256": "dcd235bbf7a3954c91d6a1cd01a6f792cb9ba846a9d960c4b5a7552e38ed606b"
         },
         {
           "symbol": "test_conditional_get_writes_and_self_grant_revoke_without_admin",
-          "start": 422,
-          "end": 439,
+          "start": 425,
+          "end": 442,
           "raw_span_sha256": "1ce54a682d4b9b80cf17e05706f10282dafd36cae49c9a2a64f7521bf30383f1"
         },
         {
           "symbol": "test_post_token_flush_denial_rolls_back_family_token_code_consumption",
-          "start": 442,
-          "end": 458,
+          "start": 445,
+          "end": 461,
           "raw_span_sha256": "79baf168cb64eae327bda141c50e2e3443eaf187de887f6d46e96f74e7e00242"
         },
         {
           "symbol": "test_post_token_flush_denial_rolls_back_family_token_code_consumption.after_token_flush",
-          "start": 447,
-          "end": 452,
+          "start": 450,
+          "end": 455,
           "raw_span_sha256": "d815a387c12c7f10ba96060ad67bcd63246a59e39bb7c730bf4e3bf643f5c117"
         },
         {
           "symbol": "test_cancel_at_typed_wait_and_rollback_leave_no_partial_installation",
-          "start": 461,
-          "end": 477,
+          "start": 464,
+          "end": 480,
           "raw_span_sha256": "e953909b0adbfd7f5c6d191323a91523fcf80e7c61c9627f932896dbfde8bc2b"
         },
         {
           "symbol": "test_ca_row_precedes_installation_row_under_actual_http_wait",
-          "start": 480,
-          "end": 496,
+          "start": 483,
+          "end": 499,
           "raw_span_sha256": "2b9bd2135cbd59444536bbc1db8db2c7f331c49c067175561aab992c3708b6a2"
         },
         {
           "symbol": "test_consent_get_actual_request_wait_rechecks_single_use_and_owner",
-          "start": 500,
-          "end": 519,
+          "start": 503,
+          "end": 522,
           "raw_span_sha256": "fa2c2be21c0a80a43479c16aa2c60dc1d8ada87e801dbd44fb12dcdfec94eefb"
         },
         {
           "symbol": "test_code_update_wait_rechecks_current_deadlines_and_consumption",
-          "start": 523,
-          "end": 540,
+          "start": 526,
+          "end": 543,
           "raw_span_sha256": "4c3ff036e3a0895223c5728f2d0f97777444a3f2218e3224661d5100e60e8657"
         },
         {
           "symbol": "test_selected_credential_does_not_replace_original_family_credential",
-          "start": 543,
-          "end": 554,
+          "start": 546,
+          "end": 557,
           "raw_span_sha256": "529a1ab00b708317a9d5efa7740e2daccdf70418e6aec50fe8e91aa2d6353ba6"
         },
         {
           "symbol": "test_original_b1_borrowed_connection_root_rejects_late_plan",
-          "start": 557,
-          "end": 573,
+          "start": 560,
+          "end": 576,
           "raw_span_sha256": "c288511c898be8a1097c251c351b4915e4723680a59fd2d1daeb8a09415f0293"
         },
         {
           "symbol": "test_real_reader_cap_blocks_actual_credential_revoke_until_root_end",
-          "start": 576,
-          "end": 595,
+          "start": 579,
+          "end": 598,
           "raw_span_sha256": "1ff089e5bfe300e7b839ade923092821d5414fa85890261129fb7b4a592df61d"
         },
         {
           "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets",
-          "start": 598,
-          "end": 622,
+          "start": 601,
+          "end": 625,
           "raw_span_sha256": "8e39900ea283cb14be18c18aa13c99d9786eb1154f4f4c3a58ebf11bfb325092"
         },
         {
           "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets.Clock",
-          "start": 603,
-          "end": 605,
+          "start": 606,
+          "end": 608,
           "raw_span_sha256": "8ef88b28e28afc0aa1e04d44b17572b1063ad97dca884545ada35a8f84c19224"
         },
         {
           "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets.Clock.now",
-          "start": 605,
-          "end": 605,
+          "start": 608,
+          "end": 608,
           "raw_span_sha256": "00ff8ad38ae59b7f7cc242ed26c01dfee394c893bef9356fe7c088f5b58fa248"
         },
         {
           "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets.expire_after_insert",
-          "start": 607,
-          "end": 610,
+          "start": 610,
+          "end": 613,
           "raw_span_sha256": "86a7ca8307a1c35cb7f44c0a7f8c836767c1ec7da144664edd38b2710db9802c"
         },
         {
           "symbol": "test_revoke_ignored_oauth_fields_only_discover_and_revoke_requested_family",
-          "start": 629,
-          "end": 680,
+          "start": 632,
+          "end": 683,
           "raw_span_sha256": "c95dde93e753cfa197232a3947707678f2e483b48489a4e83cd9132123a7e07e"
         },
         {
           "symbol": "test_revoke_ignored_oauth_fields_only_discover_and_revoke_requested_family.inspect_real_plan",
-          "start": 653,
-          "end": 667,
+          "start": 656,
+          "end": 670,
           "raw_span_sha256": "a45efab23ea212b3488c5ee1abbd94c144f11b15789fbc762f9e4a5e33944b15"
         },
         {
           "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql",
-          "start": 689,
-          "end": 755,
+          "start": 692,
+          "end": 758,
           "raw_span_sha256": "e1b97eaa703f718dd9fea721959c076854dffe31a9680267a68c9f9bb861124d"
         },
         {
           "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql.forbidden",
-          "start": 710,
-          "end": 712,
+          "start": 713,
+          "end": 715,
           "raw_span_sha256": "37bc31035a9db18ebe178fbd8e20cd220ad31b42c161fed54339cb68f2af2e71"
         },
         {
           "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql.record",
-          "start": 713,
-          "end": 714,
+          "start": 716,
+          "end": 717,
           "raw_span_sha256": "cc133ca670c304da5cf2dd2e9dab1e918d88d74b96b603f49968e404128eaf83"
         },
         {
           "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql.observe_validation",
-          "start": 716,
-          "end": 726,
+          "start": 719,
+          "end": 729,
           "raw_span_sha256": "96d2bf70350549540fe9a927d409a3d7b7ba5b02819e8329fa5a811536b73e26"
         },
         {
           "symbol": "test_unknown_token_and_malformed_basic_keep_original_401_challenge",
-          "start": 759,
-          "end": 776,
+          "start": 762,
+          "end": 779,
           "raw_span_sha256": "6913caf9e860bfdca4199852e7f9897ce03156d18a2a7326839d906e74497b3b"
         },
         {
           "symbol": "test_unknown_token_and_malformed_basic_keep_original_401_challenge.forbidden",
-          "start": 762,
-          "end": 764,
+          "start": 765,
+          "end": 767,
           "raw_span_sha256": "5b66b7d8222fe71bd83686c34f1bb8052c786f6936972e7d7f3a3ad0bee37e20"
         },
         {
           "symbol": "test_identity_free_unexpected_nonerror_rolls_back_real_root",
-          "start": 782,
-          "end": 794,
+          "start": 785,
+          "end": 797,
           "raw_span_sha256": "9e420a91e12edb37a09d52c05645632d21a122fae29366c985a012bad58289d4"
         },
         {
           "symbol": "test_identity_free_unexpected_nonerror_rolls_back_real_root.wrong_result",
-          "start": 783,
-          "end": 784,
+          "start": 786,
+          "end": 787,
           "raw_span_sha256": "5940fc394fe195e6639059c4a44dba4077e124df898104ba4050d6649e310adb"
         },
         {
           "symbol": "test_identity_free_unexpected_nonerror_rolls_back_real_root.forbidden",
-          "start": 785,
-          "end": 786,
+          "start": 788,
+          "end": 789,
           "raw_span_sha256": "de2a86d9f2865bddb0c472b9be2fcdfa7c26ac7004aaf926595990e244c7435b"
         },
         {
           "symbol": "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
-          "start": 804,
-          "end": 862,
+          "start": 807,
+          "end": 865,
           "raw_span_sha256": "1d9107ad4c6d96d400972925173df93326371cd4b8b1a6475642d41a17453b7e"
         },
         {
           "symbol": "test_identity_present_controls_use_real_composer_once_and_canonical_auth.inspect_real_plan",
-          "start": 822,
-          "end": 837,
+          "start": 825,
+          "end": 840,
           "raw_span_sha256": "fec1991988084efcddf190400e0604f59c9962bd1843237eeaa9f0fae2b8b43f"
         },
         {
           "symbol": "test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors",
-          "start": 867,
-          "end": 906,
+          "start": 870,
+          "end": 909,
           "raw_span_sha256": "fb32af22ad5965d5d451643e8bf368534a36dcc617d27f57519855975e360506"
         },
         {
           "symbol": "test_token_branch_ignores_fields_of_other_protocol_branches",
-          "start": 911,
-          "end": 966,
+          "start": 914,
+          "end": 969,
           "raw_span_sha256": "1f3df095ebb239007a207f908494a96f2ac70b9b55545cd73f0542824bcd41f8"
         },
         {
           "symbol": "test_token_branch_ignores_fields_of_other_protocol_branches.inspect_real_plan",
-          "start": 940,
-          "end": 956,
+          "start": 943,
+          "end": 959,
           "raw_span_sha256": "a48ee74f4002bad52dfdc9a0c65f26b6e2ea39c17fcf156204d889e14798e810"
+        },
+        {
+          "symbol": "test_installation_client_error_precedes_resource_parse_without_plan",
+          "start": 975,
+          "end": 998,
+          "raw_span_sha256": "c9fa2a7e77d750646390cc1329ec37af7e02f558235d5ad57f1c44ff545275dc"
+        },
+        {
+          "symbol": "test_installation_client_error_precedes_resource_parse_without_plan.trace",
+          "start": 987,
+          "end": 989,
+          "raw_span_sha256": "df8ffd100610d4e541c34fc2ad32183d49bf4bdfa62f9ab820cae9b85ea095eb"
+        },
+        {
+          "symbol": "test_installation_location_error_precedes_malformed_uuid_without_plan",
+          "start": 1002,
+          "end": 1014,
+          "raw_span_sha256": "1d8e9bd5fb6db448848d040d629927ceabba73dd24d755a6b14885de5453c744"
+        },
+        {
+          "symbol": "test_installation_location_error_precedes_malformed_uuid_without_plan.trace",
+          "start": 1005,
+          "end": 1007,
+          "raw_span_sha256": "df8ffd100610d4e541c34fc2ad32183d49bf4bdfa62f9ab820cae9b85ea095eb"
+        },
+        {
+          "symbol": "test_installation_resource_iteration_mode_type_ownership_order",
+          "start": 1018,
+          "end": 1032,
+          "raw_span_sha256": "c23952107aaa9d155499b63d90d9b010af610c7459f298ba81bb82ab5748599d"
+        },
+        {
+          "symbol": "test_installation_all_uuid_resource_kinds_keep_type_then_ownership_error",
+          "start": 1037,
+          "end": 1045,
+          "raw_span_sha256": "82a5c6dd6a903dcf07ae5ea519cc47d1a81380c5b4c6fed8240f3caab70c7dd4"
+        },
+        {
+          "symbol": "test_installation_valid_selection_one_real_complete_plan_and_exact_replacement",
+          "start": 1049,
+          "end": 1090,
+          "raw_span_sha256": "b615deaa2c387fb8456578e3fcd4456a51f2981cdeded00b5db01bd02ec18835"
+        },
+        {
+          "symbol": "test_installation_valid_selection_one_real_complete_plan_and_exact_replacement.checked",
+          "start": 1055,
+          "end": 1060,
+          "raw_span_sha256": "8cdf6246caf99ace16c9e231978e761c784da968267702c7cd24144e58974da0"
+        },
+        {
+          "symbol": "test_installation_valid_selection_one_real_complete_plan_and_exact_replacement.inspect_real_plan",
+          "start": 1061,
+          "end": 1073,
+          "raw_span_sha256": "b05cff84856ecbbcc0e75b0a575be735a34551e1b078ddf8a9e8f408cadf5afd"
+        },
+        {
+          "symbol": "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load",
+          "start": 1094,
+          "end": 1123,
+          "raw_span_sha256": "bacf2aaab17360646102afc5cb20fd5f95bc951485e7235243e93cba8fd4387d"
+        },
+        {
+          "symbol": "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load.sql",
+          "start": 1106,
+          "end": 1106,
+          "raw_span_sha256": "a3745e8b330c86be2035f19fa2de38bf72f1071fdb895c53c438d76b29ae0a42"
+        },
+        {
+          "symbol": "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load.flush",
+          "start": 1107,
+          "end": 1107,
+          "raw_span_sha256": "fb02b7a4b9dfabc4453e8b72f036b658d880f617d9c4c7214969295be3b09e17"
+        },
+        {
+          "symbol": "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load.expired",
+          "start": 1108,
+          "end": 1109,
+          "raw_span_sha256": "15246662b1e21113486934c307f9baa37ccf2a05523be3fa0703067a30e28e03"
+        },
+        {
+          "symbol": "test_installation_native_and_admin_gate_precede_mixed_invalid_selection",
+          "start": 1127,
+          "end": 1140,
+          "raw_span_sha256": "34c1c7ccc906330d7d4d7df971f72fd6995d5d2b34a59732c68b44f7151c8c00"
+        },
+        {
+          "symbol": "test_installation_native_and_admin_gate_precede_mixed_invalid_selection.trace",
+          "start": 1131,
+          "end": 1133,
+          "raw_span_sha256": "df8ffd100610d4e541c34fc2ad32183d49bf4bdfa62f9ab820cae9b85ea095eb"
+        },
+        {
+          "symbol": "test_installation_preflight_never_authorizes_after_wait",
+          "start": 1145,
+          "end": 1205,
+          "raw_span_sha256": "c7e6419ed4d25f5b0eb329ee3180e92909cbfd9161b0bd1db6f543565755382f"
+        },
+        {
+          "symbol": "test_installation_preflight_never_authorizes_after_wait.validate",
+          "start": 1151,
+          "end": 1153,
+          "raw_span_sha256": "4668191978d2a535243f1ed20b0c5991f0edf48cfea3eeafd6dad9ff80a1fd5d"
+        },
+        {
+          "symbol": "test_installation_preflight_never_authorizes_after_wait.acquire",
+          "start": 1155,
+          "end": 1160,
+          "raw_span_sha256": "1860bbbabc006f72d62b6ef07c8f1b17c0938479eedf8cd205542c346a2238fd"
+        },
+        {
+          "symbol": "test_installation_preflight_never_authorizes_after_wait.acquire.record",
+          "start": 1157,
+          "end": 1157,
+          "raw_span_sha256": "c7a1c0e37b0d6dbb9c444d78ca24338cad39f2f7978580113560578de87e5f3a"
+        },
+        {
+          "symbol": "test_installation_preflight_never_authorizes_after_wait.Clock",
+          "start": 1185,
+          "end": 1187,
+          "raw_span_sha256": "cfb3c9f8fdc4b0fa2e25c255d82908af59ffbc16d8448a1c03f68b3f549b9314"
+        },
+        {
+          "symbol": "test_installation_preflight_never_authorizes_after_wait.Clock.now",
+          "start": 1187,
+          "end": 1187,
+          "raw_span_sha256": "470a376adf84ee260d9185f2243c1a7338f463ed66b0dee5cb13b1390a10e294"
         }
       ],
       "authored_test_functions": [
@@ -1461,10 +1622,18 @@
         "test_identity_free_unexpected_nonerror_rolls_back_real_root",
         "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
         "test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors",
-        "test_token_branch_ignores_fields_of_other_protocol_branches"
+        "test_token_branch_ignores_fields_of_other_protocol_branches",
+        "test_installation_client_error_precedes_resource_parse_without_plan",
+        "test_installation_location_error_precedes_malformed_uuid_without_plan",
+        "test_installation_resource_iteration_mode_type_ownership_order",
+        "test_installation_all_uuid_resource_kinds_keep_type_then_ownership_error",
+        "test_installation_valid_selection_one_real_complete_plan_and_exact_replacement",
+        "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load",
+        "test_installation_native_and_admin_gate_precede_mixed_invalid_selection",
+        "test_installation_preflight_never_authorizes_after_wait"
       ],
-      "all_function_definitions": 50,
-      "test_function_definitions": 30
+      "all_function_definitions": 70,
+      "test_function_definitions": 38
     }
   ],
   "unchanged_dependency_pins": [
@@ -3513,7 +3682,7 @@
     "rows": "Company -> App -> Client -> Users -> Role -> Member -> CA -> Installation -> Grant -> Credentials -> Family -> Token -> Request/Code -> known reference rows. UPDATE for mutated rows, SHARE for authority, never KEY SHARE; company/pointer predicates before lock; populate_existing.",
     "set_drift": "Complete original credential IDs and installation location/profile/item snapshots are scalar-discovered and compared after parent locks; drift rolls back whole root before new rows/keys.",
     "seam": {
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
       "path": "clearledger/server/app/services/partner_identity.py",
       "symbol": "verify_locked_partner_access",
       "start": 1148,
@@ -3523,7 +3692,7 @@
     },
     "non_portable": "Issued capability proves issuance/lifetime/logical coverage, NOT row locks or ACL; returned VerifiedPartnerToken is fresh data, never portable write authority. Caller owns canonical rows on same actual session/root and repeats seam after waits.",
     "native": {
-      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
       "path": "clearledger/server/app/services/partner_identity.py",
       "symbol": "_native_authority",
       "start": 431,
@@ -3550,150 +3719,151 @@
       "actual_get_db_or_pg_target_isolation": "UNCONFIRMED; ROOT must confirm/enforce READ COMMITTED before runtime admission"
     },
     "protocol_discovery": "For identity-present requests: trusted server mutation selects code/refresh_token/grant_id/revoke token only; full original single typed plan and canonical rows unchanged byte/AST from3bcb. Ignored fields remain ignored, no payload rewrite/allowlist/rejection. Identity-absent requests use the strictly negative canonical Authlib validation described in pw_r2_successor, never an unlocked writer.",
-    "negative_preflight": "Clean Session required before parsing; same extract_basic_authorization(headers)[0] OR payload.client_id. Only when both falsy, inside no_autoflush call original canonical server token/endpoint response with no writer, forward only actual error result with durable=False for whole-root rollback. Reject unexpected tuple/non-error/dirty result with explicit rollback and ScopedLockError. No hardcoded OAuth status/code/challenge/dispatch policy. All identity-present requests including bad-secret/nonempty unknown Basic usernames enter original one full composer. checkpoint and RevokeEndpoint writer guards unchanged."
+    "negative_preflight": "Clean Session required before parsing; same extract_basic_authorization(headers)[0] OR payload.client_id. Only when both falsy, inside no_autoflush call original canonical server token/endpoint response with no writer, forward only actual error result with durable=False for whole-root rollback. Reject unexpected tuple/non-error/dirty result with explicit rollback and ScopedLockError. No hardcoded OAuth status/code/challenge/dispatch policy. All identity-present requests including bad-secret/nonempty unknown Basic usernames enter original one full composer. checkpoint and RevokeEndpoint writer guards unchanged.",
+    "installation_preflight": "First clean guard before actor dereference/admin/SQL; one shared no_autoflush MVCC validator preserves original e518 admin/client/location/resource error precedence, returns frozen IDs for complete upfront plan. After actual composer rows/native checkpoint, repeat same validator with writer.actor/fresh client/scalar refs, retain current checkpoint before first DML and finish. No plan reacquisition/late keys, unchanged helper drift/CA winner/whole sets. Extra readonly queries not measured."
   },
   "per_17_branches": [
     {
       "id": 1,
       "branch": "admin.register",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "register",
-        "start": 58,
-        "end": 79,
+        "start": 59,
+        "end": 80,
         "raw_span_sha256": "d2e04839ea99776eeea3d4b0e0a938c8c5def6d358f576202c811d9049c479b9",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Newborn App X + Client X allocated before acquire.",
       "row_protocol": "Company/App/Client/User/Role/Member authority; new App flush -> Client flush -> final current native/admin checks -> commit.",
       "current_authority": "Raw bearer decode + public native policy/admin repeated after FK flush.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 2,
       "branch": "admin.client_status",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "client_status",
-        "start": 83,
-        "end": 89,
+        "start": 84,
+        "end": 90,
         "raw_span_sha256": "893d1447035b6b7efea646547a4767e71048ed9c6ed9e9b0fd107338a3d52c27",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
       "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
       "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 3,
       "branch": "admin.issue_credential",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "issue_credential",
-        "start": 93,
-        "end": 107,
+        "start": 94,
+        "end": 108,
         "raw_span_sha256": "f1b1421e6a678ab052c1c67236ee55038e2e86e8db64626b6a3aa0f8e325bdb5",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
       "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
       "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 4,
       "branch": "admin.revoke_credential",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "revoke_credential",
-        "start": 111,
-        "end": 120,
+        "start": 112,
+        "end": 121,
         "raw_span_sha256": "93419e1b0534a8fed143acc20a888e78ff90d4d7d12789825b8f12d2e80221fb",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
       "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
       "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 5,
       "branch": "admin.approve_installation",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "approve_installation",
-        "start": 124,
-        "end": 180,
-        "raw_span_sha256": "c70d51ba1f0964d66070010aa6426996119b4f94b0220f3b9906a67798753b55",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "start": 161,
+        "end": 203,
+        "raw_span_sha256": "eb9fe7cbe8a07a2561541cbbf19252631dff90fe06204a37bcb76a76cd3db7aa",
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; target Company S; existing/preallocated Installation X; original/new resource references scalar-discovered.",
-      "row_protocol": "CA UPDATE before Installation UPDATE; absent CA INSERT ON CONFLICT -> actual-id scalar compare -> whole rollback409 on winner drift BEFORE different CA/install lock; full set replacement/FK flush -> final check.",
-      "current_authority": "Original target admin, client/scopes/resources; exact selected reference rows SHARE by company+id; old/current selection drift aborts without late key.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "row_protocol": "Clean readonly original-policy preflight -> one full typed plan/canonical rows/native -> same validator with writer.actor/current scalar references -> current native checkpoint -> original CA/Installation/whole-set write protocol unchanged. CA UPDATE before Installation UPDATE; actual winner compare/whole rollback409 before different lock; no second plan or late key.",
+      "current_authority": "One validator: admin -> enabled client/scopes subset -> locations -> per dictionary kind mode/UUID/ownership; first clean guard before expired actor/SQL, no_autoflush MVCC only. Fresh current held-row validation repeated after waits; None ALL/[] EMPTY, opaque objects/UUID others/defaults/duplicates preserved. Additional queries unmeasured; no M15 acceptance.",
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 6,
       "branch": "admin.revoke_installation",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "revoke_installation",
-        "start": 195,
-        "end": 201,
+        "start": 218,
+        "end": 224,
         "raw_span_sha256": "5141860bc0248151fd8476f65d243ce5581b83711cf6a27a4768f0fcc044618f",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; actual Installation X; owner/target companies S.",
       "row_protocol": "Company -> App -> Client -> User -> Role -> Member -> CA -> Installation; revoke Installation UPDATE; machine new Grant flush after canonical authority.",
       "current_authority": "Original native target admin; machine confidential client/scope restrictions preserved; no fake user as service principal.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 7,
       "branch": "admin.machine_grant",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "machine_grant",
-        "start": 205,
-        "end": 220,
+        "start": 228,
+        "end": 243,
         "raw_span_sha256": "a027708d1fd4c7069f985463917a52f6727d281ed46069f2425a89764fb89083",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; actual Installation S; owner/target companies S.",
       "row_protocol": "Company -> App -> Client -> User -> Role -> Member -> CA -> Installation; revoke Installation UPDATE; machine new Grant flush after canonical authority.",
       "current_authority": "Original native target admin; machine confidential client/scope restrictions preserved; no fake user as service principal.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 8,
       "branch": "admin.revoke_grant",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "revoke_grant",
-        "start": 224,
-        "end": 235,
+        "start": 247,
+        "end": 258,
         "raw_span_sha256": "f10bcd6c343eaf1eab2a7af6adcb71e440f14391026e8758cb61615891004b3e",
-        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+        "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. Grant grantee User/Member/current Role S when present; native actor User S; N only original nonself.",
       "row_protocol": "CA -> Installation SHARE -> Grant UPDATE. Self branch has NO new admin/member eligibility gate.",
       "current_authority": "Actual native bearer/session after waits; original self vs nonself admin branch retained, no live_grant requirement.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 9,
       "branch": "oauth.authorize",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "authorize",
         "start": 106,
@@ -3704,13 +3874,13 @@
       "full_original_plan": "App/Client/actual owner Company S; no chosen User/company/installation.",
       "row_protocol": "Full typed plan + canonical parents BEFORE get_consent_grant/nonce; Request INSERT flush; final checkpoint -> commit.",
       "current_authority": "Actual public client/App and existing Authlib redirect/scope/PKCE/nonce; no fake Core actor.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 10,
       "branch": "consent.get_request",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "get_request",
         "start": 282,
@@ -3721,13 +3891,13 @@
       "full_original_plan": "App/Client/owner Company/native User S; original Request pointer/owner discovered.",
       "row_protocol": "Canonical parents -> Request UPDATE -> bind user; nonce callback may lock bigint; final native check/flush -> commit; GET WRITES.",
       "current_authority": "Raw native JWT/public native user/visit/ordinary policy repeated after Request/nonce/FK waits; displayed all-company choices remain advisory.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 11,
       "branch": "consent.approve",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "approve",
         "start": 311,
@@ -3738,13 +3908,13 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse. Discovery selects ONLY body.companyId; existing chosen Installation S.",
       "row_protocol": "Canonical parent rows -> Request UPDATE -> nonce wait -> new Grant flush -> nonce/code -> Request finished flush -> final native/live check.",
       "current_authority": "Same selected-company eligible_scopes before grant and after nonce; current native claims supply code auth_time/tv/parent exp; no contracts:create/profile authority.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 12,
       "branch": "consent.deny",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "deny",
         "start": 368,
@@ -3755,13 +3925,13 @@
       "full_original_plan": "App/Client/owner Company/native User S; original Request user/client pointers.",
       "row_protocol": "Parents -> Request UPDATE/bind -> Authlib deny response/nonce -> finished flush -> final checkpoint.",
       "current_authority": "Current native ordinary policy; Request owner/expiry/finished and actual client; no chosen-company ACL introduced.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 13,
       "branch": "oauth.token-code",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
         "start": 168,
@@ -3772,13 +3942,13 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Canonical parents/Grant/Credentials SHARE -> original Code UPDATE -> new Family -> new Token flush -> consumed Code; OIDC after-response subject callback -> final checkpoint/flush.",
       "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 14,
       "branch": "oauth.token-refresh",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
         "start": 168,
@@ -3789,13 +3959,13 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Canonical parents/Grant/Credentials SHARE -> Family UPDATE -> old Token UPDATE; issue new token -> mark old refresh used. Reuse family.revoked flush deliberately survives invalid_grant response.",
       "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 15,
       "branch": "oauth.token-machine",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
         "start": 168,
@@ -3806,13 +3976,13 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Canonical actual service-client/App/Company/Installation/Grant/Credentials -> new Family -> new Token; no User row/fake claims.",
       "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 16,
       "branch": "oauth.revoke",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
         "start": 168,
@@ -3823,13 +3993,13 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Original Family UPDATE before Token SHARE; known/revoked family marked revoked; unknown remains protocol success. PW-R1 successor: trusted mutation=revoke discovers only original RFC7009 token (access OR refresh); extra grant_type/refresh_token/code/grant_id cannot select another graph.",
       "current_authority": "Only original client authentication/token ownership gate; no live_grant/admin/member requirement, no replacement authority for revoked credentials/grants.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 17,
       "branch": "oauth.userinfo",
       "source": {
-        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "userinfo",
         "start": 232,
@@ -3840,12 +4010,12 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Caller canonical rows -> issued cap seam(existing verify_access) -> user_info conditional Subject INSERT ON CONFLICT -> flush -> same seam -> commit.",
       "current_authority": "Stable original token/client/app/install/company/grant/user/kind/subject tuple; fresh returned scopes/resources. Existing verifier requires stored subject; normal issued-token path does not itself prove missing-subject repair reachable.",
-      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE3bcb; PW-R2 CLOSED_SOURCEccad; PW-R3 AUTHORED, independent targeted recheck PENDING; all runtime NOTRUN/UNPROVEN"
     }
   ],
   "authored_tests": {
-    "source_functions": 18,
-    "pg_functions": 30,
+    "source_functions": 22,
+    "pg_functions": 38,
     "names": {
       "clearledger/server/tests/test_partner_writer_scoped_locks.py": [
         "test_all_eight_admin_roots_enter_shared_composer_before_changes",
@@ -3865,7 +4035,11 @@
         "test_final_callbacks_and_native_checks_never_acquire_another_plan",
         "test_protocol_nonce_and_subject_uniqueness_are_preserved",
         "test_absent_members_roles_and_parent_pointer_drift_are_explicit",
-        "test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields"
+        "test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields",
+        "test_installation_preflight_clean_guard_precedes_actor_and_all_sql",
+        "test_installation_single_policy_preserves_legacy_error_precedence",
+        "test_installation_closed_selection_revalidated_after_one_complete_plan",
+        "test_installation_revalidation_retains_current_native_after_query_waits"
       ],
       "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py": [
         "test_real_seam_same_session_optionengine_original_cap_and_fresh_resources",
@@ -3897,7 +4071,15 @@
         "test_identity_free_unexpected_nonerror_rolls_back_real_root",
         "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
         "test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors",
-        "test_token_branch_ignores_fields_of_other_protocol_branches"
+        "test_token_branch_ignores_fields_of_other_protocol_branches",
+        "test_installation_client_error_precedes_resource_parse_without_plan",
+        "test_installation_location_error_precedes_malformed_uuid_without_plan",
+        "test_installation_resource_iteration_mode_type_ownership_order",
+        "test_installation_all_uuid_resource_kinds_keep_type_then_ownership_error",
+        "test_installation_valid_selection_one_real_complete_plan_and_exact_replacement",
+        "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load",
+        "test_installation_native_and_admin_gate_precede_mixed_invalid_selection",
+        "test_installation_preflight_never_authorizes_after_wait"
       ]
     },
     "counts_meaning": "AST top-level authored test function definitions only; NOT collection results, collected cases, executions or passes. Parametrized rows not counted as collected cases.",
@@ -3989,7 +4171,7 @@
     "coverage_gaps_for_future_root_acceptance": [
       "Resource-profile test compares unchanged resources; no valid narrowing interleaving/changed snapshot definition.",
       "Role pointer change is covered in definitions; dedicated same-Role module change after a later wait is absent.",
-      "No dedicated exact7 PG identity cases for pending dirty admission or preexisting/nested savepoints.",
+      "PW-R3 authors pending new/dirty/deleted admission only for installation selection; other writer pending states and preexisting/nested savepoints remain uncovered.",
       "Missing Role/member appearing after discovery is not covered by a dedicated exact7 PG identity test.",
       "Partial-write cancellation and all eight admin permutations are not fully covered; typed-wait cancellation is narrower.",
       "Guarded subject repair call remains, but normal canonical verifier requires existing PartnerSubject; missing-subject repair reachability unproved.",
@@ -4235,15 +4417,41 @@
       "execution": 0,
       "existing_assertions": "All previous top-level function definitions in both test files AST-identical3bcb, including PW-R1; test_partner_identity.py and existing password unsupported_grant_type assertion byte-identical e518/3bcb. No source oracle weakened/deleted.",
       "coverage": "42 identity-free valid-material HTTP combinations with no composer/cap/lookup/nonce/mutation callbacks and zero protocol SQL; exact2 empty-graph counterexample rows; 8 unexpected-result rollback combinations on actual root; 15 public/confidential/bad-secret/nonempty unknown Basic controls call original composer once with actual cap/canonical rows, canonical success or auth failure. Definitions only, no execution."
+    },
+    "new_in_pw_r3": {
+      "source_functions": 4,
+      "pg_functions": 8,
+      "collection": "NOTRUN",
+      "executions": 0,
+      "names": {
+        "clearledger/server/tests/test_partner_writer_scoped_locks.py": [
+          "test_installation_preflight_clean_guard_precedes_actor_and_all_sql",
+          "test_installation_single_policy_preserves_legacy_error_precedence",
+          "test_installation_closed_selection_revalidated_after_one_complete_plan",
+          "test_installation_revalidation_retains_current_native_after_query_waits"
+        ],
+        "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py": [
+          "test_installation_client_error_precedes_resource_parse_without_plan",
+          "test_installation_location_error_precedes_malformed_uuid_without_plan",
+          "test_installation_resource_iteration_mode_type_ownership_order",
+          "test_installation_all_uuid_resource_kinds_keep_type_then_ownership_error",
+          "test_installation_valid_selection_one_real_complete_plan_and_exact_replacement",
+          "test_installation_pending_entry_fails_before_sql_flush_or_expired_actor_load",
+          "test_installation_native_and_admin_gate_precede_mixed_invalid_selection",
+          "test_installation_preflight_never_authorizes_after_wait"
+        ]
+      },
+      "coverage": "Mixed-invalid unknown/disabled/scope client with bad UUID or mode-set; foreign/missing location before UUID; resource dictionary/mode/type/ownership and all UUID kinds; real issued cap/canonical rows/exact full keys/one plan/complete sets/None EMPTY SET/defaults/duplicates; pending new dirty deleted with expired actor and zero SQL/flush/expire; nonadmin or expired native before mixed validation; client/scopes/location/resource/admin/JWT change after typed or Client row wait with no DML/late keys and preserved old sets. Definitions only; no runtime or collected-case claim.",
+      "existing_tests": "All preexisting top-level function definitions AST-identical ccad, including PW-R1 and PW-R2; source helper functions also unchanged."
     }
   },
   "verification": {
     "diff_check": "No whitespace diagnostics at source freeze",
-    "stdlib_ast_memory_compile": "All 5 cumulative authored Python files parsed and compiled in memory without exec/import at source8964bfa4; no syntax diagnostics; no app import/runtime acceptance.",
-    "independent_source_review": "PW-R1 SOURCE_PASS3bcb remains immutable/CLOSED_SOURCE; subsequent independent negative follow-up confirmed one P3 PW-R2 on3bcb (also54). This new successor requires targeted independent recheck; no author acceptance verdict.",
+    "stdlib_ast_memory_compile": "All 5 cumulative Python AST parsed and memory-compiled without exec/import on source 1879762f4dd37fb3c5635a3265f8c84cacc82e30; no syntax diagnostics. Not runtime/app import proof.",
+    "independent_source_review": "Historical independent PW-R1 SOURCE_PASS3bcb and PW-R2 SOURCE_PASSccad preserved. PW-R3 source fix AUTHORED, targeted independent recheck PENDING; author declares no SOURCE_PASS/runtime acceptance.",
     "runtime": "NOTRUN",
     "full_ci": "NOTRUN",
-    "prior_test_definitions_preserved": "All previous top-level definitions in both test files AST-identical3bcb; original test_partner_identity.py including password assertion unchanged e518/3bcb. No assertions removed/relaxed.",
+    "prior_test_definitions_preserved": "All previous top-level definitions in both tests AST-identical ccad; canonical 12 policy AST-identical e518. No existing assertions removed or relaxed.",
     "canonical_policy_AST_unchanged": {
       "base": "e51876f994172c1d8306b934840541d2700486a6",
       "functions": [
@@ -4264,7 +4472,7 @@
       "method": "stdlib AST/Git comparison only, no function imports/invocation"
     },
     "static_tool_note": "Only stdlib AST/JSON/hash/memory compile and Git/FS reads/writes; no imports of app/helper/encoder/pure/testhelper, no extracted function or library parser/auth calls. Memory compile does not prove app import.",
-    "positive_dispatch_preservation": "Entire original _protocol_response suffix from kind/mutation selection through final return byte- AND AST-identical3bcb; new prefix only. partner_identity.py and partner_admin_router.py byte-identical3bcb, preserving PW-R1 discovery, callbacks and positive17 guards. Transport form_request/protocol_error/result_response AST unchanged."
+    "positive_dispatch_preservation": "partner_oauth_router.py and partner_identity.py byte-identical ccad; PW-R1 trusted-mutation discovery, PW-R2 negative-only preflight, canonical12 and original writer guards unchanged. Only approve_installation plus one readonly policy helper changed in production; other seven admin root ASTs equal ccad."
   },
   "outside_closure": [
     {
@@ -4514,7 +4722,7 @@
   },
   "final_target_identifier": {
     "rule": "The immutable Git commit containing this MD/JSON is the docs-only direct child of source_commit; exact final SHA and report raw hashes supplied externally in worker_done. No circular self-hash embedded.",
-    "parent": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+    "parent": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
     "source5_byte_identical_to_source_commit": true,
     "required_final_delta": [
       "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.md",
@@ -4564,7 +4772,7 @@
     "prior_target": "3bcb00b3f6b07f2cb1ea77a966989f174ac0b10e",
     "also_present_in_rejected_target": "54fd0c9ff141ffd97e31fe37b11eebff673b2d0d",
     "source_commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
-    "fix_status": "AUTHORED_TARGETED_INDEPENDENT_RECHECK_PENDING",
+    "fix_status": "CLOSED_SOURCE at immutable target ccad by independent SOURCE recheck; historical authored details and runtime0 retained",
     "runtime": "NOTRUN_UNPROVEN",
     "review_inputs": [
       {
@@ -5029,6 +5237,105 @@
     ],
     "test_observer_scope": "SQL observer is installed only around the actual original _protocol_response body, which must run exactly once and return durable=False with clean Session. Actual HTTP/security middleware remains intact; its independent SecurityBlock reads/probe logging are outside identity protocol no-writes proof. No authenticator/verifier/positive writer is replaced. This observer refinement changes only a newly authored test, preserving all preexisting definitions.",
     "mode_deviation": "At startup, one printenv ORCA_CLI_COMMAND ORCA_DEV_REPO_ROOT read resolved the CLI skill selector; both were absent and output was empty. Disclosed to coordinator separately. This is a literal no-env deviation, not a DB/DSN/application-env/credential read or app/library execution; none repeated. All application/parser/auth/test/SQL/HTTP execution counts remain0.",
-    "inbox_ordering_deviation": "Before the initial final docs commit, orca check and subsequent Git mutations shared one functions.exec with no intervening model checkpoint. Actual check returned count0/no delivery, as did the subsequent separate check; no message was skipped. Disclosed to coordinator; only own unpublished docs commit amended to record this. All source patches were preceded by separately observed empty inbox checkpoints."
+    "inbox_ordering_deviation": "Before the initial final docs commit, orca check and subsequent Git mutations shared one functions.exec with no intervening model checkpoint. Actual check returned count0/no delivery, as did the subsequent separate check; no message was skipped. Disclosed to coordinator; only own unpublished docs commit amended to record this. All source patches were preceded by separately observed empty inbox checkpoints.",
+    "independent_recheck": {
+      "target": "ccad3a6270572c4f5ea2a0ab0b781a92f8826388",
+      "status": "SOURCE_PASS_CLOSED_SOURCE",
+      "inputs": [
+        {
+          "path": "/srv/projects/preview/partner-writer-auth-errors-recheck-20261101/review.md",
+          "raw_sha256": "993f7f03a95578d0db0e8b17f1d91a782031e0d602401df5271f5bdcea6349fa"
+        },
+        {
+          "path": "/srv/projects/preview/partner-writer-auth-errors-recheck-20261101/review.json",
+          "raw_sha256": "67bacf69ebfd6db3cbc4a537f4ddfd82faa5a415ab4d2e1fe5502ddbd0448538"
+        }
+      ],
+      "runtime": "NOTRUN_UNPROVEN"
+    }
+  },
+  "pw_r3_successor": {
+    "finding": "PW-R3",
+    "priority": "P3 quality only: error422 detail precedence",
+    "exact_base": "ccad3a6270572c4f5ea2a0ab0b781a92f8826388",
+    "cumulative_base": "e51876f994172c1d8306b934840541d2700486a6",
+    "source_commit": "1879762f4dd37fb3c5635a3265f8c84cacc82e30",
+    "fix_status": "AUTHORED_TARGETED_INDEPENDENT_RECHECK_PENDING",
+    "runtime": "NOTRUN_UNPROVEN",
+    "decision": "ROOT msg_39f732a32d74 strict legacy order, not intentional new error contract",
+    "source_counterexamples": [
+      {
+        "conditions": "Legal actor/company + unknown or disabled client / disallowed scopes + equipment SET [not-a-uuid]",
+        "e518": "422 Invalid client or scopes + NoStore",
+        "ccad": "422 Invalid resource ID type + NoStore"
+      },
+      {
+        "conditions": "Valid actor/client + foreign/missing locationIds + malformed resource UUID",
+        "e518": "422 Invalid company resource IDs + NoStore",
+        "ccad": "Resource UUID type error can precede selected-location check"
+      }
+    ],
+    "impact": "Same HTTP422/private NoStore; no demonstrated auth bypass/write/privilege extension; no severity inflation",
+    "correction": "Single readonly helper with exact original admin/client/location/per-kind mode/UUID/ownership order, first full clean check before any SQL or expired actor access; no_autoflush MVCC only. Frozen typed IDs close complete plan. Same helper with current writer.actor/client/scalar refs after all typed/canonical waits; retain current native checkpoint before first DML and finish. No duplicate business policy, no second acquire/late keys.",
+    "unchanged": "Original _prepare actual row/set/drift checks; CA conflict-winner whole409 before new lock; scope_set pure position; None vs EMPTY; opaque objects vs UUIDs; dictionary order/defaults/duplicate semantics; OAuth+identity byte-identical ccad; 12 policy AST equal e518.",
+    "new_files": 0,
+    "actual_delta_paths": [
+      "clearledger/server/app/routers/partner_admin_router.py",
+      "clearledger/server/tests/test_partner_writer_scoped_locks.py",
+      "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
+      "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.md",
+      "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.json"
+    ],
+    "previous_source_pins": [
+      {
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "raw_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c",
+        "bytes": 13161,
+        "lines": 235
+      },
+      {
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "raw_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
+        "bytes": 20304,
+        "lines": 390
+      },
+      {
+        "path": "clearledger/server/app/services/partner_identity.py",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "raw_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
+        "bytes": 59546,
+        "lines": 1206
+      },
+      {
+        "path": "clearledger/server/tests/test_partner_writer_scoped_locks.py",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "raw_sha256": "744aa378f193b001f8451ba1e065658a2bec0004ec735f1635de851127ff1eaf",
+        "bytes": 20265,
+        "lines": 330
+      },
+      {
+        "path": "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+        "raw_sha256": "a85f471f9f1fcdefe5a1c50d8b8479dd08ad2ee9c6211baaee35c8473876fb15",
+        "bytes": 58540,
+        "lines": 966
+      }
+    ],
+    "query_budget": "Additional readonly queries NOT MEASURED; no M15/query budget/full CI acceptance",
+    "execution_counts": {
+      "app_helper_pure_encoder_testhelper_imports_calls": 0,
+      "pytest_collection_tests": 0,
+      "SQL_DB_DSN_application_env_HTTP_browser_SSH_Docker_Node_build_install_CI_externalrunner": 0,
+      "env_reads": 0
+    },
+    "open": [
+      "Independent targeted SOURCE recheck pending; runtime NOTRUN.",
+      "Actual READ COMMITTED UNCONFIRMED; ROOT combined schema4/HEAD/URL/admission/receipt UNSUPPLIED.",
+      "Outside Docs logout and other coverage gaps remain OPEN; no full B/API/live partner/flags/release acceptance."
+    ],
+    "external_other_composition": "ROOT auth138/native4/DTO4/fourteen refusal worlds secondary evidence only; not own execution/acceptance.",
+    "inbox_ordering": "Each mutation/new file preceded by separate inspected own-inbox tool result; no application env read or runtime, no subworkers or ROOT management."
   }
 }
