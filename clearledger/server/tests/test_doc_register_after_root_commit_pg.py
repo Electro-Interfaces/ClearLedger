@@ -31,9 +31,13 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def native_register_data(audit_pg_factory, audit_pg_company):
+async def native_register_data(audit_pg_factory, audit_pg_company, monkeypatch):
     cid = audit_pg_company
     uid, other, kind_id, doc_id = uuid4(), uuid4(), uuid4(), uuid4()
+    monkeypatch.setenv("EVENTS_SECRET_KEY", "synthetic-event-encryption-test-key")
+    subscription_secret = docs_router.space_events.encrypt_secret(
+        "whsec_MDEyMzQ1Njc4OWFiY2RlZg==")
+    assert subscription_secret is not None
     async with audit_pg_factory() as db:
         for user_id, label in ((uid, "Автор"), (other, "Читатель")):
             db.add(User(id=user_id, company_id=cid, name=label,
@@ -47,6 +51,7 @@ async def native_register_data(audit_pg_factory, audit_pg_company):
                     number_template="{prefix}-{yyyy}-{n:04d}"),
             EventSubscription(company_id=cid, label="Синтетическая подписка",
                               target_kind="url", url="https://example.invalid/events",
+                          secret_enc=subscription_secret,
                               event_types=["doc.registered"], enabled=True),
         ])
         await db.flush()
