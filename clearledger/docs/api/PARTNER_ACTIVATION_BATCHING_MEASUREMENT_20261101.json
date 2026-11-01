@@ -69,5 +69,63 @@
   ],
   "fullM15Accepted": false,
   "fullCI": false,
-  "programmeComplete": false
+  "programmeComplete": false,
+  "postRepairFourSeriesAcceptance20261101": {
+    "source": "2d1b6454350515e546a8da26e9abc24af302e568",
+    "rootIntegration": "2d1b6454350515e546a8da26e9abc24af302e568",
+    "status": "INDEPENDENT_BOUNDED_SOURCE_AND_RAW_ACCEPTED",
+    "series": [
+      {
+        "series": "parent36v2",
+        "cases": 36,
+        "definitions": 2,
+        "phases": 108,
+        "exitCode": 0,
+        "foreignParity": true,
+        "ownedRemoved": 2
+      },
+      {
+        "series": "rest58",
+        "cases": 58,
+        "definitions": 3,
+        "phases": 174,
+        "exitCode": 0,
+        "foreignParity": true,
+        "ownedRemoved": 2
+      },
+      {
+        "series": "cpa",
+        "cases": 93,
+        "definitions": 1,
+        "phases": 279,
+        "exitCode": 0,
+        "foreignParity": true,
+        "ownedRemoved": 2
+      },
+      {
+        "series": "cpb",
+        "cases": 93,
+        "definitions": 1,
+        "phases": 279,
+        "exitCode": 0,
+        "foreignParity": true,
+        "ownedRemoved": 2
+      }
+    ],
+    "reviewMDsha256": "7a681a95711838f7958f1b0d135bea160ca0821de9a19c0745513a67976d2a27",
+    "reviewJSONsha256": "8a531f5dce006b76598dbfd44ff6ec5a8735c0a13dc3d1b09f46b7096bf036ef",
+    "pinsReverifiedByRoot": 81,
+    "repair": "Only three testORM markers plus split assert; unchanged security/status/businessrollback conditions and productionA/I",
+    "negativeParentUPDATEEachWait": {
+      "typed": 1,
+      "parent": 1,
+      "profile": 1,
+      "type": 1,
+      "children": 1
+    },
+    "scope": "4 separate executions, no newruntimebyreviewer. Native341347/ordinaryrole/factory8/currentheldrootfaults; allphasespassed; pools/clients/locks0 ownedremoved andforeignsafeprojectionparity. FullSQLparameter/HTTPbody/chronologicalSQL trace notcaptured; claims bounded byunchangedpassedassertions.",
+    "historicalFailure": "Source120firstparent36 33PASS3FAIL immutable, testlistener mismatch not productionbypass; historicalsmallpair/offline60/fresh31 retainownSource",
+    "remaining": "CPC93 separately Root-observedPASS on2d, notindependentlyacceptedhere; CPD62/scaling20/original139optimizedcomposition andwhole497/fullCI stillopen",
+    "wholeM15OrAllAPIComplete": false
+  }
 }
