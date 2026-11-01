@@ -399,18 +399,61 @@ async def test_native_error_precedence_and_manual_counter_unchanged(world, error
 async def test_native_selected_constraints_and_canonical_user_refs_are_real(world):
     w = world
     async with w.factory() as db:
+        # Сравниваем OID и номера колонок схемы core: текст определения
+        # зависит от search_path, а внутренний PG "char" — от кодека.
+        relations = (await db.execute(text(
+            "SELECT c.oid, c.relname FROM pg_catalog.pg_class c "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'core' AND c.relname IN "
+            "('doc_events', 'doc_acquaints', 'eco_outbox_events', 'doc_cards', "
+            "'users', 'companies', 'eco_event_subscriptions', 'doc_cases', 'doc_kinds')"))).all()
+        relids = {row.relname: row.oid for row in relations}
+        assert set(relids) == {"doc_events", "doc_acquaints", "eco_outbox_events", "doc_cards",
+                              "users", "companies", "eco_event_subscriptions", "doc_cases", "doc_kinds"}
+        attributes = (await db.execute(text(
+            "SELECT a.attrelid, a.attname, a.attnum FROM pg_catalog.pg_attribute a "
+            "JOIN pg_catalog.pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'core' AND c.relname IN "
+            "('doc_events', 'doc_acquaints', 'eco_outbox_events', 'doc_cards', "
+            "'users', 'companies', 'eco_event_subscriptions') "
+            "AND a.attnum > 0 AND NOT a.attisdropped"))).all()
+        attnums = {(row.attrelid, row.attname): row.attnum for row in attributes}
         constraints = (await db.execute(text(
-            "SELECT conname, contype, convalidated, pg_get_constraintdef(oid) AS definition "
-            "FROM pg_constraint WHERE conrelid IN ('doc_events'::regclass, 'doc_acquaints'::regclass, "
-            "'eco_outbox_events'::regclass)"))).all()
-        assert all(row.convalidated for row in constraints)
-        assert any(row.contype == "f" and "FOREIGN KEY (doc_id)" in row.definition
-                   and "REFERENCES doc_cards(id)" in row.definition for row in constraints)
-        assert any(row.conname == "uq_eco_outbox_delivery" and row.contype == "u" for row in constraints)
+            "SELECT conname, contype::text AS contype, convalidated, "
+            "conrelid, confrelid, conkey, confkey FROM pg_catalog.pg_constraint "
+            "WHERE conrelid IN ('core.doc_events'::regclass, 'core.doc_acquaints'::regclass, "
+            "'core.eco_outbox_events'::regclass)"))).all()
+        assert constraints and all(row.convalidated for row in constraints)
+        foreign_keys = {(row.conrelid, tuple(row.conkey), row.confrelid, tuple(row.confkey))
+                        for row in constraints if row.contype == "f"}
+        for source, column, target in (
+            ("doc_events", "doc_id", "doc_cards"),
+            ("doc_events", "user_id", "users"),
+            ("doc_acquaints", "company_id", "companies"),
+            ("doc_acquaints", "doc_id", "doc_cards"),
+            ("doc_acquaints", "user_id", "users"),
+            ("doc_acquaints", "created_by", "users"),
+            ("eco_outbox_events", "subscription_id", "eco_event_subscriptions"),
+            ("eco_outbox_events", "company_id", "companies"),
+        ):
+            assert (relids[source], (attnums[relids[source], column],),
+                    relids[target], (attnums[relids[target], "id"],)) in foreign_keys
+        assert any(row.conrelid == relids["eco_outbox_events"]
+                   and row.conname == "uq_eco_outbox_delivery" and row.contype == "u"
+                   and tuple(row.conkey) == (attnums[relids["eco_outbox_events"], "event_id"],
+                                             attnums[relids["eco_outbox_events"], "subscription_id"])
+                   for row in constraints)
         indexes = (await db.execute(text(
-            "SELECT indexname, indexdef FROM pg_indexes WHERE tablename IN ('doc_cards','doc_cases','doc_kinds')"))).all()
-        for name in ("uq_doc_cards_reg_number", "uq_doc_cards_verify_token", "uq_doc_cases_index", "uq_doc_kinds_code"):
-            assert any(row.indexname == name and "UNIQUE" in row.indexdef for row in indexes)
+            "SELECT i.indrelid, c.relname AS indexname, i.indisunique, i.indisvalid, i.indisready "
+            "FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid "
+            "WHERE i.indrelid IN ('core.doc_cards'::regclass, 'core.doc_cases'::regclass, "
+            "'core.doc_kinds'::regclass)"))).all()
+        for table, name in (("doc_cards", "uq_doc_cards_reg_number"),
+                            ("doc_cards", "uq_doc_cards_verify_token"),
+                            ("doc_cases", "uq_doc_cases_index"), ("doc_kinds", "uq_doc_kinds_code")):
+            assert any(row.indrelid == relids[table] and row.indexname == name
+                       and row.indisunique and row.indisvalid and row.indisready for row in indexes)
         actor = await db.get(User, w.uid)
         prepared = await native.prepare_register(db, actor, str(w.cid), str(w.doc))
         from uuid import UUID
