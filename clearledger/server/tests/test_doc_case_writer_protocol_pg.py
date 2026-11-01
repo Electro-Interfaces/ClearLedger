@@ -218,16 +218,64 @@ async def test_native_writer_first_blocks_shared_admission_until_real_completion
         elif root == "close":
             await blocker.execute(select(DocCase).where(DocCase.id == w.case).with_for_update())
         else:
-            # Native INSERT's real FK check needs KEY SHARE on Company.
-            await blocker.execute(select(Company).where(Company.id == w.cid).with_for_update())
+            # A pending unique key stops the INSERT after catalog X while
+            # allowing register's earlier Company SHARE. MVCC duplicate reads
+            # cannot see this pending row; the real unique index must wait.
+            if root in ("create_kind", "starter", "contract"):
+                code = ("new_synthetic" if root == "create_kind" else
+                        docs.starter_kinds("energy")[0]["code"] if root == "starter" else
+                        docs.STARTER_KINDS_CONTRACT[0]["code"])
+                blocker.add(DocKind(company_id=w.cid, code=code,
+                                    name="Synthetic pending unique key"))
+            else:
+                blocker.add(DocCase(company_id=w.cid, organization_id=None,
+                    year=w.year if root == "create_case" else w.year + 1,
+                    index="NEW" if root == "create_case" else "01-02",
+                    title="Synthetic pending unique key"))
+            await blocker.flush()
         async with running(writer(w, owner, root)) as wt:
-            await blocked(observer, op, bp)
+            waits = await blocked(observer, op, bp)
+            if root not in ("update_kind", "clear_default", "close"):
+                assert any(r.locktype == "transactionid" and not r.granted for r in waits)
+            held = (await observer.execute(text(
+                "SELECT mode FROM pg_locks WHERE pid=:pid AND locktype='advisory' "
+                "AND classid=435223 AND objsubid=2 AND granted"), {"pid": op})).all()
+            assert any(r.mode == "ExclusiveLock" for r in held)
             async with running(reader(w, admission, "register")) as rt:
                 await blocked(observer, ap, op, advisory=True)
                 assert not any(label == "reader" and "for update" in s for label, s, _ in w.sql)
                 await blocker.rollback()
                 assert await asyncio.wait_for(wt, 10)
-                assert await asyncio.wait_for(rt, 10)
+                if root == "update_kind":
+                    # Original B saw no default Case before the catalog S wait.
+                    # The committed new parent requires a new request/root.
+                    with pytest.raises(HTTPException) as error:
+                        await asyncio.wait_for(rt, 10)
+                    assert error.value.status_code == 409
+                    assert error.value.detail == "Данные изменились одновременно; повторите запрос"
+                    assert not any(label == "reader" and s.lstrip().startswith(
+                        ("insert ", "update ", "delete ")) for label, s, _ in w.sql)
+                    assert not admission.new and not admission.dirty and not admission.deleted
+                    doc = await admission.get(DocCard, w.doc)
+                    assert doc.status == "draft" and doc.case_id is None
+                    assert doc.reg_number is None and doc.reg_date is None and doc.verify_token is None
+                    assert not w.notifications
+                    assert await admission.scalar(select(func.count()).select_from(DocCounter).where(
+                        DocCounter.company_id == w.cid)) == 0
+                    await admission.rollback()  # The caller discards the whole stale root.
+                    assert not admission.in_transaction()
+                    async with w.factory() as fresh:
+                        await tag(fresh, "reader-new-request")
+                        result = await reader(w, fresh, "register")
+                        assert result["case_id"] == str(w.case) and result["reg_number"]
+                    async with w.factory() as check:
+                        saved = await check.get(DocCard, w.doc)
+                        assert saved.status == "registered" and saved.case_id == w.case
+                        assert saved.reg_number == result["reg_number"] and saved.verify_token
+                        assert await check.scalar(select(DocKind.default_case_id).where(
+                            DocKind.id == w.kind)) == w.case
+                else:
+                    assert await asyncio.wait_for(rt, 10)
 
 
 @pytest.mark.parametrize("root", READERS)

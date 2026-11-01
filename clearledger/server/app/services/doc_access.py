@@ -598,3 +598,28 @@ async def authorize_docs_file_egress(db: AsyncSession, user: User,
         if not allowed:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
     return [authorized_docs[key] for key in sorted(authorized_docs)]
+
+
+async def assert_fresh_doc_edit(db: AsyncSession, cid: uuid.UUID,
+                                doc: DocCard, user: User) -> None:
+    """Reevaluate native READ/edit with fresh clean grants, without use DML.
+
+    The register entrance owns parent epochs. Never refresh the pending Card,
+    assignments or their histories; scalar assignment queries already see the
+    current committed snapshot at READ COMMITTED.
+    """
+    from sqlalchemy import inspect
+    for row in db.identity_map.values():
+        if isinstance(row, DocAccessGrant) and row.company_id == cid:
+            if row in db.dirty or row in db.deleted:
+                raise HTTPException(409, "Данные доступа изменились одновременно; повторите запрос")
+    with db.no_autoflush:
+        scopes = [(DocAccessGrant.scope_type == "doc") & (DocAccessGrant.scope_id == doc.id)]
+        if doc.inherit_kind_acl:
+            scopes.append((DocAccessGrant.scope_type == "kind") & (DocAccessGrant.scope_id == doc.kind_id))
+        (await db.execute(select(DocAccessGrant).where(DocAccessGrant.company_id == cid,
+            or_(*scopes)).execution_options(populate_existing=True))).scalars().all()
+        if inspect(doc).session is not db.sync_session or inspect(user).session is not db.sync_session:
+            raise RuntimeError("Native document policy requires the caller Session")
+        if not await _can_doc(db, cid, doc, user, "edit", record_break_glass_use=False):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав на документ")

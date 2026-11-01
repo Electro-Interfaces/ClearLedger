@@ -65,6 +65,7 @@ from app.services import (
     task_mail, work_state,
 )
 from app.services.doc_numbers import next_number, render, scope_key
+from app.services import native_doc_register_locks as register_locks
 from app.services.native_doc_create_locks import (
     assert_doc_create_clean, prepare_doc_create, refresh_doc_create,
 )
@@ -1232,6 +1233,9 @@ async def save_access_grant(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if payload.scope_type == "kind":
+        await register_locks.prepare_kind_grant(db, current_user, payload.company_id, payload.scope_id,
+            subject_type=payload.subject_type, subject_id=payload.subject_id)
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     if payload.scope_type == "doc":
         if payload.expected_acl_revision is None:
@@ -1321,6 +1325,7 @@ async def delete_access_grant(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(company_id, current_user, db, "docs")
+    await register_locks.prepare_kind_grant_delete(db, current_user, company_id, cid, grant_id)
     row = (await db.execute(select(DocAccessGrant).where(
         DocAccessGrant.company_id == cid,
         DocAccessGrant.id == _uuid_or_400(grant_id, "grant_id")))).scalar_one_or_none()
@@ -2328,16 +2333,21 @@ async def register_doc(
     Повторная регистрация запрещена: номер, однажды выданный, остаётся за
     документом навсегда — даже если документ потом отменят.
     """
-    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
-    from app.services.doc_case_locks import acquire_case_catalog
-
-    await acquire_case_catalog(db, (cid,), "S")
-    d = await _doc_or_404(db, cid, doc_id)
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+    prepared = await register_locks.prepare_register(db, current_user, payload.company_id, doc_id)
+    cid = prepared.company_id
+    try:
+        d = await _doc_or_404(db, cid, doc_id)
+    except HTTPException as error:
+        if error.status_code == 404 and prepared.card_pointer is not None:
+            register_locks.changed()
+        raise
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
-            populate_existing=True).with_for_update())).scalar_one()
-    await _assert_doc_permission(db, cid, d, current_user, "edit")
+            populate_existing=True).with_for_update())).scalar_one_or_none()
+    if d is None:
+        register_locks.changed()
+    retained = register_locks.retain_register(prepared, d)
+    await register_locks.check_register(db, prepared, d, retained, phase="card")
     if d.reg_number:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Документ уже зарегистрирован под номером {d.reg_number}")
@@ -2357,11 +2367,12 @@ async def register_doc(
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Дата регистрации не может быть в будущем")
 
-    if "org" in kind.number_scope and d.organization_id is None:
+    effective_org = d.organization_id
+    if "org" in kind.number_scope and effective_org is None:
         organizations = list((await db.execute(select(Organization.id).where(
             Organization.company_id == cid).order_by(Organization.id))).scalars().all())
         if len(organizations) == 1:
-            d.organization_id = organizations[0]
+            effective_org = organizations[0]
         elif len(organizations) > 1:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 "Выберите юрлицо: у компании несколько журналов")
@@ -2384,9 +2395,9 @@ async def register_doc(
         # ошибается в номере регулярно: это штатный путь, а не сбой.
         busy = (await db.execute(select(DocCard.id).where(
             DocCard.company_id == cid,
-            DocCard.organization_id.is_(d.organization_id)
-            if d.organization_id is None
-            else DocCard.organization_id == d.organization_id,
+            DocCard.organization_id.is_(effective_org)
+            if effective_org is None
+            else DocCard.organization_id == effective_org,
             DocCard.reg_number == number,
             DocCard.id != d.id))).scalar_one_or_none()
         if busy is not None:
@@ -2395,16 +2406,18 @@ async def register_doc(
         d.number_manual = True
     else:
         reason = ""
-        scope = scope_key(kind.code, d.organization_id, on_date, kind.number_scope)
+        scope = scope_key(kind.code, effective_org, on_date, kind.number_scope)
         n = await next_number(db, cid, scope)
+        await register_locks.check_register(db, prepared, d, retained, phase="post_counter")
         org_code = ""
-        if d.organization_id:
+        if effective_org:
             # Префикс юрлица — тот же реквизит, которым нумерует документы 1С.
             org_code = (await db.execute(select(Organization.prefix).where(
-                Organization.id == d.organization_id))).scalar_one_or_none() or ""
+                Organization.id == effective_org))).scalar_one_or_none() or ""
         number = render(kind.number_template, prefix=kind.number_prefix, number=n,
                         on_date=on_date, org_code=org_code, kind_code=kind.code)
 
+    d.organization_id = effective_org
     d.reg_number = number
     d.reg_date = on_date
     await doc_verify.ensure_token(db, d)
@@ -2424,7 +2437,9 @@ async def register_doc(
         _assert_case_accepts_doc(case_row, d, on_date)
         # Срок считается от конца года регистрации, как в перечне.
         _set_storage_until(d, case_row, on_date)
-    await _supersede_pending_acquaints(db, d.id)
+    retained = register_locks.retain_register(prepared, d)
+    await register_locks.check_register(db, prepared, d, retained, phase="post_case")
+    await register_locks.supersede_register_acquaints(db, prepared)
     db.add(DocEvent(doc_id=d.id, kind="registered", user_id=current_user.id,
                     actor_name=current_user.name or current_user.email,
                     to_value=number, note=reason or None))
@@ -2436,10 +2451,16 @@ async def register_doc(
     # Событие ставится в очередь ЗДЕСЬ, до фиксации: или документ зарегистрирован
     # и подписчики об этом узнают, или не зарегистрирован вовсе. Состояния «номер
     # выдан, но никто не в курсе» не бывает.
-    await space_events.publish(
-        db, cid, "doc.registered", str(d.id),
-        space_events.doc_data(d, current_user, manual=bool(manual_number)))
+    with db.no_autoflush:
+        await space_events.publish(
+            db, cid, "doc.registered", str(d.id),
+            space_events.doc_data(d, current_user, manual=bool(manual_number)),
+            expected_parents=register_locks.subscription_parents(db, prepared))
     try:
+        retained = register_locks.retain_register(prepared, d)
+        await db.flush()
+        await register_locks.check_register(db, prepared, d, retained, phase="final")
+        register_locks.seal_register(db, prepared)
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -5119,6 +5140,9 @@ async def create_substitution(
     if uid == did:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Человек не может замещать сам себя")
+    await register_locks.prepare_substitution(db, current_user, payload.company_id,
+        principal=uid, deputy=did)
+    await _assert_admin(db, cid, current_user)
     row = UserSubstitution(
         company_id=cid, user_id=uid, deputy_id=did,
         starts_on=payload.starts_on, ends_on=payload.ends_on,
@@ -5149,6 +5173,8 @@ async def stop_substitution(
         UserSubstitution.id == _uuid_or_400(sub_id, "sub_id")))).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Замещение не найдено")
+    await register_locks.prepare_substitution(db, current_user, company_id, sub_id=row.id)
+    await _assert_admin(db, cid, current_user)
     row.is_active = False
     await db.commit()
     return {"stopped": str(row.id)}
