@@ -26,7 +26,9 @@ from app.models_partner_contracts import (PartnerContractCreateProfile as Profil
     PartnerContractCreateRef as Ref, PartnerContractIntentLocation as IntentLocation,
     PartnerContractSuccessIntent as Intent)
 from app.product_api import access, budget, dto
-from app.product_api.app import create_product_api, curated_openapi, public_client_openapi
+from app.product_api.app import (_RequestMetadataMiddleware, create_product_api,
+    curated_openapi, public_client_openapi)
+from app.security_context import SecurityContext, current as current_security_context
 from app.services import partner_contract_authority as authority, partner_contract_commands as commands
 from app.services import partner_identity as identity, contract_write_locks as locks
 from tests.partner_contract_issuer_fixture import issuer_world, issue_machine, issue_user, make_body, state
@@ -35,9 +37,17 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
 @pytest_asyncio.fixture(loop_scope="session")
-async def http_world(issuer_world):
+async def http_world(issuer_world, monkeypatch):
     w = issuer_world
     sessions, lifetimes = [], []
+    close = AsyncSession.close
+
+    async def observed_close(db):
+        await close(db)
+        if db in sessions:
+            lifetimes.append(("closed", db))
+
+    monkeypatch.setattr(AsyncSession, "close", observed_close)
 
     @asynccontextmanager
     async def actual_sessions():
@@ -48,7 +58,6 @@ async def http_world(issuer_world):
                 yield db
             finally:
                 lifetimes.append(("closing", db))
-        lifetimes.append(("closed", db))
 
     child = create_product_api(session_factory=actual_sessions, enabled=True,
         issuer="https://issuer.synthetic.invalid", cursor_key=b"synthetic-http-create-key-32bytes!!",
@@ -62,11 +71,12 @@ def wire(w, **changes):
     return make_body(w, **changes).model_dump_json().encode()
 
 
-async def request(h, *, bearer=None, chunks=None, raw=None, headers=None, method="POST", path="/api/v1/contracts"):
+async def request(h, *, bearer=None, chunks=None, raw=None, headers=None, method="POST",
+                  path="/api/v1/contracts", spec_version="2.4"):
     """Actual ASGI HTTP boundary, with a counted receive, including chunking.
 
-    ASGI 2.4 avoids an unrelated disconnect-listener read in StreamingResponse;
-    body_reads therefore counts the sole HTTP request stream reader exactly.
+    Default ASGI 2.4 also supports the historical StreamingResponse boundary.
+    Explicit 2.3 cases verify that metadata adds no disconnect-listener task.
     """
     messages, count, started = [], 0, False
     chunks = list(chunks if chunks is not None else [raw if raw is not None else wire(h.w)])
@@ -82,6 +92,8 @@ async def request(h, *, bearer=None, chunks=None, raw=None, headers=None, method
         if chunks:
             count += 1
             chunk = chunks.pop(0)
+            if chunk is None:
+                return {"type": "http.disconnect"}
             return {"type": "http.request", "body": chunk, "more_body": bool(chunks)}
         return {"type": "http.disconnect"}
 
@@ -91,7 +103,7 @@ async def request(h, *, bearer=None, chunks=None, raw=None, headers=None, method
             started = True
         messages.append(message)
 
-    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": spec_version},
         "http_version": "1.1", "scheme": "https", "method": method, "path": path,
         "raw_path": path.encode(), "root_path": "", "query_string": b"", "headers": header_list,
         "client": ("127.0.0.1", 1234), "server": ("issuer.synthetic.invalid", 443)}
@@ -475,7 +487,9 @@ async def test_schema_exact_post_canonical_body_and_protected_public_projection(
     post = schema["paths"]["/contracts"]["post"]
     expected = ContractCreateBody.model_json_schema(by_alias=True, mode="validation", ref_template="#/components/schemas/{model}")
     definitions = expected.pop("$defs", {})
-    assert post["requestBody"]["content"]["application/json"]["schema"] == expected
+    body_reference = post["requestBody"]["content"]["application/json"]["schema"]
+    assert body_reference == {"$ref": "#/components/schemas/ContractCreateBody"}
+    assert schema["components"]["schemas"][body_reference["$ref"].rsplit("/", 1)[-1]] == expected
     assert all(schema["components"]["schemas"][k] == v for k, v in definitions.items())
     assert post["security"] == [{"ProductOAuth": ["contracts:create"]}, {"ProductServiceOAuth": ["contracts:create"]}]
     assert post["tags"] == ["Договоры"] and "validUntil" in expected["required"]
@@ -557,7 +571,8 @@ async def test_disabled_api_503_is_prebody_without_any_session(http_world):
     assert denied.body_reads == 0 and not h.sessions
 
 
-async def test_cancel_actual_http_task_after_five_parts_rolls_back_before_close(http_world, monkeypatch):
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+async def test_cancel_actual_http_task_after_five_parts_rolls_back_before_close(http_world, monkeypatch, spec_version):
     h, w = http_world, http_world.w
     original, ready, hold = commands.create_partner_contract, asyncio.Event(), asyncio.Event()
 
@@ -569,9 +584,11 @@ async def test_cancel_actual_http_task_after_five_parts_rolls_back_before_close(
 
     monkeypatch.setattr(commands, "create_partner_contract", observe)
     before = await state(w)
-    pending = asyncio.create_task(request(h))
+    pending = asyncio.create_task(request(h, spec_version=spec_version))
     try:
-        await asyncio.wait_for(ready.wait(), timeout=5)
+        # ROOT measured 5.9–6.3s to the real consumer; this is only a bounded
+        # test readiness deadline, not a production timeout or a weaker oracle.
+        await asyncio.wait_for(ready.wait(), timeout=30)
         pending.cancel()
         with pytest.raises(asyncio.CancelledError):
             await pending
@@ -583,3 +600,160 @@ async def test_cancel_actual_http_task_after_five_parts_rolls_back_before_close(
     assert await state(w) == before
     assert all(not db.in_transaction() for db in h.sessions)
     assert h.lifetimes[-1][0] == "closed"
+
+
+async def test_failed_actual_session_close_has_no_success_marker(http_world, monkeypatch):
+    h, w, reached, failed = http_world, http_world.w, [], []
+    original, close = commands.create_partner_contract, AsyncSession.close
+
+    async def denied_after_write(db, bearer, body):
+        await original(db, bearer, body)
+        reached.append(db)
+        raise HTTPException(403, "synthetic denial after five parts")
+
+    async def fail_close(db):
+        if db in reached and not failed:
+            failed.append(db)
+            raise RuntimeError("synthetic actual Session.close failure")
+        await close(db)
+
+    monkeypatch.setattr(commands, "create_partner_contract", denied_after_write)
+    monkeypatch.setattr(AsyncSession, "close", fail_close)
+    before = await state(w)
+    try:
+        result = await request(h)
+        problem(result, 500, "internal_error")
+        assert len(reached) == 1 and failed == reached
+        assert await state(w) == before
+        assert all(not db.in_transaction() for db in h.sessions)
+        assert h.lifetimes[-1] == ("closing", reached[0])
+        assert ("closed", reached[0]) not in h.lifetimes
+    finally:
+        # Actual cleanup is separate from the failed close observation.
+        for db in failed:
+            await close(db)
+    assert h.lifetimes[-1] == ("closed", reached[0])
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+async def test_receive_disconnect_rolls_back_actual_request_root(http_world, spec_version):
+    h, w = http_world, http_world.w
+    before = await state(w)
+    result = await request(h, chunks=[wire(w)[:13], None], spec_version=spec_version)
+    problem(result, 500, "internal_error")
+    assert result.body_reads == 2 and await state(w) == before
+    assert len(h.sessions) == 2
+    assert all(not db.in_transaction() for db in h.sessions)
+    assert [item[0] for item in h.lifetimes] == ["open", "closing", "closed", "open", "closing", "closed"]
+    assert all(key not in result.scope for key in (
+        CREATE_PREFLIGHT_KEY, "elsy.product.create_db", "elsy.product.create_context", "elsy.product.create_bearer"))
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+async def test_actual_http_metadata_prebody_errors_get405_and_create(http_world, monkeypatch, spec_version):
+    h, w = http_world, http_world.w
+    before = await state(w)
+    denied = await request(h, bearer=False, spec_version=spec_version,
+        headers=[(b"x-request-id", b"untrusted-client-value")])
+    problem(denied, 401, "invalid_credentials")
+    assert denied.body_reads == 0 and not h.sessions
+    assert denied.headers[b"x-request-id"] != b"untrusted-client-value"
+    for path, allowed in (("/api/v1/contracts", b"GET, POST"), ("/api/v1/objects", b"GET")):
+        unsupported = await request(h, method="DELETE", path=path, spec_version=spec_version)
+        problem(unsupported, 405, "method_not_allowed")
+        assert unsupported.headers[b"allow"] == allowed and unsupported.body_reads == 0
+    get_denied = await request(h, method="GET", bearer=False, spec_version=spec_version)
+    problem(get_denied, 401, "invalid_credentials")
+    assert get_denied.body_reads == 0
+    created = await request(h, spec_version=spec_version)
+    assert created.status == 201 and created.body_reads == 1
+    assert created.headers[b"cache-control"] == b"no-store"
+    assert UUID(created.headers[b"x-request-id"].decode())
+    assert await state(w) == tuple(n+1 for n in before)
+    original = commands.create_partner_contract
+
+    async def fail_after_write(db, bearer, body):
+        await original(db, bearer, body)
+        raise RuntimeError("synthetic post-write metadata failure")
+
+    monkeypatch.setattr(commands, "create_partner_contract", fail_after_write)
+    before_error = await state(w)
+    failed = await request(h, spec_version=spec_version)
+    problem(failed, 500, "internal_error")
+    assert failed.body_reads == 1 and await state(w) == before_error
+    assert all(not db.in_transaction() for db in h.sessions)
+    assert h.lifetimes[-1][0] == "closed"
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+@pytest.mark.parametrize("trusted", [False, True])
+async def test_metadata_wrapper_preserves_stream_messages_scope_receive_and_context(spec_version, trusted):
+    # Protocol-only application; no replacement for auth or SQL admission.
+    # Synthetic 206 metadata is passthrough evidence, not a product Range promise.
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": spec_version},
+        "state": {"preserved": object()}, "headers": [(b"x-request-id", b"untrusted-client-value")]}
+    state_object, messages, received = scope["state"], [], []
+    start = {"type": "http.response.start", "status": 206, "headers": [
+        (b"cache-control", b"public"), (b"cache-control", b"max-age=3600"),
+        (b"x-request-id", b"stale"), (b"x-request-id", b"duplicate"),
+        (b"content-type", b"application/octet-stream"), (b"content-length", b"3"),
+        (b"content-range", b"bytes 0-2/6"), (b"accept-ranges", b"bytes"),
+        (b"content-disposition", b"attachment; filename=synthetic.txt"), (b"x-content-type-options", b"nosniff")]}
+    first = {"type": "http.response.body", "body": b"ab", "more_body": True}
+    last = {"type": "http.response.body", "body": b"c", "more_body": False}
+
+    async def receive():
+        received.append(True)
+        raise AssertionError("metadata must not read the body")
+
+    async def send(message):
+        messages.append(message)
+
+    async def downstream(actual_scope, actual_receive, actual_send):
+        assert actual_scope is scope and actual_scope["state"] is state_object
+        assert actual_receive is receive and state_object["preserved"] is scope["state"]["preserved"]
+        for message in (start, first, last):
+            await actual_send(message)
+
+    context = SecurityContext(request_id="80000000-0000-4000-8000-000000000001",
+        ip="127.0.0.1", peer="synthetic", path="/synthetic", user_agent="synthetic") if trusted else None
+    token = current_security_context.set(context)
+    try:
+        await _RequestMetadataMiddleware(downstream)(scope, receive, send)
+        assert current_security_context.get() is context
+    finally:
+        current_security_context.reset(token)
+    assert not received and all(actual is original for actual, original in zip(messages, (start, first, last)))
+    assert len(messages) == 3 and start["status"] == 206
+    headers = dict(start["headers"])
+    assert headers[b"cache-control"] == b"no-store"
+    assert headers[b"x-request-id"].decode() == state_object["request_id"]
+    assert sum(k == b"cache-control" for k, _ in start["headers"]) == 1
+    assert sum(k == b"x-request-id" for k, _ in start["headers"]) == 1
+    assert headers[b"content-type"] == b"application/octet-stream" and headers[b"content-length"] == b"3"
+    assert headers[b"content-range"] == b"bytes 0-2/6" and headers[b"accept-ranges"] == b"bytes"
+    assert headers[b"content-disposition"] == b"attachment; filename=synthetic.txt"
+    assert headers[b"x-content-type-options"] == b"nosniff"
+    if trusted:
+        assert state_object["request_id"] == context.request_id
+    else:
+        assert UUID(state_object["request_id"])
+
+
+@pytest.mark.parametrize("scope_type", ["lifespan", "websocket"])
+async def test_metadata_wrapper_nonhttp_passthrough(scope_type):
+    scope, observed = {"type": scope_type}, []
+
+    async def receive():
+        raise AssertionError("unexpected receive")
+
+    async def send(message):
+        raise AssertionError("unexpected send")
+
+    async def downstream(actual_scope, actual_receive, actual_send):
+        observed.append((actual_scope, actual_receive, actual_send))
+
+    await _RequestMetadataMiddleware(downstream)(scope, receive, send)
+    assert len(observed) == 1
+    assert observed[0][0] is scope and observed[0][1] is receive and observed[0][2] is send
+    assert scope == {"type": scope_type}
