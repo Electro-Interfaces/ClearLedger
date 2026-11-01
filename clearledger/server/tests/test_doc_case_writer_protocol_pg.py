@@ -218,10 +218,29 @@ async def test_native_writer_first_blocks_shared_admission_until_real_completion
         elif root == "close":
             await blocker.execute(select(DocCase).where(DocCase.id == w.case).with_for_update())
         else:
-            # Native INSERT's real FK check needs KEY SHARE on Company.
-            await blocker.execute(select(Company).where(Company.id == w.cid).with_for_update())
+            # A pending unique key stops the INSERT after catalog X while
+            # allowing register's earlier Company SHARE. MVCC duplicate reads
+            # cannot see this pending row; the real unique index must wait.
+            if root in ("create_kind", "starter", "contract"):
+                code = ("new_synthetic" if root == "create_kind" else
+                        docs.starter_kinds("energy")[0]["code"] if root == "starter" else
+                        docs.STARTER_KINDS_CONTRACT[0]["code"])
+                blocker.add(DocKind(company_id=w.cid, code=code,
+                                    name="Synthetic pending unique key"))
+            else:
+                blocker.add(DocCase(company_id=w.cid, organization_id=None,
+                    year=w.year if root == "create_case" else w.year + 1,
+                    index="NEW" if root == "create_case" else "01-02",
+                    title="Synthetic pending unique key"))
+            await blocker.flush()
         async with running(writer(w, owner, root)) as wt:
-            await blocked(observer, op, bp)
+            waits = await blocked(observer, op, bp)
+            if root not in ("update_kind", "clear_default", "close"):
+                assert any(r.locktype == "transactionid" and not r.granted for r in waits)
+            held = (await observer.execute(text(
+                "SELECT mode FROM pg_locks WHERE pid=:pid AND locktype='advisory' "
+                "AND classid=435223 AND objsubid=2 AND granted"), {"pid": op})).all()
+            assert any(r.mode == "ExclusiveLock" for r in held)
             async with running(reader(w, admission, "register")) as rt:
                 await blocked(observer, ap, op, advisory=True)
                 assert not any(label == "reader" and "for update" in s for label, s, _ in w.sql)

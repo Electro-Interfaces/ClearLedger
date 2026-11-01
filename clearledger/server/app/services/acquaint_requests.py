@@ -56,7 +56,8 @@ async def _document(db: AsyncSession, company_id: uuid.UUID, process_id: str,
     raw = _uuid_or_none(data.get("doc_id") or data.get("docId"))
     if raw is not None:
         doc = (await db.execute(select(DocCard).where(
-            DocCard.id == raw, DocCard.company_id == company_id))).scalar_one_or_none()
+            DocCard.id == raw, DocCard.company_id == company_id)
+            .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
         if doc is None:
             raise AcquaintRequestError("Документ не найден в этой компании")
         return doc
@@ -70,7 +71,8 @@ async def _document(db: AsyncSession, company_id: uuid.UUID, process_id: str,
     if doc_id is None:
         raise AcquaintRequestError(
             "В просьбе не назван документ, а процесс ни одного не заводил")
-    doc = await db.get(DocCard, doc_id)
+    doc = (await db.execute(select(DocCard).where(DocCard.id == doc_id)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if doc is None:
         raise AcquaintRequestError("Документ процесса больше не существует")
     return doc
