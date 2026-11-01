@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import secrets
 
-from authlib.oauth2.rfc6749 import InvalidGrantError
+from authlib.oauth2.rfc6749 import InvalidClientError, InvalidGrantError
 from fastapi import HTTPException, Request
 from sqlalchemy import delete, select
 
@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.models_docs_portal import DocsPortalSession
 from app.models_partner import PartnerClient, PartnerToken, PartnerTokenFamily
 from app.services import partner_identity as identity
+from app.services.contract_write_locks import ScopedLockError
 
 settings = get_settings()
 PREFIX = "/api/developer/docs"
@@ -140,18 +141,64 @@ def session_info(db, raw):
 
 
 def close_session(db, raw):
+    # Reject before even an expired ORM attribute or a raw-cookie shortcut.
+    if db.new or db.dirty or db.deleted:
+        raise ScopedLockError("Docs logout requires clean discovery; roll back the entire root")
     if not raw:
         return
-    row = identity.fresh(db, DocsPortalSession, identity.digest(raw))
-    if row:
+    with db.no_autoflush:
+        cookie_hash = identity.digest(raw)
+        candidate = identity.fresh(db, DocsPortalSession, cookie_hash)
+        if candidate is None:
+            return
+        token_id = candidate.token_id
+        try:
+            writer = identity._prepare_partner_write(db, token_id=token_id, mutation="revoke")
+        except InvalidClientError:
+            # This protocol/native-free composer call has exactly one such
+            # source path: no original graph yielded any typed requests.
+            # A surviving orphan is not a no-plan mutation fallback.
+            if db.scalar(select(DocsPortalSession.token_id).where(
+                    DocsPortalSession.cookie_hash == cookie_hash)) is None:
+                return  # Parent CASCADE may already have removed the cookie.
+            identity._writer_drift(db)
+
+        # All original parent rows, including Family UPDATE then Token SHARE,
+        # are held before this last lock. Never follow a replacement token.
+        row = db.scalar(select(DocsPortalSession).where(
+            DocsPortalSession.cookie_hash == cookie_hash,
+            DocsPortalSession.token_id == token_id)
+            .with_for_update().execution_options(populate_existing=True))
+        writer.checkpoint()
+        if row is None:
+            surviving = db.scalar(select(DocsPortalSession.token_id).where(
+                DocsPortalSession.cookie_hash == cookie_hash))
+            if surviving is not None:
+                identity._writer_drift(db)
+            return  # Actually absent: no family callback or pending write.
+
+        original_token = next((spec for spec in writer.rows
+            if spec.model is PartnerToken and spec.identity == (token_id,) and not spec.missing), None)
+        if original_token is None:
+            identity._writer_drift(db)
+        family_id, = original_token.pointers
+        original_family = next((spec for spec in writer.rows
+            if spec.model is PartnerTokenFamily and spec.identity == (family_id,) and not spec.missing), None)
+        token = identity.fresh(db, PartnerToken, token_id)
+        family = identity.fresh(db, PartnerTokenFamily, family_id)
+        if (original_family is None or token is None or token.family_id != family_id or family is None
+                or (family.grant_id, family.credential_id) != original_family.pointers):
+            identity._writer_drift(db)
+
+        # Cookie + Origin/CSRF authorize cleanup even after live access expires
+        # or is revoked. Do not turn current access eligibility into a gate.
+        server = identity.PartnerAuthorizationServer(db, writer)
+        server.family = family
+        identity.RevokeEndpoint(server).revoke_token(identity.RefreshHandle(token, ""), None)
+        # The callback flushes Family first; Docs never becomes dirty earlier.
         row.revoked = True
-        token = identity.fresh(db, PartnerToken, row.token_id)
-        family = identity.fresh(db, PartnerTokenFamily, token.family_id) if token else None
-        if family:
-            server = identity.PartnerAuthorizationServer(db)
-            server.family = family
-            identity.RevokeEndpoint(server).revoke_token(identity.RefreshHandle(token, ""), None)
         db.flush()
+        writer.checkpoint()
 
 
 def product_schema(app, *, browser=True):
