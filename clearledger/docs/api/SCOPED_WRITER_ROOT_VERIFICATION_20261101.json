@@ -1620,5 +1620,140 @@
       "overallPercent": null
     },
     "preserved": "47/54 schema variants and24 unit cases retain previous distinct immutable composition boundaries; no new OneC PASS/overall CI/merge/deploy/flags"
+  },
+  "uuidAndNativeWriterAcceptance20261101": {
+    "status": "ROOT_TWO_COMPONENT_PROFILES_ACCEPTED_NOT_OVERALL_GO",
+    "asOfUTC": "2026-11-01 03:03 UTC",
+    "testedApplicationSource": "29baa0c6a938c366edb2ee69cbcd1a60532558e4",
+    "currentRootSourceBeforeReport": "c9f8812c31a2cb76e440c9e33135cc8fb7d3a410",
+    "UUIDFix": {
+      "codeFiles": 7,
+      "coreColumns": 28,
+      "partnerColumns": 26,
+      "dormantProfileColumns": 25,
+      "docsColumns": 1,
+      "kernelDriverPolicyUnchanged": true,
+      "metadataConsumers": [
+        "counterparty_usage",
+        "product_api.queries"
+      ],
+      "sourceReviewMarkdownSHA256": "d8b6acfc303119ef8bdc4b8ee3b5bfae2503677ed8ab7818ebcff38c9dd094e4"
+    },
+    "oneCAndUUID": {
+      "artifact": "uuid-boundary-onec-pg-20261101-67acf90bdc66",
+      "cases": 38,
+      "definitions": 20,
+      "phases": 114,
+      "seconds": 36.15727649535984,
+      "resultSHA256": "8f39d77440e44767e19ab06e5a47bd72513b79ea7cd97c8aefe61cea44dbdeba",
+      "executionSHA256": "f885ac0d81c01d6d73a70a9d944ce29eebf38b0d64eaf849851f2cc737c85365",
+      "originalOneCUnchangedCases": 21,
+      "newUUIDUnitCases": 14,
+      "newUUIDPGCases": 3,
+      "sourceFileCount": 553,
+      "sourceBytes": 17756331,
+      "sourceManifestSHA256": "e548cbe9d2ab9403edc0e89c958dd8ceb47202e786116e211aa6d316f1f75c8c",
+      "independentReview": {
+        "status": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "5aa858434fd4f643531259f510ccdf088c2c09f84f9f1a8723a5dacd8cc597be",
+        "jsonSHA256": "3ffd50dcb92494ba64da66521fd8f1469c100f852eb185fcb331733ae68ab698"
+      }
+    },
+    "nativeR1": {
+      "artifact": "native-r1-fullnative-pg-v2-20261101-112864d38685",
+      "cases": 162,
+      "definitions": 42,
+      "phases": 486,
+      "seconds": 89.54593244660646,
+      "resultSHA256": "161bcc3467755c54583ff7cf2ef6e0d87b69a1b571f581923cb39bb67fc93ced",
+      "executionSHA256": "9c405dcaf72fc0c004f6c55cdab9ae1bdff8606a50780c7b3a310d4ca0657e27",
+      "originalFunctions": 42,
+      "routerEntrances": 9,
+      "directUseCase": true,
+      "sourceFileCount": 551,
+      "sourceBytes": 17781273,
+      "sourceManifestSHA256": "2111ac19fd063ddce47acb306a03a29f50c8a6605a696cf75dc9a6f2dd8afc9e",
+      "poolCleanup": {
+        "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 1
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "poolErrors": []
+      },
+      "poolCleanupSHA256": "27b74f7ced7aadb662e4a29bb87ffb138aafd4b876af8c8f17b4e57c98a1799e",
+      "independentReview": {
+        "status": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "9f78ea5a0b0d60d5ed50b1f8e6dae68b0e80f767d0b3bd921f6ae6e5106f239c",
+        "jsonSHA256": "99cc18a048d1499345a73942f3023241d9bbec09aa4e6daa588443a582844abb"
+      },
+      "harnessFinding": "R1-HARNESS-01 CLOSED_IN_V2; original162/P2/raw retained",
+      "bounds": "programmatic native claims/handlers/usecase; no full HTTP/JWT/entire auth/identity/Store"
+    },
+    "physicalNativeComposition": {
+      "models": 341,
+      "tablesBeforeAfter": [
+        341,
+        347
+      ],
+      "columnsBeforeAfter": [
+        4675,
+        4720
+      ],
+      "FKsBeforeAfter": [
+        790,
+        803
+      ],
+      "enabledRITriggersBeforeAfter": [
+        3160,
+        3212
+      ],
+      "adaptedUUIDColumnsPhysicallyUUID": 80,
+      "limits": "mapped names/columns/PK/FK/action coverage; not full every type/default/index equivalence; distinct from old535/historical675 profiles"
+    },
+    "cleanup": {
+      "allOwnedNormalRemoved": true,
+      "PGClientsLocks": [
+        0,
+        0
+      ],
+      "foreign41SafeProjectionsUnchanged": true,
+      "allForeignStateProven": false
+    },
+    "historyPreserved": {
+      "oneCBeforeFix": "21 cases 3PASS/18FAIL on e4; result3fb2bc3b retained",
+      "diagnostic": "actual ORM subtype proof with Root host bookkeeping KeyError retained NOT_ACCEPTED",
+      "R1FirstRun": "162 assertions passed with post-pytest cross-loop disposal P2; v2 rerun fixed same-test-loop cleanup",
+      "R1ScopeErratum": "actual38 contained zero test definitions from R1 module; all42 were separate subsequent execution"
+    },
+    "DocsLogout": {
+      "source": "7a84b3de85a996336b198016cd4abcc71508d801",
+      "rootIntegration": "c9f8812c31a2cb76e440c9e33135cc8fb7d3a410",
+      "exactFiles": 6,
+      "status": "INDEPENDENT_SOURCE_ACCEPTED_RUNTIME_NOTRUN",
+      "sourceDefinitions": 7,
+      "PGDefinitions": 17,
+      "knownJointSourceRequirement": "three protected model byte guards still pin bf741 and need explicit reviewed UUID29b composition before execution; no blind skip/repin"
+    },
+    "remaining": [
+      "schema matrix historical seven0–2; original47/54 separate immutable535 composition",
+      "old binaries/restore and new adapter-aware all-metadata recorder",
+      "current auth/userRole/Store/partner identity and Docs joint runtime",
+      "native CP/Org/contact and MemberScope Source handoffs, all OrgDELETE producers",
+      "external CREATE SQL receipt/profile/admin/options/query/OpenAPI/SDK",
+      "final joint CI and real partner pilots"
+    ],
+    "originalScope": {
+      "M00_M19": 20,
+      "crossCuttingRequirements": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "mergeDeployActivation": false
   }
 }
