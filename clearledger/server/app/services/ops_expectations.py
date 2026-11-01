@@ -152,7 +152,10 @@ class ExpandCtx:
         `None` в списке — общая затрата компании (офис, услуги на всю сеть).
         Это штатный разрез, а не пропуск.
         """
-        if (term.scope_type or "location") == "company":
+        scope_type = term.scope_type or "location"
+        if scope_type not in ("company", "location"):
+            return []
+        if scope_type == "company":
             return [None]
         if term.location_id:
             return [term.location_id]
@@ -453,6 +456,11 @@ async def _plan_expectations(db: AsyncSession, company_id: uuid.UUID, period: st
         if item is not None and not item.is_active:
             continue
 
+        if (term.scope_type or "location") not in ("company", "location"):
+            blocked.append({"termId": str(term.id), "contractId": str(term.contract_id),
+                            "costItem": term.cost_item,
+                            "reason": f"неподдерживаемый охват {term.scope_type}; требуется распределение"})
+            continue
         locations = ctx.scope(term)
         if not locations:
             blocked.append({"termId": str(term.id), "contractId": str(term.contract_id),
