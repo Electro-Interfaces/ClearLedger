@@ -345,6 +345,14 @@ async def seed(w, path):
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def read_world(rushydro_read_factory):
     """External actual async_sessionmaker; ROOT owns preflight and pool disposal."""
+    # Pytest registers an imported fixture once per module's fixture namespace.
+    # Both modules must share this one real seed/client for the same factory.
+    cache_key = "_rushydro_native_reads_world"
+    cached = getattr(rushydro_read_factory, cache_key, None)
+    if cached is not None:
+        assert cached.factory is rushydro_read_factory and not cached.http.is_closed
+        yield cached
+        return
     suffix = uuid4().hex
     w = SimpleNamespace(factory=rushydro_read_factory, suffix=suffix,
         companies=(uuid4(), uuid4()), orgs=(uuid4(), uuid4(), uuid4()), role=uuid4(), user=uuid4(),
@@ -382,7 +390,11 @@ async def read_world(rushydro_read_factory):
                     w.user_headers = await issue_user(w, bootstrap)
                     w.machine_headers = await issue_machine(w, secret)
                     del bootstrap, secret
-                    yield w
+                    setattr(rushydro_read_factory, cache_key, w)
+                    try:
+                        yield w
+                    finally:
+                        delattr(rushydro_read_factory, cache_key)
             finally:
                 app.dependency_overrides.clear()
     finally:
