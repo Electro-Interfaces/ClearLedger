@@ -29,7 +29,7 @@ from app.services.partner_contract_commands import create_partner_contract
 from app.services.native_contract_commands import create_native_contract
 from app.schemas import ContractCreate
 from tests.partner_contract_issuer_fixture import (
-    issuer_world, issue_machine, issue_user, make_body, state,
+    issuer_world, issue_machine, issue_user, make_body, state, add_opaque_locations,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -587,3 +587,138 @@ async def test_dedicated_fk_wait_is_not_claimed_by_flush_observation(issuer_worl
                     Organization.company_id == w.company).with_for_update(nowait=True))
             assert getattr(blocked_parent.value.orig, "sqlstate", None) == "55P03"
             await contender.rollback()
+
+
+@pytest.mark.parametrize("kind", ["user", "machine"])
+async def test_multiple_opaque_locations_ignore_snapshot_order_and_same_key_replays(issuer_world, monkeypatch, kind):
+    w = issuer_world
+    locations = await add_opaque_locations(w)
+    body = make_body(w, coverage={"kind": "locations", "locationIds": list(reversed(locations))})
+    before, observed = await state(w), set()
+    with pytest.raises(ValueError):
+        make_body(w, coverage={"kind": "locations", "locationIds": [*locations, locations[0]]})
+    original = authority._rows
+    def reordered_rows(db, statement):
+        rows = original(db, statement)  # Actual SQL; never replaces verifier/policy/proof.
+        columns = tuple((c.table.name, c.key) for c in getattr(statement, "selected_columns", ()))
+        if columns in (((ContractLocation.__tablename__, "company_id"), (ContractLocation.__tablename__, "location_id")),
+                       ((IntentLocation.__tablename__, "intent_id"), (IntentLocation.__tablename__, "location_id"))):
+            if len(rows) >= 2:
+                # Deliberately opposite to Python order, regardless of target collation.
+                # Every value and duplicate is retained from original SQL return.
+                observed.add(columns[0][0])
+                return tuple(sorted(rows, reverse=True))
+        return rows
+    monkeypatch.setattr(authority, "_rows", reordered_rows)
+    bearer = w.machine if kind == "machine" else w.bearer
+    result = await execute(w, body, bearer)
+    assert not result.replayed
+    after = await state(w)
+    assert after == tuple(n + delta for n, delta in zip(before, (1, len(locations), 1, 1, len(locations))))
+    assert observed == {ContractLocation.__tablename__, IntentLocation.__tablename__}
+    async with w.factory() as db:
+        card_rows = tuple(await db.scalars(select(ContractLocation.location_id).where(
+            ContractLocation.contract_id == result.contract_id)))
+        intent = await db.scalar(select(Intent).where(Intent.current_contract_id == result.contract_id))
+        intent_rows = tuple(await db.scalars(select(IntentLocation.location_id).where(IntentLocation.intent_id == intent.id)))
+        assert len(card_rows) == len(intent_rows) == len(locations) == len(set(locations))
+        assert sorted(card_rows) == sorted(intent_rows) == sorted(locations)
+    # Replay preservation, not a claim that R01 previously affected replay.
+    same_key = make_body(w, **{**body.model_dump(mode="json"),
+        "coverage": {"kind": "locations", "locationIds": sorted(locations)}})
+    replay = await execute(w, same_key, bearer)
+    assert replay.replayed and replay.contract_id == result.contract_id
+    assert await state(w) == after
+
+
+@pytest.mark.parametrize("snapshot", ["card", "receipt"])
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "different_id"])
+async def test_multiple_location_snapshot_drift_keeps_exact_cardinality_and_rolls_back(issuer_world, monkeypatch, snapshot, fault):
+    w = issuer_world
+    locations = await add_opaque_locations(w)
+    body = make_body(w, coverage={"kind": "locations", "locationIds": list(locations)})
+    before, observed = await state(w), []
+    original = authority._rows
+    model, parent = (ContractLocation, "company_id") if snapshot == "card" else (IntentLocation, "intent_id")
+    def negative_rows(db, statement):
+        rows = original(db, statement)
+        columns = tuple((c.table.name, c.key) for c in getattr(statement, "selected_columns", ()))
+        if columns == ((model.__tablename__, parent), (model.__tablename__, "location_id")) and rows:
+            # Negative snapshot fault only, AFTER actual full multi-row SQL flush.
+            # No new authority or fabricated positive rows; original rows exist.
+            assert len(rows) == len(locations)
+            observed.append(len(rows))
+            if fault == "missing": return rows[:-1]
+            if fault == "duplicate": return (*rows, rows[0])
+            return ((rows[0][0], rows[0][1] + " "), *rows[1:])
+        return rows
+    monkeypatch.setattr(authority, "_rows", negative_rows)
+    with pytest.raises(HTTPException) as drift:
+        await execute(w, body)
+    assert drift.value.status_code == 409 and observed == [len(locations)]
+    assert await state(w) == before  # All five atomic parts absent in fresh SQL.
+
+
+@pytest.mark.parametrize("ceiling", ["profile", "resource", "membership", "installation"])
+async def test_multiple_locations_one_uncovered_exact_id_denies_whole_create(issuer_world, ceiling):
+    w = issuer_world
+    locations = await add_opaque_locations(w)
+    missing = locations[-1]
+    body = make_body(w, coverage={"kind": "locations", "locationIds": list(locations)})
+    async with w.factory() as db:
+        if ceiling == "profile":
+            await db.execute(delete(Ref).where(Ref.profile_id == w.profile, Ref.location_id == missing))
+        elif ceiling == "resource":
+            await db.execute(delete(PartnerResourceItem).where(PartnerResourceItem.installation_id == w.iid,
+                PartnerResourceItem.kind == "objects", PartnerResourceItem.object_id == missing))
+        elif ceiling == "membership":
+            (await db.get(UserCompany, (w.user, w.company))).object_scope = list(locations[:-1])
+        else:
+            await db.execute(delete(PartnerInstallationLocation).where(
+                PartnerInstallationLocation.installation_id == w.iid, PartnerInstallationLocation.location_id == missing))
+        await db.commit()
+    before = await state(w)
+    with pytest.raises(HTTPException) as denied:
+        await execute(w, body)
+    assert denied.value.status_code == 403 and await state(w) == before
+
+
+@pytest.mark.parametrize("snapshot", ["card", "receipt"])
+async def test_multiple_locations_actual_sql_child_drift_after_flush_rolls_back(issuer_world, snapshot):
+    w = issuer_world
+    locations = await add_opaque_locations(w)
+    requested = locations[1:]
+    body = make_body(w, coverage={"kind": "locations", "locationIds": list(requested)})
+    before, observed, pending = await state(w), [], set()
+    marker = ContractLocation if snapshot == "card" else IntentLocation
+    def before_flush(db, context, instances):
+        if any(type(row) is marker for row in db.new):
+            pending.add(db)
+    def after_flush(db, context):
+        if observed or db not in pending:
+            return
+        pending.remove(db)
+        card = db.scalar(select(Contract.id).where(Contract.company_id == w.company))
+        assert card is not None
+        if snapshot == "card":
+            actual = tuple(db.scalars(select(ContractLocation.location_id).where(ContractLocation.contract_id == card)))
+            assert sorted(actual) == sorted(requested)
+            db.execute(delete(ContractLocation).where(ContractLocation.contract_id == card,
+                ContractLocation.location_id == requested[0]))
+        else:
+            iid = db.scalar(select(Intent.id).where(Intent.current_contract_id == card))
+            actual = tuple(db.scalars(select(IntentLocation.location_id).where(IntentLocation.intent_id == iid)))
+            assert sorted(actual) == sorted(requested)
+            # Real extra immutable child in its birth transaction; no trigger bypass.
+            db.execute(IntentLocation.__table__.insert().values(intent_id=iid, location_id=locations[0]))
+        observed.append(len(actual))
+    event.listen(Session, "before_flush", before_flush)
+    event.listen(Session, "after_flush_postexec", after_flush)
+    try:
+        with pytest.raises(HTTPException) as drift:
+            await execute(w, body)
+        assert drift.value.status_code == 409
+    finally:
+        event.remove(Session, "after_flush_postexec", after_flush)
+        event.remove(Session, "before_flush", before_flush)
+    assert observed == [len(requested)] and await state(w) == before

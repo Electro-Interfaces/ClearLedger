@@ -62,6 +62,14 @@ CASES = (
      "Actual native creation and shared matcher cause generic conflict without read-hidden IDs"),
     ("dedicated_fk_wait", "test_dedicated_fk_wait_is_not_claimed_by_flush_observation",
      "Separate definition: canonical FK parents already SHARE-locked, competing key DELETE/UPDATE blocks at parent phase; dedicated FK wait reachability NOT RUNTIME PROVEN"),
+    ("opaque_locations_order", "test_multiple_opaque_locations_ignore_snapshot_order_and_same_key_replays",
+     "Real multi-ID SQL/auth; original snapshots reordered losslessly opposite to Python for both checks; exact IDs/counts, same-key replay preserves all five counts"),
+    ("opaque_locations_cardinality", "test_multiple_location_snapshot_drift_keeps_exact_cardinality_and_rolls_back",
+     "Negative missing/duplicate/exact-ID projection faults after actual multi-row flush for each snapshot; fresh SQL confirms whole-root rollback"),
+    ("opaque_locations_coverage", "test_multiple_locations_one_uncovered_exact_id_denies_whole_create",
+     "One of several mixed-case/Cyrillic/whitespace IDs absent from actual profile/resource/membership/installation coverage denies entire CREATE"),
+    ("opaque_locations_sql_drift", "test_multiple_locations_actual_sql_child_drift_after_flush_rolls_back",
+     "Actual SQL delete of newborn card child or extra intent child in birth transaction after full flush; exact recheck fails and fresh SQL confirms whole-root rollback"),
 )
 STATUS = "AUTHORED_NOTRUN"
 INDEPENDENT_REVIEW = "PENDING"

@@ -81,6 +81,29 @@ async def state(w):
             await db.scalar(select(func.count()).select_from(IntentLocation).where(IntentLocation.intent_id.in_(ids)))])
 
 
+async def add_opaque_locations(w):
+    """Actual SQL coverage in every existing ceiling; original auth is reissued.
+
+    Existing single-location definitions keep their original fixture unchanged.
+    ROOT owns these extra rows through the same synthetic company/installation.
+    """
+    suffix = uuid4().hex[:16]
+    extra = (" zAa:" + suffix + "  ", " Zaa:" + suffix + "  ", " Яя:" + suffix + "  ")
+    locations = (w.loc, *extra)
+    async with w.factory() as db:
+        db.add_all([ServiceLocation(id=loc, company_id=w.company, code="multi-" + str(i) + suffix,
+            name="Synthetic opaque object", source_bindings=[]) for i, loc in enumerate(extra)])
+        await db.flush()
+        (await db.get(UserCompany, (w.user, w.company))).object_scope = list(locations)
+        db.add_all([PartnerInstallationLocation(installation_id=w.iid, location_id=loc) for loc in extra])
+        db.add_all([PartnerResourceItem(installation_id=w.iid, kind="objects", object_id=loc) for loc in extra])
+        db.add_all([Ref(id=uuid4(), profile_id=w.profile, kind="location", location_id=loc) for loc in extra])
+        await db.commit()
+    w.machine = await issue_machine(w)
+    w.bearer = await issue_user(w)
+    return locations
+
+
 @pytest_asyncio.fixture(loop_scope="session")
 async def issuer_world(partner_contract_issuer_factory, monkeypatch):
     factory = partner_contract_issuer_factory  # Sole ROOT-owned actual factory.

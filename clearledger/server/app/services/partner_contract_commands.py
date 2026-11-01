@@ -21,7 +21,7 @@ from app.services.contract_card_creation import (
     ContractCardValues, create_contract_card, find_contract_card_duplicates,
 )
 from app.services.partner_contract_authority import (
-    OPERATION, _deny, _one, _require, prepare_create, require_create,
+    OPERATION, _deny, _location_rows, _one, _require, prepare_create, require_create,
 )
 from app.services.partner_identity import NO_STORE, now
 from app.services.reference_identity import contract_identity
@@ -86,7 +86,7 @@ async def create_partner_contract(db: AsyncSession, bearer: str,
         locations = tuple(sorted(checked.coverage.locationIds))
         db.add_all([ContractLocation(id=uuid4(), company_id=operation.company_id,
             contract_id=card.id, location_id=loc) for loc in locations])
-        operation.own_locations = tuple((operation.company_id, loc) for loc in locations)
+        operation.own_locations = _location_rows((operation.company_id, loc) for loc in locations)
         await db.flush()
         await require_create(db, admission, checked)
         txid = await db.scalar(text("SELECT pg_current_xact_id()::text"))
@@ -107,7 +107,7 @@ async def create_partner_contract(db: AsyncSession, bearer: str,
         await db.flush()  # Intent FK parent precedes immutable location children.
         await require_create(db, admission, checked)
         db.add_all([IntentLocation(intent_id=intent.id, location_id=loc) for loc in locations])
-        operation.expected_receipt = (operation.expected_receipt[0], tuple((intent.id, loc) for loc in locations))
+        operation.expected_receipt = (operation.expected_receipt[0], _location_rows((intent.id, loc) for loc in locations))
         db.add(AuditEvent(id=uuid4(), company_id=operation.company_id,
             user_id=intent.actor_key, user_name=operation.verified.subject,
             action="partner.contract.create", details=json.dumps({"contractId": str(card.id),

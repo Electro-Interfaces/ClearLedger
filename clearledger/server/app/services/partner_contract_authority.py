@@ -46,6 +46,12 @@ def _rows(db, statement):
     return deepcopy(tuple(tuple(row) for row in db.execute(statement)))
 
 
+def _location_rows(rows):
+    # Exact full-row ordering on BOTH SQL and expected snapshots. Python keeps
+    # opaque strings and duplicate rows intact, independent of DB collation.
+    return tuple(sorted(rows))
+
+
 def _one(db, model, ident):
     return _rows(db, select(*model.__table__.c).where(model.id == ident))
 
@@ -90,7 +96,7 @@ class CreateOperation:
         iid = self.own_intent_id or (self.previous.id if self.previous else None)
         children = _rows(db, select(IntentLocation.intent_id, IntentLocation.location_id).where(
             IntentLocation.intent_id == iid).order_by(IntentLocation.location_id)) if iid else ()
-        return intents, children
+        return intents, _location_rows(children)
 
     def guard(self, db, model, ident):
         frozen = _one(db, model, ident)
@@ -256,9 +262,9 @@ class CreateOperation:
         if self.own_contract_id:
             if _one(db, Contract, self.own_contract_id) != self.own_card:
                 identity._writer_drift(db)
-            if _rows(db, select(ContractLocation.company_id, ContractLocation.location_id).where(
+            if _location_rows(_rows(db, select(ContractLocation.company_id, ContractLocation.location_id).where(
                     ContractLocation.contract_id == self.own_contract_id)
-                    .order_by(ContractLocation.location_id, ContractLocation.id)) != self.own_locations:
+                    .order_by(ContractLocation.location_id, ContractLocation.id))) != self.own_locations:
                 identity._writer_drift(db)
         current = identity.verify_locked_partner_access(db, self.bearer,
             capability=self.writer.capability, expected=self.verified)

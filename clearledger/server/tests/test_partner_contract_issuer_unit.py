@@ -1,6 +1,7 @@
 """AUTHOR ONLY / NOTRUN, including collection. Source assertions use stdlib.
 
-Positive authority, token parsing and SQL evidence are exercised ONLY by the
+The exact row-order helper regression carries no authority. Positive authority,
+token parsing and SQL evidence are exercised ONLY by the
 separately admitted real PG definitions, never by a fabricated unit verifier.
 """
 import ast
@@ -126,3 +127,41 @@ def test_no_secondary_session_engine_issuer_or_http_activation_surface():
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 assert not any("router." in ast.unparse(d) for d in n.decorator_list)
+
+
+def test_both_location_snapshots_and_expected_rows_use_same_lossless_ordering():
+    helper = node(AUTHORITY, "_location_rows")
+    # No set, normalization, filtering, projection or SQL configuration here.
+    assert ast.unparse(helper.body[-1]) == "return tuple(sorted(rows))"
+    assert {c.func.id for c in ast.walk(helper) if isinstance(c, ast.Call)} == {"tuple", "sorted"}
+    receipt = node(AUTHORITY, "receipt_snapshot", "CreateOperation")
+    assert ast.unparse(receipt.body[-1]) == "return (intents, _location_rows(children))"
+    recheck = node(AUTHORITY, "recheck", "CreateOperation")
+    own, = (n for n in ast.walk(recheck) if isinstance(n, ast.Compare)
+             and ast.unparse(n.comparators[0]) == "self.own_locations")
+    assert isinstance(own.left, ast.Call) and own.left.func.id == "_location_rows"
+    assert calls(own.left, "_rows")  # Fresh actual SQL rows, then Python order.
+    command = node(COMMAND, "create_partner_contract")
+    assignments = {ast.unparse(n.targets[0]): n.value for n in ast.walk(command)
+                   if isinstance(n, ast.Assign) and len(n.targets) == 1}
+    assert assignments["operation.own_locations"].func.id == "_location_rows"
+    # expected_receipt is assigned twice; this is the final children snapshot.
+    assert assignments["operation.expected_receipt"].elts[1].func.id == "_location_rows"
+
+
+def test_location_rows_preserve_exact_ids_cardinality_and_duplicates():
+    # AUTHORED NOTRUN: normal import only if ROOT later admits this definition.
+    from app.services.partner_contract_authority import _location_rows
+    from uuid import UUID
+    parent = UUID("00000000-0000-0000-0000-000000000001")
+    rows = ((parent, " zAa  "), (parent, " Zaa  "), (parent, " Яя  "))
+    expected = _location_rows(rows)
+    assert _location_rows(reversed(rows)) == expected
+    assert len(expected) == len(rows) == 3
+    assert _location_rows((*rows, rows[0])) != expected
+    assert len(_location_rows((*rows, rows[0]))) == 4
+    assert _location_rows(rows[:-1]) != expected
+    for changed in (" zaa  ", "zAa", " zAa ", " ЯЯ  "):
+        assert _location_rows((*rows[1:], (parent, changed))) != expected
+    other = UUID("00000000-0000-0000-0000-000000000002")
+    assert _location_rows(((other, rows[0][1]), *rows[1:])) != expected
