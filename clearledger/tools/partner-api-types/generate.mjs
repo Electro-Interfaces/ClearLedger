@@ -30,6 +30,7 @@ const operationManifest = new Set([
   "get /documents/{docId} getDocument",
   "get /documents/{docId}/versions/{versionId}/content downloadDocumentVersion",
   "post /contracts createContract",
+  "get /contracts/create-options getContractCreateOptions",
 ]);
 
 // Schema generation is local. A future accidental remote resolver fails closed.
@@ -120,7 +121,7 @@ export async function main(args = process.argv.slice(2)) {
         await writeFile(staging, bytes);
         await rename(staging, output);
       } finally { await rm(staging, { force: true }); }
-      process.stdout.write("Generated partner wire types from exact 15 GET + createContract POST candidate operations\n");
+      process.stdout.write("Generated partner wire types from exact 15 READ + createContract POST + getContractCreateOptions GET candidate operations\n");
     }
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }

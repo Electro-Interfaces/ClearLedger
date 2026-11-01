@@ -278,7 +278,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_actual_positive_12_handlers_match_response_headers_and_schemas(self):
         async with self.transport_projection():
-            for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
+            for entry in fixtures.read_entries(policy_registry(self.app)):
                 with self.subTest(operation=entry["operationId"]):
                     response = await self.request(path=self.operation_path(entry))
                     self.assertEqual(response.status_code, 200, response.text)
@@ -291,7 +291,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn("ETag", operation["responses"]["200"]["headers"])
 
     async def test_actual_negative_12_handlers_match_problem_contract_and_have_no_domain_effect(self):
-        for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
+        for entry in fixtures.read_entries(policy_registry(self.app)):
             operation = self.schema["paths"][entry["path"]]["get"]
             for status in (401, 403, 422, 503):
                 with self.subTest(operation=entry["operationId"], status=status):
@@ -322,7 +322,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         async with self.transport_projection():
             for status in (400, 404, 500):
                 self.state["failure"] = RuntimeError("SECRET internal state") if status == 500 else HTTPException(status, "SECRET detail")
-                for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
+                for entry in fixtures.read_entries(policy_registry(self.app)):
                     with self.subTest(operation=entry["operationId"], status=status):
                         response = await self.request(path=self.operation_path(entry))
                         self.assertEqual(response.status_code, status, response.text)
@@ -335,7 +335,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(known["methods"], ["GET"])
         self.assertEqual(known["methodOverrides"], {"/contracts": {"methods": ["GET", "POST"],
             "unsupportedMethodResponse": {"$ref": "#/components/responses/ProductContractsMethodNotAllowed"}}})
-        for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
+        for entry in fixtures.read_entries(policy_registry(self.app)):
             response = await self.request("DELETE", path=self.operation_path(entry))
             self.assertEqual(response.status_code, 405, response.text)
             self.assertEqual(response.headers["allow"], "GET, POST" if entry["path"] == "/contracts" else "GET")

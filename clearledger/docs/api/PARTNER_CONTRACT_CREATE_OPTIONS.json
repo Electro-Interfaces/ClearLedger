@@ -1,0 +1,892 @@
+{
+  "kind": "source-authored-protocol-contract",
+  "status": "NOTRUN_PENDING_INDEPENDENT_FULL21_SOURCE_REVIEW",
+  "schema_validation_executed": false,
+  "api_version": "1.1.0",
+  "readiness": "candidate",
+  "base_commit": "c3fd7cf89035cae5bd9317c7e6ac18624e12d136",
+  "code_cut_commit": "5ebb54b9df6deddc04c436f10077b9dbc6a15d7d",
+  "code_cut_tree": "fd769941f34392f4104af283224821657a6c29c9",
+  "docs_parent_commit": "5ebb54b9df6deddc04c436f10077b9dbc6a15d7d",
+  "docs_scope": [
+    "clearledger/docs/PARTNER_CONTRACT_CREATE_OPTIONS.md",
+    "clearledger/docs/api/PARTNER_CONTRACT_CREATE_OPTIONS.json"
+  ],
+  "code_pins_scope_count": 19,
+  "final_package_count": 21,
+  "code_pins": {
+    "clearledger/server/app/product_api/app.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "f9b4fa21c862359109cd28fed508c4b43013a5e5886a5151316abe85a57e3b3c",
+      "code_cut_raw_sha256": "82d7f7e59e2cc17500b5544c08e0a34eba0d42d6658fd20a474aa3462ca52cc7",
+      "code_cut_git_blob": "89818ab7cd4c5dc1b8e7bbf86ac89282e1094e5d",
+      "bytes": 90284,
+      "lines": 1323,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "265c31e13f7e17a7ad64aeebd32144dbd58de49a6251d9aadaca379214e2a5c0"
+    },
+    "clearledger/server/app/product_api/access.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "d8e357635a8420a614c211edc43ef8bd425e8ddab2843bdbac01e3fa57956475",
+      "code_cut_raw_sha256": "7331643cd874532e8f90442c680d92ce0d059ea9d063ebbbc2697fcd1a340285",
+      "code_cut_git_blob": "40fe8c37c8d5bb21bf35fd9098dea4862c5b0782",
+      "bytes": 10845,
+      "lines": 202,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "f4090af64869e966c9d618203f3d5f6072168f16500f696011f35c65f10d10c7"
+    },
+    "clearledger/server/app/api_contracts/context.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "b480ddd2e13ae8d2534e30acf8ff484ac8a7d8a9f6de3549e6fd7f11e8d4e1c1",
+      "code_cut_raw_sha256": "27feb0f720096ad760a1ddc6f56279eefcfc3db0890b42cac8149acbf5529f3f",
+      "code_cut_git_blob": "294ad08d92ba85d32fc5fb2ceb09b9d34e0a1d80",
+      "bytes": 16482,
+      "lines": 337,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "daefefa816cad57077e2f97c9baba6f79f20e52628c810171b10e62dac650661"
+    },
+    "clearledger/server/app/api_contracts/routing.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "20efc42527e9a08f1b9ff92abb8b76bbad9327d0c298611c5d97e375e9550b0b",
+      "code_cut_raw_sha256": "ae9d47b044551b06e2fd5ce7c0a39fa36b9534c453f9b7617d3395e1381b04a3",
+      "code_cut_git_blob": "7e9a6842d3f47a0abb8048eafce569f89f29c203",
+      "bytes": 19409,
+      "lines": 367,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "cd7e1bb6f403119ea28b11456c91e4543990216a75de0d0332469955712b36b5"
+    },
+    "clearledger/server/app/product_api/dto.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "5d7d5de4cb95a80b8f5cf4cfe34bbf03a779b11b1cef27b19c8e81b374739ea8",
+      "code_cut_raw_sha256": "978b9b96e78e593b8828d98b2de541db0a047c50c66c31ff91570b230da48627",
+      "code_cut_git_blob": "b9c2a34c6a7ed82fd23f267e3f0b67848302b9ce",
+      "bytes": 30558,
+      "lines": 892,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "96cff318da8b8add5749ee8345767916c6f711d6d7d62633d317dd670e60f650"
+    },
+    "clearledger/server/app/services/partner_contract_authority.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18",
+      "code_cut_raw_sha256": "2a52bb5bf5740a3450492f1f2bd60d1617430a6950560c29c697314f82e32027",
+      "code_cut_git_blob": "59309165c36df4843c5e3b09317dabb1a3f68f59",
+      "bytes": 23040,
+      "lines": 444,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "98aa1170ad2f218bbcf7049cc5be16afa7d163e2ba3ab8c10d0892748a2e454b"
+    },
+    "clearledger/server/app/product_api/contract_create_options.py": {
+      "baseline_status": "NEW_NOT_IMPLEMENTED",
+      "change_from_base": "added",
+      "base_raw_sha256": null,
+      "code_cut_raw_sha256": "41ba731f136a983782061d18ea0f26d29ecc995b3ee86a4339f8720e25417f2c",
+      "code_cut_git_blob": "7a00f0fe2f519dbf3c357e93d58f93acb99245f1",
+      "bytes": 17017,
+      "lines": 341,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "fa15dbedc984e8e834dddb02f35dadf3986833f8c81685cd424b4d79d51ee7d6"
+    },
+    "clearledger/server/tests/test_partner_contract_create_options.py": {
+      "baseline_status": "NEW_NOT_IMPLEMENTED",
+      "change_from_base": "added",
+      "base_raw_sha256": null,
+      "code_cut_raw_sha256": "e7ade8471abbb34086a1a34bdd1a35d1b59f56b50ab0a560303c008d8e08f8bf",
+      "code_cut_git_blob": "7c7dad82e732303fda164e183dc1cb8efddfef88",
+      "bytes": 15742,
+      "lines": 251,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "879177b0891ceca65b6f43125f938be6ebbb2060f3a94c70e6d64d58a40fdb00"
+    },
+    "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "c18391521cc660efc53cfdd8655d2e1b90af89b567628cf6feddeabf14ab16ee",
+      "code_cut_raw_sha256": "7b59f163aebb805064f2d4a7c9841f55dca44dab8eb0bf2d42692434b8fd40ec",
+      "code_cut_git_blob": "eb5ebd9d3cb36e76140890c6634f204c4218a856",
+      "bytes": 41432,
+      "lines": 506,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "4ba473205440c11c54c549988fff0e35915af0073e7e453b9e55782dbe58ace7"
+    },
+    "clearledger/scripts/export-partner-openapi.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "afc546c88a579387fed8942f8feaada01d88c525b2b9a28927215d648ebba786",
+      "code_cut_raw_sha256": "5051758929045426a0f87d1047e9f8e3294ccd0663b40c36ed7b625238f8bf0c",
+      "code_cut_git_blob": "4854de70691076b9c82af88ebef7739f00ca83bf",
+      "bytes": 6207,
+      "lines": 126,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "4e48340a6fced941727cc1f96884007d5dc077b9c893b6b45b3a2c75e07987ab"
+    },
+    "clearledger/tools/partner-api-types/generate.mjs": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "53481c3053e781712c5e12c9b76038589e7f0c996180132c66721e0f3dded1ee",
+      "code_cut_raw_sha256": "9b55d2838cb80fa6cc1479d89c0042862bbf508395365d9b0fe9ea9aed018109",
+      "code_cut_git_blob": "35fbbbd909c421cd367a89089a465d50f977be8c",
+      "bytes": 6925,
+      "lines": 131,
+      "relation_to_docs_parent": "same_code_blob"
+    },
+    "clearledger/server/tests/test_product_http_profile.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "ee748e5c922d387431a641b64956f7c55a9be19cc34b87c7cadf6d03d794de82",
+      "code_cut_raw_sha256": "deb05de1db924288e67851a1d1987ddd6d49263f76549273ceb050efd28e49b1",
+      "code_cut_git_blob": "2cfba34ea2e41c8d439bf9b0506288f42f2e472d",
+      "bytes": 24412,
+      "lines": 423,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "97877440027cb9415c391b982810f13b5e86d98275fad7765e5477303a144ec9"
+    },
+    "clearledger/server/tests/test_product_api.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "97dfe4b486566c63a70b26662ab1ff298700054193db3a93d41d6f2943e05e09",
+      "code_cut_raw_sha256": "2621e187bb75effcef1e018d328b31bcee6b66c509a51dca4f9f482923da1eed",
+      "code_cut_git_blob": "45fb774aea9c5380294214eb63392a47c3b9c51c",
+      "bytes": 28599,
+      "lines": 498,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "c5a27df528757b6f402f21b242fabc80c144164e2f830ae31c6208c3983a223f"
+    },
+    "clearledger/server/tests/test_product_contract_classification.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "0d3b2897ca277ad5511e7f2c9caa20e6fd2ca4e18228b51c4582e723969d9a7c",
+      "code_cut_raw_sha256": "609b9e63410e8dd39b408461d7fb102ced1d2030866b464a54ab243b268507fd",
+      "code_cut_git_blob": "4ed76fec4e407e65b5edc80b03fb301437b38afd",
+      "bytes": 36444,
+      "lines": 607,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "36e63ad7168a2a95bc23bc687a6cdd022c6b11ba3b2d5f0e138f8d80ea2a45cd"
+    },
+    "clearledger/server/tests/test_product_contract_documents.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "58b1d5283ff50951610cc7456cfda4d71f3732fbb679f59a406a6e6fe561bca0",
+      "code_cut_raw_sha256": "c1280433af4898a7e32b601e67e1f12efa4bb60c72c487d59f9ebd9733c9ddbd",
+      "code_cut_git_blob": "c60032ce5e7f746fc9482b4103fd0ad34d6f512e",
+      "bytes": 38125,
+      "lines": 653,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "61bd3d3e4d6ef7caf8bbaee9e042d5f3694e1e550360822f940d53c033c0a804"
+    },
+    "clearledger/server/tests/test_product_contract_objects.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "839accbf35ccfa0c075b04bd0d9334ac731f7c714a031f6deb0ed6ea4e9217e1",
+      "code_cut_raw_sha256": "c365d468801e29cf65fb625f1b745b6b3eaa51a18cfef5826a8b15c0801a0b56",
+      "code_cut_git_blob": "c88065d7aaf099ba9e75a7a898f4281969396e6f",
+      "bytes": 31005,
+      "lines": 541,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "fe17ac67fac60cf4874f50408cb317f8880c9911c4d102e8bf1a8f2cb30861f9"
+    },
+    "clearledger/server/tests/test_product_openapi_http_contract.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "c1b71be1f49474f18210c3ea3379ed25c99e7565cfd36f9a522189cd7d9c5778",
+      "code_cut_raw_sha256": "d5b08fed59cdf45aa85a741479c587f54ca55bf9998a4d7ef457b8ebd1759898",
+      "code_cut_git_blob": "6f7de3c3766edd0a82ee3b48ac0946acb8c0a021",
+      "bytes": 23625,
+      "lines": 408,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "1fff86597c0f25f25785eb5788285873108acaf0705f061ac0c8fb766d32789d"
+    },
+    "clearledger/server/tests/test_partner_contract_create_options_pg.py": {
+      "baseline_status": "NEW_NOT_IMPLEMENTED",
+      "change_from_base": "added",
+      "base_raw_sha256": null,
+      "code_cut_raw_sha256": "12eaaee1fc96a69d7aa482e8883ed3154603809a678a9dcd325270a597c6cdc5",
+      "code_cut_git_blob": "58f282b9811635afca8cef34419c47ec803d57b3",
+      "bytes": 36563,
+      "lines": 724,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "172b7b7aab4060e2ce1dd0b628f44ed9cf18190ed75111c27bcd32590b900efb"
+    },
+    "clearledger/server/tests/test_partner_contract_http_create.py": {
+      "baseline_status": "EXISTS_BASELINE",
+      "change_from_base": "modified",
+      "base_raw_sha256": "d4f1843141c8658a1547a60b2346fc4da2593379e9f5ec777c8e5f6012f248b4",
+      "code_cut_raw_sha256": "46e7adf1b9511c72490f634d479a61eafc28f8225bc1f5341fbca169d2502ce9",
+      "code_cut_git_blob": "4433e70beb394d807c2221b2969faae55d83d090",
+      "bytes": 38748,
+      "lines": 781,
+      "relation_to_docs_parent": "same_code_blob",
+      "module_ast_sha256": "9d8315eb2d8c49ad2a87422f01e1812943b8ecc0f1bd333d0b81e8014207fc2f"
+    }
+  },
+  "authorization_provenance": {
+    "initial_code_gate": "msg_b8f342be181a",
+    "relayed_user_permission": "msg_5f5562931d62",
+    "scope21_gate": "msg_f0d279b06c3c",
+    "member_absence_parity": "msg_7fb666cf8239",
+    "production_snapshot_sql": "msg_9bc0d8801c36",
+    "real_provider": "msg_c659cb3b82bf"
+  },
+  "frozen_design": {
+    "v1": {
+      "design_sha256": "7cf5df47e849ea9f34dbc543b5e91355ddf733ac7e58438a68e1bf37e47fda5d",
+      "pins_sha256": "133af1107a205b19629a1d6f22da9031b88e472a9be1cbb86c98d9169c1884ad"
+    },
+    "v2": {
+      "design_sha256": "a15c9c8d748fcbce44aa8d24ae605f94bf3a077df374905273dd8896b83abfcf",
+      "pins_sha256": "0a89eb486705c13d0f30c11ef2d141601693313b909c6c988c317900b5e391cc",
+      "timing": "before_added_legacy_body_edit_after_18_paths_authored"
+    }
+  },
+  "operation": {
+    "method": "GET",
+    "path": "/api/v1/contracts/create-options",
+    "operationId": "getContractCreateOptions",
+    "tag": "Договоры",
+    "scope": "contracts:create",
+    "accepted_principals": [
+      "partner",
+      "service"
+    ],
+    "stage": "create-options",
+    "action": "create-options",
+    "permissions": [],
+    "database_authority": false,
+    "body": null
+  },
+  "query": {
+    "resource": {
+      "required": true,
+      "enum": [
+        "organization",
+        "counterparty",
+        "location",
+        "type"
+      ]
+    },
+    "pageSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 50
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 2048,
+      "required": false
+    },
+    "additional_properties": false
+  },
+  "response_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "resource",
+      "items",
+      "selectionVersion",
+      "nextCursor"
+    ],
+    "properties": {
+      "resource": {
+        "enum": [
+          "organization",
+          "counterparty",
+          "location",
+          "type"
+        ],
+        "type": "string"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "selectionVersion": {
+        "type": "string"
+      },
+      "nextCursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "response_example": {
+    "fictional": true,
+    "captured_runtime": false,
+    "value": {
+      "resource": "type",
+      "items": [
+        {
+          "value": " Учебный тип "
+        }
+      ],
+      "selectionVersion": "fictional-opaque-selection-version",
+      "nextCursor": null
+    }
+  },
+  "problem_schema": {
+    "type": "object",
+    "required": [
+      "type",
+      "title",
+      "status",
+      "code",
+      "requestId",
+      "detail"
+    ],
+    "properties": {
+      "type": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "status": {
+        "type": "integer"
+      },
+      "code": {
+        "type": "string"
+      },
+      "requestId": {
+        "type": "string"
+      },
+      "detail": {
+        "type": "string"
+      }
+    }
+  },
+  "problem_example": {
+    "type": "about:blank",
+    "title": "Service Unavailable",
+    "status": 503,
+    "code": "api_unavailable",
+    "requestId": "80000000-0000-4000-8000-000000000001",
+    "detail": "Partner API is unavailable"
+  },
+  "errors": {
+    "400": "invalid_cursor",
+    "401": "invalid_credentials",
+    "403": "access_denied",
+    "405": "method_not_allowed",
+    "422": "invalid_request",
+    "429": {
+      "quota": "rate_limited",
+      "generic": "internal_error"
+    },
+    "500": "internal_error",
+    "503": "api_unavailable"
+  },
+  "headers": {
+    "all_application_responses": [
+      "Cache-Control: no-store",
+      "X-Request-Id"
+    ],
+    "401_403": "Bearer challenge",
+    "405": "Allow: GET",
+    "quota429": "Retry-After",
+    "generic429_503": "Retry-After only when trusted upstream provides it"
+  },
+  "lifetime": {
+    "global_deadline_seconds": 10,
+    "phases": [
+      "canonical_preflight_rollback_close",
+      "old_quota_independent_commit_close_if_enabled",
+      "separate_actual_clean_AsyncSession_bound_AsyncEngine",
+      "READ_ONLY_REPEATABLE_READ_before_first_SQL",
+      "whole_profile_closure_projection_on_t0",
+      "repeat_same_canonical_verifier_before_DTO_database_still_t0",
+      "selection_rollback_close_before_response"
+    ],
+    "first_production_sql": "SELECT set_config('statement_timeout', :ms, true), pg_current_snapshot()",
+    "statement_timeout_ms": "floor of remaining total deadline; <=0 refuses503 before first SQL; transaction-local only",
+    "t0_observation": "after_cursor_execute completed production SQL on same actual RR Connection; SHOW only afterward",
+    "revoke_before_t0": "deny",
+    "revoke_after_t0": "may be invisible to this response",
+    "post": "reauthorizes current authority independently",
+    "business_dml": false,
+    "selection_commit": false,
+    "advisory_or_row_locks": false,
+    "sql_stamp": false,
+    "write_admission": false,
+    "retry_or_reset_inside_snapshot": false,
+    "borrowed_connection_accepted": false
+  },
+  "policy": {
+    "selector": "app.services.partner_contract_authority.select_create_domains",
+    "sql_loader": "app.product_api.contract_create_options",
+    "verifier": "app.product_api.access.configured_verifier (canonical, not injected READ fixture verifier)",
+    "current_user_membership_required": true,
+    "unrelated_member_absence": "stable absence allowed, as baseline E",
+    "unrelated_inactive_grant_or_type": "no blanket veto",
+    "foreign_required_parent_or_wrong_machine_binding": "original policy denial",
+    "member_object_scope_none_equals_empty": false,
+    "unused_raw_all_empty_native_veto_added": false,
+    "domains": {
+      "organization": [
+        "profile",
+        "tenant",
+        "ownOrganization"
+      ],
+      "counterparty": [
+        "profile",
+        "tenant",
+        "counterpartiesResourceScope"
+      ],
+      "location": [
+        "profile",
+        "tenant",
+        "objectsResourceScope",
+        "installationLocations",
+        "memberObjectScope"
+      ],
+      "type": [
+        "profile",
+        "activeCatalog"
+      ]
+    },
+    "limits_per_kind": {
+      "users": 100,
+      "machines": 100,
+      "organizations": 100,
+      "counterparties": 100,
+      "locations": 100,
+      "types": 100
+    },
+    "limit_enforcement": "bounded SQL limit+1; overflow/incomplete load503; no partial200",
+    "canonical_verifier_sql_row_bounded": false,
+    "empty_domain_status": 200
+  },
+  "cursor": {
+    "ttl_max_seconds": 300,
+    "max_length": 2048,
+    "key": "existing protected Settings.cursor_key, >=32bytes, no new secret",
+    "algorithm": "domain-separated HMAC-SHA256 options-v1",
+    "encoding": "typed length-prefixed UTF8, sorted encoded sets, canonical UUID, unchanged opaque bytes",
+    "selectionVersion": "opaque HMAC(binding), advisory only",
+    "payload_keys": [
+      "version",
+      "resource",
+      "pageSize",
+      "lastValue",
+      "expiry",
+      "digest"
+    ],
+    "payload_internal_identity_ids": false,
+    "payload_bearer": false,
+    "binding": [
+      "method",
+      "path",
+      "operation",
+      "policyVersion",
+      "tenant",
+      "app",
+      "client",
+      "installation",
+      "grant",
+      "actorKind",
+      "userOrMachineClient",
+      "tokenID",
+      "scopes",
+      "profileID",
+      "generation",
+      "fourEffectiveDomains",
+      "ownOrganization",
+      "resourceModesAndIDs",
+      "installationLocations",
+      "memberObjectScopeNoneDistinctFromEmpty"
+    ],
+    "mac_binds": [
+      "binding",
+      "selectionVersionDigest",
+      "wholePayloadIncludingPageContext"
+    ],
+    "constant_time_compare": true,
+    "key_rotation": "invalidates cursor",
+    "invalid_stale_expired_cross_binding_new_token": "400 after current auth; omit cursor to restart",
+    "reservation_or_write_authority": false,
+    "payload_version": 2,
+    "payload_encoding": "binary fixed-width header + unsigned big-endian UTF8 byte length + exact UTF8 bytes; unpadded canonical base64url(payload).base64url(MAC); no JSON or compression",
+    "payload_layout": [
+      {
+        "field": "version",
+        "offset": 0,
+        "bytes": 1,
+        "value": 2
+      },
+      {
+        "field": "resource",
+        "offset": 1,
+        "bytes": 1,
+        "values": [
+          "organization",
+          "counterparty",
+          "location",
+          "type"
+        ]
+      },
+      {
+        "field": "pageSize",
+        "offset": 2,
+        "bytes": 1,
+        "min": 1,
+        "max": 100
+      },
+      {
+        "field": "expiry",
+        "offset": 3,
+        "bytes": 8,
+        "encoding": "unsigned big-endian epoch seconds"
+      },
+      {
+        "field": "lastValueByteLength",
+        "offset": 11,
+        "bytes": 2,
+        "encoding": "unsigned big-endian"
+      },
+      {
+        "field": "digest",
+        "offset": 13,
+        "bytes": 32,
+        "encoding": "HMAC selection digest"
+      },
+      {
+        "field": "lastValue",
+        "offset": 45,
+        "max_bytes": 1024,
+        "encoding": "exact strict UTF8, no NUL; type nonblank 1..256 characters; location 1..40; organization/counterparty canonical UUID"
+      }
+    ],
+    "capacity_proof": {
+      "fixed_bytes": 45,
+      "type_max_characters": 256,
+      "utf8_max_bytes_per_character": 4,
+      "payload_max_bytes": 1069,
+      "unpadded_base64_max_characters": 1426,
+      "separator_characters": 1,
+      "mac_raw_bytes": 32,
+      "mac_base64_characters": 43,
+      "cursor_max_characters": 1470,
+      "public_max_length_unchanged": 2048,
+      "all_legal_C0_non_NUL_and_multibyte": true,
+      "proof_kind": "own stdlib integer/UTF8 byte-length arithmetic only; encoder NOTRUN"
+    },
+    "cursor_mac_domain": "options-v1 domain separator with cursor-v2 label, binding and canonical encoded whole binary payload",
+    "decoder": "MAC and selection digest constant-time; input <=2048; raw45..1069; exact version/resource/pageSize/length; reject trailing bytes, malformed UTF8, NUL, invalid domain/expiry; invalid400 after current auth",
+    "unpublished_format_transition": "v1 JSON to opaque binary v2 before publication; old opaque tokens rejected400; endpoint/scope/policy unchanged"
+  },
+  "source_manifest_status": "static declarations, not executed runtime registry or exported OpenAPI",
+  "source_manifest": [
+    {
+      "method": "GET",
+      "path": "/objects",
+      "operationId": "listObjects"
+    },
+    {
+      "method": "GET",
+      "path": "/objects/{objectId}",
+      "operationId": "getObject"
+    },
+    {
+      "method": "GET",
+      "path": "/objects/{objectId}/monitoring",
+      "operationId": "getObjectMonitoring"
+    },
+    {
+      "method": "GET",
+      "path": "/equipment",
+      "operationId": "listEquipment"
+    },
+    {
+      "method": "GET",
+      "path": "/equipment/{equipmentId}",
+      "operationId": "getEquipment"
+    },
+    {
+      "method": "GET",
+      "path": "/counterparties",
+      "operationId": "listCounterparties"
+    },
+    {
+      "method": "GET",
+      "path": "/counterparties/{counterpartyId}",
+      "operationId": "getCounterparty"
+    },
+    {
+      "method": "POST",
+      "path": "/contracts",
+      "operationId": "createContract"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/create-options",
+      "operationId": "getContractCreateOptions"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts",
+      "operationId": "listContracts"
+    },
+    {
+      "method": "GET",
+      "path": "/contract-types",
+      "operationId": "getContractTypeMetadata"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/{contractId}",
+      "operationId": "getContract"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/{contractId}/objects",
+      "operationId": "listContractObjects"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/{contractId}/documents",
+      "operationId": "listContractDocuments"
+    },
+    {
+      "method": "GET",
+      "path": "/documents",
+      "operationId": "listDocuments"
+    },
+    {
+      "method": "GET",
+      "path": "/documents/{docId}",
+      "operationId": "getDocument"
+    },
+    {
+      "method": "GET",
+      "path": "/documents/{docId}/versions/{versionId}/content",
+      "operationId": "downloadDocumentVersion"
+    }
+  ],
+  "compatibility": {
+    "old_read_count": 15,
+    "old_read_dual_count": 11,
+    "old_read_user_only_count": 4,
+    "old_post_count": 1,
+    "new_options_get_count": 1,
+    "total_declared_operations": 17,
+    "protected_app_nodes": {
+      "_restore_declared_response_examples": {
+        "lines": [
+          1149,
+          1167
+        ],
+        "ast_sha256": "852b2a65676888fc0797741f74739bea3b023ebee241e0c3c67a646315a69860"
+      },
+      "objects": {
+        "lines": [
+          213,
+          214
+        ],
+        "ast_sha256": "b47608371d3cc23452aa15b06b0c5d120acb6d67f9c6b9119e04b1b2479bb9b5"
+      },
+      "object_detail": {
+        "lines": [
+          258,
+          259
+        ],
+        "ast_sha256": "01f36853865d7bb7dfe777ab4c8eb389bb76759f71ef25e0c0e8c0d3f11d9d65"
+      },
+      "object_monitoring": {
+        "lines": [
+          332,
+          334
+        ],
+        "ast_sha256": "a3635ad83cc17b3441f81342b2fa04beb6fb9c1fa91ca54cbd9d512c78c3d77e"
+      },
+      "equipment": {
+        "lines": [
+          390,
+          391
+        ],
+        "ast_sha256": "c158fd8f97ffed567492ca2d74c9f558bf840814e1c450ba231c59637dd91949"
+      },
+      "equipment_detail": {
+        "lines": [
+          435,
+          436
+        ],
+        "ast_sha256": "1c4c64089cd5de0bbc07064a99ee778f9fe4cd4673596fee5ebba1f389bb7f77"
+      },
+      "counterparties": {
+        "lines": [
+          485,
+          486
+        ],
+        "ast_sha256": "f15e7a6deb5973f0441131bb8529fdc3e4100afd895cd7ecfbb8f343df49d1a8"
+      },
+      "counterparty_detail": {
+        "lines": [
+          523,
+          524
+        ],
+        "ast_sha256": "bb50b6e08a8bc7cfd5e0aea4e7e13d36ad9379ae35bd5cfedfdc828c6bebe0ce"
+      },
+      "contract_create_post": {
+        "lines": [
+          552,
+          553
+        ],
+        "ast_sha256": "aa419a893ed6ce9bc23c8d74f0ebbff55920bd147622e9d55b8a0d8b40f3124a"
+      },
+      "contracts": {
+        "lines": [
+          612,
+          613
+        ],
+        "ast_sha256": "b053770adbf45e930f988795f26f9f2c81e4494cd35762c1719dd7bd5f70c4bb"
+      },
+      "contract_type_metadata": {
+        "lines": [
+          655,
+          660
+        ],
+        "ast_sha256": "e509b327384f6858a6507af5c80de0d62078aed02f37f787b2aca6b082e26ee4"
+      },
+      "contract_detail": {
+        "lines": [
+          707,
+          708
+        ],
+        "ast_sha256": "8fe64c26f666267fad9b0c3c6e496c2f4ce18a3a1254a94c8b99f451590d4b2a"
+      },
+      "contract_objects": {
+        "lines": [
+          756,
+          761
+        ],
+        "ast_sha256": "e66373c1d60474fdd67794b6756ffa7c12a7eccd9f0d170c6d29e5087baf7ce3"
+      },
+      "contract_documents": {
+        "lines": [
+          809,
+          814
+        ],
+        "ast_sha256": "ee95244dcfc3d1b1aac6435fc2a2c58038be7874c72839011df57eabb8a6b138"
+      },
+      "documents": {
+        "lines": [
+          869,
+          870
+        ],
+        "ast_sha256": "ca1acd0eba9469e18306795f92ec87680c877c9d6501b6d7dfb01bb2bf961182"
+      },
+      "document_detail": {
+        "lines": [
+          928,
+          938
+        ],
+        "ast_sha256": "0f90ad4c6b2e7a16db88d5815a886f186f5dead34f7cbb69600247cd658cf981"
+      },
+      "document_content": {
+        "lines": [
+          975,
+          977
+        ],
+        "ast_sha256": "017a24a4ad4d682021a95e1022f1a8b97e9ac1b7cfc216abf37175f33d3d381d"
+      },
+      "create_policy": {
+        "lines": [
+          528,
+          531
+        ],
+        "ast_sha256": "9553c817dc3c9f25422682933ba156312c3d9afc5a66d6b6439b8c9b49f448da"
+      },
+      "create_problems": {
+        "lines": [
+          532,
+          533
+        ],
+        "ast_sha256": "d1a5598f86acc9baced5a5af3b0be35f3afddfe930dbc9d17820d6a9770a778b"
+      }
+    },
+    "whole_E_inverse_raw": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18",
+    "whole_E_inverse_ast": "a7f495d3d33c780107a5a417c001090048ebe147c1d9aeac26de656cd69da202",
+    "legacy_http_test_only_body": "test_schema_exact_post_canonical_body_and_protected_public_projection",
+    "legacy_http_base_raw": "d4f1843141c8658a1547a60b2346fc4da2593379e9f5ec777c8e5f6012f248b4",
+    "legacy_http_masked_module_ast": "e0bf7918e0a392fb6269bf2200896584ea8f0381f5140aee5e44f7a54c796042",
+    "historical_DPL_19_17_12_and_activation_pins": "preserved, DPL NOTRUN",
+    "sdk_generated_or_consumer_changed": false
+  },
+  "authored_tests": {
+    "unit": {
+      "definitions": 14,
+      "ast_cartesian_variants": 90
+    },
+    "real_pg": {
+      "definitions": 23,
+      "ast_cartesian_variants": 75
+    },
+    "collected": false,
+    "executed": false,
+    "pass_count": null,
+    "provider": "ROOT-admitted callable partner_contract_issuer_factory through issuer_world; independent actual clean Sessions/AsyncEngine >=2connections",
+    "observations": "original canonical functions plus SQLAlchemy completed-SQL events, actual SHOW after t0, separate real writable commits, negative clock/cancel/deadline faults",
+    "cleanup": "ROOT lifecycle with w.owned users/installations/type_codes; synthetic company graph; no driver/conftest edits",
+    "repair_regressions": {
+      "unit": "legal256 C0 and4-byte UTF8/unstripped roundtrip, other resource bounds, authenticated malformed binary decoder, source exception/cleanup protocol",
+      "real_pg": "four actual invalid-query422 then original real quota429 cases; three legal two-type pageSize1 pairs; no Session/SQL/verifier positive stand-in",
+      "all_not_run": true
+    }
+  },
+  "remaining": [
+    "fresh independent FULL21 SourceReview",
+    "exact ROOT push/draft gate",
+    "separate ROOT actual canonical auth/PG/cleanup/deadline/cursor admission",
+    "ROOT-owned SDK generation",
+    "human merge only after separate authorization"
+  ],
+  "runtime_imports_tests_during_authoring": 0,
+  "original_program": {
+    "ref": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "counts": [
+      20,
+      11
+    ],
+    "complete": false
+  },
+  "repair_lineage": {
+    "initial_code_cut": "b17a8014ee79b605e6369839048b01b21c84e4a1",
+    "initial_docs_head": "2cce114652a661f2667a810f1b3eaaf4b2770a7e",
+    "repair_code_parent": "2cce114652a661f2667a810f1b3eaaf4b2770a7e",
+    "repair_code_changed_paths": 3,
+    "repair_docs_changed_paths": 2,
+    "repair_code_cumulative_paths_from_base": 21,
+    "docs_already_present_in_repair_code_parent": true,
+    "docs_child_changes": "two existing documents modified; 19 code/test blobs unchanged from immediate parent",
+    "frozen_negative_review": "/srv/projects/preview/partner-contract-create-options-review-20261101/review.json",
+    "source_pass": false
+  },
+  "framework_error_preservation": "Original Starlette HTTPException including BudgetExceeded and FastAPI RequestValidationError re-raised after mandatory rollback/close/scope cleanup; existing Problem handlers keep422/429/rate_limited/Retry-After; unexpected infra/timeouts503"
+}

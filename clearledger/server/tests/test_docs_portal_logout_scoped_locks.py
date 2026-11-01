@@ -342,12 +342,55 @@ def test_accepted_org_order_extension_is_exact_and_preserves_scope_projection():
     assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
 
 
+
+# Explicit CREATE_OPTIONS extraction overlay; every old pin below stays literal.
+ACCEPTED_OPTIONS_EXTRACTION = {'ratification': ['msg_b8f342be181a', 'msg_7fb666cf8239'], 'base': 'c3fd7cf89035cae5bd9317c7e6ac18624e12d136', 'baseline_raw': '92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18', 'extended_raw': '2a52bb5bf5740a3450492f1f2bd60d1617430a6950560c29c697314f82e32027', 'baseline_ast': 'a7f495d3d33c780107a5a417c001090048ebe147c1d9aeac26de656cd69da202'}
+_OPTIONS_INVERSE_EDITS = (('\n\n\ndef select_create_domains(current, refs, types, catalog, member_object_scope):\n    """Pure existing CREATE intersections; neither SQL nor write authority.\n\n    Input parents have already been checked by the owning SQL loader. Keep\n    opaque IDs literal and distinguish None (unrestricted) from an empty set.\n    Inactive/unrelated types narrow their domain, never veto another type.\n    """\n    orgs = frozenset(r[3] for r in refs if r[2] == "organization"\n        and (current.own_organization_id is None or current.own_organization_id == r[3]))\n    cps = frozenset(r[4] for r in refs if r[2] == "counterparty"\n        and _permits(current.resource_scopes.get("counterparties"), str(r[4])))\n    locs = frozenset(r[5] for r in refs if r[2] == "location"\n        and _permits(current.resource_scopes.get("objects"), r[5])\n        and (current.location_ids is None or r[5] in current.location_ids)\n        and (member_object_scope is None or r[5] in member_object_scope))\n    codes = frozenset(r[1] for r in types if catalog.get(r[1]) == ((r[1], True),))\n    return orgs, cps, locs, codes\n\n\n', '\n\n'), ("    def policy(self, db, current):\n        refs, types = _require_coarse_create(db, current, self.expected_profile)\n        requests = [(self.body.organizationId, self.body.counterpartyId,\n                     self.body.typeCode, self.body.coverage.locationIds)]\n        if self.previous:\n            requests.append((self.previous.created_organization_id, self.previous.created_counterparty_id,\n                             self.previous.created_type_code, self.previous_locations))\n        member = identity.fresh(db, UserCompany, (current.user_id, self.company_id)) if current.user_id else None\n        orgs, cps, locs, allowed_types = select_create_domains(current, refs, types, self.types,\n            member.object_scope if member is not None else None)\n        for org, cp, code, locations in requests:\n            if (org not in orgs or cp not in cps or not locations or code not in allowed_types):\n                _deny()\n            for loc in locations:\n                if loc not in locs:\n                    _deny()\n        # contracts read resources intentionally do not confer CREATE or veto a\n        # newborn's own immutable intent receipt. verify_access still validates\n        # every existing canonical resource profile, including EMPTY/SET/ALL.\n\n", '    def policy(self, db, current):\n        refs, types = _require_coarse_create(db, current, self.expected_profile)\n        orgs = {r[3] for r in refs if r[2] == "organization"}\n        cps = {r[4] for r in refs if r[2] == "counterparty"}\n        locs = {r[5] for r in refs if r[2] == "location"}\n        allowed_types = {r[1] for r in types}\n        requests = [(self.body.organizationId, self.body.counterpartyId,\n                     self.body.typeCode, self.body.coverage.locationIds)]\n        if self.previous:\n            requests.append((self.previous.created_organization_id, self.previous.created_counterparty_id,\n                             self.previous.created_type_code, self.previous_locations))\n        member = identity.fresh(db, UserCompany, (current.user_id, self.company_id)) if current.user_id else None\n        for org, cp, code, locations in requests:\n            if (org not in orgs or cp not in cps or not locations or code not in allowed_types\n                    or self.types.get(code) != ((code, True),)\n                    or (current.own_organization_id is not None and current.own_organization_id != org)\n                    or not _permits(current.resource_scopes.get("counterparties"), str(cp))):\n                _deny()\n            for loc in locations:\n                if (loc not in locs or not _permits(current.resource_scopes.get("objects"), loc)\n                        or (current.location_ids is not None and loc not in current.location_ids)\n                        or (member is not None and member.object_scope is not None and loc not in member.object_scope)):\n                    _deny()\n        # contracts read resources intentionally do not confer CREATE or veto a\n        # newborn\'s own immutable intent receipt. verify_access still validates\n        # every existing canonical resource profile, including EMPTY/SET/ALL.\n\n'))
+
+
+def options_authority_baseline_bytes(path):
+    """Check actual whole raw E, invert only exact extraction, prove WHOLE E."""
+    extension = ACCEPTED_OPTIONS_EXTRACTION
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == extension["extended_raw"]
+    source = raw.decode("utf-8")
+    for extended, original in _OPTIONS_INVERSE_EDITS:
+        assert source.count(extended) == 1
+        source = source.replace(extended, original, 1)
+    restored = source.encode("utf-8")
+    assert hashlib.sha256(restored).hexdigest() == extension["baseline_raw"]
+    assert hashlib.sha256(stable_ast_dump(ast.parse(restored)).encode()).hexdigest() == extension["baseline_ast"]
+    assert extension["baseline_raw"] == ACCEPTED_HTTP_CREATE_EXTENSION["authority_extended_file"]
+    return restored
+
+
+def test_options_extraction_preserves_complete_preexisting_authority_before_old_inverses():
+    restored = options_authority_baseline_bytes(ROOT / "app/services/partner_contract_authority.py")
+    assert hashlib.sha256(restored).hexdigest() == "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18"
+    assert ACCEPTED_OPTIONS_EXTRACTION["baseline_ast"] == "a7f495d3d33c780107a5a417c001090048ebe147c1d9aeac26de656cd69da202"
+    assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
+
+
+def test_options_ast_compatibility_ignores_only_empty_type_parameters():
+    node = ast.parse("def sample(value):\n    return value + 1\n").body[0]
+    original = digest_node(node)
+    # Model the newer AST field on Python 3.11 as well; never skip the negative.
+    if "type_params" not in node._fields:
+        node._fields = (*node._fields, "type_params")
+    node.type_params = []
+    assert digest_node(node) == original
+    node.type_params = [ast.Name(id="UnreviewedTypeParameter", ctx=ast.Load())]
+    assert digest_node(node) != original
+    assert "UnreviewedTypeParameter" in stable_ast_dump(node)
+
+
 def accepted_http_authority_baseline_digest(path):
     """Exact explicit overlay plus full inverse AST projection, no skip/repin."""
     extension = ACCEPTED_HTTP_CREATE_EXTENSION
     assert extension["authority_baseline_file"] == ACCEPTED_G_ORG_ORDER_EXTENSION["authority_extended_file"]
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == extension["authority_extended_file"]
-    projected = tree(path)
+    restored = options_authority_baseline_bytes(path)
+    assert hashlib.sha256(restored).hexdigest() == extension["authority_extended_file"]
+    projected = ast.parse(restored)
     helper, = (n for n in projected.body if isinstance(n, ast.FunctionDef) and n.name == "_require_coarse_create")
     operation, = (n for n in projected.body if isinstance(n, ast.ClassDef) and n.name == "CreateOperation")
     policy, = (n for n in operation.body if isinstance(n, ast.FunctionDef) and n.name == "policy")

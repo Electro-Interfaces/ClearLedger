@@ -42,29 +42,30 @@ EXPECTED_GET_MANIFEST = frozenset({
     ("GET", "/documents/{docId}", "getDocument"),
     ("GET", "/documents/{docId}/versions/{versionId}/content", "downloadDocumentVersion"),
 })
-EXPECTED_PRODUCT_MANIFEST = EXPECTED_GET_MANIFEST | {("POST", "/contracts", "createContract")}
+OPTIONS_MANIFEST = frozenset({("GET", "/contracts/create-options", "getContractCreateOptions")})
+EXPECTED_PRODUCT_MANIFEST = EXPECTED_GET_MANIFEST | OPTIONS_MANIFEST | {("POST", "/contracts", "createContract")}
 USER_ONLY_GET_IDS = frozenset({"listContractDocuments", "listDocuments", "getDocument", "downloadDocumentVersion"})
 
 
 def assert_product_manifest(schema, registry):
     """Exact method/path/id oracle; no HTTP or fixture execution."""
     operations = registry["operations"]
-    assert len(operations) == 16
+    assert len(operations) == 17
     assert {(e["method"], e["path"], e["operationId"]) for e in operations} == EXPECTED_PRODUCT_MANIFEST
-    assert len({e["operationId"] for e in operations}) == 16
+    assert len({e["operationId"] for e in operations}) == 17
     assert {(e["method"], e["path"], e["operationId"]) for e in operations
-            if e["method"] == "GET"} == EXPECTED_GET_MANIFEST
+            if e["method"] == "GET"} == EXPECTED_GET_MANIFEST | OPTIONS_MANIFEST
     documented = [(method.upper(), path, op["operationId"])
                   for path, item in schema["paths"].items() for method, op in item.items()]
-    assert len(documented) == 16 and set(documented) == EXPECTED_PRODUCT_MANIFEST
+    assert len(documented) == 17 and set(documented) == EXPECTED_PRODUCT_MANIFEST
 
 
 def assert_product_policy_manifest(entries):
     """Keep 11 service GETs, four user-only GETs and the separate CREATE stage."""
-    assert len(entries) == 16
+    assert len(entries) == 17
     assert {(method, e["path"], e["operationId"]) for e in entries
             for method in e["methods"]} == EXPECTED_PRODUCT_MANIFEST
-    reads = [e for e in entries if "GET" in e["methods"]]
+    reads = [e for e in entries if e["operationId"] in {item[2] for item in EXPECTED_GET_MANIFEST}]
     assert len(reads) == 15 and all(e["methods"] == ["GET"] for e in reads)
     assert {(method, e["path"], e["operationId"]) for e in reads
             for method in e["methods"]} == EXPECTED_GET_MANIFEST
@@ -83,6 +84,22 @@ def assert_product_policy_manifest(entries):
     assert create["tenantRequired"] is True and create["securityScheme"] == "ProductOAuth"
     assert create["resourceStage"] == "create-newborn" and create["fields"] == []
     assert "databaseAuthorityKinds" not in create
+
+    options, = [e for e in entries if e["operationId"] == "getContractCreateOptions"]
+    assert (options["methods"], options["path"]) == (["GET"], "/contracts/create-options")
+    assert options["principalKinds"] == ["partner", "service"]
+    assert options["scopes"] == ["contracts:create"] and options["resourceStage"] == "create-options"
+    assert options["resourceType"] == options["owner"] == "contracts" and options["action"] == "create-options"
+    assert options["tenantRequired"] is True and options["fields"] == []
+    assert options["securityScheme"] == "ProductOAuth" and "databaseAuthorityKinds" not in options
+
+
+def read_entries(entries):
+    """The original fixed 15 READ handlers, never fake SQL options success."""
+    reads = [e for e in entries if ("GET", e["path"], e["operationId"]) in EXPECTED_GET_MANIFEST]
+    assert len(reads) == 15
+    assert {("GET", e["path"], e["operationId"]) for e in reads} == EXPECTED_GET_MANIFEST
+    return reads
 
 
 @dataclass(frozen=True)
@@ -305,7 +322,7 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         registry = export_runtime_registry(self.app)
         assert_product_manifest(schema, registry)
         assert_product_policy_manifest(entries)
-        for entry in (e for e in entries if "GET" in e["methods"]):
+        for entry in read_entries(entries):
             with self.subTest(path=entry["path"]):
                 operation = schema["paths"][entry["path"]]["get"]
                 scopes = set(entry["scopes"])
@@ -359,7 +376,7 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         schema = curated_openapi(self.app)
         checked = []
         with patch.object(product.monitoring, "detail", AsyncMock(return_value=sample)):
-            for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
+            for entry in read_entries(policy_registry(self.app)):
                 if entry["operationId"] == "downloadDocumentVersion":
                     continue
                 path = entry["path"].replace("{objectId}", "point").replace("{equipmentId}", str(FILE))

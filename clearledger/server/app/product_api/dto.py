@@ -872,3 +872,21 @@ class Problem(DTO):
 class ContractCreateResult(DTO):
     contract_id: UUID
     replayed: bool
+
+
+class ContractCreateOptionsQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resource: Literal["organization", "counterparty", "location", "type"]
+    pageSize: int = Field(default=50, ge=1, le=100)
+    cursor: str | None = Field(default=None, min_length=1, max_length=2048)
+
+
+class ContractCreateOption(DTO):
+    value: str = Field(min_length=1)
+
+
+class ContractCreateOptions(DTO):
+    resource: Literal["organization", "counterparty", "location", "type"]
+    items: list[ContractCreateOption]
+    selection_version: str
+    next_cursor: str | None = Field(...)
