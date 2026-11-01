@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import and_, exists, func, or_, select, text
+from sqlalchemy import and_, exists, func, inspect, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import InstanceState, Session
 from sqlalchemy.util import await_only
 
 from app.models import EzsProject, EzsSite, Organization, ServiceLocation, User, UserCompany
@@ -109,6 +109,16 @@ async def native_site_allowed(db: AsyncSession, authenticated_user: User, *,
                               organization_id: uuid.UUID, action: str) -> bool:
     """Additional native boundary for an already authenticated canonical User."""
     if type(authenticated_user) is not User or action not in SITE_ACTIONS:
+        return False
+    # populate_existing discards pending fields, even under no_autoflush.
+    # Admit only a clean, persistent identity owned by the actual caller Session;
+    # a delete queued before flush still has a persistent InstanceState.
+    sync = db.sync_session
+    state = inspect(authenticated_user)
+    if (not isinstance(sync, Session) or not isinstance(state, InstanceState)
+            or state.session is not sync or not state.persistent or state.modified
+            or authenticated_user in sync.new or authenticated_user in sync.dirty
+            or authenticated_user in sync.deleted):
         return False
     from app.auth import current_token_claims, native_user_from_claims, native_visit_from_claims
     claims = current_token_claims()

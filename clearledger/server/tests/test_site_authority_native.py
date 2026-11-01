@@ -292,6 +292,86 @@ async def test_native_spoof_and_current_session_revoke(site_authority_pg):
     assert not await native(pg, actor=USER_A, bearer=bearer_b)
     bearer_a = await pg.native_bearer(USER_A, A)
     assert await native(pg, bearer=bearer_a)
+    # Observe the caller's actual connection, without replacing any result.
+    # Direct calls retain canonical claims without native()'s autoflushing SELECT.
+    from sqlalchemy import event, inspect
+    from sqlalchemy.orm import Session
+    connection = (await pg.session.connection()).sync_connection
+    statements = []
+    observe = lambda conn, cursor, statement, parameters, context, executemany: statements.append(statement)
+    event.listen(connection, 'before_cursor_execute', observe)
+    pending = None
+    try:
+        with pg.session.no_autoflush, native_claims_context(decode_token(bearer_a), None):
+            state = inspect(current)
+            identity = state.identity
+            original_name = current.name
+            current.name = original_name + ' pending edit'
+            history = state.attrs.name.history
+            assert state.persistent and state.modified and current in pg.session.dirty
+            assert not await native_site_allowed(pg.session, current, company_id=A,
+                site_id=SITE_A, organization_id=ORG_A, action='site.read')
+            assert statements == []
+            assert current.name == original_name + ' pending edit'
+            assert inspect(current) is state and state.identity == identity
+            assert state.attrs.name.history == history and state.modified
+            assert state.session is pg.session.sync_session and current in pg.session.dirty
+            # Discard the unsaved edit explicitly, without flushing or rolling back
+            # the uncommitted seed/token owner transaction.
+            pg.session.expunge(current)
+            current = (await pg.session.execute(select(User).where(User.id == USER_A))).scalar_one()
+            assert current.name == original_name
+            statements.clear()
+
+            # Matching actor IDs cannot turn transient/pending objects into authority.
+            pending = User(id=USER_A, name='Synthetic pending actor')
+            assert inspect(pending).transient
+            assert not await native_site_allowed(pg.session, pending, company_id=A,
+                site_id=SITE_A, organization_id=ORG_A, action='site.read')
+            assert statements == [] and inspect(pending).transient
+            pg.session.add(pending)
+            assert inspect(pending).pending and pending in pg.session.new
+            assert not await native_site_allowed(pg.session, pending, company_id=A,
+                site_id=SITE_A, organization_id=ORG_A, action='site.read')
+            assert statements == [] and inspect(pending).pending
+            assert pending.name == 'Synthetic pending actor' and pending in pg.session.new
+            pg.session.expunge(pending)
+
+            pg.session.expunge(current)
+            assert inspect(current).detached
+            assert not await native_site_allowed(pg.session, current, company_id=A,
+                site_id=SITE_A, organization_id=ORG_A, action='site.read')
+            assert statements == [] and inspect(current).detached
+            # Reattach the actual row to a different real Session on the caller
+            # connection; no commit, independent engine or new seed visibility.
+            with Session(bind=connection) as foreign:
+                foreign.add(current)
+                try:
+                    assert inspect(current).persistent and inspect(current).session is foreign
+                    assert not await native_site_allowed(pg.session, current, company_id=A,
+                        site_id=SITE_A, organization_id=ORG_A, action='site.read')
+                    assert statements == []
+                    assert inspect(current).session is foreign and inspect(current).identity == identity
+                finally:
+                    foreign.expunge(current)
+            pg.session.add(current)
+
+            await pg.session.delete(current)
+            assert inspect(current).persistent and current in pg.session.deleted
+            statements.clear()
+            assert not await native_site_allowed(pg.session, current, company_id=A,
+                site_id=SITE_A, organization_id=ORG_A, action='site.read')
+            assert statements == []
+            assert inspect(current).persistent and current in pg.session.deleted
+            assert current.name == original_name and inspect(current).identity == identity
+    finally:
+        event.remove(connection, 'before_cursor_execute', observe)
+        if pending is not None and pending in pg.session:
+            pg.session.expunge(pending)
+        if current in pg.session:
+            pg.session.expunge(current)
+    # Cleanup left no pending UPDATE/INSERT/DELETE; clean canonical authority works.
+    assert await native(pg, bearer=bearer_a)
     await sql(pg, 'UPDATE core.users SET token_version=token_version+1 WHERE id=:uid', uid=USER_A)
     with pytest.raises(HTTPException) as error:
         await native(pg, bearer=bearer_a)
