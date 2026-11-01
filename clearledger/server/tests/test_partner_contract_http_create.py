@@ -475,7 +475,9 @@ async def test_schema_exact_post_canonical_body_and_protected_public_projection(
     post = schema["paths"]["/contracts"]["post"]
     expected = ContractCreateBody.model_json_schema(by_alias=True, mode="validation", ref_template="#/components/schemas/{model}")
     definitions = expected.pop("$defs", {})
-    assert post["requestBody"]["content"]["application/json"]["schema"] == expected
+    body_reference = post["requestBody"]["content"]["application/json"]["schema"]
+    assert body_reference == {"$ref": "#/components/schemas/ContractCreateBody"}
+    assert schema["components"]["schemas"][body_reference["$ref"].rsplit("/", 1)[-1]] == expected
     assert all(schema["components"]["schemas"][k] == v for k, v in definitions.items())
     assert post["security"] == [{"ProductOAuth": ["contracts:create"]}, {"ProductServiceOAuth": ["contracts:create"]}]
     assert post["tags"] == ["Договоры"] and "validUntil" in expected["required"]

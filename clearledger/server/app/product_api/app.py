@@ -509,10 +509,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
         return (await query.project("counterparties", [await query.detail("counterparties", counterpartyId)]))[0]
 
     # Request-only endpoint: FastAPI must not pre-read or parse the body.
-    # The explicit requestBody is generated from the existing strict model.
-    create_schema = ContractCreateBody.model_json_schema(
-        by_alias=True, mode="validation", ref_template="#/components/schemas/{model}")
-    create_schema.pop("$defs", None)
+    # curated_openapi supplies the canonical model component and all definitions.
     create_policy = RoutePolicy(owner="contracts", accepted_kinds={PrincipalKind.PARTNER, PrincipalKind.SERVICE},
         resource_type="contracts", action="create", required_scopes={"contracts:create"},
         policy_version=access.POLICY_VERSION, tenant_required=True, security_scheme="ProductOAuth",
@@ -535,7 +532,8 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
             "with the same creationKey and current original-grant/actor/reference authority.",
         openapi_extra={"x-elsy-owner": "contracts", "x-elsy-access-class": "partner",
             "x-elsy-resource-policy": "contracts:create", "x-elsy-readiness": "candidate",
-            "requestBody": {"required": True, "content": {"application/json": {"schema": create_schema}}}})
+            "requestBody": {"required": True, "content": {"application/json": {
+                "schema": {"$ref": "#/components/schemas/ContractCreateBody"}}}}})
     async def contract_create_post(request: Request):
         return await contract_create.create(request)
 
