@@ -105,3 +105,30 @@ source pins, имена/параметры 24 случаев, command/exit code,
 неожиданный ответ сохраняется как FAIL/UNKNOWN; production fix и ослабление oracle
 в этот пакет не входят. M11, остальные M00–M19 и 11 общих условий остаются OPEN /
 unproven; completion=false.
+
+
+## 01.11.2026 — первый фактический setup ERROR и узкая правка seed
+
+Первый отдельный запуск исходника
+`68155454d849331d4c8bd46edd363beadc43004a` выбрал 1 happy-path случай:
+selectedCases=1, testsRun=0, setupErrors=1. До вызова теста INSERT в
+`core.eco_apps` завершился `StringDataRightTruncationError`, SQLSTATE 22001:
+seed передавал `machine-docs-<32 hex>` длиной 45 в `App.code` с лимитом 40.
+OAuth flow и защищённые surfaces не выполнялись. Это дефект тестового seed;
+результат не является обнаружением ошибки production auth. Первый ERROR
+сохраняется как отдельный фактический результат и не переобозначается в PASS.
+
+Узкая правка только в `native_docs`: отдельный owned `App.code` по формуле
+`nd-{index}-{suffix}` имеет длину 37 для каждого из двух приложений и уникален
+по index при общем UUID suffix. Client IDs `docs-<32 hex>` (37) и
+`machine-docs-<32 hex>` (45) сохранены целиком: оба укладываются в собственный
+лимит `PartnerClient.id` 64. Схема, связи App/client/installation, config,
+grants, OAuth/native JWT, cleanup, 9 определений и 24 случая не изменены.
+
+Правка проверяется только статически: AST, compile без исполнения, обратная
+подстановка исходного тела `native_docs`, parity остального файла и дерева.
+Нового collection/run или runtime PASS здесь нет; исторические source pins
+выше сохранены. Следующий шаг вызывающей стороны — admission точного нового
+source и повтор только happy-path (1); после его фактического успеха — остальные
+23 случая с отдельными результатами и cleanup evidence. Все M00–M19 и 11 общих
+условий остаются OPEN / unproven; completion=false.

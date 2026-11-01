@@ -144,7 +144,7 @@ async def native_docs(issuer_world, monkeypatch):
             db.add(UserCompany(user_id=w.employee, company_id=w.company, role="user", role_id=w.role,
                 modules=[], object_scope=[base.loc]))
             for index in range(2):
-                db.add(App(id=w.apps[index], code=w.clients[index], name="Synthetic docs setup",
+                db.add(App(id=w.apps[index], code=f"nd-{index}-{suffix}", name="Synthetic docs setup",
                     kind="partner", is_active=True))
             await db.flush()
             db.add_all([PartnerClient(id=w.client_id, app_id=w.apps[0], owner_company_id=w.company,
