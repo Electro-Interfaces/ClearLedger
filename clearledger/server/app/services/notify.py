@@ -451,13 +451,71 @@ async def dispatch(
     return out
 
 
+async def dispatch_doc_notice(company_id: uuid.UUID, doc_id: uuid.UUID) -> None:
+    """Письмо одному адресату, best effort, без общего чата и производного push.
+
+    UUID кандидатов ограничивают рассылку, но не подтверждают полномочия.
+    Перед каждым handoff заново проверяются rule/audience/product/READ.
+    Отзыв до начала проверки подавляет письмо; READ COMMITTED с несколькими
+    SELECT не даёт атомарного снимка политики. Начавшийся транспорт не отозвать.
+    Корень регистрации во время SMTP не удерживается.
+    """
+    from app.database import async_session_factory
+    from app.services.doc_notice_access import authorized_doc_notice, doc_notice_context
+
+    category = category_for("doc.register")
+    with doc_notice_context():
+        async with async_session_factory() as candidates:
+            rule = (await candidates.execute(select(NotificationRule).where(
+                NotificationRule.company_id == company_id,
+                NotificationRule.category == category))).scalar_one_or_none()
+            if rule is None or not rule.enabled or not rule.via_email:
+                return
+            user_ids = tuple(person.id for person in await _recipients(candidates, company_id, rule))
+    for user_id in user_ids:
+        try:
+            with doc_notice_context():
+                # Старые User/Member/Role/Doc из identity map не переживают SMTP.
+                async with async_session_factory() as recipient:
+                    rule = (await recipient.execute(select(NotificationRule).where(
+                        NotificationRule.company_id == company_id,
+                        NotificationRule.category == category))).scalar_one_or_none()
+                    if rule is None or not rule.enabled or not rule.via_email:
+                        continue
+                    if not any(person.id == user_id for person in
+                               await _recipients(recipient, company_id, rule)):
+                        continue
+                    notice = await authorized_doc_notice(recipient, company_id, doc_id, user_id)
+                    if notice is None:
+                        continue
+                    # Между проверкой и handoff больше нет DB/transport await.
+                    label = action_label("doc.register")
+                    await email_service.send_notice([notice.email], label,
+                        f"{label}\n{notice.number}\n{notice.title}")
+        except Exception as error:  # Ошибка адресата не прерывает всю рассылку.
+            logger.warning("Доставка уведомления о регистрации сорвалась: %s", error)
+
+
 def dispatch_async(company_id, action: str, who: str | None = None,
-                   details: str | None = None) -> None:
+                   details: str | None = None, *, doc_notice_id: uuid.UUID | None = None) -> None:
     """Поставить доставку в фон: своя сессия, ошибки только в лог.
 
     Вызывается из `log_audit`, то есть внутри чужой транзакции — поэтому ни сессию
     вызывающего не занимаем, ни ответ API не задерживаем.
     """
+    if doc_notice_id is not None:
+        if action != "doc.register" or not isinstance(doc_notice_id, uuid.UUID):
+            raise ValueError("document notices require a trusted doc.register UUID reference")
+        async def _run_doc() -> None:
+            try:
+                await dispatch_doc_notice(company_id, doc_notice_id)
+            except Exception as error:
+                logger.warning("Доставка уведомления о регистрации сорвалась: %s", error)
+        try:
+            asyncio.get_running_loop().create_task(_run_doc())
+        except RuntimeError:
+            pass
+        return
     async def _run() -> None:
         from app.database import async_session_factory
         try:
