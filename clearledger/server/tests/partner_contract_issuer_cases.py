@@ -70,6 +70,12 @@ CASES = (
      "One of several mixed-case/Cyrillic/whitespace IDs absent from actual profile/resource/membership/installation coverage denies entire CREATE"),
     ("opaque_locations_sql_drift", "test_multiple_locations_actual_sql_child_drift_after_flush_rolls_back",
      "Actual SQL delete of newborn card child or extra intent child in birth transaction after full flush; exact recheck fails and fresh SQL confirms whole-root rollback"),
+    ("org_creator_first", "test_org_delete_creator_first_waits_at_org_before_ri_member",
+     "AFTER FIX actual MemberS pause implies prior OrgS; native real-admin OrgDELETE waits at OrgX before RI MemberX; creator commit/rollback, native 23503/23502 allowed only after CREATE commit; fresh five-part counts"),
+    ("org_deleter_first", "test_org_delete_deleter_first_rechecks_without_null_scope_broadening",
+     "Actual native OrgDELETE+flush holds OrgX/RI MemberX; CREATE PID waits at original OrgS before Member/business DML; deleter commit denies without own-org NULL broadening, rollback permits fresh CREATE"),
+    ("org_no_member", "test_org_parent_stage_runs_for_machine_with_no_canonical_member_rows",
+     "Remove real user principals, assert canonical Member list empty; real machine issuer still holds parent stage and blocks native OrgDELETE; explicit whole-root rollback"),
 )
 STATUS = "AUTHORED_NOTRUN"
 INDEPENDENT_REVIEW = "PENDING"

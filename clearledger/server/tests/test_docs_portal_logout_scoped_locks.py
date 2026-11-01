@@ -39,6 +39,19 @@ ACCEPTED_CREATE_EXTENSION = {
     "baseline_eligible": "1524bb5ebec7869c2ac8c742c830da0fd234e9433fcc70f7ed7809c76ef78107",
     "extended_eligible": "cb9fc729c9b13a563f43c79161e3aba7983c1b45dd6600a20a20e1e4201724d9",
 }
+# G-ORG01 is a separate, explicitly ratified order extension. Keep the
+# accepted CREATE scope record and every historical 19/17/12 pin unchanged.
+ACCEPTED_G_ORG_ORDER_EXTENSION = {
+    "ratification": "msg_b07b4203c2cc",
+    "source_parent": "297f7b4a726b917530e6ba54ff71a7b6c2c33e38",
+    "baseline_file": "11624851e39b2dbf2671b46d349ed5f627a23f2b6359c716583c8c724fd651d9",
+    "extended_file": "ad2408f8e081a4088668d3f1c45c12be06bb293a43ca48e333248fa90c6f688a",
+    "authority_baseline_file": "1b62359305c87a2f6de0c44adf83eef2286b280b191dcd24850067ffe0d8c741",
+    "authority_extended_file": "cb762a3d7341d84af400ad0378069a6387c09087d64827e0267ee9eb4c586586",
+    "prefix": ("Company", "App", "PartnerClient", "User", "CompanyRole"),
+    "parents": ("Counterparty", "Organization", "ServiceLocation", "Contract"),
+    "boundary": "after prefix; before ANY UserCompany; including empty Member set",
+}
 PROTECTED_17 = [('admin.register', 'app/routers/partner_admin_router.py', 'register', 'babffd869487681577361145bb2fed6f9d34da74a7e84bfcfb0e64063b156f57'), ('admin.client_status', 'app/routers/partner_admin_router.py', 'client_status', 'ecae87c5e9f16b287b94710e8afebb665784a9522fa98305e6a734586d182fd0'), ('admin.issue_credential', 'app/routers/partner_admin_router.py', 'issue_credential', 'd99a543f3e3b2c5935c53842837712a596242fb540c161709e05c394ba985fab'), ('admin.revoke_credential', 'app/routers/partner_admin_router.py', 'revoke_credential', '191517e884f64724b52b58240a72d14bd41903c5ef284e9d0df3712ce43ecfe8'), ('admin.approve_installation', 'app/routers/partner_admin_router.py', 'approve_installation', '0aa0fba2a41483db29ac285ee7c34b95aefdc190c37df0205aa7135a2374d1f5'), ('admin.revoke_installation', 'app/routers/partner_admin_router.py', 'revoke_installation', '79819f21a5df17c66dd4f017246cb6a5f9cb4c0d15edd6d3ebac06ae862c6ac7'), ('admin.machine_grant', 'app/routers/partner_admin_router.py', 'machine_grant', 'eb33e31712ac4bc3a8940925cf198bdbc05f599ef23711b893c4a2da59a68616'), ('admin.revoke_grant', 'app/routers/partner_admin_router.py', 'revoke_grant', '39a21684593bda9fad770cccc244aba5f3fe5f826f7fd4b2a0455f14c02075e7'), ('oauth.authorize', 'app/routers/partner_oauth_router.py', 'authorize', 'a73573447f15f9843a47020eeafeb04cd3c0f638d68dd5e3190dadb4d8facdf3'), ('consent.get_request', 'app/routers/partner_oauth_router.py', 'get_request', '94ae42b6e06ea61e0a88478390c0e9d0670700139b9f4c7531afeb58d2e8560f'), ('consent.approve', 'app/routers/partner_oauth_router.py', 'approve', '759e25b36da56bec7c4fa9abf58f80d87e0b08848b65aefaab62df7e0475b941'), ('consent.deny', 'app/routers/partner_oauth_router.py', 'deny', '6c9fea08b4d9eec59484d9fa80098a43dfa004ad02f980a21d47de6942117250'), ('oauth.token-code', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.token-refresh', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.token-machine', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.revoke', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.userinfo', 'app/routers/partner_oauth_router.py', 'userinfo', 'a1fcf03561c44c6bef7ce5c9b6f8138cb3faecaad8b8504f218fc7789bc4bd2e')]
 
 
@@ -260,6 +273,8 @@ def test_logout_preserves_existing17_and_canonical12():
         if path == "app/services/partner_identity.py":
             assert expected == ACCEPTED_CREATE_EXTENSION["baseline_file"]
             expected = ACCEPTED_CREATE_EXTENSION["extended_file"]
+            assert expected == ACCEPTED_G_ORG_ORDER_EXTENSION["baseline_file"]
+            expected = ACCEPTED_G_ORG_ORDER_EXTENSION["extended_file"]
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, path
     for path, expected in UUID_SUPPORT_BYTES.items():
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, path
@@ -287,3 +302,29 @@ def test_logout_adds_no_runner_config_fixture_or_authority_surface():
         assert path in PROTECTED_BYTES
     service = ast.unparse(node)
     assert "request.headers" not in service and "request.query_params" not in service
+
+
+def test_accepted_org_order_extension_is_exact_and_preserves_scope_projection():
+    order = ACCEPTED_G_ORG_ORDER_EXTENSION
+    assert order["ratification"] == "msg_b07b4203c2cc"
+    assert order["source_parent"] == "297f7b4a726b917530e6ba54ff71a7b6c2c33e38"
+    assert order["baseline_file"] == ACCEPTED_CREATE_EXTENSION["extended_file"]
+    assert order["extended_file"] != order["baseline_file"]
+    assert hashlib.sha256(IDENTITY.read_bytes()).hexdigest() == order["extended_file"]
+    authority = ROOT / "app/services/partner_contract_authority.py"
+    assert hashlib.sha256(authority.read_bytes()).hexdigest() == order["authority_extended_file"]
+    composer = definition(IDENTITY, "_prepare_partner_write")
+    boundary, = (n for n in ast.walk(composer) if isinstance(n, ast.If)
+        and ast.unparse(n.test) == "create_writer is not None and stage_index == 0")
+    assert [ast.unparse(n) for n in boundary.body] == ["contract_profile.lock_parents()"]
+    stage_loop, = (n for n in ast.walk(composer) if isinstance(n, ast.For)
+        and ast.unparse(n.target) == "(stage_index, stage)")
+    assert boundary in stage_loop.body and isinstance(stage_loop.body[0], ast.For)
+    prefix, = (n for n in ast.walk(composer) if isinstance(n, ast.Assign)
+        and ast.unparse(n.targets[0]) == "before_member")
+    assert tuple(n.id for n in prefix.value.elts) == order["prefix"]
+    operation = next(n for n in tree(authority).body if isinstance(n, ast.ClassDef) and n.name == "CreateOperation")
+    parents, = (n for n in operation.body if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "parent_models")
+    assert tuple(n.id for n in parents.value.elts) == order["parents"]
+    assert digest_node(baseline_create_policy_projection(definition(IDENTITY, "eligible_scopes"))) == CANONICAL_12["eligible_scopes"]
+    assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12

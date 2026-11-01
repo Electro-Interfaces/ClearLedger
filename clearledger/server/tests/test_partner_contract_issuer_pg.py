@@ -11,7 +11,9 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import delete, event, func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.util import await_only
 from sqlalchemy.orm import Session
 
 from app.models import (App, AuditEvent, CompanyApp, CompanyRole, Contract, ContractLocation,
@@ -30,6 +32,7 @@ from app.services.native_contract_commands import create_native_contract
 from app.schemas import ContractCreate
 from tests.partner_contract_issuer_fixture import (
     issuer_world, issue_machine, issue_user, make_body, state, add_opaque_locations,
+    native_org_admin, native_org_delete,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -722,3 +725,211 @@ async def test_multiple_locations_actual_sql_child_drift_after_flush_rolls_back(
         event.remove(Session, "after_flush_postexec", after_flush)
         event.remove(Session, "before_flush", before_flush)
     assert observed == [len(requested)] and await state(w) == before
+
+
+async def org_wait_evidence(w, waiter, holder):
+    """Bounded polling is only pacing; actual PID graph and SQL locks are proof."""
+    for _ in range(300):
+        async with w.factory() as reader:
+            blockers = tuple(await reader.scalar(text("SELECT pg_blocking_pids(:p)"), {"p": waiter}))
+            rows = (await reader.execute(text(
+                "SELECT pid,locktype,mode,granted,relation::regclass::text AS relation,transactionid::text "
+                "FROM pg_locks WHERE pid IN (:w,:h) ORDER BY pid,locktype,mode"),
+                {"w": waiter, "h": holder})).mappings().all()
+            query = await reader.scalar(text("SELECT query FROM pg_stat_activity WHERE pid=:p"), {"p": waiter})
+        if holder in blockers:
+            assert any(row["pid"] == waiter and not row["granted"] for row in rows)
+            assert any(row["pid"] == holder and row["granted"] for row in rows)
+            evidence = {"waiter": waiter, "holder": holder, "blockers": blockers,
+                        "locks": [dict(row) for row in rows], "query": query}
+            if not hasattr(w, "org_order_evidence"):
+                w.org_order_evidence = []
+            w.org_order_evidence.append(evidence)  # ROOT may retain actual raw observations.
+            return evidence
+        await asyncio.sleep(.01)
+    raise AssertionError("Expected real Org lock edge was not observed")
+
+
+def org_delete_signals():
+    return {"attempted": asyncio.Event(), "flushed": asyncio.Event(), "release": asyncio.Event()}
+
+
+def canonical_share_statement(statement, model):
+    return (getattr(statement, "_for_update_arg", None) is not None
+            and statement._for_update_arg.read
+            and any(column.get("entity") is model for column in getattr(statement, "column_descriptions", ())))
+
+
+@pytest.mark.parametrize("creator_finish", ["commit", "rollback"])
+async def test_org_delete_creator_first_waits_at_org_before_ri_member(issuer_world, monkeypatch, creator_finish):
+    """1848-byte G-ORG01 plan, AFTER FIX: real MemberS implies earlier OrgS."""
+    w = issuer_world
+    native = await native_org_admin(w)
+    before = await state(w)
+    signals, member_locked, resume = org_delete_signals(), asyncio.Event(), asyncio.Event()
+    observed, parent_stages = [], []
+    original_parents = authority.CreateOperation.lock_parents
+    def parents(operation):
+        result = original_parents(operation)
+        parent_stages.append("complete")
+        return result
+    monkeypatch.setattr(authority.CreateOperation, "lock_parents", parents)
+    async with w.factory() as creator, w.factory() as deleter:
+        creator_pid = await creator.scalar(text("SELECT pg_backend_pid()"))
+        def after_actual_member(context):
+            result = context.invoke_statement()
+            if canonical_share_statement(context.statement, UserCompany) and not member_locked.is_set():
+                assert parent_stages == ["complete"]
+                observed.append("real_MemberS")
+                member_locked.set()
+                await_only(resume.wait())
+            return result
+        event.listen(creator.sync_session, "do_orm_execute", after_actual_member, retval=True)
+        async def create():
+            result = await create_partner_contract(creator, w.bearer, w.body)
+            assert not result.replayed
+            if creator_finish == "commit":
+                await creator.commit()
+            else:
+                await creator.rollback()
+            return result
+        task = asyncio.create_task(create())
+        native_task = None
+        try:
+            await asyncio.wait_for(member_locked.wait(), 10)
+            assert await state(w) == before  # No business DML at the canonical Member pause.
+            native_task = asyncio.create_task(native_org_delete(w, deleter, native, signals, finish="commit"))
+            await asyncio.wait_for(signals["attempted"].wait(), 10)
+            evidence = await org_wait_evidence(w, signals["pid"], creator_pid)
+            assert "delete" in evidence["query"].lower() and "organizations" in evidence["query"].lower()
+            # Blocked at original Org DELETE, BEFORE RI can UPDATE Member.
+            assert not any(row["pid"] == signals["pid"] and row["mode"] == "RowExclusiveLock"
+                           and row["relation"] in {"core.user_companies", "user_companies"}
+                           for row in evidence["locks"])
+            assert not signals["flushed"].is_set()
+            resume.set()
+            await asyncio.wait_for(task, 10)  # 40P01/cancellation/partial success are failures.
+            expected = tuple(n+1 for n in before) if creator_finish == "commit" else before
+            assert await state(w) == expected  # Fresh reader: all five parts commit or roll back.
+            signals["release"].set()
+            try:
+                await asyncio.wait_for(native_task, 10)
+            except DBAPIError as error:
+                # Contract->Org NO ACTION or NOT NULL can legitimately reject
+                # native deletion AFTER a successful CREATE. Never alter the FK.
+                assert creator_finish == "commit"
+                assert getattr(error.orig, "sqlstate", None) in {"23503", "23502"}
+            assert observed == ["real_MemberS"] and await state(w) == expected
+        finally:
+            resume.set(); signals["release"].set()
+            for pending in (task, native_task):
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+            event.remove(creator.sync_session, "do_orm_execute", after_actual_member)
+            await creator.rollback(); await deleter.rollback()
+
+
+@pytest.mark.parametrize("deleter_finish", ["commit", "rollback"])
+async def test_org_delete_deleter_first_rechecks_without_null_scope_broadening(issuer_world, deleter_finish):
+    """Actual native OrgX/RI MemberX first; CREATE waits before Member/business DML."""
+    w = issuer_world
+    native = await native_org_admin(w)
+    before, signals = await state(w), org_delete_signals()
+    shares, business_flushes = [], []
+    async with w.factory() as creator, w.factory() as deleter:
+        creator_pid = await creator.scalar(text("SELECT pg_backend_pid()"))
+        def record_share(context):
+            if canonical_share_statement(context.statement, UserCompany):
+                shares.append("MemberS_attempt")
+            return context.invoke_statement()
+        def business_flush(session, context, instances):
+            business_flushes.extend(type(row).__name__ for row in session.new
+                if isinstance(row, (Contract, ContractLocation, Intent, IntentLocation, AuditEvent)))
+        event.listen(creator.sync_session, "do_orm_execute", record_share, retval=True)
+        event.listen(creator.sync_session, "before_flush", business_flush)
+        native_task = asyncio.create_task(native_org_delete(w, deleter, native, signals, finish=deleter_finish))
+        task = None
+        try:
+            await asyncio.wait_for(signals["flushed"].wait(), 10)
+            assert deleter.in_transaction()  # DELETE/RI were flushed, never committed yet.
+            assert await deleter.get(Organization, w.org, populate_existing=True) is None
+            member = await deleter.get(UserCompany, (w.user, w.company), populate_existing=True)
+            assert member.own_organization_id is None  # Real installed RI, not a synthetic UPDATE.
+            assert await state(w) == before
+            async def create():
+                result = await create_partner_contract(creator, w.bearer, w.body)
+                await creator.commit()
+                return result
+            task = asyncio.create_task(create())
+            evidence = await org_wait_evidence(w, creator_pid, signals["pid"])
+            assert "organizations" in evidence["query"].lower() and "for share" in evidence["query"].lower()
+            assert any(row["pid"] == signals["pid"] and row["granted"]
+                       and row["mode"] == "RowExclusiveLock"
+                       and row["relation"] in {"core.user_companies", "user_companies"}
+                       for row in evidence["locks"])
+            assert shares == [] and business_flushes == []
+            signals["release"].set()
+            await asyncio.wait_for(native_task, 10)
+            if deleter_finish == "commit":
+                with pytest.raises(HTTPException) as denied:
+                    await asyncio.wait_for(task, 10)
+                assert denied.value.status_code in {403, 409}
+                assert shares == [] and business_flushes == []
+                assert await state(w) == before
+                async with w.factory() as reader:
+                    assert await reader.get(Organization, w.org) is None
+                    assert (await reader.get(UserCompany, (w.user, w.company))).own_organization_id is None
+                assert not creator.in_transaction()  # Issuer rolled the whole root back.
+            else:
+                result = await asyncio.wait_for(task, 10)
+                assert not result.replayed and shares and business_flushes
+                assert await state(w) == tuple(n+1 for n in before)
+                async with w.factory() as reader:
+                    assert (await reader.get(UserCompany, (w.user, w.company))).own_organization_id == w.org
+        finally:
+            signals["release"].set()
+            for pending in (task, native_task):
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+            event.remove(creator.sync_session, "do_orm_execute", record_share)
+            event.remove(creator.sync_session, "before_flush", business_flush)
+            await creator.rollback(); await deleter.rollback()
+
+
+async def test_org_parent_stage_runs_for_machine_with_no_canonical_member_rows(issuer_world, monkeypatch):
+    w = issuer_world
+    async with w.factory() as db:
+        await db.execute(delete(Principal).where(Principal.profile_id == w.profile, Principal.actor_kind == "user"))
+        await db.commit()
+    before, stages = await state(w), []
+    original = authority.CreateOperation.lock_parents
+    def parents(operation):
+        assert operation.verified.is_machine
+        assert not any(spec.model is UserCompany for spec in operation.ordered)
+        result = original(operation)  # Actual parent SQL and every original policy checkpoint.
+        stages.append("real_parent_stage_without_Member")
+        return result
+    monkeypatch.setattr(authority.CreateOperation, "lock_parents", parents)
+    async with w.factory() as creator, w.factory() as deleter:
+        native = await native_org_admin(w)
+        signals = org_delete_signals()
+        admission = await authority.prepare_create(creator, w.machine, w.body)
+        assert stages == ["real_parent_stage_without_Member"]
+        creator_pid = await creator.scalar(text("SELECT pg_backend_pid()"))
+        task = asyncio.create_task(native_org_delete(w, deleter, native, signals, finish="rollback"))
+        try:
+            await asyncio.wait_for(signals["attempted"].wait(), 10)
+            evidence = await org_wait_evidence(w, signals["pid"], creator_pid)
+            assert "organizations" in evidence["query"].lower() and "delete" in evidence["query"].lower()
+            await authority.require_create(creator, admission, w.body)
+            await creator.rollback()
+            signals["release"].set()
+            await asyncio.wait_for(task, 10)
+        finally:
+            signals["release"].set()
+            if not task.done():
+                task.cancel(); await asyncio.gather(task, return_exceptions=True)
+            await creator.rollback(); await deleter.rollback()
+    assert await state(w) == before

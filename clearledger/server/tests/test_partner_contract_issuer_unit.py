@@ -97,7 +97,10 @@ def test_replay_original_binding_checked_before_hash_conflict_or_return():
     command = node(COMMAND, "create_partner_contract")
     conflict = next(n for n in ast.walk(command) if isinstance(n, ast.If)
                     and "operation.previous.request_hash != operation.request_hash" == ast.unparse(n.test))
-    assert calls(command, "prepare_create")[0].lineno < calls(command, "_require")[0].lineno < conflict.lineno
+    require, = (call for call in calls(command, "run_sync")
+                if ast.unparse(call.func) == "db.run_sync" and call.args
+                and isinstance(call.args[0], ast.Name) and call.args[0].id == "_require")
+    assert calls(command, "prepare_create")[0].lineno < require.lineno < conflict.lineno
     assert "Contract identity conflicts" in ast.unparse(command)
     assert "join(sorted" not in ast.unparse(command)
 
@@ -165,3 +168,61 @@ def test_location_rows_preserve_exact_ids_cardinality_and_duplicates():
         assert _location_rows((*rows[1:], (parent, changed))) != expected
     other = UUID("00000000-0000-0000-0000-000000000002")
     assert _location_rows(((other, rows[0][1]), *rows[1:])) != expected
+
+
+def test_create_parent_stage_is_explicit_after_prefix_even_without_members():
+    composer = node(IDENTITY, "_prepare_partner_write")
+    stage_loop, = (n for n in ast.walk(composer) if isinstance(n, ast.For)
+                   and ast.unparse(n.target) == "(stage_index, stage)")
+    row_loop = stage_loop.body[0]
+    assert isinstance(row_loop, ast.For) and ast.unparse(row_loop.iter) == "stage"
+    boundary = stage_loop.body[1]
+    assert isinstance(boundary, ast.If)
+    assert ast.unparse(boundary.test) == "create_writer is not None and stage_index == 0"
+    assert ast.unparse(boundary.body[0]) == "contract_profile.lock_parents()"
+    assert len(stage_loop.body) == 2  # Boundary is outside the row loop.
+    source = ast.unparse(composer)
+    assert "row_stages = (ordered,)" in source
+    assert "before_member = (Company, App, PartnerClient, User, CompanyRole)" in source
+    assert "spec.model in before_member" in source
+    assert "spec.model not in before_member and spec.model not in contract_profile.parent_models" in source
+    assert calls(composer, "freeze")[0].lineno < calls(composer, "acquire_scoped_locks")[0].lineno
+    assert calls(composer, "after_b")[0].lineno < stage_loop.lineno
+    assert calls(composer, "checkpoint")[-1].lineno > boundary.lineno
+
+
+def test_parent_stage_uses_only_frozen_union_fixed_order_and_checks_each_wait():
+    tree = ast.parse(AUTHORITY.read_bytes())
+    operation = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "CreateOperation")
+    parents, = (n for n in operation.body if isinstance(n, ast.Assign)
+                and ast.unparse(n.targets[0]) == "parent_models")
+    assert ast.unparse(parents.value) == "(Counterparty, Organization, ServiceLocation, Contract)"
+    stage = node(AUTHORITY, "lock_parents", "CreateOperation")
+    source = ast.unparse(stage)
+    for fragment in ("for model in self.parent_models", "spec.identity[0]: spec for spec in self.ordered",
+                     "self.guards", "canonical.keys()", "for rid in sorted(ids)",
+                     "spec.statement().with_only_columns(model.id)", "model.company_id == self.company_id"):
+        assert fragment in source
+    lock, = calls(stage, "with_for_update")
+    check, = calls(stage, "checkpoint")
+    assert ast.unparse(lock.keywords[0].value) == "True" and lock.lineno < check.lineno
+    inner, = (n for n in ast.walk(stage) if isinstance(n, ast.For) and ast.unparse(n.target) == "rid")
+    assert ast.unparse(inner.body[-1]) == "writer.checkpoint()"
+    for forbidden in ("discover", "guard", "acquire_scoped_locks", "LockPlan", "key", "flush"):
+        assert not calls(stage, forbidden)
+    assert not any(ast.unparse(call.func) == "db.get" for call in calls(stage, "get"))
+
+
+def test_late_operation_locks_keep_profile_types_children_and_final_original_admission():
+    late = node(AUTHORITY, "lock", "CreateOperation")
+    source = ast.unparse(late)
+    assert "parent_models" not in source and "self.guards" not in source
+    for fragment in ("select(Profile.id)", "for code in sorted(self.types)", "for model, names in _CHILDREN",
+                     "self.intent_statement()", "select(IntentLocation)", "select(ContractLocation)"):
+        assert fragment in source
+    prepare = node(AUTHORITY, "_prepare")
+    late_call, = calls(prepare, "lock")
+    checkpoint, = calls(prepare, "checkpoint")
+    assert calls(prepare, "_prepare_partner_write")[0].lineno < late_call.lineno < checkpoint.lineno
+    assert checkpoint.lineno < next(n.lineno for n in ast.walk(prepare) if isinstance(n, ast.Assign)
+        and ast.unparse(n.targets[0]) == "generation")
