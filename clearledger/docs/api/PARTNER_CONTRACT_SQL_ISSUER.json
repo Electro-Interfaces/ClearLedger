@@ -610,7 +610,7 @@
     "stdlib AST parse and in-memory compile of 8 Python files without exec",
     "stdlib AST exact baseline projection for eligible_scopes; unchanged other 11 canonical functions",
     "stdlib AST equality of original DPL 19/17/12 literals and historical overlays/source pins",
-    "AST definition/parameter-list counts and one-to-one 30 PG matrix mapping",
+    "AST definition/parameter-list counts and one-to-one 34 PG matrix mapping",
     "raw file SHA-256 and immutable Git byte equality; git diff --check",
     "R01: identical lossless Python row sort at both SQL/expected snapshot sites; reverse AST comparison restores original CreateOperation and consumer; exact original identity/DPL bytes unchanged"
   ],
