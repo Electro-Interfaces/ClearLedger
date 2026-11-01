@@ -373,7 +373,10 @@ async def test_doc_site_business_native(doc_site_pg, case):
         path = f"/api/v1/documents/{DOC}" + (f"/versions/{VERSION}/content" if file_case else "")
         # Read the actual seeded sort values with the same ordering as Query;
         # bulk INSERT timestamps need not put the Site card on page one.
-        expected_first = (await sql(pg, "SELECT id FROM core.doc_cards WHERE company_id=:cid ORDER BY created_at,id LIMIT 1", cid=A)).scalar_one()
+        # Observe ordering through the admitted raw connection; keep fixture
+        # ORM Session settled before the independent real HTTP request.
+        expected_first = await pg.connection.fetchval(
+            "SELECT id FROM core.doc_cards WHERE company_id=$1 ORDER BY created_at,id LIMIT 1", A)
         async def assert_listing(*, visible, grant_revoked=False, documents_revoked=False):
             listing = await pg.product_get(bearer, "/api/v1/documents?pageSize=1")
             if grant_revoked:
