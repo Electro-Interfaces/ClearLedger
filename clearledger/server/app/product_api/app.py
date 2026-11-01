@@ -1146,6 +1146,27 @@ def _canonical_object_id_paths(schema):
         parameter["schema"] = dict(reference)
 
 
+def _restore_declared_response_examples(schema, routes):
+    """Preserve literal example payloads after FastAPI's exclude_none encoding."""
+    from fastapi.routing import APIRoute
+
+    for route in routes:
+        if not isinstance(route, APIRoute) or not route.include_in_schema:
+            continue
+        for method in route.methods or ():
+            responses = schema["paths"][route.path_format][method.lower()]["responses"]
+            for status, declared in route.responses.items():
+                status_key = str(status).upper()
+                if status_key == "DEFAULT":
+                    status_key = "default"
+                produced = responses[status_key]
+                for section in ("content", "headers"):
+                    for name, container in declared.get(section, {}).items():
+                        for keyword in ("example", "examples"):
+                            if keyword in container:
+                                produced[section][name][keyword] = deepcopy(container[keyword])
+
+
 def curated_openapi(app):
     issuer = app.state.product_settings.issuer
     try:
@@ -1161,6 +1182,7 @@ def curated_openapi(app):
         raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI")
     entries = policy_registry(app)
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes, tags=OPENAPI_TAGS)
+    _restore_declared_response_examples(schema, app.routes)
     body_schema = ContractCreateBody.model_json_schema(
         by_alias=True, mode="validation", ref_template="#/components/schemas/{model}")
     definitions = body_schema.pop("$defs", {})

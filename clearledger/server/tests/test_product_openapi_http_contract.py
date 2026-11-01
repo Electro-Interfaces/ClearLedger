@@ -166,7 +166,50 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
             yield
 
     async def test_formal_oas_local_refs_formats_and_examples(self):
+        from json import dumps
+        from fastapi.routing import APIRoute
+
         local_examples_gate(self.schema)
+        routes = [route for route in self.app.routes
+                  if isinstance(route, APIRoute) and route.include_in_schema]
+        declarations = [deepcopy(route.responses) for route in routes]
+        public = product.public_client_openapi(self.schema)
+        local_examples_gate(public)
+        for document in (self.schema, public):
+            checked = 0
+            for route in routes:
+                for method in route.methods:
+                    operation = document["paths"][route.path_format][method.lower()]
+                    for status, response in route.responses.items():
+                        status_key = str(status).upper()
+                        if status_key == "DEFAULT":
+                            status_key = "default"
+                        produced = operation["responses"][status_key]
+                        for section in ("content", "headers"):
+                            for name, container in response.get(section, {}).items():
+                                for keyword in ("example", "examples"):
+                                    if keyword not in container:
+                                        continue
+                                    expected = container[keyword]
+                                    actual = produced[section][name][keyword]
+                                    self.assertEqual(actual, expected)
+                                    self.assertEqual(dumps(actual, sort_keys=True, allow_nan=False),
+                                                     dumps(expected, sort_keys=True, allow_nan=False))
+                                    if isinstance(expected, (dict, list)):
+                                        self.assertIsNot(actual, expected)
+                                    checked += 1
+            self.assertEqual(checked, 14)
+
+        # Mutating either schema must not alter route declarations or the other view.
+        canonical_value = self.schema["paths"]["/objects"]["get"]["responses"]["200"]["content"][
+            "application/json"]["examples"]["fictional"]["value"]
+        public_value = public["paths"]["/objects"]["get"]["responses"]["200"]["content"][
+            "application/json"]["examples"]["fictional"]["value"]
+        original = deepcopy(canonical_value)
+        public_value["items"][0]["name"] = "Fictional public example mutation"
+        self.assertEqual(canonical_value, original)
+        canonical_value["items"][0]["name"] = "Fictional canonical example mutation"
+        self.assertEqual([route.responses for route in routes], declarations)
 
     async def test_gate_rejects_external_refs_unknown_formats_and_bad_examples(self):
         for poisoned in ({"$ref": "https://untrusted.invalid/schema"},
