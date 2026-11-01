@@ -232,7 +232,8 @@ async def test_required_token_and_auth_errors_keep_real_rows_unchanged(env, conf
         response = await env["client"].post("/api/oauth2/revoke", data=form, auth=auth)
     finally:
         event.remove(_test_engine.sync_engine, "before_cursor_execute", record)
-    wire(response, 400 if case == "missing-token" else 401,
+    wire(response, 400 if (case == "missing-token" or
+        (not confidential and case == "unknown-client")) else 401,
         "invalid_request" if case == "missing-token" else "invalid_client")
     assert not dml
     assert await bound_state(env, app, other) == before
