@@ -1,14 +1,15 @@
 {
-  "classification": "AUTHOR_FIX_SOURCE_CONTRACT_NOT_RUNTIME_ACCEPTANCE",
+  "classification": "AUTHOR_TEST_ONLY_NEGATIVE_OBSERVER_FIX_NOT_RUNTIME_ACCEPTANCE",
   "source_base": "cdb65361f3207f82283c88da8b431625a5b1804c",
-  "source_commit": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
+  "source_commit": "2aef5f8abb6f2ff7f1202eee997c56427ae136f2",
   "ratifications": [
     "msg_dc2f907bf07e",
     "msg_85a4864d991c",
     "msg_243863d23160",
     "msg_a0b500c56fd9",
     "msg_8b65b5c01830",
-    "msg_3fe7c1c9e78a"
+    "msg_3fe7c1c9e78a",
+    "msg_fa5aae8ffbf3"
   ],
   "operation": {
     "method": "POST",
@@ -154,7 +155,10 @@
       "protocol-only trusted context/generated UUID and streaming messages/header identity for ASGI2.3/2.4; synthetic206 is not Range API promise",
       "nonHTTP lifespan/websocket identity passthrough"
     ],
-    "prior22_definitions": "all retained; schema oracle exact ref + full equality; external task-cancel parametrized2.3/2.4/readiness30s; other20 unchanged AST to correction_base"
+    "prior22_definitions": "historical state at 92b425fbff8ad235c5b4c845c97b8f9014440bf6: all retained; schema exact ref + full equality; external cancel ASGI2.3/2.4/readiness30s; other20 unchanged AST to correction_base; current observer delta described separately",
+    "unchanged_HTTP_definitions_in_negative_observer_fix": 26,
+    "negative_observer": "original create_preflight; permissions==(); fallback UNINITIALIZED; original canonical token contracts.mode==EMPTY; no database permissions/receipt; real descriptor copy/other_request; first other_request201; exact403/access_denied/noBody/noSQLstate retained",
+    "old_HTTP_definitions_preserved_provenance": "historical count before the current negative observer fix; current base35e other26 byte+AST preserved"
   },
   "deferred": [
     "GET create-options",
@@ -192,14 +196,22 @@
     "source_test_paths": 12,
     "docs_paths": 2,
     "repair_source_test_paths": [
-      "clearledger/server/app/product_api/app.py",
       "clearledger/server/tests/test_partner_contract_http_create.py"
     ],
-    "commits": "schema source/test logical commit; ratified middleware+test logical commit; final exact2 docs-only child; hooks OFF, skip ci; no push/PR/merge/rebase",
+    "commits": "historical schema source/test and middleware+test commits retained; test-only negative observer commit then exact2 docs-only child; hooks OFF, skip ci; no push/PR/merge/rebase",
     "prior_repair_source_test_paths": [
       "clearledger/server/app/product_api/access.py",
       "clearledger/server/tests/test_partner_contract_http_create.py",
       "clearledger/server/tests/test_partner_contract_issuer_unit.py"
+    ],
+    "prior_schema_middleware_repair_source_test_paths": [
+      "clearledger/server/app/product_api/app.py",
+      "clearledger/server/tests/test_partner_contract_http_create.py"
+    ],
+    "negative_observer_exact_delta_paths": [
+      "clearledger/server/tests/test_partner_contract_http_create.py",
+      "clearledger/docs/PARTNER_CONTRACT_HTTP_CREATE.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_HTTP_CREATE.json"
     ]
   },
   "history": {
@@ -240,6 +252,26 @@
       "inner_CancelledError": "DIDNOTRAISE",
       "external_task_cancel": "timeout5 before ready; actual consumer5.9–6.3s; cancelpointNOTREACHED",
       "unknown_commit_new_root_same_key_current_auth_replay": "diagnosticPASS"
+    },
+    "negative_observer_base": "35e3fac1c2d33b91ef5d0fbb12dbf632b8c102c7",
+    "prior_source_test_commit": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
+    "prior_docs_head": "35e3fac1c2d33b91ef5d0fbb12dbf632b8c102c7",
+    "actual47da_secondary_dispatch": {
+      "integrated_pin_abbreviated": "47da",
+      "provenance": "dispatch task_5126594507ca / ROOT msg_fa5aae8ffbf3 only; no private RAW read",
+      "first_two_slices": {
+        "diagnosticPASS": 40
+      },
+      "third20": {
+        "cases": 20,
+        "diagnosticPASS": 18,
+        "FAIL": 2,
+        "seconds": 90.718
+      },
+      "last10": "NOTSTARTED",
+      "failures": "both negative observer cases before descriptor forgery",
+      "production_bypass_proven": false,
+      "applies_to_corrected_test": false
     }
   },
   "fixes": {
@@ -283,6 +315,43 @@
     "compile_without_exec": 2,
     "diff_check": "clean",
     "imports_collection_tests_exporter_generator": "NOTRUN",
-    "independent_fresh_whole14_source_review": "PENDING"
+    "independent_fresh_whole14_source_review": "PENDING",
+    "negative_observer_other26_byte_AST_and_exact_assertion_delta": true,
+    "negative_observer_compile_without_exec": 1
+  },
+  "negative_observer_fix": {
+    "authority": "msg_fa5aae8ffbf3",
+    "base": "35e3fac1c2d33b91ef5d0fbb12dbf632b8c102c7",
+    "test_only_commit": "2aef5f8abb6f2ff7f1202eee997c56427ae136f2",
+    "only_definition": "test_request_bound_preflight_cannot_be_copied_or_reused",
+    "imports_changed": false,
+    "other_26_definitions_byte_and_AST_preserved": true,
+    "fixtures_helpers_unchanged": true,
+    "production_changed": false,
+    "app_py_owner": "ROOT ctxf9ec",
+    "definitions": 27,
+    "static_variants": 70,
+    "runtime": "NOTRUN_INCLUDING_IMPORTS_COLLECTION",
+    "source_test_pins": {
+      "clearledger/scripts/export-partner-openapi.py": "afc546c88a579387fed8942f8feaada01d88c525b2b9a28927215d648ebba786",
+      "clearledger/server/app/api_contracts/context.py": "b480ddd2e13ae8d2534e30acf8ff484ac8a7d8a9f6de3549e6fd7f11e8d4e1c1",
+      "clearledger/server/app/api_contracts/routing.py": "20efc42527e9a08f1b9ff92abb8b76bbad9327d0c298611c5d97e375e9550b0b",
+      "clearledger/server/app/product_api/access.py": "d8e357635a8420a614c211edc43ef8bd425e8ddab2843bdbac01e3fa57956475",
+      "clearledger/server/app/product_api/app.py": "5d648e5ba7d30de2dd6076c7e04546571d335cd25303fa3169d4ce871855c87d",
+      "clearledger/server/app/product_api/contract_create.py": "c51e10000f789c10220f41620a8467f4683096e2df9da51ee2971dd089510806",
+      "clearledger/server/app/product_api/dto.py": "5d7d5de4cb95a80b8f5cf4cfe34bbf03a779b11b1cef27b19c8e81b374739ea8",
+      "clearledger/server/app/services/partner_contract_authority.py": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18",
+      "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py": "bf02c9e03dba1665a65ba06cebca7460baa3659b1ad8ba7d44b94de54aa5b928",
+      "clearledger/server/tests/test_partner_contract_http_create.py": "d4f1843141c8658a1547a60b2346fc4da2593379e9f5ec777c8e5f6012f248b4",
+      "clearledger/server/tests/test_partner_contract_issuer_unit.py": "e3c008a93886dc295f9db88db9940bd87f0c678391eea0d107834e901d49bdc8",
+      "clearledger/tools/partner-api-types/generate.mjs": "53481c3053e781712c5e12c9b76038589e7f0c996180132c66721e0f3dded1ee"
+    },
+    "final14_pins_and_exact3_delta_report": "/srv/projects/preview/partner-contract-http-negative-observer-fix-20261101/report.json",
+    "docs_child_exact_paths": [
+      "clearledger/docs/PARTNER_CONTRACT_HTTP_CREATE.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_HTTP_CREATE.json"
+    ],
+    "independent_focused_review": "PENDING_COORDINATOR_FINAL3_AND_ALL14_PINS",
+    "SOURCE_PASS": false
   }
 }

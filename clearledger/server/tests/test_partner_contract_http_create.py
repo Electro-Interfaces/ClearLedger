@@ -362,7 +362,9 @@ async def test_request_bound_preflight_cannot_be_copied_or_reused(http_world, mo
     async def observe(request, db, bearer, *, bind=False):
         token, context = await original(request, db, bearer, bind=bind)
         if bind:
-            assert context.permission("contracts", "read").resources.mode is ScopeMode.EMPTY
+            assert context.permissions == ()
+            assert context.permission("contracts", "read").resources.mode is ScopeMode.UNINITIALIZED
+            assert token.resource_scopes["contracts"].mode == "EMPTY"
             assert not context.database_permissions and context.receipt_read_binding is None
             descriptor = context.create_preflight
             if forgery == "copy":
