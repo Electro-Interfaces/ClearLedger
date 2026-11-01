@@ -1,0 +1,73 @@
+{
+  "status": "ACCEPTED_BOUNDED_SQL_MEASUREMENT_NOT_FULL_M15",
+  "source": "1209792731c697bd0629505a240d804f00d13594",
+  "baselineServices": "9eb236a4d69f0452208857ac603fd1da515f52d8",
+  "reviewedPeerSource": "3f2e343f2e4cb7ae0b16ae65ed7c684622795b62",
+  "sourceScope": "Only per-pass batching of Company/User and same-tenant ServiceLocation identities/parents; both passes and physical locks preserved.",
+  "SQLPerOriginalPut": {
+    "before": 1775,
+    "after": 1496,
+    "delta": 279,
+    "reductionPercent": 15.71830985915493,
+    "beforeSelect": 1693,
+    "afterSelect": 1414,
+    "TextClauseEach": 80,
+    "InsertEach": 1,
+    "UpdateEach": 1,
+    "HTTPStatusEach": 200,
+    "originalCheckpoints": 31,
+    "measurementBoundary": "Inside original put await only; original response returned unchanged. Eight test-readback selects excluded from optimized request counter."
+  },
+  "acceptedEvidence": {
+    "optimizedCases": 2,
+    "optimizedDefinitions": 2,
+    "optimizedPhases": 6,
+    "offlineCases": 60,
+    "offlineDefinitions": 31,
+    "offlinePhases": 180,
+    "offlineBreakdown": {
+      "originalActivationUnit": 37,
+      "newSourceGuards": 6,
+      "DPL": 17
+    },
+    "baselineCases": 1,
+    "baselinePytestExit": 1,
+    "baselineFailures": 1,
+    "baselineOutcome": "DIAGNOSTIC_BASELINE_BUDGET_EXCEEDED_EXPECTED, not pytestPASS; later pending-state assertions not reached.",
+    "reviewVerdict": "ACCEPT_BOUNDED_SOURCE_RAW_EVIDENCE",
+    "reviewMDsha256": "913855e1de7592a729c111e76d373dcf37fe0dcdf1a4fcfe5a066c4dc2b8b0b3",
+    "reviewJSONsha256": "7cd912872dc3b58c9b6f47b9cc8595c7b44b1333e57dc17f47b01f10ba1db084",
+    "evidencePinsRootReverified": 52,
+    "independentRerun": false
+  },
+  "nativeEnvironment": {
+    "models": 341,
+    "prefix3Tables": 341,
+    "prefix4Tables": 347,
+    "ordinaryRole": "clearledger",
+    "elevatedRoleFlags": false,
+    "nativeAdminJWT": "Source auth.token_for via PyJWT; no OAuth exchange in selected pair.",
+    "actualAsyncSessions": true,
+    "appAndProfilePoolsAfter": "0 checkedout / 0 checkedin",
+    "databaseClientsAndLocksAfter": "0 / 0",
+    "allOwnedContainersRemoved": true,
+    "foreignSafeProjectionsEqual": true
+  },
+  "subsequentSeparateRootObservations": {
+    "fresh31": "Root observed31cases/5definitions/93phasesPASS on same source. Separate independent review pending, outside accepted pair.",
+    "firstParent36": "NOT_ACCEPTED:36 cases,33pass3fail in parent/profile/children after-wait observer cases. No negative update ran in those3 due core-qualified markers versus unqualified ORM SQL. Tests-only repair pending; original failed evidence retained.",
+    "notProductionBypassConclusion": "An intended fault not injected does not establish authorization bypass.",
+    "all497AuthoredVariants": "Not fully run or accepted."
+  },
+  "limits": [
+    "One small synthetic workload, not representative production benchmark or latency proof.",
+    "All20programme sections and11cross-cutting criteria remainunproven.",
+    "Original139 accepted separately on earlier source; no PASS transfer to this optimized composition.",
+    "Source and captured evidence verified independently; reviewers did not rerun PostgreSQL or tests.",
+    "V1 offline wrapper failed compilation before any tests; preserved separately, not counted as product failure or PASS.",
+    "Broader current ACL matrices, all checkpoint/wait faults, scaling/large shapes, current composition CI and production/ingress/pilots remain open."
+  ],
+  "fullM15Accepted": false,
+  "fullCI": false,
+  "programmeComplete": false
+}
