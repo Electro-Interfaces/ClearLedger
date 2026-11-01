@@ -1,0 +1,117 @@
+{
+  "asOf": "2026-11-01T05:02:48.631342+00:00",
+  "status": "ACCEPTED_SOURCE_RAW_TWO_INDEPENDENT_SERIES",
+  "testedSource": "7b90cad2b2e00d8484a3a4fbb2d8bd86ff826e86",
+  "peerProductionSource": "80e0fb29e3783d2fa96c81d5380d01ac37dd44bd",
+  "peerTestDocsFix": "85b35ae9b34b6e7bf09e12c642078362eac8967e",
+  "series": [
+    {
+      "id": "a48",
+      "artifact": "rfc7009-a48-fullnative-pg-20261101-3826b26c5695",
+      "cases": 48,
+      "definitions": 5,
+      "phases": 144,
+      "seconds": 254.73395884223282,
+      "hostSession": 67009,
+      "hostExit": 0,
+      "hostReaped": true,
+      "resultSHA256": "94a26e5a586c800c4cb5eca955e3cd54d2e5e728929c057cb5b57a67acb86ee5",
+      "executionSHA256": "daab9cfff75a09e1fdc7cafabe77839ae6142dd4ae44a1cef274489ef90d1e26",
+      "sourceManifestSHA256": "023214b8a9bf61e4ef58d5255f9a9dfeb5a9fe0364d081bece3a9d535a53d865",
+      "poolCleanup": {
+        "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "poolErrors": []
+      },
+      "cleanup": "normal2ownedRemoved PGclientslocks0/0 pool0/0sameLoop/noERROR foreign41same"
+    },
+    {
+      "id": "b46",
+      "artifact": "rfc7009-b46-fullnative-pg-20261101-0a22409cbc9f",
+      "cases": 46,
+      "definitions": 3,
+      "phases": 138,
+      "seconds": 375.31133393384516,
+      "hostSession": 8088,
+      "hostExit": 0,
+      "hostReaped": true,
+      "resultSHA256": "3b1bd48a8c47f5d8073f02b758766327d04bb9a29ca0043a1d5e10114b41f69c",
+      "executionSHA256": "3196cd94ff2003d4a52e05bbe1954b2cce7355d8d4d5899a628132b219b6f272",
+      "sourceManifestSHA256": "023214b8a9bf61e4ef58d5255f9a9dfeb5a9fe0364d081bece3a9d535a53d865",
+      "poolCleanup": {
+        "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "poolErrors": []
+      },
+      "cleanup": "normal2ownedRemoved PGclientslocks0/0 pool0/0sameLoop/noERROR foreign41same"
+    }
+  ],
+  "coverage": {
+    "uniqueCases": 94,
+    "definitions": 8,
+    "phases": 282,
+    "unit": 20,
+    "actualHTTPPostgreSQL": 74,
+    "single94Run": false,
+    "currentFullCI": false
+  },
+  "independentReview": {
+    "REVIEW.md": "f366c752713afd546c5ce8974afd5879e71ce59a084ce5b274eb8d6f4994ee6f",
+    "REVIEW.json": "996a4c27819910131e966fb2d31070dd0ebea6f2118a8635d18183d2e5747d9e"
+  },
+  "source": "RevokeEndpoint.check_params presence token, ignore hint; inherited auth/query/ownership/revoke/commit intact; combinedProfilepurpose preserved; exact2 public400 vs Basic401 test/doc fix only",
+  "semantics": [
+    "missing/unknown/opposite hints all search actual access/refresh",
+    "unknown token and repeat 200emptyobject noStore",
+    "only actual family.revoked changes; unrelated closure and unusedCodes unchanged",
+    "foreignclient400invalid_grant without DML",
+    "publicunknownclient400invalid_client; Basicunknown/badsecret401; missingauth401; missingtoken400invalid_request",
+    "actual fault after revoke flush/protocol response rollback same root and full fresh18-table bound snapshot"
+  ],
+  "fixture": "fullnative341models347tables803validatedFK3212RI, original canonicalenv/client/db/RSA/actualASGIAuthlib; originalCF importedAFTERownOIDpreflight/bootstrap butsetupreplaced noDROPseed; noappservers/lifespan",
+  "historicalV1": {
+    "status": "NOT_ACCEPTED",
+    "source": "c6376f2b887dad9947409d6947520cd3ec6704fa",
+    "collected": 94,
+    "calls": 64,
+    "failed": 3,
+    "diagnosticPassedNotAccepted": 61,
+    "pytestExit": 2,
+    "hostExit": 1,
+    "interrupt": "RootgracefulSIGINT afterpositiveownedRunning,notdeadline",
+    "reason": "incorrect401expectation forunknownpublicclient actual400",
+    "rawResultSHA256": "cc6a87fa80ea9809516c33cf9dc88596e9d944e9ebef79d4fe58a2c8bf4ca1bf"
+  },
+  "originalScope": {
+    "sections": 20,
+    "crossCutting": 11,
+    "unchanged": true,
+    "completion": false,
+    "overallPercent": null
+  },
+  "remaining": [
+    "same-root SQLissuer/current-generation consumer implementation",
+    "G3 afterRootCommit notifications V2 Source fix; G1Docsregistration sequencing remains",
+    "externalPOST/options/activation/SDK and pilots",
+    "fullcurrentcomposition/OrgDELETE/historical7schema variants/fullCI"
+  ],
+  "merge": false,
+  "deployment": false,
+  "liveFlagsChanged": false
+}
