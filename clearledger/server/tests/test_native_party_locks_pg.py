@@ -739,7 +739,7 @@ async def test_actual_savepoint_poison_and_reentry_require_fresh_whole_root(worl
 
 async def test_actual_contact_delete_cascades_existing_location_assignment_without_mutating_cp(world):
     w = world
-    opaque_id = "opaque:synthetic:" + uuid4().hex
+    opaque_id = "opaque:" + uuid4().hex
     async with w.factory() as seed:
         seed.add(ServiceLocation(id=opaque_id, company_id=w.cid, code=opaque_id,
             name="Synthetic assigned point", type="other", source_bindings=[]))
