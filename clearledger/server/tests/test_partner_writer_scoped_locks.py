@@ -69,6 +69,108 @@ def test_oauth_seven_named_roots_and_three_token_branches_share_composition():
         assert calls(symbol(OAUTH, name), "run_sync") and "_protocol_response" in text(OAUTH, name)
 
 
+def test_identity_free_validation_is_negative_only_before_composition():
+    node = symbol(OAUTH, "_protocol_response")
+    negative = next(n for n in node.body if isinstance(n, ast.If)
+                    and ast.unparse(n.test) == "not (basic[0] or protocol.payload.client_id)")
+    prepare, = calls(node, "_prepare_partner_write")
+    parser, = calls(node, "extract_basic_authorization")
+    assert parser.lineno < negative.lineno < negative.end_lineno < prepare.lineno
+    assert ast.unparse(node.body[0].test) == "sync.new or sync.dirty or sync.deleted"
+    assert calls(node.body[0], "ScopedLockError")
+    context, = [n for n in negative.body if isinstance(n, ast.With)]
+    assert ast.unparse(context.items[0].context_expr) == "sync.no_autoflush"
+    server, = calls(negative, "PartnerAuthorizationServer")
+    assert [ast.unparse(arg) for arg in server.args] == ["sync"] and not server.keywords
+    assert len(calls(negative, "create_token_response")) == len(calls(negative, "create_endpoint_response")) == 1
+    failure, = [n for n in context.body if isinstance(n, ast.If)]
+    guard = ast.unparse(failure.test)
+    for term in ("not isinstance(result, tuple)", "len(result) != 3", "result[0] < 400",
+                 "not isinstance(result[1], dict)", "not result[1].get('error')",
+                 "sync.new", "sync.dirty", "sync.deleted"):
+        assert term in guard
+    assert ast.unparse(failure.body[0]) == "sync.rollback()"
+    assert isinstance(failure.body[1], ast.Raise) and calls(failure, "ScopedLockError")
+    assert ast.unparse(context.body[-1]) == "return (result, False)"
+    for forbidden in ("_prepare_partner_write", "acquire_scoped_locks", "LockPlan", "checkpoint",
+                      "flush", "add", "execute", "commit", "query_token", "issue_token"):
+        assert not calls(negative, forbidden)
+
+
+def test_identity_present_protocol_still_has_one_full_writer_and_final_checks():
+    node = symbol(OAUTH, "_protocol_response")
+    prepare, = calls(node, "_prepare_partner_write")
+    positive = [n for n in node.body if n.lineno >= prepare.lineno]
+    assert ast.unparse(positive[0]) == "writer = _prepare_partner_write(sync, protocol=protocol, mutation=mutation)"
+    assert ast.unparse(positive[1]) == "server = PartnerAuthorizationServer(sync, writer, protocol)"
+    result = positive[2]
+    assert isinstance(result.value, ast.IfExp) and ast.unparse(result.value.test) == "revocation"
+    assert ast.unparse(result.value.body) == "server.create_endpoint_response('revocation', protocol)"
+    assert ast.unparse(result.value.orelse) == "server.create_token_response(protocol)"
+    assert ast.unparse(positive[3].test) == "server.reuse_revoked"
+    assert ast.unparse(positive[4]) == "if result[0] >= 400:\n    return (result, False)"
+    assert [ast.unparse(n) for n in positive[-4:]] == ["server.checkpoint()", "sync.flush()",
+        "server.checkpoint()", "return (result, True)"]
+    assert len(calls(node, "_prepare_partner_write")) == 1
+    assert "if self.writer is None:" in text(IDENTITY, "checkpoint", "PartnerAuthorizationServer")
+    assert calls(symbol(IDENTITY, "checkpoint", "PartnerAuthorizationServer"), "ScopedLockError")
+
+
+def test_primary_no_client_methods_fail_before_lookup_and_protocol_callbacks():
+    # Future source oracle reads installed library TEXT, never calls its parser,
+    # authentication methods or any extracted application/library function.
+    from importlib.metadata import distribution
+    primary = Path(distribution("Authlib").locate_file("authlib/oauth2"))
+    authentication = primary / "rfc6749/authenticate_client.py"
+    dispatch = symbol(primary / "rfc6749/authorization_server.py", "create_token_response", "AuthorizationServer")
+    assert calls(dispatch, "get_token_grant")[0].lineno < calls(dispatch, "validate_token_request")[0].lineno
+    constructor = symbol(IDENTITY, "__init__", "PartnerAuthorizationServer")
+    assert [ast.unparse(n.args[0]) for n in calls(constructor, "register_grant")] == [
+        "CodeGrant", "RotatingRefreshGrant", "MachineGrant"]
+    assert not calls(constructor, "register_client_auth_method")
+    for name, predicate in (("authenticate_client_secret_basic", "client_id and client_secret"),
+                            ("authenticate_none", "client_id and (not request.payload.data.get('client_secret'))")):
+        node = symbol(authentication, name)
+        gate = next(n for n in node.body if isinstance(n, ast.If))
+        assert ast.unparse(gate.test) == predicate
+        queries = calls(node, "_validate_client")
+        assert len(queries) == 1 and gate.lineno < queries[0].lineno <= gate.end_lineno
+        assert not any(isinstance(n, ast.Return) for n in node.body)
+    authenticate = symbol(authentication, "authenticate", "ClientAuthentication")
+    assert "status_code=401" in ast.unparse(authenticate)
+    assert calls(authenticate, "InvalidClientError")
+    for owner, name in (("CodeGrant", "TOKEN_ENDPOINT_AUTH_METHODS"),
+                        ("RotatingRefreshGrant", "TOKEN_ENDPOINT_AUTH_METHODS"),
+                        ("RevokeEndpoint", "CLIENT_AUTH_METHODS")):
+        cls = next(n for n in tree(IDENTITY).body if isinstance(n, ast.ClassDef) and n.name == owner)
+        assignment = next(n for n in cls.body if isinstance(n, ast.Assign)
+                          and any(isinstance(t, ast.Name) and t.id == name for t in n.targets))
+        assert ast.literal_eval(assignment.value) == ["client_secret_basic", "none"]
+    base = next(n for n in tree(primary / "rfc6749/grants/base.py").body
+                if isinstance(n, ast.ClassDef) and n.name == "BaseGrant")
+    assert ast.literal_eval(base.body[0].value) == ["client_secret_basic"]
+    # MachineGrant inherits client_credentials -> BaseGrant's basic-only method.
+    machine = next(n for n in tree(IDENTITY).body if isinstance(n, ast.ClassDef) and n.name == "MachineGrant")
+    assert [ast.unparse(n) for n in machine.bases] == ["ClientCredentialsGrant"]
+    assert not any(isinstance(n, ast.Assign) for n in machine.body)
+    parent = next(n for n in tree(primary / "rfc6749/grants/client_credentials.py").body
+                  if isinstance(n, ast.ClassDef) and n.name == "ClientCredentialsGrant")
+    assert "BaseGrant" in [ast.unparse(n) for n in parent.bases]
+    assert not any(isinstance(n, ast.Assign) and any(isinstance(t, ast.Name)
+                   and t.id == "TOKEN_ENDPOINT_AUTH_METHODS" for t in n.targets) for n in parent.body)
+    for file, owner, method in (("authorization_code.py", "AuthorizationCodeGrant", "validate_token_request"),
+                               ("refresh_token.py", "RefreshTokenGrant", "_validate_request_client"),
+                               ("client_credentials.py", "ClientCredentialsGrant", "validate_token_request")):
+        node = symbol(primary / "rfc6749/grants" / file, method, owner)
+        first, = calls(node, "authenticate_token_endpoint_client")
+        # Authentication is the first call in each actual validation body.
+        assert next(n for n in body_nodes(node) if isinstance(n, ast.Call)) is first
+    refresh = symbol(primary / "rfc6749/grants/refresh_token.py", "validate_token_request", "RefreshTokenGrant")
+    assert calls(refresh, "_validate_request_client")[0].lineno < calls(refresh, "_validate_request_token")[0].lineno
+    revoke = symbol(primary / "rfc7009/revocation.py", "create_endpoint_response", "RevocationEndpoint")
+    assert calls(revoke, "authenticate_endpoint_client")[0].lineno < calls(revoke, "authenticate_token")[0].lineno
+
+
 def test_discovery_has_one_full_plan_and_acquisition_before_row_locks():
     node = symbol(IDENTITY, "_prepare_partner_write")
     assert len(calls(node, "LockPlan")) == len(calls(node, "acquire_scoped_locks")) == 1

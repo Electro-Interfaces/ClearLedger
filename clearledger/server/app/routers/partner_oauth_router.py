@@ -19,6 +19,7 @@ from app.database import get_db
 from app.models import App, Company, CompanyApp, User
 from app.models_partner import PartnerAuthorizationRequest, PartnerGrant, PartnerInstallation
 from app.schemas_partner import ApproveConsent
+from app.services.contract_write_locks import ScopedLockError
 from app.services.partner_identity import (NO_STORE, SCOPE_DESCRIPTIONS, PartnerAuthorizationServer, PartnerProblem, PartnerRoute,
     ProtocolRequest, eligible_scopes, get_verified_partner_token, live_grant, now, partner_bearer_headers, public_jwks,
     require_core_user, require_enabled, settings, user_info, validate_scopes,
@@ -165,6 +166,23 @@ async def revoke(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 def _protocol_response(sync, protocol, revocation):
+    if sync.new or sync.dirty or sync.deleted:
+        raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
+    basic = extract_basic_authorization(protocol.headers)
+    if not (basic[0] or protocol.payload.client_id):
+        # Neither supported client-auth method can pass without an identity.
+        # Let Authlib select the grant/error and render its original headers;
+        # this branch cannot reach token lookup, writer callbacks or issuance.
+        with sync.no_autoflush:
+            validation = PartnerAuthorizationServer(sync)
+            result = (validation.create_endpoint_response("revocation", protocol) if revocation
+                      else validation.create_token_response(protocol))
+            if (not isinstance(result, tuple) or len(result) != 3 or result[0] < 400
+                    or not isinstance(result[1], dict) or not result[1].get("error")
+                    or sync.new or sync.dirty or sync.deleted):
+                sync.rollback()
+                raise ScopedLockError("Identity-free OAuth validation must only return an error")
+            return result, False  # Caller rolls back the complete root.
     kind = protocol.payload.data.get("grant_type")
     mutation = "revoke" if revocation else {"authorization_code": "token-code",
         "refresh_token": "token-refresh", "client_credentials": "token-machine"}.get(kind, "token-invalid")

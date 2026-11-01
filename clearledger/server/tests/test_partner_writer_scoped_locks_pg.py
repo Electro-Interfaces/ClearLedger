@@ -680,6 +680,179 @@ async def test_revoke_ignored_oauth_fields_only_discover_and_revoke_requested_fa
         headers={"Authorization": "Bearer " + unrelated["access_token"]})).status_code == 200
 
 
+@pytest.mark.parametrize("authorization,empty_body_id", [(None, False), (None, True),
+    ("Basic !!!", False), ("Basic Og==", False), ("Basic OnNlY3JldA==", False), ("Digest fictional", False)])
+@pytest.mark.parametrize("operation,status,error", [("authorization_code", 401, "invalid_client"),
+    ("refresh_token", 401, "invalid_client"), ("client_credentials", 401, "invalid_client"),
+    ("unknown", 400, "unsupported_grant_type"), ("password", 400, "unsupported_grant_type"),
+    (None, 400, "unsupported_grant_type"), ("revoke", 401, "invalid_client")])
+async def test_identity_free_http_preserves_canonical_errors_without_writer_or_sql(
+        env, monkeypatch, authorization, empty_body_id, operation, status, error):
+    # Valid real code/refresh/machine/revoke material proves the denial is due
+    # to missing identity, before any lookup, nonce, cap, or mutating callback.
+    app = await registration(env, confidential=True)
+    issued, _ = await tokens(env, app)
+    code, _, _ = await consent(env, app)
+    approved = await env["client"].post(f"/api/developer/installations/{app['installation_id']}/machine-grants",
+        headers=env["headers"], json={"scopes": ["docs:read"]})
+    assert approved.status_code == 201
+    actual = await token_rows(issued["access_token"])
+    before = await counts(app["client_id"])
+    form = {"code": code, "redirect_uri": REDIRECT, "code_verifier": VERIFIER,
+        "refresh_token": issued["refresh_token"], "grant_id": approved.json()["grantId"],
+        "scope": "docs:read", "token": issued["access_token"]}
+    if operation is not None:
+        form["grant_type"] = operation
+    if empty_body_id:
+        form["client_id"] = ""
+    headers = {} if authorization is None else {"Authorization": authorization}
+    reached, sql = [], []
+    def forbidden(*args, **kwargs):
+        reached.append("forbidden")
+        raise AssertionError("Identity-free request reached a writer/lookup callback")
+    def record(conn, cursor, statement, parameters, context, executemany):
+        sql.append(statement)
+    # Observers apply only to this HTTP call, not fixture setup or later reads.
+    with monkeypatch.context() as guard:
+        guard.setattr(oauth, "_prepare_partner_write", forbidden)
+        guard.setattr(identity, "acquire_scoped_locks", forbidden)
+        for owner, method in ((identity.PartnerAuthorizationServer, "query_client"),
+                (identity.PartnerAuthorizationServer, "checkpoint"),
+                (identity.PartnerAuthorizationServer, "issue_token"),
+                (identity.PartnerAuthorizationServer, "save_token"),
+                (identity.CodeGrant, "query_authorization_code"),
+                (identity.RotatingRefreshGrant, "authenticate_refresh_token"),
+                (identity.RevokeEndpoint, "query_token"), (identity.RevokeEndpoint, "revoke_token"),
+                (identity.PartnerOpenIDCode, "exists_nonce")):
+            guard.setattr(owner, method, forbidden)
+        guard.setattr(identity, "pairwise_subject", forbidden)
+        event.listen(_test_engine.sync_engine, "before_cursor_execute", record)
+        try:
+            response = await env["client"].post("/api/oauth2/" + ("revoke" if operation == "revoke" else "token"),
+                data=form, headers=headers)
+        finally:
+            event.remove(_test_engine.sync_engine, "before_cursor_execute", record)
+    assert response.status_code == status and response.json() == {"error": error}
+    methods = ["client_secret_basic"] if operation == "client_credentials" else ["client_secret_basic", "none"]
+    challenge = ('Basic error="invalid_client", error_description="The client cannot authenticate with methods: '
+        + str(methods) + '"') if status == 401 else None
+    assert response.headers.get("www-authenticate") == challenge
+    assert response.headers["cache-control"] == "no-store" and response.headers["pragma"] == "no-cache"
+    assert reached == [] and sql == []  # No SELECT/locks/DML/FK/nonce, even if fixture material is valid.
+    assert await counts(app["client_id"]) == before
+    async with _test_session_factory() as db:
+        assert (await db.get(PartnerCode, identity.digest(code))).consumed is False
+        assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is False
+        assert (await db.get(PartnerToken, actual.tid)).refresh_used is False
+
+
+@pytest.mark.parametrize("operation", ["token", "revoke"])
+async def test_unknown_token_and_malformed_basic_keep_original_401_challenge(env, monkeypatch, operation):
+    # Exact PW-R2 empty graph counterexample: no body client id/secret.
+    reached = []
+    def forbidden(*args, **kwargs):
+        reached.append(True)
+        raise AssertionError("Empty negative graph must not enter composer")
+    monkeypatch.setattr(oauth, "_prepare_partner_write", forbidden)
+    form = {"token": "fictionalunknown"} if operation == "revoke" else {"grant_type": "password"}
+    response = await env["client"].post("/api/oauth2/" + operation, data=form,
+        headers={"Authorization": "Basic !!!"})
+    assert reached == []
+    if operation == "revoke":
+        assert response.status_code == 401 and response.json() == {"error": "invalid_client"}
+        assert response.headers["www-authenticate"] == ('Basic error="invalid_client", '
+            'error_description="The client cannot authenticate with methods: [\'client_secret_basic\', \'none\']"')
+    else:
+        assert response.status_code == 400 and response.json() == {"error": "unsupported_grant_type"}
+        assert "www-authenticate" not in response.headers
+
+
+@pytest.mark.parametrize("operation", ["token", "revoke"])
+@pytest.mark.parametrize("unexpected", [(200, {"access_token": "must-not-publish"}, []),
+    (302, {}, [("Location", "https://example.invalid")]), (400, {}, []), None])
+async def test_identity_free_unexpected_nonerror_rolls_back_real_root(env, monkeypatch, operation, unexpected):
+    def wrong_result(*args, **kwargs):
+        return unexpected
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Unexpected validation result must never fall through to composer")
+    monkeypatch.setattr(oauth, "_prepare_partner_write", forbidden)
+    method = "create_endpoint_response" if operation == "revoke" else "create_token_response"
+    monkeypatch.setattr(identity.PartnerAuthorizationServer, method, wrong_result)
+    async with _test_session_factory() as db:
+        await db.scalar(select(PartnerClient.id).limit(1))  # Actual root exists.
+        with pytest.raises(locks.ScopedLockError, match="must only return an error"):
+            await db.run_sync(oauth._protocol_response, identity.ProtocolRequest("POST", {}), operation == "revoke")
+        assert not db.in_transaction()  # Whole root rollback, not a savepoint or successful publication.
+
+
+@pytest.mark.parametrize("operation,auth_mode", [("authorization_code", "public"),
+    ("refresh_token", "public"), ("revoke", "public"), ("authorization_code", "confidential"),
+    ("refresh_token", "confidential"), ("client_credentials", "confidential"), ("revoke", "confidential"),
+    ("authorization_code", "bad-secret"), ("refresh_token", "bad-secret"),
+    ("client_credentials", "bad-secret"), ("revoke", "bad-secret"),
+    ("authorization_code", "unknown-basic"), ("refresh_token", "unknown-basic"),
+    ("client_credentials", "unknown-basic"), ("revoke", "unknown-basic")])
+async def test_identity_present_controls_use_real_composer_once_and_canonical_auth(env, monkeypatch, operation, auth_mode):
+    app = await registration(env, confidential=auth_mode != "public")
+    issued, _ = await tokens(env, app)
+    actual = await token_rows(issued["access_token"])
+    code, _, _ = await consent(env, app)
+    form = {"grant_type": operation, "code": code, "redirect_uri": REDIRECT,
+        "code_verifier": VERIFIER, "refresh_token": issued["refresh_token"], "token": issued["access_token"]}
+    if operation == "client_credentials":
+        approved = await env["client"].post(f"/api/developer/installations/{app['installation_id']}/machine-grants",
+            headers=env["headers"], json={"scopes": ["docs:read"]})
+        assert approved.status_code == 201
+        form.update(grant_id=approved.json()["grantId"], scope="docs:read")
+    client_id = "unknown-" + uuid4().hex if auth_mode == "unknown-basic" else app["client_id"]
+    auth = None if auth_mode == "public" else (client_id,
+        app["secret"] if auth_mode == "confidential" else "wrong-secret")
+    if auth is None:
+        form["client_id"] = client_id
+    original, prepared = oauth._prepare_partner_write, []
+    def inspect_real_plan(sync, **kwargs):
+        writer = original(sync, **kwargs)
+        locks.require_scoped_locks(sync, writer.capability, writer.capability.plan.requests)
+        keys = {request.key for request in writer.capability.plan.requests}
+        assert locks.ClientKey(client_id) in keys
+        assert writer.rows and writer.discovered(PartnerClient, client_id) == (auth_mode != "unknown-basic")
+        assert any(row.model is PartnerClient and row.identity == (client_id,)
+                   and row.missing == (auth_mode == "unknown-basic") for row in writer.rows)
+        if operation == "authorization_code":
+            assert writer.discovered(PartnerCode, identity.digest(code))
+        elif operation in {"refresh_token", "revoke"}:
+            assert writer.discovered(PartnerToken, actual.tid) and writer.discovered(PartnerTokenFamily, actual.fid)
+        else:
+            assert writer.discovered(PartnerGrant, UUID(form["grant_id"]))
+        prepared.append(writer)
+        return writer
+    monkeypatch.setattr(oauth, "_prepare_partner_write", inspect_real_plan)
+    before = await counts(app["client_id"])
+    response = await env["client"].post("/api/oauth2/" + ("revoke" if operation == "revoke" else "token"),
+        data=form, auth=auth)
+    assert len(prepared) == 1
+    if auth_mode in {"bad-secret", "unknown-basic"}:
+        assert response.status_code == 401 and response.json() == {"error": "invalid_client"}
+        description = ("The client does not exist on this server." if auth_mode == "unknown-basic" else
+            "The client cannot authenticate with methods: " + str(["client_secret_basic"] if operation == "client_credentials"
+                else ["client_secret_basic", "none"]))
+        assert response.headers["www-authenticate"] == ('Basic error="invalid_client", error_description="' + description + '"')
+        assert await counts(app["client_id"]) == before
+        async with _test_session_factory() as db:
+            assert (await db.get(PartnerCode, identity.digest(code))).consumed is False
+            assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is False
+            assert (await db.get(PartnerToken, actual.tid)).refresh_used is False
+    elif operation == "revoke":
+        assert response.status_code == 200 and response.json() == {}
+        async with _test_session_factory() as db:
+            assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is True
+    else:
+        assert response.status_code == 200 and "www-authenticate" not in response.headers
+        async with _test_session_factory() as db:
+            current = await db.run_sync(identity.verify_access, response.json()["access_token"])
+            assert current.client_id == app["client_id"] and current.is_machine == (operation == "client_credentials")
+
+
 @pytest.mark.parametrize("confidential", [False, True])
 @pytest.mark.parametrize("token_field", ["access_token", "refresh_token"])
 async def test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors(env, confidential, token_field):
