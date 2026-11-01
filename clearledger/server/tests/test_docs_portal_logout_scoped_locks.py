@@ -52,8 +52,45 @@ def text(path, name, owner=None):
     return ast.unparse(definition(path, name, owner))
 
 
+def stable_ast_dump(value):
+    """Keep the original Python 3.11 pins across AST display changes.
+
+    Only empty type_params is compatibility metadata. Nonempty parameters and
+    every other field remain in the digest; locations remain excluded.
+    """
+    if isinstance(value, ast.AST):
+        fields = []
+        for name, child in ast.iter_fields(value):
+            if name == "type_params" and child == []:
+                continue
+            if child is None and getattr(type(value), name, ...) is None:
+                continue
+            fields.append(name + "=" + stable_ast_dump(child))
+        return type(value).__name__ + "(" + ", ".join(fields) + ")"
+    if isinstance(value, list):
+        return "[" + ", ".join(stable_ast_dump(child) for child in value) + "]"
+    return repr(value)
+
+
 def digest_node(node):
-    return hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+    return hashlib.sha256(stable_ast_dump(node).encode()).hexdigest()
+
+
+def test_source_digest_keeps_legacy_pin_and_detects_semantic_changes():
+    node = ast.parse("def sample(value):\n    return value + 1\n").body[0]
+    before = ast.dump(node, include_attributes=True)
+    expected = "ee518d4f1a4c9b0c019cb6669d72a2911d5b0f3baeecaffa8ccf34beee63d22e"
+    assert digest_node(node) == expected
+    assert ast.dump(node, include_attributes=True) == before
+    node.body[0].value.right.value = 2
+    assert digest_node(node) != expected
+    node.body[0].value.right.value = 1
+    node.decorator_list.append(ast.Name(id="changed", ctx=ast.Load()))
+    assert digest_node(node) != expected
+    node.decorator_list.clear()
+    if "type_params" in node._fields:
+        node.type_params = [ast.Name(id="T", ctx=ast.Load())]
+        assert digest_node(node) != expected
 
 
 def test_logout_transport_authority_and_wire_are_unchanged():

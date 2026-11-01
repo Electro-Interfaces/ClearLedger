@@ -46,5 +46,14 @@
   "unchanged": "all17 branch AST/12 canonical policies/all other protected bytes/production DPL code/originalPG17 assertions",
   "justification": "independent SOURCE+RAW accepted UUID29b/OneC38/R1162; newexactcomposition pins, no wildcard/skips/mutableHEADexpectedhash",
   "runtime": "DPL NOTRUN",
-  "scope20plus11unchanged": true
+  "scope20plus11unchanged": true,
+  "astSerializerCompatibility": {
+    "format": "Python3.11 explicit fields/empty lists; empty type_params only omitted; nonempty/unknown fields retained",
+    "originalPinsUnchanged": 29,
+    "originalSourceDefinitions": 7,
+    "addedSourceDefinitions": 1,
+    "PGDefinitionsUnchanged": 17,
+    "productionUnchanged": true,
+    "runtime": "Pending new controlled Root execution; original39014 failed artifact immutable"
+  }
 }
