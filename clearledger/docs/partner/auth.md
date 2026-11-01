@@ -193,9 +193,11 @@ client_id=PLACEHOLDER_PUBLIC_CLIENT_ID&token=PLACEHOLDER_CURRENT_REFRESH_TOKEN&t
 Отзыв известного access или refresh закрывает фактическое семейство. Неизвестный
 токен и повторный отзыв также возвращают 200 `{}`. Удалите свои сохранённые токены;
 ответ не содержит новой пары. Передача токена другого клиента даёт 400
-`invalid_grant` без изменения его семейства. Неизвестный клиент или неверный
-confidential secret дают 401 `invalid_client` без записи отзыва. Hint не заменяет
-аутентификацию клиента; смена `grant_id`, `grant_type` или secret не исправляет
+`invalid_grant` без изменения его семейства. Неизвестный public client даёт
+400 `invalid_client`; неизвестный confidential client с Basic или неверный
+confidential secret дают 401 `invalid_client`. Отсутствие client authentication
+также даёт 401 `invalid_client`; запись отзыва при этих ошибках не выполняется.
+Hint не заменяет аутентификацию клиента; смена `grant_id`, `grant_type` или secret не исправляет
 отсутствие права на чужой токен.
 
 ## Machine: confidential client credentials
@@ -342,5 +344,19 @@ Source/test commit: `3fd6e164cc86bde4e53be881e1102719b1cfdc26`, база:
   проверки параметров, реального HTTP/Authlib пути и сохранённого состояния.
   **NOTCOLLECTED / NOTRUN**; родительский `tests/conftest.py` требует отдельной
   изоляции до collection, поскольку импортирует приложение до module guards.
+
+### Отдельная правка ожиданий test/docs
+
+Source commit тестовой правки: `ee3dd7fd17e908569021badeef62ae4948d87c2d`,
+база: `80e0fb29e3783d2fa96c81d5380d01ac37dd44bd`.
+`clearledger/server/tests/test_partner_revocation_hints_pg.py:234–237` уточняет
+строгие ожидания: неизвестный public client — 400 `invalid_client`,
+неизвестный confidential client с Basic — 401 `invalid_client`;
+отсутствие client authentication —
+401 `invalid_client`, отсутствие `token` — 400 `invalid_request`.
+Production source pin `3fd6e164cc86bde4e53be881e1102719b1cfdc26` не изменён.
+Сохранены 89 статически подсчитанных случаев (20 unit + 69 PG):
+**NOTCOLLECTED / NOTRUN**, review **PENDING**. Это отдельная правка ожиданий
+и описания, остальные разделы повторно не аудировались.
 
 Далее: [первое чтение каталогов](recipes/read-catalogs.md).
