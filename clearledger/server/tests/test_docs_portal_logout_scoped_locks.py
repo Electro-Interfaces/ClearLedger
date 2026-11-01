@@ -285,7 +285,9 @@ def test_logout_preserves_existing17_and_canonical12():
             expected = ACCEPTED_CREATE_EXTENSION["extended_file"]
             assert expected == ACCEPTED_G_ORG_ORDER_EXTENSION["baseline_file"]
             expected = ACCEPTED_G_ORG_ORDER_EXTENSION["extended_file"]
-        assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, path
+        actual = (activation_baseline_digest(ROOT / path) if path in ACTIVATION_RAW_OVERLAY
+                  else hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+        assert actual == expected, path
     for path, expected in UUID_SUPPORT_BYTES.items():
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, path
     assert set(UUID_MODEL_OVERLAY) == {"app/models.py", "app/models_partner.py", "app/models_docs_portal.py"}
@@ -320,7 +322,7 @@ def test_accepted_org_order_extension_is_exact_and_preserves_scope_projection():
     assert order["source_parent"] == "297f7b4a726b917530e6ba54ff71a7b6c2c33e38"
     assert order["baseline_file"] == ACCEPTED_CREATE_EXTENSION["extended_file"]
     assert order["extended_file"] != order["baseline_file"]
-    assert hashlib.sha256(IDENTITY.read_bytes()).hexdigest() == order["extended_file"]
+    assert activation_baseline_digest(IDENTITY) == order["extended_file"]
     authority = ROOT / "app/services/partner_contract_authority.py"
     assert accepted_http_authority_baseline_digest(authority) == order["authority_extended_file"]
     composer = definition(IDENTITY, "_prepare_partner_write")
@@ -380,4 +382,96 @@ def test_explicit_http_extension_keeps_original_gorg_and_full_issuer_semantics()
     loader = definition(authority, "_load_coarse_create")
     forbidden = {"add", "add_all", "flush", "commit", "rollback", "begin", "begin_nested", "with_for_update", "acquire_scoped_locks"}
     assert not any(calls(loader, name) for name in forbidden)
+    assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
+
+
+# Separate narrow native-admin overlay. Historical literals above remain intact.
+ACTIVATION_RAW_OVERLAY = {
+    "app/services/partner_identity.py": {
+        "baseline": "ad2408f8e081a4088668d3f1c45c12be06bb293a43ca48e333248fa90c6f688a",
+        "baseline_ast": "85ef374747e6ee54aa33995e1d3802aab8524c263efa033495abd724c0eefb57",
+        "extended": "0968c41deac1955095c9a80ba4542d0ccd074f68699c29c788cbfab11772ac90",
+    },
+    "app/routers/partner_admin_router.py": {
+        "baseline": "1d097bfca261e25dd6a482cd2b041fde4f6ef593ef29252c55335a5e15ca97db",
+        "baseline_ast": "5690108145cb66ccb5ea1b31ce2dc51b178ed7b076b5a47942c1b5b52fcc355b",
+        "extended": "8d7e9324e1a82a716cb96632f389d2ebedd40dfe4b7f798b4b81d8437afb2494",
+    },
+}
+ACTIVATION_SOURCE = {
+    "base": "4a4ba3bc041b69ccb4064a7865873eadd6f0f00f",
+    "codegate": "msg_4b02011dc305",
+    "purpose": "contract-profile-activation",
+    "service_sha": "c1a7fb76be8b4f044eab0dada99662be7af0d9624526d91233ab5f83c6643ce5",
+    "profile_sha": "6fdc93816c6ba7af22b97dc6c1e8e1bc91f1563cec1c0672e82e17a11c23abef",
+    "schema_baseline_ast": "ad406ab6bb3ac94502a9680402b60659b8e3cfa7928850b9a4b0aede4291323a",
+    "schema_sha": "2f9c10a92d960b25ff3bbd74a4990e583cadfaba118570236b325baf8ab02580",
+}
+
+
+def activation_baseline_digest(path):
+    """Restore the WHOLE previous module, not just selected old functions."""
+    relative = str(path.relative_to(ROOT))
+    overlay = ACTIVATION_RAW_OVERLAY[relative]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == overlay["extended"]
+    projected = tree(path)
+    if relative == "app/services/partner_identity.py":
+        composer, = (n for n in projected.body if isinstance(n, ast.FunctionDef)
+                     and n.name == "_prepare_partner_write")
+        removed = {"if": 0, "assign": 0, "purpose": 0, "writer": 0}
+        class RestoreActivation(ast.NodeTransformer):
+            def visit_If(self, node):
+                spelling = ast.unparse(node.test)
+                if spelling in {"activation_purpose", "activation_writer is not None",
+                                "activation_writer is not None and stage_index == 0"}:
+                    removed["if"] += 1
+                    return [self.visit(n) for n in node.orelse]
+                return self.generic_visit(node)
+            def visit_Assign(self, node):
+                if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in {
+                        "activation_purpose", "activation_writer"}:
+                    removed["assign"] += 1
+                    return None
+                return self.generic_visit(node)
+            def visit_Set(self, node):
+                matches = [n for n in node.elts if isinstance(n, ast.Constant)
+                           and n.value == "contract-profile-activation"]
+                removed["purpose"] += len(matches)
+                node.elts = [n for n in node.elts if n not in matches]
+                return self.generic_visit(node)
+            def visit_BoolOp(self, node):
+                if ast.unparse(node) == "activation_writer or create_writer or _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)":
+                    removed["writer"] += 1
+                    node.values = node.values[1:]
+                return self.generic_visit(node)
+        RestoreActivation().visit(composer)
+        assert removed == {"if": 8, "assign": 2, "purpose": 1, "writer": 1}
+    else:
+        additions = []
+        for node in projected.body:
+            if isinstance(node, ast.ImportFrom) and (
+                    node.module == "app.services.partner_contract_activation"
+                    or (node.module == "app.schemas_partner" and [n.name for n in node.names] == ["ActivateContractCreateProfile"])):
+                additions.append(node)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "activate_contract_create_profile":
+                additions.append(node)
+        assert len(additions) == 3
+        projected.body = [n for n in projected.body if n not in additions]
+    assert digest_node(projected) == overlay["baseline_ast"]
+    return overlay["baseline"]
+
+
+def test_activation_explicit_overlay_preserves_whole_identity_routes_profile_and_schema():
+    for path in ACTIVATION_RAW_OVERLAY:
+        activation_baseline_digest(ROOT / path)
+    profile = ROOT / "app/services/partner_contract_profiles.py"
+    assert hashlib.sha256(profile.read_bytes()).hexdigest() == ACTIVATION_SOURCE["profile_sha"]
+    service = ROOT / "app/services/partner_contract_activation.py"
+    assert hashlib.sha256(service.read_bytes()).hexdigest() == ACTIVATION_SOURCE["service_sha"]
+    schema = ROOT / "app/schemas_partner.py"
+    assert hashlib.sha256(schema.read_bytes()).hexdigest() == ACTIVATION_SOURCE["schema_sha"]
+    projected = tree(schema)
+    addition, = (n for n in projected.body if isinstance(n, ast.ClassDef) and n.name == "ActivateContractCreateProfile")
+    projected.body.remove(addition)
+    assert digest_node(projected) == ACTIVATION_SOURCE["schema_baseline_ast"]
     assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12

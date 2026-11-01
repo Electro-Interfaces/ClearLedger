@@ -510,6 +510,7 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
     profile_purpose = mutation in {"contract-profile-read", "contract-profile-write"}
     create_purpose = mutation == "contract-create"
+    activation_purpose = mutation == "contract-profile-activation"
     if profile_purpose:
         from app.services.partner_contract_profiles import ProfileOperation
         if (type(contract_profile) is not ProfileOperation or actor is None or native is None
@@ -521,6 +522,12 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         if (type(contract_profile) is not CreateOperation or actor is not None or native is not None
                 or contract_profile.installation_id != installation_id):
             raise ScopedLockError("Exact SQL CREATE composition required")
+    elif activation_purpose:
+        from app.services.partner_contract_activation import ActivationOperation
+        if (type(contract_profile) is not ActivationOperation or actor is None or native is None
+                or contract_profile.installation_id != installation_id
+                or admin_company != company_id or company_id is None):
+            raise ScopedLockError("Exact activation composition and actual native admin authority required")
     elif contract_profile is not None:
         raise ScopedLockError("Profile state cannot change an existing identity flow")
     found, requests, installation_sets, credential_sets = {}, [], {}, {}
@@ -528,6 +535,11 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
     S, X = LockMode.SHARED, LockMode.EXCLUSIVE
 
     def key(value, mode=S):
+        if activation_purpose:
+            for index, previous in enumerate(requests):
+                if previous.key == value:
+                    requests[index] = LockRequest(value, max(previous.mode, mode))
+                    return
         requests.append(LockRequest(value, mode))
 
     def remember(model, row, update=False):
@@ -600,7 +612,7 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
     def installation(iid):
         if iid is None:
             return
-        key(InstallationKey(iid), X if mutation in {"approve_installation", "revoke_installation", "contract-profile-write"} else S)
+        key(InstallationKey(iid), X if mutation in {"approve_installation", "revoke_installation", "contract-profile-write", "contract-profile-activation"} else S)
         ca = get(CompanyApp, iid, mutation == "approve_installation")
         row = get(PartnerInstallation, iid, mutation in {"approve_installation", "revoke_installation"})
         if ca:
@@ -712,6 +724,9 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
             # one existing B entrance. No second preparation/issuer or policy.
             contract_profile.discover(db, company_id=company_id, client_id=client_id,
                 actor=actor, get=get, key=key, company=company)
+        if activation_purpose:
+            contract_profile.discover(db, company_id=company_id, client_id=client_id,
+                actor=actor, get=get, key=key, company=company)
         ordered = tuple(sorted(found.values(), key=lambda r: (
             _ROW_ORDER.index(r.model) if r.model in _ROW_ORDER else len(_ROW_ORDER),
             r.model.__tablename__, tuple(map(str, r.identity)))))
@@ -719,6 +734,8 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
             raise InvalidClientError()
         plan = LockPlan(tuple(requests))
         if create_purpose:
+            contract_profile.freeze(db, ordered, installation_sets, credential_sets)
+        if activation_purpose:
             contract_profile.freeze(db, ordered, installation_sets, credential_sets)
     cap = acquire_scoped_locks(db, plan)
     create_writer = None
@@ -728,6 +745,13 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         contract_profile.writer = create_writer
         create_writer.checkpoint()
         contract_profile.after_b(create_writer)
+    activation_writer = None
+    if activation_purpose:
+        activation_writer = _PartnerWrite(db, cap, ordered, native, actor, admin_company,
+                                          ca_id, installation_id, request_deadline)
+        activation_writer.contract_profile = contract_profile
+        contract_profile.writer = activation_writer
+        activation_writer.checkpoint()
     # CREATE has an explicit boundary even if its canonical Member set is
     # empty. Other purposes retain the original single ordered row pass.
     row_stages = (ordered,)
@@ -736,6 +760,13 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         row_stages = (
             tuple(spec for spec in ordered if spec.model in before_member),
             tuple(spec for spec in ordered if spec.model not in before_member
+                  and spec.model not in contract_profile.parent_models),
+        )
+    if activation_writer is not None:
+        activation_prefix = (Company, App, PartnerClient, User, CompanyRole)
+        row_stages = (
+            tuple(spec for spec in ordered if spec.model in activation_prefix),
+            tuple(spec for spec in ordered if spec.model not in activation_prefix
                   and spec.model not in contract_profile.parent_models),
         )
     with db.no_autoflush:
@@ -764,9 +795,13 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
                     request_deadline = row.expires_at if not row.finished else None
                 if create_writer is not None:
                     create_writer.checkpoint()
+                if activation_writer is not None:
+                    activation_writer.checkpoint()
             if create_writer is not None and stage_index == 0:
                 contract_profile.lock_parents()
-    writer = create_writer or _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)
+            if activation_writer is not None and stage_index == 0:
+                contract_profile.lock_parents()
+    writer = activation_writer or create_writer or _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)
     if profile_purpose:
         writer.contract_profile = contract_profile
     writer.checkpoint()
