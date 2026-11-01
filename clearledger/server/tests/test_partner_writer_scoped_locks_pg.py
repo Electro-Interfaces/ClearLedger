@@ -706,14 +706,27 @@ async def test_identity_free_http_preserves_canonical_errors_without_writer_or_s
     if empty_body_id:
         form["client_id"] = ""
     headers = {} if authorization is None else {"Authorization": authorization}
-    reached, sql = [], []
+    reached, sql, validated = [], [], []
     def forbidden(*args, **kwargs):
         reached.append("forbidden")
         raise AssertionError("Identity-free request reached a writer/lookup callback")
     def record(conn, cursor, statement, parameters, context, executemany):
         sql.append(statement)
-    # Observers apply only to this HTTP call, not fixture setup or later reads.
+    original_dispatch = oauth._protocol_response
+    def observe_validation(sync, protocol, revocation):
+        # Observe the actual protocol body, excluding outer security middleware
+        # which may read SecurityBlock or log an unrelated probe episode.
+        event.listen(_test_engine.sync_engine, "before_cursor_execute", record)
+        try:
+            result, durable = original_dispatch(sync, protocol, revocation)
+            assert not durable and not (sync.new or sync.dirty or sync.deleted)
+            validated.append(result)
+            return result, durable
+        finally:
+            event.remove(_test_engine.sync_engine, "before_cursor_execute", record)
+    # No replacement server/parser/authenticator/verifier; actual dispatch runs.
     with monkeypatch.context() as guard:
+        guard.setattr(oauth, "_protocol_response", observe_validation)
         guard.setattr(oauth, "_prepare_partner_write", forbidden)
         guard.setattr(identity, "acquire_scoped_locks", forbidden)
         for owner, method in ((identity.PartnerAuthorizationServer, "query_client"),
@@ -726,19 +739,15 @@ async def test_identity_free_http_preserves_canonical_errors_without_writer_or_s
                 (identity.PartnerOpenIDCode, "exists_nonce")):
             guard.setattr(owner, method, forbidden)
         guard.setattr(identity, "pairwise_subject", forbidden)
-        event.listen(_test_engine.sync_engine, "before_cursor_execute", record)
-        try:
-            response = await env["client"].post("/api/oauth2/" + ("revoke" if operation == "revoke" else "token"),
-                data=form, headers=headers)
-        finally:
-            event.remove(_test_engine.sync_engine, "before_cursor_execute", record)
+        response = await env["client"].post("/api/oauth2/" + ("revoke" if operation == "revoke" else "token"),
+            data=form, headers=headers)
     assert response.status_code == status and response.json() == {"error": error}
     methods = ["client_secret_basic"] if operation == "client_credentials" else ["client_secret_basic", "none"]
     challenge = ('Basic error="invalid_client", error_description="The client cannot authenticate with methods: '
         + str(methods) + '"') if status == 401 else None
     assert response.headers.get("www-authenticate") == challenge
     assert response.headers["cache-control"] == "no-store" and response.headers["pragma"] == "no-cache"
-    assert reached == [] and sql == []  # No SELECT/locks/DML/FK/nonce, even if fixture material is valid.
+    assert len(validated) == 1 and reached == [] and sql == []  # No protocol SELECT/locks/DML/FK/nonce.
     assert await counts(app["client_id"]) == before
     async with _test_session_factory() as db:
         assert (await db.get(PartnerCode, identity.digest(code))).consumed is False
