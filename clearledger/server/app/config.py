@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     partner_oauth_enabled: bool = False
     # Независимый gate продуктового /api/v1: его включает отдельная приёмка M03.
     partner_api_enabled: bool = False
+    # Отдельный закрытый prerequisite: только настройка CREATE-профиля.
+    partner_contract_create_admin_enabled: bool = False
     # Распределённая квота product API, отдельно от legacy/IP limiter.
     partner_api_budget_enabled: bool = False
     partner_api_budget_limit: int = Field(default=120, ge=1, le=1_000_000, strict=True)

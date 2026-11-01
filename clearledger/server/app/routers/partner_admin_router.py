@@ -256,3 +256,27 @@ async def revoke_grant(grant_id: uuid.UUID, user=Depends(require_core_user), db:
         grant.approved = False
         return finish(writer, {"revoked": True})
     return await committed_response(db, revoke)
+
+
+# Separate closed profile prerequisite. Existing identity handlers/dependencies
+# above retain their native behavior, including the presence-aware dependency.
+from app.schemas_partner import ReplaceContractCreateProfile, ContractCreateProfileReadback
+from app.services.partner_contract_profiles import profile_admin_request
+
+
+@router.put("/installations/{installation_id}/contract-create-profile",
+            response_model=ContractCreateProfileReadback)
+async def replace_contract_create_profile(
+    installation_id: uuid.UUID, body: ReplaceContractCreateProfile,
+    db: AsyncSession = Depends(get_db), credentials=Depends(bearer_scheme),
+):
+    return await profile_admin_request(db, installation_id, credentials, body)
+
+
+@router.get("/installations/{installation_id}/contract-create-profile",
+            response_model=ContractCreateProfileReadback)
+async def read_contract_create_profile(
+    installation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), credentials=Depends(bearer_scheme),
+):
+    return await profile_admin_request(db, installation_id, credentials)
