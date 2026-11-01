@@ -162,8 +162,11 @@ async def history(conn):
 
 
 async def contents(conn):
-    return tuple(tuple(dict(r) for r in await conn.fetch('SELECT * FROM '+table+' ORDER BY id'))
-                 for table in (PARENT, CHILD))
+    snapshots = []
+    for table in (PARENT, CHILD):
+        rows = await conn.fetch('SELECT * FROM '+table+' ORDER BY id')
+        snapshots.append(tuple(dict(row) for row in rows))
+    return tuple(snapshots)
 
 
 async def gate(w, required=REVISION):
