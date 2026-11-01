@@ -70,7 +70,7 @@ async def world(monkeypatch):
     monkeypatch.setattr(notify, "dispatch_async", lambda *a, **kw: w.notifications.append((a, kw)))
     try:
         async with w.factory() as db:
-            db.add_all([Company(id=c, slug="synthetic-register-" + c.hex,
+            db.add_all([Company(id=c, slug="reg-" + c.hex,
                 name="Synthetic register", profile_id="energy") for c in (w.cid, w.home, w.other)])
             await db.flush()
             db.add_all([User(id=u, company_id=w.home if u != w.foreign else w.other,
