@@ -4,8 +4,10 @@
 [Каталоги](recipes/read-catalogs.md) · [Договоры](recipes/contracts.md) ·
 [Мониторинг](recipes/monitoring.md) · [Документы](recipes/documents.md)
 
-Candidate, default-off; source pin
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Все requests ниже вымышлены,
+Candidate, default-off; исторический source pin общего walkthrough
+`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Уточнение revoke и его отдельный
+source pin приведены ниже; остальные разделы повторно не аудировались.
+Все requests ниже вымышлены,
 HTTP/OAuth library/runtime **NOTRUN**. Они описывают подключение после отдельного
 допуска, не включают функции и не выдают учётные данные.
 
@@ -173,10 +175,28 @@ Accept: application/json
 client_id=PLACEHOLDER_PUBLIC_CLIENT_ID&token=PLACEHOLDER_CURRENT_REFRESH_TOKEN&token_type_hint=refresh_token
 ```
 
-При успехе revoke возвращает 200; не ожидайте token DTO. Отзыв известного токена
-закрывает семейство, а не только локальную запись клиента. Удалите свои сохранённые
-токены. Для confidential Code/refresh/revoke применяется Basic вместо `client_id`
-в body; одновременно два способа аутентификации не передавайте.
+`POST /api/oauth2/revoke` принимает form body. Для public client передайте
+`client_id`; для confidential применяется `client_secret_basic` (Basic) вместо
+`client_id` в body. Одновременно два способа аутентификации не передавайте.
+Ключ `token` обязателен: его отсутствие даёт 400 `invalid_request`.
+
+`token_type_hint` необязателен. Этот обработчик ищет переданное значение `token`
+как access и как refresh независимо от hint. Отсутствующий, неизвестный или
+противоположный фактическому типу hint не меняет поиск и отзыв. Это соответствует
+[RFC 7009, разделам 2.1–2.2.1](https://www.rfc-editor.org/rfc/rfc7009.html#section-2.1):
+неизвестная подсказка игнорируется, а неудачный поиск по подсказке требует поиска
+среди остальных поддерживаемых типов. `unsupported_token_type` означает реально
+неподдерживаемый тип токена; неизвестное значение hint само по себе такой ошибки
+не означает.
+
+При успехе ответ — 200 с `{}`, `Cache-Control: no-store` и `Pragma: no-cache`.
+Отзыв известного access или refresh закрывает фактическое семейство. Неизвестный
+токен и повторный отзыв также возвращают 200 `{}`. Удалите свои сохранённые токены;
+ответ не содержит новой пары. Передача токена другого клиента даёт 400
+`invalid_grant` без изменения его семейства. Неизвестный клиент или неверный
+confidential secret дают 401 `invalid_client` без записи отзыва. Hint не заменяет
+аутентификацию клиента; смена `grant_id`, `grant_type` или secret не исправляет
+отсутствие права на чужой токен.
 
 ## Machine: confidential client credentials
 
@@ -291,8 +311,9 @@ Form requests не принимают query, дубли и смешанную cl
 
 ## Свидетельства исходников
 
-Точный source commit для всех позиций:
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`.
+Исторические свидетельства общего walkthrough (без повторного аудита):
+`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Номера строк в следующем списке
+относятся только к этому историческому коммиту.
 
 - `clearledger/server/app/routers/partner_oauth_router.py:64–185`: form parsing, discovery, OAuth envelopes и UserInfo.
 - `clearledger/server/app/services/partner_identity.py:435–603`: S256, code lifetime, nonce, refresh reuse, machine grant и revoke.
@@ -300,5 +321,26 @@ Form requests не принимают query, дубли и смешанную cl
 - `clearledger/server/app/auth.py:46–57`: семидневный предел исходной сессии.
 - `clearledger/server/app/routers/docs_portal_router.py:73–115` и `clearledger/server/app/services/docs_portal.py:76–179`: cookie, CSRF, expiry и две схемы.
 - `clearledger/server/app/product_api/app.py:399–513`: server/browser OpenAPI profiles.
+
+### Отдельное свидетельство revoke
+
+Source/test commit: `3fd6e164cc86bde4e53be881e1102719b1cfdc26`, база:
+`ca672dd7a03b7370f3162c9ff6562811b97c1779`. Это статическое свидетельство
+исходников, не подтверждение runtime или готовности партнёрского подключения.
+
+- `clearledger/server/app/services/partner_identity.py:953–990`: новый
+  `RevokeEndpoint.check_params` (956–960) сохраняет проверку наличия `token`;
+  прежние `query_token` и `revoke_token` ищут оба хеша и отзывают семейство.
+  SHA-256 полного файла:
+  `3f2239e4e77efeab8a2d2a67f5d9e5fd0a976c150832a6f999a6a4e75e742efa`.
+- `clearledger/server/app/routers/partner_oauth_router.py:153–204`: прежние
+  транспорт revoke, commit/rollback и вызов исходного Authlib endpoint;
+  no-store задаётся также в `result_response` (40–46).
+  SHA-256 полного файла: `f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3`.
+- `clearledger/server/tests/test_partner_revocation_hints.py` и
+  `clearledger/server/tests/test_partner_revocation_hints_pg.py`: authored
+  проверки параметров, реального HTTP/Authlib пути и сохранённого состояния.
+  **NOTCOLLECTED / NOTRUN**; родительский `tests/conftest.py` требует отдельной
+  изоляции до collection, поскольку импортирует приложение до module guards.
 
 Далее: [первое чтение каталогов](recipes/read-catalogs.md).
