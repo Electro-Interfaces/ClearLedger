@@ -476,11 +476,15 @@ class _PartnerWrite:
         """
         require_scoped_locks(self.db, self.capability, self.capability.plan.requests)
         with self.db.no_autoflush:
-            for spec in self.rows:
-                if not spec.update:
-                    row = self.db.scalar(spec.statement())
-                    if (row is None) != spec.missing:
-                        _writer_drift(self.db)
+            from app.services.partner_contract_activation import ActivationOperation
+            if type(getattr(self, "contract_profile", None)) is ActivationOperation:
+                self.contract_profile.refresh_identity(self.db, self.rows)
+            else:
+                for spec in self.rows:
+                    if not spec.update:
+                        row = self.db.scalar(spec.statement())
+                        if (row is None) != spec.missing:
+                            _writer_drift(self.db)
             profile = getattr(self, "contract_profile", None)
             if profile is not None:
                 profile.recheck(self.db)

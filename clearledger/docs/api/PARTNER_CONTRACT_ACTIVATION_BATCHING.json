@@ -1,0 +1,3031 @@
+{
+  "status": "F1_F2_AUTHOR_REPAIR_SOURCE_ONLY_NOTRUN_PENDING_FRESH_INDEPENDENT_FULL7",
+  "repository": "Electro-Interfaces/ClearLedger",
+  "base": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
+  "base_tree": "784f145d773619ae0a11379c005ef6bf61d110d2",
+  "source_cut": "7dd71a54a45315ad67fe1f8b358834fe86301c36",
+  "source_tree": "e48ba5eb9ed36db2746e61c2cd6e7ffce5acd867",
+  "code_parent": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+  "code_parent_tree": "891f3ff52478d8490d5217fdfdfa75821a140064",
+  "documentation_parent": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+  "documentation_commit_policy": "Exactly one new docs2-only child of the new test repair cut; both docs already existed and are inherited unchanged at this code cut. Cumulative b41 diff remains exact7 (3 existing +4 originally new), never code cumulative5.",
+  "canonical_worktree": "/home/mag/orca/workspaces/ledger-app/partner-contract-activation-m15-source-20261101",
+  "branch": "MagLook/partner-contract-activation-m15-source-20261101",
+  "exact_scope": [
+    {
+      "path": "clearledger/server/app/services/partner_contract_activation.py",
+      "reason": "Per-pass batching only; discovery/freeze/physical locks/flags/DML unchanged"
+    },
+    {
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "reason": "New exact ActivationOperation branch of checkpoint; original fallback verbatim"
+    },
+    {
+      "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
+      "reason": "Explicit approved raw+AST strict inverse before all historical checks; literals unchanged"
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_contract_activation_batching.py",
+      "reason": "New stdlib source guard definitions, NOTRUN"
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_contract_activation_batching_pg.py",
+      "reason": "New actual PostgreSQL/native/issuer fixture definitions, NOTRUN"
+    },
+    {
+      "path": "clearledger/docs/PARTNER_CONTRACT_ACTIVATION_BATCHING.md",
+      "reason": "New source-only human contract; introduced by docs-only child of code parent"
+    },
+    {
+      "path": "clearledger/docs/api/PARTNER_CONTRACT_ACTIVATION_BATCHING.json",
+      "reason": "New source-only machine manifest; introduced by same docs-only child of code parent"
+    }
+  ],
+  "source": {
+    "app/services/partner_contract_activation.py": {
+      "raw_sha256": "3d9bf265fe808c8efa9f8a7b4df86352e9e4349b5bf7607bb017cdcd20b57be0",
+      "blob": "c915b626d857f8eb10d052559be89e61501a8f06",
+      "mode": "100644",
+      "lines": 381,
+      "whole_ast_sha256": "1a180f59252361ed9c7b3ebe1a89c2dc0099b345887b28953907cca1ef38b134",
+      "AST_serializer": "independent stdlib canonical fields compatible with existing stable_ast_dump; location attributes excluded; empty type_params excluded",
+      "all_nested_definitions": [
+        {
+          "name": "_request",
+          "ast_sha256": "b8f953c71cdcfb6f25fbc60a207cef623e1cfe75cb00806e048433f52ec3fd71"
+        },
+        {
+          "name": "_rows",
+          "ast_sha256": "667b9429e3b2bbff8e4d4f47305f7679b4330de1787fc56839609407dd6facf1"
+        },
+        {
+          "name": "_identity_batches",
+          "ast_sha256": "e4abae186e724b510167e294ef3080a1976846137bf8a899c23ade68fbe8c0f7"
+        },
+        {
+          "name": "_batch_statement",
+          "ast_sha256": "ab40ef43d31bd0b8253be402df9af8c6c80cecfe544cfd926030ace70192b88b"
+        },
+        {
+          "name": "_keyed_rows",
+          "ast_sha256": "f3431b83feaa66c1f25b7e9a47a017615dad7165d5158bf8eebe10102e48f742"
+        },
+        {
+          "name": "ActivationOperation",
+          "ast_sha256": "bfada237b0f0b0e9f19d96e050f8818da055aa804e1cfecc975106f330d468ee"
+        },
+        {
+          "name": "ActivationOperation.__init__",
+          "ast_sha256": "1cacb403ddb40ba8466ae3fd8cd942053a86690328c1e2128a5b5c55fbe3236a"
+        },
+        {
+          "name": "ActivationOperation.parent",
+          "ast_sha256": "016ec65eb6ea6df29147ae2c2459e36b8b60ca47d83f94adb8f21bff964ba383"
+        },
+        {
+          "name": "ActivationOperation.discover",
+          "ast_sha256": "72be7e673e4ef5ac832125e127bb7b4efa8c9d94005bcd417a85c6aa13c84a94"
+        },
+        {
+          "name": "ActivationOperation.discover.graph_key",
+          "ast_sha256": "059d82e002d6e7cd317a69493cc677ea177d3de7b688767d79bf202f9e45fd08"
+        },
+        {
+          "name": "ActivationOperation.freeze",
+          "ast_sha256": "6135f840ca66c455532b7e5e991dd88d876b646704edd7c1ecc65a133fc6be73"
+        },
+        {
+          "name": "ActivationOperation.refresh_identity",
+          "ast_sha256": "1ce04065b3787d2958af1180d65d014da384cc75c35d1fbcc601a741e5da47eb"
+        },
+        {
+          "name": "ActivationOperation.recheck",
+          "ast_sha256": "f90a96cb5db07e6465391107de8621f7961b8e65ad446a27f558a88025adf317"
+        },
+        {
+          "name": "ActivationOperation.lock_parents",
+          "ast_sha256": "5b402d888aa4b25f1c715af222959c49398acdd262b70ecc12153b9387eb8375"
+        },
+        {
+          "name": "ActivationOperation.lock",
+          "ast_sha256": "f8acdecb3f3f0918c3171211c8b82e6c7ae616be76be52336b911953143fed91"
+        },
+        {
+          "name": "ActivationOperation.validate_enable",
+          "ast_sha256": "c9a01f3662edde9bca1d89b7cbf2189b0fa141eb93306843e653ad6552393b12"
+        },
+        {
+          "name": "ActivationOperation.validate_enable.permits",
+          "ast_sha256": "b9ff8620c44c4c0477693e743c5918d90dccefc805914f56c9447df30154ee8a"
+        },
+        {
+          "name": "activate_partner_contract_create_profile",
+          "ast_sha256": "3d1732d5b90ad9bc944d99e2274530a258a426a4432938c7fa1f2f8e1e48f651"
+        },
+        {
+          "name": "activation_admin_request",
+          "ast_sha256": "f5ec93d3ef4918e54a02564f48d681b8638dcf25e21db1651457c11a1340ba84"
+        }
+      ],
+      "base_raw_sha256": "6b97c9e6c5420af95587b85947c26295b95d82941ada2bc1c6f5912e648ad9a5",
+      "base_blob": "fbc43e4973a16519a376dacfa5f016e25f3d673a",
+      "pinned_at": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+      "verified_at_code_parent": true,
+      "reason": "Per-pass batching only; discovery/freeze/physical locks/flags/DML unchanged",
+      "repair_from_3e": "BYTE_FROZEN",
+      "f3_changed_from_22a": false
+    },
+    "app/services/partner_identity.py": {
+      "raw_sha256": "3a254b8816bfcd2a2a6619d7ebe8e225e1c460cbb6cfca7302babeeacf935f9a",
+      "blob": "8ff49a28ac1034b4945bb4b60efc71d9d056325e",
+      "mode": "100644",
+      "lines": 1306,
+      "whole_ast_sha256": "4d3cd8f94c7940fab71db6b352899b4ad573083b0641df67308ae30ea60495e5",
+      "AST_serializer": "independent stdlib canonical fields compatible with existing stable_ast_dump; location attributes excluded; empty type_params excluded",
+      "all_nested_definitions": [
+        {
+          "name": "partner_bearer_headers",
+          "ast_sha256": "ec85551c6325c526c6f1553d7ec9bf2c4cf8be8f23a2409d440dea3a3b2cecec"
+        },
+        {
+          "name": "PartnerProblem",
+          "ast_sha256": "0b59b1ca8a1bf5987accf3ef36a113bf00553241fb26a6713b5d227876c4ce16"
+        },
+        {
+          "name": "PartnerProblem.__init__",
+          "ast_sha256": "0d1563aea78e1dea8995c9b3eaeb0bce3674358775df98d17450e272695ca801"
+        },
+        {
+          "name": "problem_handler",
+          "ast_sha256": "112eabfac66a18cd978f1cd4cbd2f2d3be52348cb99922b224d6014e83d90219"
+        },
+        {
+          "name": "PartnerRoute",
+          "ast_sha256": "e4443b0aa5ed10a56d3e0aa036b7a75dbf3902c6f5cd2fb7b4c1da6f49043491"
+        },
+        {
+          "name": "PartnerRoute.get_route_handler",
+          "ast_sha256": "cdce773bd7d523aefe3b6236d74ab1ab396d8386e230e24c7405e07ae769dea0"
+        },
+        {
+          "name": "PartnerRoute.get_route_handler.handler",
+          "ast_sha256": "5902804e2204591a9e1989d386f674d8e4b075b23dae65e4ee033e60af2d3a9a"
+        },
+        {
+          "name": "now",
+          "ast_sha256": "53caf2f8abcec7705657f652f053be4ea16a21102c6286fcc99ea4cf8585bd7e"
+        },
+        {
+          "name": "digest",
+          "ast_sha256": "f90dc6e0bd8610accb96c03e26a22fa4ce27050be5a2792215da9f88fbb48fb7"
+        },
+        {
+          "name": "require_enabled",
+          "ast_sha256": "c6dab256845c57a7304b6adb657de9a9d439be99d8dd3d94b2fef2fa2d724599"
+        },
+        {
+          "name": "signing_key",
+          "ast_sha256": "b83ebc8f9da51577d3ebceb5ee7e8bd3bd07c042f6642bd362447893c4852ad7"
+        },
+        {
+          "name": "public_jwks",
+          "ast_sha256": "a13616725b2fed83b969875b2f9f4913095e6888dbedaab063667a0091d66e0d"
+        },
+        {
+          "name": "validate_redirect",
+          "ast_sha256": "95eb275ad222abff1ceec38efc6e30ef29809095122270968ad7c4a52e9ede36"
+        },
+        {
+          "name": "validate_scopes",
+          "ast_sha256": "8fe53fb297112853ce73ca204cac1e47f47bccd816e1566d4a90c9c2ec0bbaca"
+        },
+        {
+          "name": "fresh",
+          "ast_sha256": "b3021ec52857862a89401c28ddc7cd5b2e0b647bbe82eff6a63110d4741f9c38"
+        },
+        {
+          "name": "active_user",
+          "ast_sha256": "3d80e091fce1dfbd10fec98006522ff13181ff6a719a4a900485b99bfa0ff213"
+        },
+        {
+          "name": "admin",
+          "ast_sha256": "86fdeba221d4968b5ed9c049630703aff94ba1f828a05440ce2ef25d008badba"
+        },
+        {
+          "name": "eligible_scopes",
+          "ast_sha256": "cb9fc729c9b13a563f43c79161e3aba7983c1b45dd6600a20a20e1e4201724d9"
+        },
+        {
+          "name": "VerifiedResourceScope",
+          "ast_sha256": "1fcae497ec7933e9c15faab70e5e8ff92499d283258fcad7ad72d26812e5026f"
+        },
+        {
+          "name": "VerifiedPartnerToken",
+          "ast_sha256": "54546935851682ff09290f00c57b61c7be9eb326abfcee895d05cf047a677dd1"
+        },
+        {
+          "name": "LiveGrant",
+          "ast_sha256": "e62a0839f7f4582df5a1a5a9ef7227e2f4dca8c20e55fa667e2ec81d67d0f2b3"
+        },
+        {
+          "name": "resource_scopes",
+          "ast_sha256": "b75cddcd5492e0d36d487fda24684462f7cbbdc37a924ef3e4724fe744622152"
+        },
+        {
+          "name": "live_grant",
+          "ast_sha256": "9a24d316c20290bc90a329fe3d2652ee8072028798182ac680b34e94a6881448"
+        },
+        {
+          "name": "pairwise_subject",
+          "ast_sha256": "26e6db2c84bf2f0d6de6f5d70e86a3fecff0e22a4dc0a536c4c5d318aa53a6a1"
+        },
+        {
+          "name": "_PartnerRow",
+          "ast_sha256": "ab103a01bd3485cfda593227bde5f4f5327cda81f90154f9458690601abbd123"
+        },
+        {
+          "name": "_PartnerRow.statement",
+          "ast_sha256": "90d4e6c8e1a009d913177c081413799c3c3360177609c8e3fe7debe31fdab61a"
+        },
+        {
+          "name": "_writer_drift",
+          "ast_sha256": "aed88c9b653049bab276891820c6283869321b3a192ec3600be1c09e6ad6e6f2"
+        },
+        {
+          "name": "_installation_sets",
+          "ast_sha256": "68e6ceb7692f35b93d5d85110e0687158c9aa2e83c448160d7306d28c01400e0"
+        },
+        {
+          "name": "_native_authority",
+          "ast_sha256": "214a1ad2dfebe3d4e259341efa04e01da855a067dca0051ec51c28eb1fa8698b"
+        },
+        {
+          "name": "_native_authority.check",
+          "ast_sha256": "2eb5a6d6013a4c339480b57a7ec3a952d5fcf8563191a9060842bd037dace63b"
+        },
+        {
+          "name": "_native_authority.on_same_session",
+          "ast_sha256": "e9f7b27acfe2209e8b50cf10c52733763088aa7bb906a5dbbf87a51092f7b6a4"
+        },
+        {
+          "name": "_PartnerWrite",
+          "ast_sha256": "ade18587a9a3339bdcfaeabf303f0d6c98ff946e117fe5b9b003fb409a4b998e"
+        },
+        {
+          "name": "_PartnerWrite.discovered",
+          "ast_sha256": "79e40a11abbb9cd49e6ac0c03790f81e5a9c921f13cb2d18d56450ea068b4227"
+        },
+        {
+          "name": "_PartnerWrite.checkpoint",
+          "ast_sha256": "06c41a522208f5a753e54d1ca919d156433bfe52c3900c2056954e8136295cdf"
+        },
+        {
+          "name": "_prepare_partner_write",
+          "ast_sha256": "37866ef3181f525a5c083366fc4f639626c1a914e8e330c27f44bd8b8bbc5dfb"
+        },
+        {
+          "name": "_prepare_partner_write.key",
+          "ast_sha256": "f4210de1f6af102dabcc104451481119d0f6b91a9e0b6bfc5781adaf68f53721"
+        },
+        {
+          "name": "_prepare_partner_write.remember",
+          "ast_sha256": "913810b30bc6c533c96ef5e0ac1122a87248aa53a8fb7acf697ba7e3a98c7a1b"
+        },
+        {
+          "name": "_prepare_partner_write.get",
+          "ast_sha256": "90ca519459eef6483333c85df03462202acd2f0a5772b3530846100454f8f892"
+        },
+        {
+          "name": "_prepare_partner_write.company",
+          "ast_sha256": "ed1ceb93b000668d84ddc014c921e4dfc27dc52d15cafcbe6e3a9408948e8a9b"
+        },
+        {
+          "name": "_prepare_partner_write.references",
+          "ast_sha256": "1cc9c988e454a0a83071ccfa33da7d2740668aa58f867d4d9f90671cd9b5415c"
+        },
+        {
+          "name": "_prepare_partner_write.person",
+          "ast_sha256": "a73409ffefb8edf8388a9bb1ab5956a21876211249d54113b0b723136ac9d826"
+        },
+        {
+          "name": "_prepare_partner_write.client",
+          "ast_sha256": "223b47f77c300ce6217113d006348492ed840168c585336bd6ff82da2a83bcc3"
+        },
+        {
+          "name": "_prepare_partner_write.installation",
+          "ast_sha256": "28df5d15997d1fe03ddeb862c8497b9457d01bd6f78a3bfae9ec5b9d758626c1"
+        },
+        {
+          "name": "_prepare_partner_write.grant",
+          "ast_sha256": "1bd2a41e4611d680730f63288e6ebe22483706310957c1e00ca54c40766efd7b"
+        },
+        {
+          "name": "ClientAdapter",
+          "ast_sha256": "ad11c36074a34008b960a47245fabf80ac3400e787e3649675ab2cc01a8251fa"
+        },
+        {
+          "name": "ClientAdapter.__init__",
+          "ast_sha256": "49a2271e9782904e073138ddb7e2bfdfab1d4ad59ddc01247bd8c216315f8848"
+        },
+        {
+          "name": "ClientAdapter.get_client_id",
+          "ast_sha256": "524e5196169770d8118abab1c07f24eaa415b1cea8a87168753549ccb94c589b"
+        },
+        {
+          "name": "ClientAdapter.check_redirect_uri",
+          "ast_sha256": "fd136fe76a587213060b4aecf0ed9bf4be75dac95c98863c84b25bf1870ef4dc"
+        },
+        {
+          "name": "ClientAdapter.get_default_redirect_uri",
+          "ast_sha256": "f40065e8eafdb9bc710f7950533b794bf0914e71d534ea9842bb410adfe40489"
+        },
+        {
+          "name": "ClientAdapter.check_client_secret",
+          "ast_sha256": "272e73a11f1cf3eed72b0f17123e205ab73e32466e391231d24052ddb8aa6a07"
+        },
+        {
+          "name": "ClientAdapter.check_endpoint_auth_method",
+          "ast_sha256": "4b4137f7c59f13450a908d5518376dab760d49a7e9180267330d484d39962e4b"
+        },
+        {
+          "name": "ClientAdapter.check_response_type",
+          "ast_sha256": "1ed5cf8ad9eac710c4499eb6d973614d6af16c8245617d8905d0340d75e33f1b"
+        },
+        {
+          "name": "ClientAdapter.check_grant_type",
+          "ast_sha256": "33565e12d8ca9f415878f887fe4edaddaa817fc94a34115c68ed745f27b73809"
+        },
+        {
+          "name": "ClientAdapter.get_allowed_scope",
+          "ast_sha256": "cd52bb6760d91d7817470664d58eed409ce1f12e67205fac7d356f921c57cff3"
+        },
+        {
+          "name": "ProtocolRequest",
+          "ast_sha256": "84e50c1ea0bf7bb48a0cc13fcd40b12ed3e0428923c81ecc1743c4db85eb70fd"
+        },
+        {
+          "name": "ProtocolRequest.__init__",
+          "ast_sha256": "3e902abdf4f7f854ad1ea9f6f1a37197e64dc8a4165f64c035b359bec5038df4"
+        },
+        {
+          "name": "ProtocolRequest.form",
+          "ast_sha256": "91c5f2a863e537d7a596bc56490b34c6edd7b0291b7a6a813c2b6d3f0042cc7e"
+        },
+        {
+          "name": "ProtocolRequest.args",
+          "ast_sha256": "de1b36a617552f341f541c53ea288aa843e962e9d8c32d8087ffa81634b16f9d"
+        },
+        {
+          "name": "S256Challenge",
+          "ast_sha256": "1d34f55af40c82f1c725d7e298c010f67eefa386fee25d2adcc5ee693e33d4ba"
+        },
+        {
+          "name": "S256Challenge.validate_code_challenge",
+          "ast_sha256": "8fa03267033ed57fc82ee8229118960e25c528b106b4b0c1d1ffd9a1ea3519d8"
+        },
+        {
+          "name": "CodeGrant",
+          "ast_sha256": "493211d76df0f1b260a20b0b6deccb2f8b1e03852948efcd7f22ac28df0ac6fa"
+        },
+        {
+          "name": "CodeGrant.save_authorization_code",
+          "ast_sha256": "c792c1ed5c492336e1cabf51eadb5ae5e2d2da5bc9a18260980c3bcfe2f6f930"
+        },
+        {
+          "name": "CodeGrant.query_authorization_code",
+          "ast_sha256": "e38aa4eb3a18d81ee8bd3aa943b89755c1e7b1ca1cd95a712e59e312cda8046a"
+        },
+        {
+          "name": "CodeGrant.delete_authorization_code",
+          "ast_sha256": "19f5abea4d5fff6bd132a3bf07c281a601101ff8ea6a973c97843dc3f31356d0"
+        },
+        {
+          "name": "CodeGrant.authenticate_user",
+          "ast_sha256": "33c65f8f4f6097ba0bf091da3b75ee7ce39d582f1ea17fb6008003f802e67c89"
+        },
+        {
+          "name": "RefreshHandle",
+          "ast_sha256": "eff941346549c80fba2819f87635a6aff54855c7b1d612a91ffc2b36ebe0d965"
+        },
+        {
+          "name": "RefreshHandle.check_client",
+          "ast_sha256": "b6ae0f36ea09cab51fc09d3bac9d1bdddbc1bd17767d1a6c17b3e30234ccdbc2"
+        },
+        {
+          "name": "RefreshHandle.get_scope",
+          "ast_sha256": "21a79ad55c6639873e6e9c7bd1ebaef382cd6f0140c7a1c4e7d68df41592696f"
+        },
+        {
+          "name": "RotatingRefreshGrant",
+          "ast_sha256": "6d06a8ab789fb561c89704122459b60356de4004b74ab328490bd7fa2e55de0c"
+        },
+        {
+          "name": "RotatingRefreshGrant.authenticate_refresh_token",
+          "ast_sha256": "3a22b5c3652abd790ed90c4a7bfdc261f90037baade8744a8fadb648c1ad78b9"
+        },
+        {
+          "name": "RotatingRefreshGrant.authenticate_user",
+          "ast_sha256": "0c4d4077a560dc5fa43fb1975da5d5d07c916b3408f48d79939ab71fafba84c3"
+        },
+        {
+          "name": "RotatingRefreshGrant.revoke_old_credential",
+          "ast_sha256": "5ba3763f29a738e96000385ab75b288035ba19514e5b07a55c20ae80f2b1542a"
+        },
+        {
+          "name": "MachineGrant",
+          "ast_sha256": "40a40e250ef4488fd040f3d9e340368ff07fb2c3ab039713f27a823c4bbb2b14"
+        },
+        {
+          "name": "MachineGrant.validate_token_request",
+          "ast_sha256": "26b5f004fd4d80bb51a8b1886da9ed18429304fe7082af75c0dd27113b673a72"
+        },
+        {
+          "name": "PartnerOpenIDCode",
+          "ast_sha256": "485ad8e80b04e9f6069a4f12e0083cc3e4f43a2ac41d20a9d8d4cdc18e48dcd7"
+        },
+        {
+          "name": "PartnerOpenIDCode.__init__",
+          "ast_sha256": "0af6061a7e95313f1b12b276b694cae8fcb7f0332963c009fcfe6d57c363fef2"
+        },
+        {
+          "name": "PartnerOpenIDCode.exists_nonce",
+          "ast_sha256": "1d1f6d0be59db9c6ea5e3aa8a5b4ed3d8cb22773951b4ac871f45bc049711321"
+        },
+        {
+          "name": "PartnerOpenIDCode.resolve_client_private_key",
+          "ast_sha256": "e95ae155c8bd74e60517d0e1ed8adf37269c34855bfb813624077cbf81a57282"
+        },
+        {
+          "name": "PartnerOpenIDCode.get_client_algorithm",
+          "ast_sha256": "0b16b0a7a53223f55a7261f4f279b70c296306f3066037577545a08e6750409c"
+        },
+        {
+          "name": "PartnerOpenIDCode.get_encode_header",
+          "ast_sha256": "b7cf69973ae63ad71b8e253729b9b672fde66a0123bf82aded89ba4861fedef4"
+        },
+        {
+          "name": "PartnerOpenIDCode.get_client_claims",
+          "ast_sha256": "45b2030e027d1c2059a73b4be0e3ba084750465a50597b10df0a86aa923819dd"
+        },
+        {
+          "name": "PartnerOpenIDCode.generate_user_info",
+          "ast_sha256": "58ce79702b9e3d1a8fda1637772d31355597ec0f355f4e6cf76975d0b82ef4f3"
+        },
+        {
+          "name": "RevokeEndpoint",
+          "ast_sha256": "4681b78e7338b4bf24d1e7e3914dd080763735aec7697323165e074162875694"
+        },
+        {
+          "name": "RevokeEndpoint.check_params",
+          "ast_sha256": "4d1ce0c4ecc4f61f3168d75747c9a1f9a73cfc8a095404787fd3bd0d3d462acc"
+        },
+        {
+          "name": "RevokeEndpoint.query_token",
+          "ast_sha256": "f673a369ca1e66960e2db23b881fb9a82707005be2aa68765d8d8e85d5172f5d"
+        },
+        {
+          "name": "RevokeEndpoint.revoke_token",
+          "ast_sha256": "0eed5b1246c4ace89c847dd165eb4f6e6f6451a6dd9372b05ae1eddb25570530"
+        },
+        {
+          "name": "PartnerAuthorizationServer",
+          "ast_sha256": "50c6ae6bbfbb7c01e7aba46d302c8b554737bb492bce0f5d54f22f43dfca31e5"
+        },
+        {
+          "name": "PartnerAuthorizationServer.__init__",
+          "ast_sha256": "00fa2f6790fa912ed527f9c2c1c3771b129076109eaabf35b8f839625ced3fe0"
+        },
+        {
+          "name": "PartnerAuthorizationServer.checkpoint",
+          "ast_sha256": "00441fbe7e81bd45da74b142ebf04b5b324e0bde041bba1f9f9946cd036dde79"
+        },
+        {
+          "name": "PartnerAuthorizationServer.query_client",
+          "ast_sha256": "24156bc024fe85f0ba06c83bbfd31329201a914ce8dcb7a95573ca98f7fec3b0"
+        },
+        {
+          "name": "PartnerAuthorizationServer.create_oauth2_request",
+          "ast_sha256": "19c1f7b6d27e0146be9999c00f6595876cb4954aa4b6f411f600756323cf9678"
+        },
+        {
+          "name": "PartnerAuthorizationServer.handle_response",
+          "ast_sha256": "c455fefbf0143755e848dc158ef906d8253a32ba1b508aa11f912578c15c6072"
+        },
+        {
+          "name": "PartnerAuthorizationServer.send_signal",
+          "ast_sha256": "527566a5e631cb48a259ef3bb4b632cccf61aaf9b0d07011a00c0de143528a9c"
+        },
+        {
+          "name": "PartnerAuthorizationServer.issue_token",
+          "ast_sha256": "f70ec2e0cddce3d4e73231c1721b9b0dba370f11852c9a3a29c56beacec3a204"
+        },
+        {
+          "name": "PartnerAuthorizationServer.save_token",
+          "ast_sha256": "0e000c36e0ea0b4f943be76efe3c5c11792ab3545ef3a6f5261c822636808c9a"
+        },
+        {
+          "name": "user_info",
+          "ast_sha256": "fdd0f58ed887398692f83d3eba178b939a6a04bfeffd65c93d4c1bbc25eb9ade"
+        },
+        {
+          "name": "require_core_user",
+          "ast_sha256": "29b605e7083c0a2eaa1188a96a8c3fed73af9888a1326ba49943dc4c79dbcb7d"
+        },
+        {
+          "name": "verify_access",
+          "ast_sha256": "8dd700eaa560771a2890ca0837ee2e8c419bccdaad8bbdde2d3643726a7d4250"
+        },
+        {
+          "name": "verify_locked_partner_access",
+          "ast_sha256": "a4129879ae270c4661d5d28c79622a061ee15c455f2b4aabb2418dd512db33c8"
+        },
+        {
+          "name": "verify_partner_access_token",
+          "ast_sha256": "f0fb0e5d751f114eb9fd2596c2c97dadf1e4332a0fbba4a8fdf74dec98ae7452"
+        },
+        {
+          "name": "get_verified_partner_token",
+          "ast_sha256": "d0c74d0d72131900db466ba2c3720ecc521940347bfb4700ad1ab98e48f193b7"
+        }
+      ],
+      "base_raw_sha256": "0968c41deac1955095c9a80ba4542d0ccd074f68699c29c788cbfab11772ac90",
+      "base_blob": "07ab16f482d6a9fc5b0b9af363309b98f542ee85",
+      "pinned_at": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+      "verified_at_code_parent": true,
+      "reason": "New exact ActivationOperation branch of checkpoint; original fallback verbatim",
+      "repair_from_3e": "BYTE_FROZEN",
+      "f3_changed_from_22a": false
+    },
+    "tests/test_docs_portal_logout_scoped_locks.py": {
+      "raw_sha256": "202056ff54096e902e2a9c536b199a674c5dab5c7cb67002302f4f1511b1f819",
+      "blob": "ad46442a89a9d6ee39bd8a7ee431bf2919305ac6",
+      "mode": "100644",
+      "lines": 570,
+      "whole_ast_sha256": "d3379f1bde5726c7b63f1d40c198c6633283f59c9a57766a240e4e49d81b9084",
+      "AST_serializer": "independent stdlib canonical fields compatible with existing stable_ast_dump; location attributes excluded; empty type_params excluded",
+      "all_nested_definitions": [
+        {
+          "name": "tree",
+          "ast_sha256": "e444943e53f0860e13a3219fb9dad9490130facd213e1f78ab41ee70cae08c33"
+        },
+        {
+          "name": "definition",
+          "ast_sha256": "eeba52fd03c9b596f25f47c991f4388466ea3df36e0f1e73cdab9b17a2685810"
+        },
+        {
+          "name": "body_nodes",
+          "ast_sha256": "0d436e1afd0e37133fbafe361a2482d1d7c37628024766903fbbd71d4ca61615"
+        },
+        {
+          "name": "calls",
+          "ast_sha256": "450cf882976055ba1f155e99a58d5e2422fda74a25468f0b259337cdf2679dfe"
+        },
+        {
+          "name": "text",
+          "ast_sha256": "6360a6f7a295682a8a45bb9b1ed5000db416606ebcb9367e501487af15e1a2b0"
+        },
+        {
+          "name": "stable_ast_dump",
+          "ast_sha256": "f3a88679325749fbb5c7647d610d08f61a01d2f2234a7415d9868916a32751cc"
+        },
+        {
+          "name": "digest_node",
+          "ast_sha256": "1c5f4d70425aa229e593af01421ba74fd69b6f717b14e99ea4a73fd7879eba45"
+        },
+        {
+          "name": "baseline_create_policy_projection",
+          "ast_sha256": "5789cb64d871a730e7a712f1692a8865c0a13608bd70b4c23dc485e8abe5ea8a"
+        },
+        {
+          "name": "test_accepted_create_scope_extension_preserves_old_eligible_policy_projection",
+          "ast_sha256": "86a08e19d1844214c28af18e403f117d4a22e2f80687bdb1bafa5142165e9abe"
+        },
+        {
+          "name": "test_source_digest_keeps_legacy_pin_and_detects_semantic_changes",
+          "ast_sha256": "75f903a7367538bdcc3953125e7782ab725c08974d50a73efc3f9a63e42f21fd"
+        },
+        {
+          "name": "test_logout_transport_authority_and_wire_are_unchanged",
+          "ast_sha256": "b5a68bad063c58778625953fb0a9f0efe1642392abc25a4200e8b14402aa6a5c"
+        },
+        {
+          "name": "test_logout_clean_admission_precedes_any_attribute_sql_or_flush",
+          "ast_sha256": "63232e8e762e46a0d13613fd64f2f74f1b64db37661ed42d35e0b536d3db14ab"
+        },
+        {
+          "name": "test_logout_full_original_composition_precedes_all_mutation",
+          "ast_sha256": "7b2e575d6af4e7e1b2d32db30693302fd1cf33b213213802485eb20a75acb91c"
+        },
+        {
+          "name": "test_logout_scoped_docs_row_follows_family_and_token",
+          "ast_sha256": "5d2bba814a536969a4ea917332fe88091413d1431632a9f0d4b1fa36ea12a2f8"
+        },
+        {
+          "name": "test_logout_callback_requires_actual_writer_and_finishes_checked",
+          "ast_sha256": "97af658b3102109b6c680e968888940007104ef90150f30122ca90416855e277"
+        },
+        {
+          "name": "test_logout_preserves_existing17_and_canonical12",
+          "ast_sha256": "8bcf7b5f7103b4ef2a1b9bda9e40ce359f7677f1049225878b1bcc294032e7a2"
+        },
+        {
+          "name": "test_logout_adds_no_runner_config_fixture_or_authority_surface",
+          "ast_sha256": "3a3caeb175330bde2b32d1ecd8e5c672ddc99a3f94e70debcfd8e4961327f907"
+        },
+        {
+          "name": "test_accepted_org_order_extension_is_exact_and_preserves_scope_projection",
+          "ast_sha256": "61739b71d0db97d292e5d1b9c504894389780856db8cc3551951a9fb2c82afe7"
+        },
+        {
+          "name": "accepted_http_authority_baseline_digest",
+          "ast_sha256": "b6f86cb61c6c3e57ec8e4fee1a2785df0e4d9a83de9e868cd6bf9a7782fe255f"
+        },
+        {
+          "name": "accepted_http_authority_baseline_digest.RestoreProfile",
+          "ast_sha256": "b7c42d91f8ae4aa625372f6f3b5225c0e943f923c73457bf1033321735a80fd7"
+        },
+        {
+          "name": "accepted_http_authority_baseline_digest.RestoreProfile.visit_Name",
+          "ast_sha256": "4881c7d7ef372e1b75a986dc5b392d9542a183e75c122de5b58e0b0fa084c9b5"
+        },
+        {
+          "name": "test_explicit_http_extension_keeps_original_gorg_and_full_issuer_semantics",
+          "ast_sha256": "c38358e736f757c8793c1e963db90140453a502f3a9728155d45a1f856ff78c2"
+        },
+        {
+          "name": "activation_baseline_digest",
+          "ast_sha256": "c59ddad7d4bb16732e38ad83587c3e6a4119129bc729ece7d1adb56ed0103cfe"
+        },
+        {
+          "name": "activation_baseline_digest.RestoreActivation",
+          "ast_sha256": "571be857a35cd3201fef83a34980fbdc5e804c0c8b6fd03596e3db743eb24289"
+        },
+        {
+          "name": "activation_baseline_digest.RestoreActivation.visit_If",
+          "ast_sha256": "373304b0b967e339d1655bdeab051c7bf51e2b83c6b4a67e798e64f7ed460458"
+        },
+        {
+          "name": "activation_baseline_digest.RestoreActivation.visit_Assign",
+          "ast_sha256": "226dd9644518bfabd094d78f6f811d05bdc27584908a5cc7b1ca019d285e6507"
+        },
+        {
+          "name": "activation_baseline_digest.RestoreActivation.visit_Set",
+          "ast_sha256": "ee9910f348358d426382050683e76cf510d2b92f1713bbdbb0075306468b5e52"
+        },
+        {
+          "name": "activation_baseline_digest.RestoreActivation.visit_BoolOp",
+          "ast_sha256": "1e79644fbf6c4ce7a47e079327b4c9d813a1611931bfda0d18a509778fdfbb94"
+        },
+        {
+          "name": "test_activation_explicit_overlay_preserves_whole_identity_routes_profile_and_schema",
+          "ast_sha256": "361c92cd033c3601155df1e67f171c5aac3131ba99657fb3fc2db62aba99f6cd"
+        },
+        {
+          "name": "m15_baseline_bytes",
+          "ast_sha256": "18801cba68ad5f173a1bdcfb119f5060596122204a0c2544c70e88c0b9b981cf"
+        },
+        {
+          "name": "test_m15_raw_and_strict_whole_inverse_precede_every_historical_projection",
+          "ast_sha256": "9de0904c8149d2847bb8919f2b5bfe7f391fdaccbe7d8c0fa39bba252630246c"
+        },
+        {
+          "name": "test_m15_any_undeclared_raw_change_and_malformed_fragment_count_fail_closed",
+          "ast_sha256": "8d51da06577bb0ffaafb66a89d51653396923ed55d7d08f57981e11e7ce22d8d"
+        },
+        {
+          "name": "test_m15_any_undeclared_raw_change_and_malformed_fragment_count_fail_closed.rejected",
+          "ast_sha256": "7822b5886fe4cee9b8507e38fd9b156bc8afdcf438bb43626d2afc9c7ac1ef25"
+        },
+        {
+          "name": "test_m15_existing_serializer_empty_type_params_same_nonempty_different",
+          "ast_sha256": "77088eaff47a60b3605a93ee9663a6e76c65abff437dff588e4c16c0359166f2"
+        }
+      ],
+      "base_raw_sha256": "c18391521cc660efc53cfdd8655d2e1b90af89b567628cf6feddeabf14ab16ee",
+      "base_blob": "43f47ba569def760ac9d1f621441f47bf452c252",
+      "pinned_at": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+      "verified_at_code_parent": true,
+      "reason": "Explicit approved raw+AST strict inverse before all historical checks; literals unchanged",
+      "repair_from_3e": "BYTE_FROZEN",
+      "f3_changed_from_22a": false
+    },
+    "tests/test_partner_contract_activation_batching.py": {
+      "raw_sha256": "a7f686b6784a237ac37148dc220bc5054acfe6338809c19e6d79c6972d7c7b9f",
+      "blob": "b767fc8ed7cc5e1bac5c110b8e368e8765e92c10",
+      "mode": "100644",
+      "lines": 148,
+      "whole_ast_sha256": "b37732a3370f787116bb8ba18d59cb8f9a0273b478edc3d5d74e230940207f3f",
+      "AST_serializer": "independent stdlib canonical fields compatible with existing stable_ast_dump; location attributes excluded; empty type_params excluded",
+      "all_nested_definitions": [
+        {
+          "name": "_hash",
+          "ast_sha256": "2f475253a12869a6e215922c6829f253c41d0c3019c8fcbfc984ae703cc051b7"
+        },
+        {
+          "name": "_node_hash",
+          "ast_sha256": "c58b114bb0b155ac904b293ac136ba858ab6d6b595ee3a059ec823e48a5154e3"
+        },
+        {
+          "name": "_node_hash.render",
+          "ast_sha256": "0091135a133679745ad53fe2954c90fed014a031adc511e860518d5ad05426a5"
+        },
+        {
+          "name": "_definitions",
+          "ast_sha256": "d2f43e808ef83c07edc548d9c27645ee86d69f298fde33cc18888af2e297cc86"
+        },
+        {
+          "name": "_definition",
+          "ast_sha256": "823d3cdc58cad66e3091aeedfe3349e3e6c4cd3d7e9e37811bd417d0c917b400"
+        },
+        {
+          "name": "test_exact_source_two_freeze_and_all_nested_definition_inventory",
+          "ast_sha256": "9db9bcc737b3b2d02897bb733bf1677340564ed70ff419e0b66e7d61f34340af"
+        },
+        {
+          "name": "test_two_passes_remain_separate_around_original_profile_boundary",
+          "ast_sha256": "24a3eb7bbcfc0426f64b9a63f4e1119bcc01659500ea4c0f937bb9c8da19aeec"
+        },
+        {
+          "name": "test_no_authority_cache_and_only_closed_homogeneous_groups",
+          "ast_sha256": "2e3f346a59bb30cbfd975e44759884e3465cdcc8758bee42c2796c765fcc7eb8"
+        },
+        {
+          "name": "test_every_identity_and_full_scalar_key_rejects_duplicate_unexpected_or_missing_rows",
+          "ast_sha256": "4484e79d9c259e27728603f8e1518edbaaf261fb953465082a29d47cbbdaa198"
+        },
+        {
+          "name": "test_chunk_tail_proof_does_not_introduce_graph_cap_or_silent_truncation",
+          "ast_sha256": "36cdb458ecdb11e575d6c3003b812333f34f38f9d1a93381763aa5aa4c6477f7"
+        },
+        {
+          "name": "test_writes_pending_flags_and_all_physical_lock_methods_remain_exact_base",
+          "ast_sha256": "fd1a2fa0a0f329a07a2bccb7e9a841efeca73aa41144947cdafea9f8fd481b94"
+        }
+      ],
+      "base_raw_sha256": null,
+      "base_blob": null,
+      "pinned_at": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+      "verified_at_code_parent": true,
+      "reason": "New stdlib source guard definitions, NOTRUN",
+      "repair_from_3e": "BYTE_FROZEN",
+      "f3_changed_from_22a": false
+    },
+    "tests/test_partner_contract_activation_batching_pg.py": {
+      "raw_sha256": "439502a22afc1b1b57a5892b4c2e5b12b1a67e0a2ac4667008d803ccd0db85fa",
+      "blob": "3326887a1391ecfb434ab5bdd22dabe9fe8dda83",
+      "mode": "100644",
+      "lines": 975,
+      "whole_ast_sha256": "c7404a1af9e0593a0af1b04760e74928ddddb4a392ebc85b5d7ea17e7bb72e7c",
+      "AST_serializer": "independent stdlib canonical fields compatible with existing stable_ast_dump; location attributes excluded; empty type_params excluded",
+      "all_nested_definitions": [
+        {
+          "name": "_snapshot",
+          "ast_sha256": "966f2683f7e84ae7a4f989f1566fa47f34fb78ce58b347d0d580f087b9f50fa4"
+        },
+        {
+          "name": "_external_second_id",
+          "ast_sha256": "a8cd27b9907e5bc81cae9735772532f3d07cd0349bf9fff8e0436bebdbd29744"
+        },
+        {
+          "name": "test_external_commit_on_second_id_between_independent_current_passes",
+          "ast_sha256": "6fec2be1bfd1841b462bd618d34b74296c3f72fe87056efb8b710dddebe35f4c"
+        },
+        {
+          "name": "test_external_commit_on_second_id_between_independent_current_passes.after_ORM",
+          "ast_sha256": "4f46343bd989242ad38f98ee68ff5ec76f1aa4a14f88a8f09f64ae98f1482805"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B",
+          "ast_sha256": "7610b8dae87d37fcd9296b3c76950bad40ef1e95d421a307cbb618948d705d96"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.freeze",
+          "ast_sha256": "18e1fba9e0d2fce65d5688735b606650618ab2b46f980fff4fec9562d4c02f56"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.issuer",
+          "ast_sha256": "8432f372781fe6ae8f27e53c0743c6dfc42d6babf40634caf403570309cbe457"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.loaded",
+          "ast_sha256": "5b292b7aff9ae14684c0f8fcbdde4b32ecc77f2232cfbf97af2f75ad480554d1"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.refreshed",
+          "ast_sha256": "253496fce366cc726fd3e8e35458f31584641a245c3de55135cabc7f7949a663"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.sql",
+          "ast_sha256": "1ca649a21fd2952964fe24bc0163701d33162f29b308d5d30e6ac9ec88234a5d"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.refresh",
+          "ast_sha256": "48755baa048436f0fe288b2616c8a0672c0a7c1632c26cab71b2bb83a2a22558"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.graph",
+          "ast_sha256": "d7f6aff34da202779af44cb347b52cdd2f01b6556f5e1e2b4b40e1e9a9047a79"
+        },
+        {
+          "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.rows",
+          "ast_sha256": "6bd815ca19cf46e53b050b081cd575f676443cbf463d8ec9b0d389859c85c97a"
+        },
+        {
+          "name": "test_unbatched_member_role_null_and_present_keep_exact_full_row",
+          "ast_sha256": "7b8e16b2c978e5982e2d920b12623c5206b241e02d0c749886efc5ba8ee92db1"
+        },
+        {
+          "name": "test_unbatched_member_role_null_and_present_keep_exact_full_row.external_after_ORM",
+          "ast_sha256": "9c34f5b735fadf185d5814b8ba878669b137de2af0b7ae67d4251f7502bbfbb1"
+        },
+        {
+          "name": "test_unbatched_member_role_null_and_present_keep_exact_full_row.external_after_ORM.change",
+          "ast_sha256": "b0ac0dad91cfdb50a82872484ea71287cfe2063ec9c06b9ca8a796ecad2e4f54"
+        },
+        {
+          "name": "test_full_scalar_json_null_empty_and_literal_opaque_drift",
+          "ast_sha256": "42492e823faf8c34b3d98a27834e81284b5f22c2b1b61cb12f09b9fc1ffd0a0d"
+        },
+        {
+          "name": "test_full_scalar_json_null_empty_and_literal_opaque_drift.drift",
+          "ast_sha256": "5b44ddfb3f9a5accfc5b5fff0e8dc5c1254beb754cdd3fa0afd01d4bf5cfb816"
+        },
+        {
+          "name": "test_full_scalar_json_null_empty_and_literal_opaque_drift.drift.commit",
+          "ast_sha256": "d3846d2bacd394b87cf43bd388bc66f9c7e24becfeeff2882ade9205f437facf"
+        },
+        {
+          "name": "_negative_current_fault",
+          "ast_sha256": "569e1de1d50b580291eff35d26bcf2062974282d2e08f33a0d9d7d2a570b1845"
+        },
+        {
+          "name": "test_all_original_31_checkpoint_boundaries_reject_current_negative_fault",
+          "ast_sha256": "4c89da71e4721c8fa473e5054fc2586f28797f929b78b3d9cb114dad7d32a46c"
+        },
+        {
+          "name": "test_all_original_31_checkpoint_boundaries_reject_current_negative_fault.current",
+          "ast_sha256": "f6ad3fe64975caa32a184e2abafeb32dd30b4a9954881f2aad4c45e28237be6b"
+        },
+        {
+          "name": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates",
+          "ast_sha256": "28c2a4fbf5b1bb8fb67adae2de171c193a25d6d9107c98a8d86cc1fc6f9a0e36"
+        },
+        {
+          "name": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates.issuer",
+          "ast_sha256": "3d4d4d3c9e294b435aa166589298d35907efbb5d13267c0aa9f515df4fa8a865"
+        },
+        {
+          "name": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates.after_wait",
+          "ast_sha256": "c330d72eee3da03ac34e7f94b0fc91f447a34c4f882b6b29e2f59246fba695a8"
+        },
+        {
+          "name": "_m15_current_record",
+          "ast_sha256": "f6466cd7d9a3678dab38a5848c8ce199ac7b7f1dce46de3b24877ecaf17aebb6"
+        },
+        {
+          "name": "_m15_expected_record",
+          "ast_sha256": "2967d30badf6feaf73452bab41c4328e74bc1e024cbe09df362518a24831b310"
+        },
+        {
+          "name": "_m15_assert_current_records",
+          "ast_sha256": "a918daf8ec8d5d780e7abc1f0636fec809d31627ab7e089c4e26b7721c7657ae"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2",
+          "ast_sha256": "45ccb964a74fbf4b21121d22819b7edc504996fa45e6218d66b6eebe6f294690"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.freeze",
+          "ast_sha256": "330bda5c77627e5840aaef84b244c1b191713e442cc3fc2bb01f51b099d95ee3"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.issuer",
+          "ast_sha256": "8dd5f9abb04fb6647624833e8129d3176eb1b366ee0e27882b83f0e3d48746e4"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.invoke",
+          "ast_sha256": "2267eeb002ba61b22a0824b88256c8c0bfc52ddc73064c497f1a58109e07f96c"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.checkpoint",
+          "ast_sha256": "8cc699d42240a933d4f578afc2d42ba417e03de31094deb2154379221c92041b"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.refresh",
+          "ast_sha256": "08224b4e2af2960d763a74ae771584b3bfa4a4cb5ec29f423e60d99677827ebd"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.loaded",
+          "ast_sha256": "8ed86c834341bc45318833a00e459ae74e011e36eae8633fb9b4e23b495dad05"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.refreshed",
+          "ast_sha256": "253496fce366cc726fd3e8e35458f31584641a245c3de55135cabc7f7949a663"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.graph",
+          "ast_sha256": "0e57925380aeb54c0a227f389f6c20c0b4941f8b6ddb5d4593a7e18a966d088f"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.rows",
+          "ast_sha256": "7c0fc037d4c18accecf9d24045a198058f3ffa8dc17dae58b2f8262e2cd43288"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.recheck",
+          "ast_sha256": "11e1e1b37bcd75851f0817e505818eed06576914d37171991641606943e86fc3"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.before_execute",
+          "ast_sha256": "ad349cfb8819750748ed08d27706d300829572bc192fb795b30de50be934ddb1"
+        },
+        {
+          "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.sql",
+          "ast_sha256": "35f8c4c80b3d2a4336fd97cc35764d3507f5136929055222ea2b19655700d7c1"
+        },
+        {
+          "name": "test_original_fixture_same_call_budget_is_only_a_proposal_and_pending_flags_survive",
+          "ast_sha256": "fcc6fb6bf5d423de5787e2939092a8ef29eafae54d22b03855f24e0d65109292"
+        },
+        {
+          "name": "test_original_fixture_same_call_budget_is_only_a_proposal_and_pending_flags_survive.checkpoint",
+          "ast_sha256": "92f1cbc83a78f2466229053e1c2a2e8c656aeea2492ee3d922c8fceb50c4303c"
+        },
+        {
+          "name": "test_original_fixture_same_call_budget_is_only_a_proposal_and_pending_flags_survive.count",
+          "ast_sha256": "16659672ce4c7854b82f9c15381f1d07b514eb8c3a70db8f63dbb630cbbae29a"
+        },
+        {
+          "name": "test_no_cache_survives_cancel_rollback_new_transaction_or_new_request",
+          "ast_sha256": "51938428079b327363b17c311eb7ff7c0341178fd8c1d3e83c2df81bd3a8c98b"
+        },
+        {
+          "name": "test_no_cache_survives_cancel_rollback_new_transaction_or_new_request.fail",
+          "ast_sha256": "e3a6e03a03f540f7433f6a19ad330b65ede607f838bf7483b70d61ebed144c46"
+        },
+        {
+          "name": "test_real_canonical_issuer_activation_remains_structural_only",
+          "ast_sha256": "bd44ab052a4950dd1a435eaedb365bf652a942ed8f4eceba053f9cda6de321b3"
+        },
+        {
+          "name": "test_real_canonical_issuer_activation_remains_structural_only.actual_sessions",
+          "ast_sha256": "a51239c191b010f7e35ac940dd697b54385c2be04353660c44e4a8a52214a7e9"
+        },
+        {
+          "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen",
+          "ast_sha256": "62feb8d26b19e6da2ddd2bfc677d14db2f792b6a1c41835813287477fc4b0bf4"
+        },
+        {
+          "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen.freeze",
+          "ast_sha256": "8db5eb348de4531c24cf634203427f9bfc6c6a2647834584515998777d07b869"
+        },
+        {
+          "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen.external",
+          "ast_sha256": "b7a0f5530d4dad8a3f677d41ee8a5341dfcc6f25ea6cc8d257c950f4f2e89d8a"
+        },
+        {
+          "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen.external.commit",
+          "ast_sha256": "af33235715434fa0e0e2534a387cf943757ddb8e7085f88436f8c8f2528e1419"
+        },
+        {
+          "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback",
+          "ast_sha256": "557a2db0de2625c69756819832636a5d05486b86f410ebe2bd260e2f9a29758f"
+        },
+        {
+          "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.refresh",
+          "ast_sha256": "21ccbe7777217273f0190259729106e4a03a4ea395bbed81471fbebf85bf8719"
+        },
+        {
+          "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.graph",
+          "ast_sha256": "0767e8f85c0e2af45f3d736dec0e8c7019d07597701800c2d9dcf4674fdcea5f"
+        },
+        {
+          "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.recheck",
+          "ast_sha256": "199c6f0ae4d0a106f23cae4182b38418ed1b560d594bd678659f8f941ae1213a"
+        },
+        {
+          "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.sql",
+          "ast_sha256": "b222f36c558ddea92a968e6d67db6a47de362ec80e2a811a8bc7046431c6be7d"
+        }
+      ],
+      "base_raw_sha256": null,
+      "base_blob": null,
+      "pinned_at": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+      "verified_at_code_parent": true,
+      "reason": "F1 separate pre-first-ORM3x3; F2 exact per-checkpoint actual ORM/scalar identity/parent records with20 literal separated scaling-axis cases; all original five graph worlds and interpass matrix preserved; NOTRUN",
+      "repair_from_3e": "MODIFIED_F1_F2_TEST_DEFINITIONS",
+      "f3_changed_from_22a": true
+    }
+  },
+  "definition_lines_at_code_parent": {
+    "clearledger/server/app/services/partner_contract_activation.py": [
+      {
+        "name": "_request",
+        "start": 31,
+        "end": 39
+      },
+      {
+        "name": "_rows",
+        "start": 42,
+        "end": 44
+      },
+      {
+        "name": "_identity_batches",
+        "start": 47,
+        "end": 67
+      },
+      {
+        "name": "_batch_statement",
+        "start": 70,
+        "end": 76
+      },
+      {
+        "name": "_keyed_rows",
+        "start": 79,
+        "end": 90
+      },
+      {
+        "name": "ActivationOperation",
+        "start": 93,
+        "end": 326
+      },
+      {
+        "name": "ActivationOperation.__init__",
+        "start": 97,
+        "end": 101
+      },
+      {
+        "name": "ActivationOperation.parent",
+        "start": 103,
+        "end": 108
+      },
+      {
+        "name": "ActivationOperation.discover",
+        "start": 110,
+        "end": 150
+      },
+      {
+        "name": "ActivationOperation.discover.graph_key",
+        "start": 113,
+        "end": 114
+      },
+      {
+        "name": "ActivationOperation.freeze",
+        "start": 152,
+        "end": 183
+      },
+      {
+        "name": "ActivationOperation.refresh_identity",
+        "start": 186,
+        "end": 206
+      },
+      {
+        "name": "ActivationOperation.recheck",
+        "start": 208,
+        "end": 258
+      },
+      {
+        "name": "ActivationOperation.lock_parents",
+        "start": 260,
+        "end": 269
+      },
+      {
+        "name": "ActivationOperation.lock",
+        "start": 271,
+        "end": 286
+      },
+      {
+        "name": "ActivationOperation.validate_enable",
+        "start": 288,
+        "end": 326
+      },
+      {
+        "name": "ActivationOperation.validate_enable.permits",
+        "start": 305,
+        "end": 306
+      },
+      {
+        "name": "activate_partner_contract_create_profile",
+        "start": 329,
+        "end": 365
+      },
+      {
+        "name": "activation_admin_request",
+        "start": 368,
+        "end": 381
+      }
+    ],
+    "clearledger/server/app/services/partner_identity.py": [
+      {
+        "name": "partner_bearer_headers",
+        "start": 69,
+        "end": 74
+      },
+      {
+        "name": "PartnerProblem",
+        "start": 77,
+        "end": 80
+      },
+      {
+        "name": "PartnerProblem.__init__",
+        "start": 78,
+        "end": 80
+      },
+      {
+        "name": "problem_handler",
+        "start": 83,
+        "end": 88
+      },
+      {
+        "name": "PartnerRoute",
+        "start": 91,
+        "end": 111
+      },
+      {
+        "name": "PartnerRoute.get_route_handler",
+        "start": 93,
+        "end": 111
+      },
+      {
+        "name": "PartnerRoute.get_route_handler.handler",
+        "start": 96,
+        "end": 109
+      },
+      {
+        "name": "now",
+        "start": 114,
+        "end": 115
+      },
+      {
+        "name": "digest",
+        "start": 118,
+        "end": 119
+      },
+      {
+        "name": "require_enabled",
+        "start": 122,
+        "end": 146
+      },
+      {
+        "name": "signing_key",
+        "start": 149,
+        "end": 150
+      },
+      {
+        "name": "public_jwks",
+        "start": 153,
+        "end": 158
+      },
+      {
+        "name": "validate_redirect",
+        "start": 161,
+        "end": 175
+      },
+      {
+        "name": "validate_scopes",
+        "start": 178,
+        "end": 184
+      },
+      {
+        "name": "fresh",
+        "start": 187,
+        "end": 188
+      },
+      {
+        "name": "active_user",
+        "start": 191,
+        "end": 195
+      },
+      {
+        "name": "admin",
+        "start": 198,
+        "end": 203
+      },
+      {
+        "name": "eligible_scopes",
+        "start": 206,
+        "end": 236
+      },
+      {
+        "name": "VerifiedResourceScope",
+        "start": 240,
+        "end": 242
+      },
+      {
+        "name": "VerifiedPartnerToken",
+        "start": 246,
+        "end": 261
+      },
+      {
+        "name": "LiveGrant",
+        "start": 265,
+        "end": 273
+      },
+      {
+        "name": "resource_scopes",
+        "start": 276,
+        "end": 307
+      },
+      {
+        "name": "live_grant",
+        "start": 310,
+        "end": 364
+      },
+      {
+        "name": "pairwise_subject",
+        "start": 367,
+        "end": 374
+      },
+      {
+        "name": "_PartnerRow",
+        "start": 397,
+        "end": 411
+      },
+      {
+        "name": "_PartnerRow.statement",
+        "start": 404,
+        "end": 411
+      },
+      {
+        "name": "_writer_drift",
+        "start": 414,
+        "end": 417
+      },
+      {
+        "name": "_installation_sets",
+        "start": 420,
+        "end": 429
+      },
+      {
+        "name": "_native_authority",
+        "start": 432,
+        "end": 452
+      },
+      {
+        "name": "_native_authority.check",
+        "start": 439,
+        "end": 447
+      },
+      {
+        "name": "_native_authority.on_same_session",
+        "start": 448,
+        "end": 451
+      },
+      {
+        "name": "_PartnerWrite",
+        "start": 456,
+        "end": 498
+      },
+      {
+        "name": "_PartnerWrite.discovered",
+        "start": 467,
+        "end": 468
+      },
+      {
+        "name": "_PartnerWrite.checkpoint",
+        "start": 470,
+        "end": 498
+      },
+      {
+        "name": "_prepare_partner_write",
+        "start": 501,
+        "end": 812
+      },
+      {
+        "name": "_prepare_partner_write.key",
+        "start": 541,
+        "end": 547
+      },
+      {
+        "name": "_prepare_partner_write.remember",
+        "start": 549,
+        "end": 558
+      },
+      {
+        "name": "_prepare_partner_write.get",
+        "start": 560,
+        "end": 566
+      },
+      {
+        "name": "_prepare_partner_write.company",
+        "start": 568,
+        "end": 570
+      },
+      {
+        "name": "_prepare_partner_write.references",
+        "start": 572,
+        "end": 582
+      },
+      {
+        "name": "_prepare_partner_write.person",
+        "start": 584,
+        "end": 600
+      },
+      {
+        "name": "_prepare_partner_write.client",
+        "start": 602,
+        "end": 614
+      },
+      {
+        "name": "_prepare_partner_write.installation",
+        "start": 616,
+        "end": 639
+      },
+      {
+        "name": "_prepare_partner_write.grant",
+        "start": 641,
+        "end": 646
+      },
+      {
+        "name": "ClientAdapter",
+        "start": 815,
+        "end": 861
+      },
+      {
+        "name": "ClientAdapter.__init__",
+        "start": 816,
+        "end": 818
+      },
+      {
+        "name": "ClientAdapter.get_client_id",
+        "start": 820,
+        "end": 821
+      },
+      {
+        "name": "ClientAdapter.check_redirect_uri",
+        "start": 823,
+        "end": 832
+      },
+      {
+        "name": "ClientAdapter.get_default_redirect_uri",
+        "start": 834,
+        "end": 836
+      },
+      {
+        "name": "ClientAdapter.check_client_secret",
+        "start": 838,
+        "end": 845
+      },
+      {
+        "name": "ClientAdapter.check_endpoint_auth_method",
+        "start": 847,
+        "end": 848
+      },
+      {
+        "name": "ClientAdapter.check_response_type",
+        "start": 850,
+        "end": 851
+      },
+      {
+        "name": "ClientAdapter.check_grant_type",
+        "start": 853,
+        "end": 855
+      },
+      {
+        "name": "ClientAdapter.get_allowed_scope",
+        "start": 857,
+        "end": 861
+      },
+      {
+        "name": "ProtocolRequest",
+        "start": 864,
+        "end": 876
+      },
+      {
+        "name": "ProtocolRequest.__init__",
+        "start": 865,
+        "end": 868
+      },
+      {
+        "name": "ProtocolRequest.form",
+        "start": 871,
+        "end": 872
+      },
+      {
+        "name": "ProtocolRequest.args",
+        "start": 875,
+        "end": 876
+      },
+      {
+        "name": "S256Challenge",
+        "start": 879,
+        "end": 886
+      },
+      {
+        "name": "S256Challenge.validate_code_challenge",
+        "start": 882,
+        "end": 886
+      },
+      {
+        "name": "CodeGrant",
+        "start": 889,
+        "end": 930
+      },
+      {
+        "name": "CodeGrant.save_authorization_code",
+        "start": 892,
+        "end": 902
+      },
+      {
+        "name": "CodeGrant.query_authorization_code",
+        "start": 904,
+        "end": 917
+      },
+      {
+        "name": "CodeGrant.delete_authorization_code",
+        "start": 919,
+        "end": 922
+      },
+      {
+        "name": "CodeGrant.authenticate_user",
+        "start": 924,
+        "end": 930
+      },
+      {
+        "name": "RefreshHandle",
+        "start": 934,
+        "end": 942
+      },
+      {
+        "name": "RefreshHandle.check_client",
+        "start": 938,
+        "end": 939
+      },
+      {
+        "name": "RefreshHandle.get_scope",
+        "start": 941,
+        "end": 942
+      },
+      {
+        "name": "RotatingRefreshGrant",
+        "start": 945,
+        "end": 988
+      },
+      {
+        "name": "RotatingRefreshGrant.authenticate_refresh_token",
+        "start": 949,
+        "end": 980
+      },
+      {
+        "name": "RotatingRefreshGrant.authenticate_user",
+        "start": 982,
+        "end": 983
+      },
+      {
+        "name": "RotatingRefreshGrant.revoke_old_credential",
+        "start": 985,
+        "end": 988
+      },
+      {
+        "name": "MachineGrant",
+        "start": 991,
+        "end": 1006
+      },
+      {
+        "name": "MachineGrant.validate_token_request",
+        "start": 992,
+        "end": 1006
+      },
+      {
+        "name": "PartnerOpenIDCode",
+        "start": 1009,
+        "end": 1044
+      },
+      {
+        "name": "PartnerOpenIDCode.__init__",
+        "start": 1010,
+        "end": 1012
+      },
+      {
+        "name": "PartnerOpenIDCode.exists_nonce",
+        "start": 1014,
+        "end": 1023
+      },
+      {
+        "name": "PartnerOpenIDCode.resolve_client_private_key",
+        "start": 1025,
+        "end": 1027
+      },
+      {
+        "name": "PartnerOpenIDCode.get_client_algorithm",
+        "start": 1029,
+        "end": 1030
+      },
+      {
+        "name": "PartnerOpenIDCode.get_encode_header",
+        "start": 1032,
+        "end": 1033
+      },
+      {
+        "name": "PartnerOpenIDCode.get_client_claims",
+        "start": 1035,
+        "end": 1038
+      },
+      {
+        "name": "PartnerOpenIDCode.generate_user_info",
+        "start": 1040,
+        "end": 1044
+      },
+      {
+        "name": "RevokeEndpoint",
+        "start": 1047,
+        "end": 1084
+      },
+      {
+        "name": "RevokeEndpoint.check_params",
+        "start": 1050,
+        "end": 1054
+      },
+      {
+        "name": "RevokeEndpoint.query_token",
+        "start": 1056,
+        "end": 1075
+      },
+      {
+        "name": "RevokeEndpoint.revoke_token",
+        "start": 1077,
+        "end": 1084
+      },
+      {
+        "name": "PartnerAuthorizationServer",
+        "start": 1087,
+        "end": 1185
+      },
+      {
+        "name": "PartnerAuthorizationServer.__init__",
+        "start": 1088,
+        "end": 1100
+      },
+      {
+        "name": "PartnerAuthorizationServer.checkpoint",
+        "start": 1102,
+        "end": 1119
+      },
+      {
+        "name": "PartnerAuthorizationServer.query_client",
+        "start": 1121,
+        "end": 1128
+      },
+      {
+        "name": "PartnerAuthorizationServer.create_oauth2_request",
+        "start": 1130,
+        "end": 1131
+      },
+      {
+        "name": "PartnerAuthorizationServer.handle_response",
+        "start": 1133,
+        "end": 1134
+      },
+      {
+        "name": "PartnerAuthorizationServer.send_signal",
+        "start": 1136,
+        "end": 1137
+      },
+      {
+        "name": "PartnerAuthorizationServer.issue_token",
+        "start": 1139,
+        "end": 1179
+      },
+      {
+        "name": "PartnerAuthorizationServer.save_token",
+        "start": 1181,
+        "end": 1185
+      },
+      {
+        "name": "user_info",
+        "start": 1188,
+        "end": 1195
+      },
+      {
+        "name": "require_core_user",
+        "start": 1198,
+        "end": 1204
+      },
+      {
+        "name": "verify_access",
+        "start": 1207,
+        "end": 1245
+      },
+      {
+        "name": "verify_locked_partner_access",
+        "start": 1248,
+        "end": 1277
+      },
+      {
+        "name": "verify_partner_access_token",
+        "start": 1280,
+        "end": 1296
+      },
+      {
+        "name": "get_verified_partner_token",
+        "start": 1302,
+        "end": 1306
+      }
+    ],
+    "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py": [
+      {
+        "name": "tree",
+        "start": 68,
+        "end": 69
+      },
+      {
+        "name": "definition",
+        "start": 72,
+        "end": 76
+      },
+      {
+        "name": "body_nodes",
+        "start": 79,
+        "end": 83
+      },
+      {
+        "name": "calls",
+        "start": 86,
+        "end": 89
+      },
+      {
+        "name": "text",
+        "start": 92,
+        "end": 93
+      },
+      {
+        "name": "stable_ast_dump",
+        "start": 96,
+        "end": 113
+      },
+      {
+        "name": "digest_node",
+        "start": 116,
+        "end": 117
+      },
+      {
+        "name": "baseline_create_policy_projection",
+        "start": 120,
+        "end": 135
+      },
+      {
+        "name": "test_accepted_create_scope_extension_preserves_old_eligible_policy_projection",
+        "start": 138,
+        "end": 149
+      },
+      {
+        "name": "test_source_digest_keeps_legacy_pin_and_detects_semantic_changes",
+        "start": 152,
+        "end": 166
+      },
+      {
+        "name": "test_logout_transport_authority_and_wire_are_unchanged",
+        "start": 169,
+        "end": 186
+      },
+      {
+        "name": "test_logout_clean_admission_precedes_any_attribute_sql_or_flush",
+        "start": 189,
+        "end": 198
+      },
+      {
+        "name": "test_logout_full_original_composition_precedes_all_mutation",
+        "start": 201,
+        "end": 226
+      },
+      {
+        "name": "test_logout_scoped_docs_row_follows_family_and_token",
+        "start": 229,
+        "end": 253
+      },
+      {
+        "name": "test_logout_callback_requires_actual_writer_and_finishes_checked",
+        "start": 256,
+        "end": 270
+      },
+      {
+        "name": "test_logout_preserves_existing17_and_canonical12",
+        "start": 273,
+        "end": 303
+      },
+      {
+        "name": "test_logout_adds_no_runner_config_fixture_or_authority_surface",
+        "start": 306,
+        "end": 316
+      },
+      {
+        "name": "test_accepted_org_order_extension_is_exact_and_preserves_scope_projection",
+        "start": 319,
+        "end": 342
+      },
+      {
+        "name": "accepted_http_authority_baseline_digest",
+        "start": 345,
+        "end": 372
+      },
+      {
+        "name": "accepted_http_authority_baseline_digest.RestoreProfile",
+        "start": 357,
+        "end": 362
+      },
+      {
+        "name": "accepted_http_authority_baseline_digest.RestoreProfile.visit_Name",
+        "start": 358,
+        "end": 362
+      },
+      {
+        "name": "test_explicit_http_extension_keeps_original_gorg_and_full_issuer_semantics",
+        "start": 375,
+        "end": 385
+      },
+      {
+        "name": "activation_baseline_digest",
+        "start": 412,
+        "end": 462
+      },
+      {
+        "name": "activation_baseline_digest.RestoreActivation",
+        "start": 423,
+        "end": 447
+      },
+      {
+        "name": "activation_baseline_digest.RestoreActivation.visit_If",
+        "start": 424,
+        "end": 430
+      },
+      {
+        "name": "activation_baseline_digest.RestoreActivation.visit_Assign",
+        "start": 431,
+        "end": 436
+      },
+      {
+        "name": "activation_baseline_digest.RestoreActivation.visit_Set",
+        "start": 437,
+        "end": 442
+      },
+      {
+        "name": "activation_baseline_digest.RestoreActivation.visit_BoolOp",
+        "start": 443,
+        "end": 447
+      },
+      {
+        "name": "test_activation_explicit_overlay_preserves_whole_identity_routes_profile_and_schema",
+        "start": 465,
+        "end": 478
+      },
+      {
+        "name": "m15_baseline_bytes",
+        "start": 486,
+        "end": 514
+      },
+      {
+        "name": "test_m15_raw_and_strict_whole_inverse_precede_every_historical_projection",
+        "start": 517,
+        "end": 528
+      },
+      {
+        "name": "test_m15_any_undeclared_raw_change_and_malformed_fragment_count_fail_closed",
+        "start": 531,
+        "end": 555
+      },
+      {
+        "name": "test_m15_any_undeclared_raw_change_and_malformed_fragment_count_fail_closed.rejected",
+        "start": 532,
+        "end": 537
+      },
+      {
+        "name": "test_m15_existing_serializer_empty_type_params_same_nonempty_different",
+        "start": 558,
+        "end": 570
+      }
+    ],
+    "clearledger/server/tests/test_partner_contract_activation_batching.py": [
+      {
+        "name": "_hash",
+        "start": 17,
+        "end": 18
+      },
+      {
+        "name": "_node_hash",
+        "start": 21,
+        "end": 37
+      },
+      {
+        "name": "_node_hash.render",
+        "start": 24,
+        "end": 36
+      },
+      {
+        "name": "_definitions",
+        "start": 40,
+        "end": 47
+      },
+      {
+        "name": "_definition",
+        "start": 50,
+        "end": 53
+      },
+      {
+        "name": "test_exact_source_two_freeze_and_all_nested_definition_inventory",
+        "start": 56,
+        "end": 66
+      },
+      {
+        "name": "test_two_passes_remain_separate_around_original_profile_boundary",
+        "start": 69,
+        "end": 83
+      },
+      {
+        "name": "test_no_authority_cache_and_only_closed_homogeneous_groups",
+        "start": 86,
+        "end": 106
+      },
+      {
+        "name": "test_every_identity_and_full_scalar_key_rejects_duplicate_unexpected_or_missing_rows",
+        "start": 109,
+        "end": 124
+      },
+      {
+        "name": "test_chunk_tail_proof_does_not_introduce_graph_cap_or_silent_truncation",
+        "start": 127,
+        "end": 135
+      },
+      {
+        "name": "test_writes_pending_flags_and_all_physical_lock_methods_remain_exact_base",
+        "start": 138,
+        "end": 148
+      }
+    ],
+    "clearledger/server/tests/test_partner_contract_activation_batching_pg.py": [
+      {
+        "name": "_snapshot",
+        "start": 38,
+        "end": 45
+      },
+      {
+        "name": "_external_second_id",
+        "start": 48,
+        "end": 90
+      },
+      {
+        "name": "test_external_commit_on_second_id_between_independent_current_passes",
+        "start": 95,
+        "end": 112
+      },
+      {
+        "name": "test_external_commit_on_second_id_between_independent_current_passes.after_ORM",
+        "start": 99,
+        "end": 108
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B",
+        "start": 117,
+        "end": 222
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.freeze",
+        "start": 138,
+        "end": 147
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.issuer",
+        "start": 148,
+        "end": 152
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.loaded",
+        "start": 153,
+        "end": 157
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.refreshed",
+        "start": 158,
+        "end": 159
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.sql",
+        "start": 160,
+        "end": 162
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.refresh",
+        "start": 163,
+        "end": 184
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.graph",
+        "start": 185,
+        "end": 188
+      },
+      {
+        "name": "test_external_second_id_before_first_original_ORM_after_freeze_and_B.rows",
+        "start": 189,
+        "end": 198
+      },
+      {
+        "name": "test_unbatched_member_role_null_and_present_keep_exact_full_row",
+        "start": 227,
+        "end": 255
+      },
+      {
+        "name": "test_unbatched_member_role_null_and_present_keep_exact_full_row.external_after_ORM",
+        "start": 236,
+        "end": 250
+      },
+      {
+        "name": "test_unbatched_member_role_null_and_present_keep_exact_full_row.external_after_ORM.change",
+        "start": 244,
+        "end": 248
+      },
+      {
+        "name": "test_full_scalar_json_null_empty_and_literal_opaque_drift",
+        "start": 262,
+        "end": 279
+      },
+      {
+        "name": "test_full_scalar_json_null_empty_and_literal_opaque_drift.drift",
+        "start": 268,
+        "end": 276
+      },
+      {
+        "name": "test_full_scalar_json_null_empty_and_literal_opaque_drift.drift.commit",
+        "start": 271,
+        "end": 274
+      },
+      {
+        "name": "_negative_current_fault",
+        "start": 286,
+        "end": 313
+      },
+      {
+        "name": "test_all_original_31_checkpoint_boundaries_reject_current_negative_fault",
+        "start": 318,
+        "end": 333
+      },
+      {
+        "name": "test_all_original_31_checkpoint_boundaries_reject_current_negative_fault.current",
+        "start": 322,
+        "end": 328
+      },
+      {
+        "name": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates",
+        "start": 338,
+        "end": 386
+      },
+      {
+        "name": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates.issuer",
+        "start": 341,
+        "end": 343
+      },
+      {
+        "name": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates.after_wait",
+        "start": 365,
+        "end": 371
+      },
+      {
+        "name": "_m15_current_record",
+        "start": 389,
+        "end": 436
+      },
+      {
+        "name": "_m15_expected_record",
+        "start": 439,
+        "end": 463
+      },
+      {
+        "name": "_m15_assert_current_records",
+        "start": 466,
+        "end": 471
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2",
+        "start": 485,
+        "end": 799
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.freeze",
+        "start": 571,
+        "end": 600
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.issuer",
+        "start": 607,
+        "end": 610
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.invoke",
+        "start": 611,
+        "end": 613
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.checkpoint",
+        "start": 614,
+        "end": 621
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.refresh",
+        "start": 622,
+        "end": 637
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.loaded",
+        "start": 638,
+        "end": 643
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.refreshed",
+        "start": 644,
+        "end": 645
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.graph",
+        "start": 646,
+        "end": 653
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.rows",
+        "start": 654,
+        "end": 681
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.recheck",
+        "start": 682,
+        "end": 698
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.before_execute",
+        "start": 702,
+        "end": 706
+      },
+      {
+        "name": "test_scaling_principals_refs_targets_chunk_tail_same_root_B_and_DML2.sql",
+        "start": 707,
+        "end": 736
+      },
+      {
+        "name": "test_original_fixture_same_call_budget_is_only_a_proposal_and_pending_flags_survive",
+        "start": 802,
+        "end": 823
+      },
+      {
+        "name": "test_original_fixture_same_call_budget_is_only_a_proposal_and_pending_flags_survive.checkpoint",
+        "start": 805,
+        "end": 808
+      },
+      {
+        "name": "test_original_fixture_same_call_budget_is_only_a_proposal_and_pending_flags_survive.count",
+        "start": 811,
+        "end": 812
+      },
+      {
+        "name": "test_no_cache_survives_cancel_rollback_new_transaction_or_new_request",
+        "start": 827,
+        "end": 850
+      },
+      {
+        "name": "test_no_cache_survives_cancel_rollback_new_transaction_or_new_request.fail",
+        "start": 831,
+        "end": 836
+      },
+      {
+        "name": "test_real_canonical_issuer_activation_remains_structural_only",
+        "start": 853,
+        "end": 877
+      },
+      {
+        "name": "test_real_canonical_issuer_activation_remains_structural_only.actual_sessions",
+        "start": 865,
+        "end": 867
+      },
+      {
+        "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen",
+        "start": 885,
+        "end": 918
+      },
+      {
+        "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen.freeze",
+        "start": 890,
+        "end": 896
+      },
+      {
+        "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen.external",
+        "start": 904,
+        "end": 912
+      },
+      {
+        "name": "test_grouped_second_row_mutable_full_scalar_json_is_deeply_frozen.external.commit",
+        "start": 907,
+        "end": 910
+      },
+      {
+        "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback",
+        "start": 921,
+        "end": 975
+      },
+      {
+        "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.refresh",
+        "start": 925,
+        "end": 930
+      },
+      {
+        "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.graph",
+        "start": 931,
+        "end": 933
+      },
+      {
+        "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.recheck",
+        "start": 934,
+        "end": 939
+      },
+      {
+        "name": "test_each_checkpoint_emits_both_fresh_passes_in_original_order_without_per_id_fallback.sql",
+        "start": 940,
+        "end": 948
+      }
+    ]
+  },
+  "unchanged_activation_definitions": {
+    "ActivationOperation.discover": "72be7e673e4ef5ac832125e127bb7b4efa8c9d94005bcd417a85c6aa13c84a94",
+    "ActivationOperation.freeze": "6135f840ca66c455532b7e5e991dd88d876b646704edd7c1ecc65a133fc6be73",
+    "ActivationOperation.lock_parents": "5b402d888aa4b25f1c715af222959c49398acdd262b70ecc12153b9387eb8375",
+    "ActivationOperation.lock": "f8acdecb3f3f0918c3171211c8b82e6c7ae616be76be52336b911953143fed91",
+    "activate_partner_contract_create_profile": "3d1732d5b90ad9bc944d99e2274530a258a426a4432938c7fa1f2f8e1e48f651",
+    "activation_admin_request": "f5ec93d3ef4918e54a02564f48d681b8638dcf25e21db1651457c11a1340ba84"
+  },
+  "original_checkpoint_ORM_loop": "for spec in self.rows:\n    if not spec.update:\n        row = self.db.scalar(spec.statement())\n        if (row is None) != spec.missing:\n            _writer_drift(self.db)",
+  "preservation": {
+    "all_non7_objects_and_modes_equal_to_base": true,
+    "non7_tracked_count": 3364,
+    "non7_ls_tree_sha256": "1ef0bd9237ddaec63cd3a2adc35848565610046c5f5727c6526dfb048b0ca29e",
+    "old_PG_path": "clearledger/server/tests/test_partner_contract_activation_pg.py",
+    "old_PG_raw_sha256": "57d2b25225901d6c3b4206de3dd1c2e97c16fb9796e04099219ca4db57b219ce",
+    "old_PG_definitions_with_decorators_byte_frozen": [
+      {
+        "name": "test_enable_same_flags_disable_and_new_cas_rollback_keep_children_and_counts",
+        "ast_sha256": "246471752a3ee2ea3405a8dc639967c5e1b0c6f5a02134b79ff82117a314bd24"
+      },
+      {
+        "name": "test_real_native_nonadmin_invalid_bearer_and_closed_gate",
+        "ast_sha256": "2d5ac94cf55c569f8d9dbe9d9df7e72636c2c505663d68412324345860abfdaf"
+      },
+      {
+        "name": "test_missing_cas_overflow_and_revoked_enable_denied",
+        "ast_sha256": "dfe5705fd52b0dc0a2d2c00a92f6bbcfc0f7ead5463f7f9b755aa1f5214f10cc"
+      },
+      {
+        "name": "test_true_requires_corresponding_principal_and_nonempty_legal_selection",
+        "ast_sha256": "546a2ee0e451800faf4a94c7f83caf2b4e9d2e59a0e5cbc08c63773841be9829"
+      },
+      {
+        "name": "test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union",
+        "ast_sha256": "84f441cb9c5e76f59a94e54c174eaad73bff10f3425890238e1baf20ab1c8e2a"
+      },
+      {
+        "name": "test_actual_last_wait_rechecks_current_native_and_full_member_pointers",
+        "ast_sha256": "4bffea6bfc5749860dcf25ab6e9f3f5597b51639608b2171ac8a281b2ca66aa5"
+      },
+      {
+        "name": "test_actual_flush_flags_audit_and_public_auth_failure_roll_back_whole_root",
+        "ast_sha256": "ffbb7a32d11fd2340265207821867a01c5155bcd9f952fa55c47054f532d4406"
+      },
+      {
+        "name": "test_concurrent_activation_replace_revoke_are_one_winner_stale_409",
+        "ast_sha256": "b7ca313aca6c146a9c2a787f53d8e6afc80ad6e7ad1f8f1cd65bc07f65fc0013"
+      },
+      {
+        "name": "test_unknown_commit_ack_requires_fresh_current_auth_readback_and_new_cas",
+        "ast_sha256": "24625ee03e793eedebdb5cbf96020faa79391a0f98a75cbaee8c23e709ed61f5"
+      },
+      {
+        "name": "test_cancel_during_actual_typed_wait_does_not_mutate",
+        "ast_sha256": "5df6c5cb3735ae2e7b6c6f8cec7f215249d82f3a029047047904ff3007f9d2e0"
+      },
+      {
+        "name": "test_structural_activation_never_restores_actual_external_oauth_or_post_authority",
+        "ast_sha256": "f305373cb0ef7ba3de8975931c7ae375d9e5e7573a3a7360eb1a600df01502b1"
+      },
+      {
+        "name": "test_exact_type_purpose_and_subclass_rejection_on_actual_native_session",
+        "ast_sha256": "553df31580307a3c68f944889b327b81f5691bdafbdca2817ea11a1182136c97"
+      },
+      {
+        "name": "test_internal_service_leaves_original_root_completion_to_actual_caller",
+        "ast_sha256": "96f542821ac1622265f2d9370309d41c40bbdbce7e573a3f57a717c1db67b279"
+      },
+      {
+        "name": "test_empty_actual_member_rows_keep_explicit_parent_boundary",
+        "ast_sha256": "5b492ff2d260ed4921621eb913b9446d71ced1c56be45416455d7efe28511754"
+      },
+      {
+        "name": "test_external_committed_graph_drift_during_real_b_wait_never_expands_plan",
+        "ast_sha256": "31aaa9fd433a9037e477ade4fd2c5595209bcdf813e95417ddc2475d6ae54a6c"
+      },
+      {
+        "name": "test_full_graph_foreign_owner_corruption_is_denied_before_b",
+        "ast_sha256": "0ffa73dc4265513b4678f45a43a4558f790fc06be91839d05cee6ba07aa96f61"
+      },
+      {
+        "name": "test_canonical_only_foreign_installation_location_denied_before_b",
+        "ast_sha256": "9f6bd51928be4402a4a6d5ac8541bac3bbeb0ff96ca9796d7bf354d4c2d8444f"
+      },
+      {
+        "name": "test_each_foreign_typed_canonical_item_denied_in_every_mode_before_b",
+        "ast_sha256": "87fdad2de8feff1552033caca9513e6459c48eb7f9a3e109753ea31a0b0aa923"
+      },
+      {
+        "name": "test_local_canonical_extras_keep_literal_unrequested_opaque_ids_and_full_union",
+        "ast_sha256": "bb270a180d25e77f7055a1e1a388131dd5b13cb7d6183532e0344950f405fdf8"
+      }
+    ],
+    "old_PG_count": 19,
+    "whole_A_I_inverse_to_b41": "own stdlib raw+AST; no project checker invoked",
+    "whole_M_inverse_to_b41": "own stdlib text/AST; exactly three sites plus additive suffix",
+    "old_activation_inverse": "own independent AST undo; strict counts if8/assign2/purpose1/writer1, whole baseline AST85ef374747e6ee54aa33995e1d3802aab8524c263efa033495abd724c0eefb57",
+    "historical_assignments": "ALL old assignments in M unchanged; original19/17/12/CREATE/GORG/HTTP/activation literals retained"
+  },
+  "DPL": {
+    "original_md_sha256": "9b551d66c2c04cc72b009edab288ce70965c999f66d20a89d2286150a79e950e",
+    "original_json_sha256": "444a1816d2b315932d25896d9823f8bf1ec97d6d0fa98ff6e60f88a7da58e040",
+    "serializer_addendum_md_sha256": "314ca64a3c5eb6b2991f5c74bdb11abc9034c247593af99326d43166b7b28186",
+    "serializer_addendum_json_sha256": "af85db4c73d9300e9af4edae0c21904a9937ffd939d5a2db30d7f9c06a21fca2",
+    "approval": "native coordinator ask reply: concrete3sites approved with mandatory existing digest_node/stable_ast_dump compatibility, addendum written before M edit",
+    "no_DPL_execution": true
+  },
+  "behavior_contract": {
+    "independent_passes": [
+      "current ORM entities populate_existing=True with cardinality/missing checks",
+      "unchanged original ProfileOperation.recheck",
+      "separate current full-column scalar/deepcopy keyed comparison"
+    ],
+    "batch_models": [
+      "Company pointers=()",
+      "User pointers=()",
+      "ServiceLocation grouped by frozen company pointer"
+    ],
+    "unbatched": "All other descriptors exact original statements including Member role NULL/present and all client/install/grant predicates",
+    "parents": "same model and self.company_id; full columns, every frozen row; no grouped physical locks",
+    "cache": "only local variables within one pass; no self/db.info/global/registry persistence and no reuse between passes",
+    "chunk_bound": {
+      "per_statement_IDs": 256,
+      "coverage": "range(0,len(group),256), all chunks and tail; no silent truncation",
+      "profile_selected_list_max": 100,
+      "profile_bound_reference": {
+        "commit": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
+        "path": "clearledger/server/app/schemas_partner.py",
+        "definition": "_profile_list",
+        "lines": "66-74"
+      },
+      "graph_maximum": "No new graph cap; canonical targets can exceed profile list bound",
+      "scaling_definitions": "20 literal cases: five old coupled worlds preserved +separate principals1/2/8/100 (r=c=1),refs1/2/8/100(p=c=1),canonical1/2/8/257(p=r=1),credentials1/2/8(p=r=c=1). Canonical257+extra_loc=258, identity AND parent chunks256+2."
+    },
+    "unchanged": [
+      "all31 target checkpoints and wait sites",
+      "one original typed B/key/mode plan and actual root/Connection",
+      "full physical parent-before-Member order",
+      "native/admin/gates/deadline and epoch/revocation",
+      "canonical sets, credentials, homes, types, children",
+      "expected-profile pending flags update, original flush/readback and exactly original two DML"
+    ]
+  },
+  "observer_source_reasoning": {
+    "path": "clearledger/server/tests/test_partner_contract_activation_pg.py",
+    "commit": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
+    "lines": "361-389,424-451",
+    "claim": "Finite observer already admits mapped tables/columns, ordinary Select, BindParameter, eq/in_op/is_, and AND. New nonlocking IN selects use exactly these; physical locking statements unchanged. No universal detector or old test edit.",
+    "actual_compatibility": "UNKNOWN until independent ROOT runtime"
+  },
+  "proposal_arithmetic": {
+    "label": "PROPOSED SOURCE ARITHMETIC ONLY; NOT measurement or acceptance",
+    "original_target_checkpoint_count": 31,
+    "historical_per_checkpoint": 53,
+    "historical_same_CALL": 1775,
+    "identity_ORM": "14 -> 11",
+    "identity_scalar": "14 -> 11",
+    "parents_scalar": "6 -> 3",
+    "other_SQL_per_checkpoint": 19,
+    "proposed_per_checkpoint": 44,
+    "proposed_same_CALL_ceiling": 1600,
+    "larger_graph_ceiling": "NONE; graph/checkpoint/chunk growth remains",
+    "prohibition": "No checks may be omitted to meet the budget"
+  },
+  "temporal_test_strategy": {
+    "external_commits": "Separate real 3x3 pre-ORM matrix after original freeze/B before physical SHARE; original refresh delegates and actual load/refresh event __dict__ snapshots prove changed values. Company/User name drift first refreshes then original ProfileOperation completes then independent full scalar rejects; User second ID has legitimate foreign home frozen before request. Missing/replaced PK/foreign Location reject in original ORM before graph. Old interpass3x3 is byte-preserved.",
+    "later_boundaries": "31 checkpoint negative-fault definitions and actual five-phase SQL listener/barrier cases. Later protected rows use same-root negative SQL because original SHARE locks prevent external UPDATE from committing. No claim of external protected-row commit after every wait.",
+    "JSON": "grouped Company/Location deep nested scalar JSON and NULL/empty; Member full columns and literal opaque IDs",
+    "impossible_PK_duplicates": "Actual duplicate same primary-key rows cannot be inserted through schema constraints; keyed duplicate/unexpected-key/cardinality rejection has source guards, no SQL/Session stand-in",
+    "pending_flags": "original repeated real PUT and successful readback definitions",
+    "no_cache": "fresh SQL both passes every checkpoint, actual same connection; cancel/rollback/new-transaction/new-request definitions",
+    "issuer": "original canonical issuer_world/native_org_admin with real verifier; structural activation cannot revive disabled grant",
+    "scaling_observer": "Actual Connection before_execute statement identity and before_cursor compiler/bind metadata, including expanded native binds. Per checkpoint exact full frozen fixture IDs/pointers verified independently, each ORM entity observed by real load/refresh events, each scalar row keyed and cardinality checked, full projections and exact ordered query lists compare ORM vs scalar identity vs parent. Original helpers delegate; graph/native/admin/credential-set singleton reads remain legitimate. No extra observer SQL/no positive substitutes/no full SQL/compiled/bind log retention."
+  },
+  "execution": {
+    "tests": "NOTRUN",
+    "collection": "NOTRUN",
+    "app_imports": 0,
+    "project_function_calls": 0,
+    "extracted_AST_execution": 0,
+    "SQLAlchemy_constructs": 0,
+    "SQL_compile": 0,
+    "SQL": 0,
+    "PG": 0,
+    "Docker": 0,
+    "HTTP": 0,
+    "network": "0 except fixed Orca lifecycle/messages",
+    "allowed_verification": "FS/Git text, own stdlib AST/hash/json/literal_eval, compile WITHOUT exec only"
+  },
+  "unknowns": [
+    "Fresh independent FULL7 of final cumulative exact7 after BOTH repair docs, then ROOT gates; no author SOURCE_PASS.",
+    "All497 authored variants/collection NOTRUN; actual load/refresh event lifetimes, original ORM freshness, expanded binds/compiler-cache compatibility and statement identity behavior UNKNOWN until admitted provider.",
+    "Actual factory/schema4/Core/READ COMMITTED/finite original allSQL observer compatibility, FK closure/provider cleanup and m15_owned descendant handling UNKNOWN, solely ROOT-owned.",
+    "Credentials UNBOUNDED in inspected source;1/2/8 only samples; canonical graph has no authored maximum/new production cap.",
+    "Large graph source-model costs/capture counts are not runtime/latency/memory benchmarks or resource admission. No checkpoints/freshness/ACL removed to fit1600/timeouts.",
+    "Original139 accepted separately on Root823; candidate runtime requires integration preserving Root old-PG helper repairs, actual typed-array fault/physical schema/provider/cleanup/resource/benchmark still NOTRUN here."
+  ],
+  "secondary_root_provenance": {
+    "source": "coordinator msg_31dd55621c45 quoting ROOT msg_a09b183cc834; secondary point-in-time only",
+    "original139": "A55 passed823; B41 running; C43 next as supplied. No candidate runtime or full139 acceptance inferred.",
+    "separate_packages": "OPTIONS75+109 independent and SDK17 bounded supplied acceptance remain separate;3e not integrated/accepted",
+    "before_benchmark": "Fresh FULL7 source review plus correct original139 baseline required; no measured-after/benchmark claim"
+  },
+  "full_program": {
+    "reference": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "M00_M19": 20,
+    "additional": 11,
+    "complete": false
+  },
+  "previous_code_parent": "706ec0371bbdc7b1055b5d05fe905d6c642a06e2",
+  "previous_final_HEAD": "3e7330db7ec37d23ab24213108e55ae9ca5f6ebc",
+  "repair_subset": [
+    "clearledger/server/tests/test_partner_contract_activation_batching_pg.py",
+    "clearledger/docs/PARTNER_CONTRACT_ACTIVATION_BATCHING.md",
+    "clearledger/docs/api/PARTNER_CONTRACT_ACTIVATION_BATCHING.json"
+  ],
+  "inherited_document_status_at_code_parent": "BOTH_EXIST_AND_EQUAL_22a; this docs child MODIFIES them",
+  "repair_history": {
+    "negative_review": "/srv/projects/preview/partner-contract-activation-batching-review-20261101/review.json",
+    "negative_review_sha256": "b1ffa12a9c7cbbcc565cba3b8efb8932a951714860b89f8f971867b2cfb38d84",
+    "reviewed_cut": "3e7330db7ec37d23ab24213108e55ae9ca5f6ebc",
+    "findings": [
+      "F1 MEDIUM required before-first-ORM coverage",
+      "F2 MEDIUM credentials/exact chunks coverage"
+    ],
+    "prior_authored_variants": 473,
+    "repair_added_variants": 24,
+    "current_authored_variants": 497,
+    "PG_definitions": 12,
+    "PG_variants": 488,
+    "source_guards": 6,
+    "M15_guards": 3,
+    "collection": "NOTRUN",
+    "author_SOURCE_PASS": false,
+    "plan_before_test_edit": "/srv/projects/preview/partner-contract-activation-batching-fix-author-20261101/plan.json",
+    "plan_sha256": "dad222b5629d80db21168f355e7a8b6d4c7f672e3a8fa0d7b9025c099b6a4e5a",
+    "A_I_M": "byte-frozen to3e; no new DPL gate/weakening",
+    "previous_interpass_and_other_definitions": "all13 other pre-repair top-level helpers/tests with decorators byte-identical; only old scaling definition changed",
+    "axis_addendum_before_second_test_edit": "/srv/projects/preview/partner-contract-activation-batching-fix-author-20261101/plan-v2.json",
+    "axis_addendum_sha256": "1cd5d69692504b5e69a3512c1aa2a51372632d82f7a10c12f683e9ab0cea4055",
+    "axis_coordinator_steering": "msg_e231182e55ac"
+  },
+  "scaling_runtime_plan": {
+    "cases": [
+      {
+        "case_id": "graph-1",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 6,
+        "checkpoints": 30,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 43,
+        "repeat_SQL_model": 1290,
+        "new_setup_roots": 0,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 0,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 30,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "graph-2",
+        "selected_principals": 2,
+        "selected_refs_per_kind": 2,
+        "canonical_argument": 2,
+        "credentials": 0,
+        "identity_locations": 3,
+        "parent_locations": 3,
+        "descriptors": 17,
+        "physical_identity": 14,
+        "parents": 9,
+        "checkpoints": 35,
+        "ORM": 12,
+        "scalar_identity": 12,
+        "scalar_parents": 3,
+        "other_SQL_model": 22,
+        "SQL_per_checkpoint_model": 49,
+        "repeat_SQL_model": 1715,
+        "new_setup_roots": 4,
+        "new_dependent_setup_rows": 2,
+        "new_setup_total": 6,
+        "replacement_children": 10,
+        "peak_actual_current_records_per_pass": 12,
+        "peak_actual_ORM_entity_keys": 17,
+        "retained_checkpoint_summaries": 35,
+        "physical_capture_rows": 12,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "graph-8",
+        "selected_principals": 8,
+        "selected_refs_per_kind": 8,
+        "canonical_argument": 8,
+        "credentials": 0,
+        "identity_locations": 9,
+        "parent_locations": 9,
+        "descriptors": 35,
+        "physical_identity": 26,
+        "parents": 27,
+        "checkpoints": 65,
+        "ORM": 18,
+        "scalar_identity": 18,
+        "scalar_parents": 3,
+        "other_SQL_model": 46,
+        "SQL_per_checkpoint_model": 85,
+        "repeat_SQL_model": 5525,
+        "new_setup_roots": 28,
+        "new_dependent_setup_rows": 14,
+        "new_setup_total": 42,
+        "replacement_children": 34,
+        "peak_actual_current_records_per_pass": 18,
+        "peak_actual_ORM_entity_keys": 35,
+        "retained_checkpoint_summaries": 65,
+        "physical_capture_rows": 36,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "graph-100",
+        "selected_principals": 100,
+        "selected_refs_per_kind": 100,
+        "canonical_argument": 100,
+        "credentials": 0,
+        "identity_locations": 101,
+        "parent_locations": 101,
+        "descriptors": 311,
+        "physical_identity": 210,
+        "parents": 303,
+        "checkpoints": 525,
+        "ORM": 110,
+        "scalar_identity": 110,
+        "scalar_parents": 3,
+        "other_SQL_model": 414,
+        "SQL_per_checkpoint_model": 637,
+        "repeat_SQL_model": 334425,
+        "new_setup_roots": 396,
+        "new_dependent_setup_rows": 198,
+        "new_setup_total": 594,
+        "replacement_children": 402,
+        "peak_actual_current_records_per_pass": 110,
+        "peak_actual_ORM_entity_keys": 311,
+        "retained_checkpoint_summaries": 525,
+        "physical_capture_rows": 404,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "LARGE_NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "mixed-large-100-257",
+        "selected_principals": 100,
+        "selected_refs_per_kind": 100,
+        "canonical_argument": 257,
+        "credentials": 0,
+        "identity_locations": 258,
+        "parent_locations": 258,
+        "descriptors": 468,
+        "physical_identity": 210,
+        "parents": 460,
+        "checkpoints": 682,
+        "ORM": 111,
+        "scalar_identity": 111,
+        "scalar_parents": 4,
+        "other_SQL_model": 414,
+        "SQL_per_checkpoint_model": 640,
+        "repeat_SQL_model": 436480,
+        "new_setup_roots": 553,
+        "new_dependent_setup_rows": 355,
+        "new_setup_total": 908,
+        "replacement_children": 402,
+        "peak_actual_current_records_per_pass": 111,
+        "peak_actual_ORM_entity_keys": 468,
+        "retained_checkpoint_summaries": 682,
+        "physical_capture_rows": 561,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "LARGE_NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "principals-1",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 6,
+        "checkpoints": 30,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 43,
+        "repeat_SQL_model": 1290,
+        "new_setup_roots": 0,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 0,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 30,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "principals-2",
+        "selected_principals": 2,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 16,
+        "physical_identity": 14,
+        "parents": 6,
+        "checkpoints": 32,
+        "ORM": 12,
+        "scalar_identity": 12,
+        "scalar_parents": 3,
+        "other_SQL_model": 19,
+        "SQL_per_checkpoint_model": 46,
+        "repeat_SQL_model": 1472,
+        "new_setup_roots": 1,
+        "new_dependent_setup_rows": 1,
+        "new_setup_total": 2,
+        "replacement_children": 7,
+        "peak_actual_current_records_per_pass": 12,
+        "peak_actual_ORM_entity_keys": 16,
+        "retained_checkpoint_summaries": 32,
+        "physical_capture_rows": 9,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "principals-8",
+        "selected_principals": 8,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 28,
+        "physical_identity": 26,
+        "parents": 6,
+        "checkpoints": 44,
+        "ORM": 18,
+        "scalar_identity": 18,
+        "scalar_parents": 3,
+        "other_SQL_model": 25,
+        "SQL_per_checkpoint_model": 64,
+        "repeat_SQL_model": 2816,
+        "new_setup_roots": 7,
+        "new_dependent_setup_rows": 7,
+        "new_setup_total": 14,
+        "replacement_children": 13,
+        "peak_actual_current_records_per_pass": 18,
+        "peak_actual_ORM_entity_keys": 28,
+        "retained_checkpoint_summaries": 44,
+        "physical_capture_rows": 15,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "principals-100",
+        "selected_principals": 100,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 212,
+        "physical_identity": 210,
+        "parents": 6,
+        "checkpoints": 228,
+        "ORM": 110,
+        "scalar_identity": 110,
+        "scalar_parents": 3,
+        "other_SQL_model": 117,
+        "SQL_per_checkpoint_model": 340,
+        "repeat_SQL_model": 77520,
+        "new_setup_roots": 99,
+        "new_dependent_setup_rows": 99,
+        "new_setup_total": 198,
+        "replacement_children": 105,
+        "peak_actual_current_records_per_pass": 110,
+        "peak_actual_ORM_entity_keys": 212,
+        "retained_checkpoint_summaries": 228,
+        "physical_capture_rows": 107,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "refs-1",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 6,
+        "checkpoints": 30,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 43,
+        "repeat_SQL_model": 1290,
+        "new_setup_roots": 0,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 0,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 30,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "refs-2",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 2,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 3,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 9,
+        "checkpoints": 33,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 21,
+        "SQL_per_checkpoint_model": 46,
+        "repeat_SQL_model": 1518,
+        "new_setup_roots": 3,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 3,
+        "replacement_children": 9,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 33,
+        "physical_capture_rows": 11,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "refs-8",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 8,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 9,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 27,
+        "checkpoints": 51,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 39,
+        "SQL_per_checkpoint_model": 64,
+        "repeat_SQL_model": 3264,
+        "new_setup_roots": 21,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 21,
+        "replacement_children": 27,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 51,
+        "physical_capture_rows": 29,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "refs-100",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 100,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 101,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 303,
+        "checkpoints": 327,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 315,
+        "SQL_per_checkpoint_model": 340,
+        "repeat_SQL_model": 111180,
+        "new_setup_roots": 297,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 297,
+        "replacement_children": 303,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 327,
+        "physical_capture_rows": 305,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "LARGE_NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "canonical-1",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 0,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 14,
+        "physical_identity": 12,
+        "parents": 6,
+        "checkpoints": 30,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 43,
+        "repeat_SQL_model": 1290,
+        "new_setup_roots": 0,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 0,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 14,
+        "retained_checkpoint_summaries": 30,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "canonical-2",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 2,
+        "credentials": 0,
+        "identity_locations": 3,
+        "parent_locations": 3,
+        "descriptors": 15,
+        "physical_identity": 12,
+        "parents": 7,
+        "checkpoints": 31,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 43,
+        "repeat_SQL_model": 1333,
+        "new_setup_roots": 1,
+        "new_dependent_setup_rows": 1,
+        "new_setup_total": 2,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 15,
+        "retained_checkpoint_summaries": 31,
+        "physical_capture_rows": 9,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "canonical-8",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 8,
+        "credentials": 0,
+        "identity_locations": 9,
+        "parent_locations": 9,
+        "descriptors": 21,
+        "physical_identity": 12,
+        "parents": 13,
+        "checkpoints": 37,
+        "ORM": 11,
+        "scalar_identity": 11,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 43,
+        "repeat_SQL_model": 1591,
+        "new_setup_roots": 7,
+        "new_dependent_setup_rows": 7,
+        "new_setup_total": 14,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 11,
+        "peak_actual_ORM_entity_keys": 21,
+        "retained_checkpoint_summaries": 37,
+        "physical_capture_rows": 15,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "canonical-257",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 257,
+        "credentials": 0,
+        "identity_locations": 258,
+        "parent_locations": 258,
+        "descriptors": 270,
+        "physical_identity": 12,
+        "parents": 262,
+        "checkpoints": 286,
+        "ORM": 12,
+        "scalar_identity": 12,
+        "scalar_parents": 4,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 46,
+        "repeat_SQL_model": 13156,
+        "new_setup_roots": 256,
+        "new_dependent_setup_rows": 256,
+        "new_setup_total": 512,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 12,
+        "peak_actual_ORM_entity_keys": 270,
+        "retained_checkpoint_summaries": 286,
+        "physical_capture_rows": 264,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "credentials-1",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 1,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 15,
+        "physical_identity": 13,
+        "parents": 6,
+        "checkpoints": 31,
+        "ORM": 12,
+        "scalar_identity": 12,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 45,
+        "repeat_SQL_model": 1395,
+        "new_setup_roots": 1,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 1,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 12,
+        "peak_actual_ORM_entity_keys": 15,
+        "retained_checkpoint_summaries": 31,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "credentials-2",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 2,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 16,
+        "physical_identity": 14,
+        "parents": 6,
+        "checkpoints": 32,
+        "ORM": 13,
+        "scalar_identity": 13,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 47,
+        "repeat_SQL_model": 1504,
+        "new_setup_roots": 2,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 2,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 13,
+        "peak_actual_ORM_entity_keys": 16,
+        "retained_checkpoint_summaries": 32,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      },
+      {
+        "case_id": "credentials-8",
+        "selected_principals": 1,
+        "selected_refs_per_kind": 1,
+        "canonical_argument": 1,
+        "credentials": 8,
+        "identity_locations": 2,
+        "parent_locations": 2,
+        "descriptors": 22,
+        "physical_identity": 20,
+        "parents": 6,
+        "checkpoints": 38,
+        "ORM": 19,
+        "scalar_identity": 19,
+        "scalar_parents": 3,
+        "other_SQL_model": 18,
+        "SQL_per_checkpoint_model": 59,
+        "repeat_SQL_model": 2242,
+        "new_setup_roots": 8,
+        "new_dependent_setup_rows": 0,
+        "new_setup_total": 8,
+        "replacement_children": 6,
+        "peak_actual_current_records_per_pass": 19,
+        "peak_actual_ORM_entity_keys": 22,
+        "retained_checkpoint_summaries": 38,
+        "physical_capture_rows": 8,
+        "bytes_upper": "UNKNOWN Python/provider/compiler/Root collector overhead; no record-to-byte equivalence",
+        "admission": "NOTRUN_ROOT_ADMISSION_NEEDED"
+      }
+    ],
+    "credentials_cardinality": "UNBOUNDED_IN_INSPECTED_SOURCE; actual provider constraints/distribution UNKNOWN; bounded1/2/8 fixture samples only, no new cap or max-coverage claim",
+    "credentials_bound_sources": [
+      "clearledger/server/app/models_partner.py:33-39",
+      "clearledger/server/app/routers/partner_admin_router.py:93-109",
+      "clearledger/server/app/services/partner_identity.py:603-614"
+    ],
+    "formulas": {
+      "D": "2*p+c+k+11",
+      "physical_identity": "2*p+k+10",
+      "P": "2*r+max(r,c)+3",
+      "C": "2*p+2*r+max(r,c)+k+25 (one active type)",
+      "hI": "ceil((c+1)/256)",
+      "hP": "ceil((max(r,c)+1)/256)",
+      "Q_ORM_and_identity_scalar": "p+9+k+hI",
+      "Q_parent": "2+hP (r<=100)",
+      "other_SQL_per_checkpoint_model": "p+3*r+14",
+      "SQL_per_checkpoint_model": "3*p+3*r+34+2*k+2*hI+hP",
+      "setup_roots": "p+2*r+max(r,c)+k-4",
+      "setup_dependents": "p+c-2",
+      "setup_total": "2*p+2*r+max(r,c)+c+k-6",
+      "route_replacement_descendants": "p+3*r+2",
+      "physical_capture_rows": "p+2*r+max(r,c)+4"
+    },
+    "assumptions": "Profile replacement selects one active type; 2companies,p+1Users/Members,r+1CPs/Orgs,c+1canonical identity Locations,max(r,c)+1parent Locations,one grant,k actual credentials; original per-row/graph/native/admin/sets source statements each once. Residual/setup/replace/cleanup/provider-added SQL UNKNOWN. Original five coupled worlds retained without skips.",
+    "capture": "UNKNOWN actual byte upper. Concrete smaller chunk proof: canonical-257 with p=r=1,c=257,k=0:270 descriptors,286 checkpoints,12/12/4 identity/scalar/parent statements;13156 repeated SQL source model. Transient actual signature records<=12 plus<=270 native entity-key tuples, scalar one actual signature/row-key chunk<=256 plus four residual signatures; retain286 count-only checkpoint summaries and264 physical tuples plus2 DML texts. No SQL/compiled/bind aggregate. Expected/frozen oracle ID values are fixture-derived; compiler cache/ORM/Python/Root collector overhead and per-value Unicode/column-name bytes not measured/bounded, so no byte budget/admission claim.",
+    "cleanup": "m15_owned now enumerates ALL direct new setup roots AND ResourceItem/Member dependents with actual IDs, plus actual route-generated Principal/Ref/Type descendants (extra3 setup SELECTs). Original fixture roots remain original owner; replacement Company/User roots already declared by preserved external helper. ROOT owns FK-safe cleanup/admission, no claim it ran.",
+    "large_admission": "graph-100, mixed-large-100-257 and refs-100 exceed100k conditional repeated SQL; LARGE NOTRUN/admission-needed. canonical-257 is separate smaller chunk-proof proposal, still NOTRUN/unadmitted. No skipped case or automatic run.",
+    "axis_topology": "Canonical-only Location IDs are identity descriptors; selected noncanonical Locations in refs-only axis are full scalar/physical parents, not silently added to canonical sets/identity. Expected full IDs computed independently from ALL fixture objects and actual frozen plan."
+  },
+  "secondary_root_provenance_historical_3e": {
+    "new_Activation51V2": "user/coordinator supplied b41:51 PASS,0 fail/error/skip,52.9513s including bootstrap; its independent review pending; full139 NOTRUN",
+    "attribution": "SECONDARY, not this author execution and not candidate acceptance",
+    "historical_observation_sha256": "89ef10fa37206a0f620dbe6e82438a8feec41748dabbd0a31e4e56100d8fd341",
+    "historical_observation": "original1775 CALL diagnostic, not production-only latency"
+  },
+  "first_repair_code_parent": "26c03211999b22353d585501b88787375330140b",
+  "append_code_authorization": "coordinator msg_e231182e55ac explicitly allowed append local code child after first code cut, without reset, then one docs2-only child",
+  "f3_repair": {
+    "negative_cut": "22a11ea07a475719c7e6d7b9d3dca4e109d11495",
+    "negative_review": "/srv/projects/preview/partner-contract-activation-batching-fix-review-20261101/review.json",
+    "negative_review_json_sha256": "fb1aa3c922383b24d4d4834500cfb111a812d960f294fee57381d5ddb2a7b1ea",
+    "negative_review_md_sha256": "c7a99cf5a4d6c2f9905d1527398c81cc0c4cf1f95f7d7914f887ffb60dd5b4fa",
+    "previous_code_parent": "059e1934611437dc9c227b007b23c2b22351191c",
+    "code_parent": "b381e42d80a8d9ce346bd046d4de9ff7e574a053",
+    "code_delta": "Only one SQL string constant in _negative_current_fault: append varchar[] to non-null Counterparty.aliases ARRAY(String). Same id/params, all31+5parent variants/assertions/wrappers/rollback preserved.",
+    "new_sql": "UPDATE core.counterparties SET aliases=aliases || ARRAY['m15-parent-drift']::varchar[] WHERE id=:p",
+    "model_type_source": "Git22a:clearledger/server/app/models.py:1132",
+    "all12_faults_type_audit": "Consolidated independent review:11SQLbranches/12targetassignments+configgate; sole F3 fixed as source; no runtime execution.",
+    "authored_variants": 497,
+    "collection": "NOTRUN",
+    "A_I_M_source_unit": "byte-frozen to22a/3e",
+    "execution": "FS/Git/own stdlib AST/hash/JSON/compile without exec; project/library imports/calls/SQL/PG/tests0",
+    "next_gate": "Fresh independent FULL7 after both documents; ROOT resource/temporal/ORM/physical-schema/runtime/benchmark gates remain."
+  },
+  "root_original139_integration_dependency": {
+    "message": "msg_31ff6d39b638",
+    "verified_public_report_commit": "7c2f09475edcbc00c499d925c51067604a746ebf",
+    "report_md": "clearledger/docs/api/PARTNER_ACTIVATION139_ROOT_VERIFICATION_20261101.md",
+    "report_md_sha256": "2bc727351756cc7319a036738bd455b1976cd855406a74f93de2267a4552ae1a",
+    "report_json_sha256": "ca271efa8b842426430dc615eae7d8814525313b1888ebc49a4e5c372e0245d1",
+    "accepted_runtime_source": "823d336c99a5986cb8ebe06ccb5a6943fe885f02",
+    "scope": "Original139 only, secondary Root observation; public report bytes verified via Git, private RAW unread.",
+    "required_runtime_integration": "Apply exact7 delta over ROOT corrected823 baseline, preserve its oldPG8e1 snapshot/helper repairs. Own oldPG b41 stays byte-frozen; no claim that b41 standalone is runnable; no eighth file."
+  }
+}

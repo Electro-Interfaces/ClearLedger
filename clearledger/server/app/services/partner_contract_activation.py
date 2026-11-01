@@ -44,6 +44,52 @@ def _rows(db, statement):
     return deepcopy(tuple(tuple(row) for row in db.execute(statement)))
 
 
+def _identity_batches(specs):
+    """Only homogeneous frozen identity predicates; never physical locks.
+
+    Each IN has at most 256 IDs. Every group is exhausted, including its tail;
+    this bounds statement parameters without imposing a new graph-size limit.
+    All state here belongs to one current pass, never to the operation.
+    """
+    groups = {}
+    for index, spec in enumerate(specs):
+        if (spec.model in (Company, User) and spec.pointers == ()
+                and len(spec.identity) == 1):
+            key = (spec.model, ())
+        elif (spec.model is ServiceLocation and len(spec.pointers) == 1
+                and len(spec.identity) == 1):
+            key = (spec.model, spec.pointers)
+        else:
+            key = (index,)
+        groups.setdefault(key, []).append(spec)
+    for group in groups.values():
+        for start in range(0, len(group), 256):
+            yield tuple(group[start:start + 256])
+
+
+def _batch_statement(batch, *, scalar=False):
+    model = batch[0].model
+    statement = select(*model.__table__.c) if scalar else select(model)
+    statement = statement.where(model.id.in_(tuple(spec.identity[0] for spec in batch)))
+    if model is ServiceLocation:
+        statement = statement.where(model.company_id == batch[0].pointers[0])
+    return statement.execution_options(populate_existing=True)
+
+
+def _keyed_rows(db, rows, expected_ids, key):
+    """Do not let a duplicate, foreign or unexpected row become a fallback."""
+    from app.services.partner_identity import _writer_drift
+    actual = {}
+    for row in rows:
+        ident = key(row)
+        if ident not in expected_ids or ident in actual:
+            _writer_drift(db)
+        actual[ident] = row
+    if set(actual) != expected_ids:
+        _writer_drift(db)
+    return actual
+
+
 class ActivationOperation:
     """Exact private composition, never a ProfileOperation subclass or receipt."""
     parent_models = (Counterparty, Organization, ServiceLocation)
@@ -137,17 +183,71 @@ class ActivationOperation:
                 self.parent(db, spec.model, spec.identity[0])
         # Discovery is complete here; no new key or parent is admitted after B.
 
+    def refresh_identity(self, db, specs):
+        """First independent current pass: original ORM entities for native auth."""
+        from app.services.partner_identity import _writer_drift
+        with db.no_autoflush:
+            for batch in _identity_batches(spec for spec in specs if not spec.update):
+                if len(batch) == 1:
+                    spec = batch[0]
+                    rows = db.scalars(spec.statement()).all()
+                    if len(rows) != (0 if spec.missing else 1):
+                        _writer_drift(db)
+                    continue
+                ids = {spec.identity[0] for spec in batch}
+                if len(ids) != len(batch):
+                    _writer_drift(db)
+                expected_ids = {spec.identity[0] for spec in batch if not spec.missing}
+                rows = db.scalars(_batch_statement(batch)).all()
+                actual = _keyed_rows(db, rows, expected_ids, lambda row: row.id)
+                if any(type(row) is not batch[0].model or
+                       (batch[0].model is ServiceLocation and
+                        row.company_id != batch[0].pointers[0]) for row in actual.values()):
+                    _writer_drift(db)
+
     def recheck(self, db):
         from app.services import partner_identity as identity
         require_profile_admin_enabled()
         self.graph.recheck(db)
-        for spec, expected in zip(self.ordered, self.identity_rows):
-            if _rows(db, spec.statement().with_only_columns(*spec.model.__table__.c)) != expected:
+        # Fresh scalar SQL AFTER the unchanged ProfileOperation pass. No ORM
+        # rows or values from refresh_identity/freeze are reused as current data.
+        with db.no_autoflush:
+            frozen = {id(spec): expected for spec, expected in zip(self.ordered, self.identity_rows)}
+            if len(self.ordered) != len(self.identity_rows) or len(frozen) != len(self.ordered):
                 identity._writer_drift(db)
-        for (model, ident), expected in self.parents.items():
-            if _rows(db, select(*model.__table__.c).where(
-                    model.id == ident, model.company_id == self.company_id)) != expected:
+            for batch in _identity_batches(self.ordered):
+                if len(batch) == 1:
+                    spec = batch[0]
+                    if _rows(db, spec.statement().with_only_columns(*spec.model.__table__.c)) != frozen[id(spec)]:
+                        identity._writer_drift(db)
+                    continue
+                model = batch[0].model
+                ids = {spec.identity[0] for spec in batch}
+                if len(ids) != len(batch):
+                    identity._writer_drift(db)
+                expected_ids = {spec.identity[0] for spec in batch if not spec.missing}
+                index = next(index for index, column in enumerate(model.__table__.c) if column.name == "id")
+                actual = _keyed_rows(db, _rows(db, _batch_statement(batch, scalar=True)),
+                                    expected_ids, lambda row: row[index])
+                for spec in batch:
+                    expected = frozen[id(spec)]
+                    current = (actual[spec.identity[0]],) if spec.identity[0] in actual else ()
+                    if current != expected:
+                        identity._writer_drift(db)
+            if any(model not in self.parent_models for model, _ident in self.parents):
                 identity._writer_drift(db)
+            for model in self.parent_models:
+                parents = [(ident, expected) for (kind, ident), expected in self.parents.items() if kind is model]
+                index = next(index for index, column in enumerate(model.__table__.c) if column.name == "id")
+                for start in range(0, len(parents), 256):
+                    chunk = parents[start:start + 256]
+                    ids = {ident for ident, _expected in chunk}
+                    actual = _keyed_rows(db, _rows(db, select(*model.__table__.c).where(
+                        model.id.in_(tuple(ident for ident, _expected in chunk)),
+                        model.company_id == self.company_id)), ids, lambda row: row[index])
+                    for ident, expected in chunk:
+                        if (actual[ident],) != expected:
+                            identity._writer_drift(db)
         for iid, expected in self.installation_sets.items():
             if identity._installation_sets(db, iid) != expected:
                 identity._writer_drift(db)

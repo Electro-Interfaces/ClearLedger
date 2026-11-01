@@ -456,8 +456,9 @@ def activation_baseline_digest(path):
     """Restore the WHOLE previous module, not just selected old functions."""
     relative = str(path.relative_to(ROOT))
     overlay = ACTIVATION_RAW_OVERLAY[relative]
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == overlay["extended"]
-    projected = tree(path)
+    baseline_bytes = m15_baseline_bytes(path)
+    assert hashlib.sha256(baseline_bytes).hexdigest() == overlay["extended"]
+    projected = ast.parse(baseline_bytes, filename=str(path))
     if relative == "app/services/partner_identity.py":
         composer, = (n for n in projected.body if isinstance(n, ast.FunctionDef)
                      and n.name == "_prepare_partner_write")
@@ -510,7 +511,7 @@ def test_activation_explicit_overlay_preserves_whole_identity_routes_profile_and
     profile = ROOT / "app/services/partner_contract_profiles.py"
     assert hashlib.sha256(profile.read_bytes()).hexdigest() == ACTIVATION_SOURCE["profile_sha"]
     service = ROOT / "app/services/partner_contract_activation.py"
-    assert hashlib.sha256(service.read_bytes()).hexdigest() == ACTIVATION_SOURCE["service_sha"]
+    assert hashlib.sha256(m15_baseline_bytes(service)).hexdigest() == ACTIVATION_SOURCE["service_sha"]
     schema = ROOT / "app/schemas_partner.py"
     assert hashlib.sha256(schema.read_bytes()).hexdigest() == ACTIVATION_SOURCE["schema_sha"]
     projected = tree(schema)
@@ -518,3 +519,95 @@ def test_activation_explicit_overlay_preserves_whole_identity_routes_profile_and
     projected.body.remove(addition)
     assert digest_node(projected) == ACTIVATION_SOURCE["schema_baseline_ast"]
     assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
+
+
+# M15 additive source-only overlay; ALL historical records above are unchanged.
+M15_SOURCE_CUT = '7dd71a54a45315ad67fe1f8b358834fe86301c36'
+M15_SOURCE_OVERLAY = {'app/services/partner_contract_activation.py': {'base_raw': '6b97c9e6c5420af95587b85947c26295b95d82941ada2bc1c6f5912e648ad9a5', 'candidate_raw': '3d9bf265fe808c8efa9f8a7b4df86352e9e4349b5bf7607bb017cdcd20b57be0', 'base_ast': 'c2e8a0ad22f48fa76801ef14e02ca3821f4fded5445d42f376b9e149586642f4', 'candidate_ast': '1a180f59252361ed9c7b3ebe1a89c2dc0099b345887b28953907cca1ef38b134', 'strict_counts': [1, 1, 1], 'fragments': [{'old': '', 'new': 'def _identity_batches(specs):\n    """Only homogeneous frozen identity predicates; never physical locks.\n\n    Each IN has at most 256 IDs. Every group is exhausted, including its tail;\n    this bounds statement parameters without imposing a new graph-size limit.\n    All state here belongs to one current pass, never to the operation.\n    """\n    groups = {}\n    for index, spec in enumerate(specs):\n        if (spec.model in (Company, User) and spec.pointers == ()\n                and len(spec.identity) == 1):\n            key = (spec.model, ())\n        elif (spec.model is ServiceLocation and len(spec.pointers) == 1\n                and len(spec.identity) == 1):\n            key = (spec.model, spec.pointers)\n        else:\n            key = (index,)\n        groups.setdefault(key, []).append(spec)\n    for group in groups.values():\n        for start in range(0, len(group), 256):\n            yield tuple(group[start:start + 256])\n\n\ndef _batch_statement(batch, *, scalar=False):\n    model = batch[0].model\n    statement = select(*model.__table__.c) if scalar else select(model)\n    statement = statement.where(model.id.in_(tuple(spec.identity[0] for spec in batch)))\n    if model is ServiceLocation:\n        statement = statement.where(model.company_id == batch[0].pointers[0])\n    return statement.execution_options(populate_existing=True)\n\n\ndef _keyed_rows(db, rows, expected_ids, key):\n    """Do not let a duplicate, foreign or unexpected row become a fallback."""\n    from app.services.partner_identity import _writer_drift\n    actual = {}\n    for row in rows:\n        ident = key(row)\n        if ident not in expected_ids or ident in actual:\n            _writer_drift(db)\n        actual[ident] = row\n    if set(actual) != expected_ids:\n        _writer_drift(db)\n    return actual\n\n\n'}, {'old': '', 'new': '    def refresh_identity(self, db, specs):\n        """First independent current pass: original ORM entities for native auth."""\n        from app.services.partner_identity import _writer_drift\n        with db.no_autoflush:\n            for batch in _identity_batches(spec for spec in specs if not spec.update):\n                if len(batch) == 1:\n                    spec = batch[0]\n                    rows = db.scalars(spec.statement()).all()\n                    if len(rows) != (0 if spec.missing else 1):\n                        _writer_drift(db)\n                    continue\n                ids = {spec.identity[0] for spec in batch}\n                if len(ids) != len(batch):\n                    _writer_drift(db)\n                expected_ids = {spec.identity[0] for spec in batch if not spec.missing}\n                rows = db.scalars(_batch_statement(batch)).all()\n                actual = _keyed_rows(db, rows, expected_ids, lambda row: row.id)\n                if any(type(row) is not batch[0].model or\n                       (batch[0].model is ServiceLocation and\n                        row.company_id != batch[0].pointers[0]) for row in actual.values()):\n                    _writer_drift(db)\n\n'}, {'old': '    def recheck(self, db):\n        from app.services import partner_identity as identity\n        require_profile_admin_enabled()\n        self.graph.recheck(db)\n        for spec, expected in zip(self.ordered, self.identity_rows):\n            if _rows(db, spec.statement().with_only_columns(*spec.model.__table__.c)) != expected:\n                identity._writer_drift(db)\n        for (model, ident), expected in self.parents.items():\n            if _rows(db, select(*model.__table__.c).where(\n                    model.id == ident, model.company_id == self.company_id)) != expected:\n                identity._writer_drift(db)\n        for iid, expected in self.installation_sets.items():\n            if identity._installation_sets(db, iid) != expected:\n                identity._writer_drift(db)\n        for cid, expected in self.credential_sets.items():\n            actual = tuple(sorted(db.scalars(select(PartnerCredential.id).where(\n                PartnerCredential.client_id == cid)), key=str))\n            if actual != expected:\n                identity._writer_drift(db)\n\n', 'new': '    def recheck(self, db):\n        from app.services import partner_identity as identity\n        require_profile_admin_enabled()\n        self.graph.recheck(db)\n        # Fresh scalar SQL AFTER the unchanged ProfileOperation pass. No ORM\n        # rows or values from refresh_identity/freeze are reused as current data.\n        with db.no_autoflush:\n            frozen = {id(spec): expected for spec, expected in zip(self.ordered, self.identity_rows)}\n            if len(self.ordered) != len(self.identity_rows) or len(frozen) != len(self.ordered):\n                identity._writer_drift(db)\n            for batch in _identity_batches(self.ordered):\n                if len(batch) == 1:\n                    spec = batch[0]\n                    if _rows(db, spec.statement().with_only_columns(*spec.model.__table__.c)) != frozen[id(spec)]:\n                        identity._writer_drift(db)\n                    continue\n                model = batch[0].model\n                ids = {spec.identity[0] for spec in batch}\n                if len(ids) != len(batch):\n                    identity._writer_drift(db)\n                expected_ids = {spec.identity[0] for spec in batch if not spec.missing}\n                index = next(index for index, column in enumerate(model.__table__.c) if column.name == "id")\n                actual = _keyed_rows(db, _rows(db, _batch_statement(batch, scalar=True)),\n                                    expected_ids, lambda row: row[index])\n                for spec in batch:\n                    expected = frozen[id(spec)]\n                    current = (actual[spec.identity[0]],) if spec.identity[0] in actual else ()\n                    if current != expected:\n                        identity._writer_drift(db)\n            if any(model not in self.parent_models for model, _ident in self.parents):\n                identity._writer_drift(db)\n            for model in self.parent_models:\n                parents = [(ident, expected) for (kind, ident), expected in self.parents.items() if kind is model]\n                index = next(index for index, column in enumerate(model.__table__.c) if column.name == "id")\n                for start in range(0, len(parents), 256):\n                    chunk = parents[start:start + 256]\n                    ids = {ident for ident, _expected in chunk}\n                    actual = _keyed_rows(db, _rows(db, select(*model.__table__.c).where(\n                        model.id.in_(tuple(ident for ident, _expected in chunk)),\n                        model.company_id == self.company_id)), ids, lambda row: row[index])\n                    for ident, expected in chunk:\n                        if (actual[ident],) != expected:\n                            identity._writer_drift(db)\n        for iid, expected in self.installation_sets.items():\n            if identity._installation_sets(db, iid) != expected:\n                identity._writer_drift(db)\n        for cid, expected in self.credential_sets.items():\n            actual = tuple(sorted(db.scalars(select(PartnerCredential.id).where(\n                PartnerCredential.client_id == cid)), key=str))\n            if actual != expected:\n                identity._writer_drift(db)\n\n'}]}, 'app/services/partner_identity.py': {'base_raw': '0968c41deac1955095c9a80ba4542d0ccd074f68699c29c788cbfab11772ac90', 'candidate_raw': '3a254b8816bfcd2a2a6619d7ebe8e225e1c460cbb6cfca7302babeeacf935f9a', 'base_ast': '4e612b200fb6e3f6cbfda1bb42524273695a016a093ed118b327150ffc2db3f8', 'candidate_ast': '4d3cd8f94c7940fab71db6b352899b4ad573083b0641df67308ae30ea60495e5', 'strict_counts': [1], 'fragments': [{'old': '    def checkpoint(self):\n        """Repeat current authority after waits, never reacquire/extend a plan.\n\n        UPDATE rows may contain this operation\'s own pending changes; only\n        unchanged authority rows are repopulated here. Pointer drift is checked\n        while first acquiring each row, before touching any downstream row.\n        """\n        require_scoped_locks(self.db, self.capability, self.capability.plan.requests)\n        with self.db.no_autoflush:\n            for spec in self.rows:\n                if not spec.update:\n                    row = self.db.scalar(spec.statement())\n                    if (row is None) != spec.missing:\n                        _writer_drift(self.db)\n            profile = getattr(self, "contract_profile", None)\n            if profile is not None:\n                profile.recheck(self.db)\n            claims = None\n            if self.native:\n                self.actor, claims = self.native(self.db)\n            if self.admin_company is not None:\n                admin(self.db, self.actor, self.admin_company)\n            if self.request_deadline is not None and self.request_deadline <= now():\n                raise PartnerProblem(410, "AUTH_REQUEST_EXPIRED", "Срок запроса авторизации истёк")\n        return claims\n', 'new': '    def checkpoint(self):\n        """Repeat current authority after waits, never reacquire/extend a plan.\n\n        UPDATE rows may contain this operation\'s own pending changes; only\n        unchanged authority rows are repopulated here. Pointer drift is checked\n        while first acquiring each row, before touching any downstream row.\n        """\n        require_scoped_locks(self.db, self.capability, self.capability.plan.requests)\n        with self.db.no_autoflush:\n            from app.services.partner_contract_activation import ActivationOperation\n            if type(getattr(self, "contract_profile", None)) is ActivationOperation:\n                self.contract_profile.refresh_identity(self.db, self.rows)\n            else:\n                for spec in self.rows:\n                    if not spec.update:\n                        row = self.db.scalar(spec.statement())\n                        if (row is None) != spec.missing:\n                            _writer_drift(self.db)\n            profile = getattr(self, "contract_profile", None)\n            if profile is not None:\n                profile.recheck(self.db)\n            claims = None\n            if self.native:\n                self.actor, claims = self.native(self.db)\n            if self.admin_company is not None:\n                admin(self.db, self.actor, self.admin_company)\n            if self.request_deadline is not None and self.request_deadline <= now():\n                raise PartnerProblem(410, "AUTH_REQUEST_EXPIRED", "Срок запроса авторизации истёк")\n        return claims\n'}]}}
+
+
+def m15_baseline_bytes(path, raw=None, overlays=None):
+    """Check exact candidate, strict inverse, then old WHOLE raw and AST.
+
+    Existing digest_node/stable_ast_dump owns cross-Python compatibility.
+    Only the declared literal fragments can be removed before old activation
+    inverse. Extra changes cannot hide behind a method-name or AST-only pin.
+    """
+    relative = str(path.relative_to(ROOT))
+    raw = path.read_bytes() if raw is None else raw
+    overlays = M15_SOURCE_OVERLAY if overlays is None else overlays
+    if relative not in overlays:
+        return raw
+    record = overlays[relative]
+    assert hashlib.sha256(raw).hexdigest() == record["candidate_raw"]
+    assert digest_node(ast.parse(raw)) == record["candidate_ast"]
+    fragments = record["fragments"]
+    assert record["strict_counts"] == [1] * len(fragments)
+    assert len(fragments) == (3 if relative.endswith("partner_contract_activation.py") else 1)
+    value = raw.decode("utf-8")
+    for fragment in fragments:
+        assert set(fragment) == {"old", "new"}
+        assert type(fragment["new"]) is str and fragment["new"]
+        assert type(fragment["old"]) is str
+        assert value.count(fragment["new"]) == 1
+        value = value.replace(fragment["new"], fragment["old"], 1)
+    baseline = value.encode("utf-8")
+    assert hashlib.sha256(baseline).hexdigest() == record["base_raw"]
+    assert digest_node(ast.parse(baseline)) == record["base_ast"]
+    return baseline
+
+
+def test_m15_raw_and_strict_whole_inverse_precede_every_historical_projection():
+    assert set(M15_SOURCE_OVERLAY) == {"app/services/partner_contract_activation.py", "app/services/partner_identity.py"}
+    assert M15_SOURCE_CUT == "7dd71a54a45315ad67fe1f8b358834fe86301c36"
+    for relative, record in M15_SOURCE_OVERLAY.items():
+        path = ROOT / relative
+        projected = m15_baseline_bytes(path)
+        assert hashlib.sha256(projected).hexdigest() == record["base_raw"]
+        assert digest_node(ast.parse(projected)) == record["base_ast"]
+    assert M15_SOURCE_OVERLAY["app/services/partner_identity.py"]["base_raw"] == ACTIVATION_RAW_OVERLAY["app/services/partner_identity.py"]["extended"]
+    assert M15_SOURCE_OVERLAY["app/services/partner_contract_activation.py"]["base_raw"] == ACTIVATION_SOURCE["service_sha"]
+    activation_baseline_digest(IDENTITY)  # Original whole activation inverse, unchanged.
+    assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
+
+
+def test_m15_any_undeclared_raw_change_and_malformed_fragment_count_fail_closed():
+    def rejected(path, raw, overlays):
+        try:
+            m15_baseline_bytes(path, raw=raw, overlays=overlays)
+        except (AssertionError, SyntaxError):
+            return
+        raise AssertionError("M15 accepted undeclared source/count change")
+    for relative, record in M15_SOURCE_OVERLAY.items():
+        path, raw = ROOT / relative, (ROOT / relative).read_bytes()
+        # Whole raw SHA covers every byte, including untouched definitions and
+        # comments; representative deltas cannot be normalized away by AST.
+        for offset in (0, len(raw) // 2, len(raw)):
+            rejected(path, raw[:offset] + b"# M15 undeclared\n" + raw[offset:], M15_SOURCE_OVERLAY)
+        rejected(path, raw.replace(b"return", b"raise ", 1), M15_SOURCE_OVERLAY)
+        for count in (0, 2, -1):
+            corrupt = deepcopy(M15_SOURCE_OVERLAY)
+            corrupt[relative]["strict_counts"][0] = count
+            rejected(path, raw, corrupt)
+        for index in range(len(record["fragments"])):
+            corrupt = deepcopy(M15_SOURCE_OVERLAY)
+            corrupt[relative]["fragments"][index]["new"] = ""
+            rejected(path, raw, corrupt)
+            corrupt = deepcopy(M15_SOURCE_OVERLAY)
+            corrupt[relative]["fragments"][index]["new"] += "# absent fragment"
+            rejected(path, raw, corrupt)
+
+
+def test_m15_existing_serializer_empty_type_params_same_nonempty_different():
+    module = ast.parse("def sample(value):\n    return value\n")
+    expected = digest_node(module)
+    current = deepcopy(module)
+    current.body[0].type_params = []
+    # Python 3.11 does not enumerate the extra field; 3.12+ does. Both retain
+    # the same original pin. Explicitly extend _fields for this synthetic AST
+    # only, so both versions also exercise a nonempty enumerated parameter.
+    if "type_params" not in current.body[0]._fields:
+        current.body[0]._fields = (*current.body[0]._fields, "type_params")
+    assert digest_node(current) == expected
+    current.body[0].type_params = [ast.Name(id="M15Nonempty", ctx=ast.Load())]
+    assert digest_node(current) != expected
