@@ -1,0 +1,529 @@
+{
+  "rootAcceptance": {
+    "status": "ROOT_ACCEPTED_INDEPENDENT_ACTIVATION51V2_ONLY",
+    "source": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
+    "task": "task_d5ce812b142c",
+    "dispatch": "ctx_5f372c87cd14",
+    "workerDone": "msg_9f612d1652d4",
+    "independentMD": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/activation51v2-independent-review-20261101/REVIEW.md",
+    "independentMDsha256": "5dd72dda72cfc8c70626184e45f6e7a502127d6e176ad64610722404592b1fb1",
+    "independentJSON": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/activation51v2-independent-review-20261101/REVIEW.json",
+    "independentJSONsha256": "a94db53994b289d9f00f22b2322313c22fcbcee3d3ab818e6a380b1c299b8ec0",
+    "inputsReverified": 15,
+    "cases": 51,
+    "phases": 153,
+    "defs": 22,
+    "seconds": 52.951319891028106,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "denied": [],
+    "oldFailed51Preserved": true,
+    "full139": "NOTRUN; source admission ongoing",
+    "SQLBudget": "CALL includes readbackGET, not compared to diagnostic1775; no M15 acceptance",
+    "global": "M00-M19+11 OPEN"
+  },
+  "independentReview": {
+    "verdict": "PASS",
+    "scope": "Activation51V2 exact component SOURCE+RAW review only",
+    "runtimeExecutedByReviewer": 0,
+    "immutableLedger": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
+    "root": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029",
+    "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation51v2-b41ba2da-fullnative-pg-20261101-4fe8ea77c1e8",
+    "sourceReview": {
+      "manifestEntries": 576,
+      "byDirectory": {
+        "app": 526,
+        "schema_migrations": 34,
+        "tests": 16
+      },
+      "all576SnapshotBytesMatchGitAndManifest": true,
+      "sourceFilesystemExactlyManifest": true,
+      "allAppSchemaEntriesPresent": 560,
+      "baseTestEntries": 6,
+      "additionalDPLReadOnlyEntries": {
+        "tests/conftest.py": "32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b",
+        "tests/partner_contract_schema_v4_approval.py": "e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920",
+        "tests/partner_contract_schema_v4_fixture.py": "5fbd458cfb1b07c86f4e835e8699aba3608c01cf7d86fe713ad9bdf3d6dca777",
+        "tests/partner_main_composition_approved.py": "23fa037557b16ab2ffcf672a7759fa89ff1adf2e11d4afbb5644fc534fea5bd8",
+        "tests/partner_test_safety.py": "43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1",
+        "tests/test_docs_portal.py": "a56f0eda9bf6ab89f24fefd4c73a61c3ff3a33e2257df64971432a5c2f22c6ff",
+        "tests/test_docs_portal_browser.py": "6b52236afd7fb367b75e88fed6439d12f75b190bd2fbe99d8506ae430e50df58",
+        "tests/test_partner_main_composition.py": "ee887de322fa62aee1af01304ee4b8d6c33b1c2940c7b8f22bd9eca0a93d7f32",
+        "tests/test_partner_writer_scoped_locks.py": "b2ca00492ddf2f669306fba5eb1e931df0b081b4f1f4be457dcfdc3784f1ccf2",
+        "tests/test_partner_writer_scoped_locks_pg.py": "5fb0e0c14074a9aeecb4ae65a515289b57debc22969b18bc6c7ea7f5b663f0a7"
+      },
+      "readonlyImportFinding": "The ten added files are hash/AST read inputs only. --noconftest and exact three collection files/two PG node IDs; selected tests/issuer fixture have no dynamic import/exec. Full AST scan found no import edge to these ten from potential runtime source (excluding the ten themselves and uncollected schema_migrations/tests). Recorder executes only original22 definitions. No raw sys.modules dump for tests exists, so no claim of independent complete import telemetry.",
+      "criticalSHA256": {
+        "app/services/partner_contract_activation.py": "6b97c9e6c5420af95587b85947c26295b95d82941ada2bc1c6f5912e648ad9a5",
+        "app/services/partner_contract_profiles.py": "6fdc93816c6ba7af22b97dc6c1e8e1bc91f1563cec1c0672e82e17a11c23abef",
+        "app/services/partner_identity.py": "0968c41deac1955095c9a80ba4542d0ccd074f68699c29c788cbfab11772ac90",
+        "app/services/contract_write_locks.py": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
+        "app/services/partner_contract_authority.py": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18",
+        "app/auth.py": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889",
+        "app/models.py": "bee511c0f1682519a6f074fd58dd88bc14068981599ba91e773838ed58ab6a49",
+        "app/models_partner.py": "2de59cd89fee2f6c468db14e24e99b07577ea0078b7263abdc7a3da43e74ec94",
+        "app/models_partner_contracts.py": "d38d57424373220d358f5411bb566c62a6dbd30212be9bc482d8f7358e4cf2de",
+        "app/schemas_partner.py": "2f9c10a92d960b25ff3bbd74a4990e583cadfaba118570236b325baf8ab02580",
+        "app/routers/partner_admin_router.py": "8d7e9324e1a82a716cb96632f389d2ebedd40dfe4b7f798b4b81d8437afb2494",
+        "tests/test_partner_contract_activation.py": "2e5f9a31ed4cc3653b3f2c0d2df5e23479baa4f38e169cc32aad3fd0facb1219",
+        "tests/test_docs_portal_logout_scoped_locks.py": "c18391521cc660efc53cfdd8655d2e1b90af89b567628cf6feddeabf14ab16ee",
+        "tests/test_partner_contract_activation_pg.py": "57d2b25225901d6c3b4206de3dd1c2e97c16fb9796e04099219ca4db57b219ce",
+        "tests/partner_contract_issuer_fixture.py": "274b1451b1af107b384e2f2dd9aa44d32f6787027789bfefd13359dc5c8c15f0"
+      },
+      "integration": {
+        "source": "fad2a8dc80bfa9cabc36567fc37caf532d3fc8a2",
+        "receiptPath": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/activation-observer-fad2-source-integration-20261101.json",
+        "receiptSHA256": "005847300013c2c555d400175c09c738912876193c0ed01c460194c4a26c637c",
+        "newCommitDiff": "One test file only, 216 insertions/12 deletions; production/schema delta zero vs149f3033d8e8c4cef012ce7072e72283abc4190c.",
+        "inverseProof": "AST of whole test module with target function removed is identical to149f; target signature/decorators unchanged; module raw hash equals reviewed fad2 receipt."
+      }
+    },
+    "composition": {
+      "controller": {
+        "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation51v2-b41ba2da-fullnative-pg-root-20261101.py",
+        "sha256": "006aa038fbd60da4522e65292ceafec06d1e43696541dd5974f68343bc5deb5b",
+        "embeddedRunnerSHA256": "5b4d9e21a88e56710d5dbfa631bf2fe1e345f8f53c28f04071d0e44d5d57e33d",
+        "readAndCompiledOnly": true
+      },
+      "refs": "Controller lines18-56 pre-copy/hash;57-76 ordinary owned PG identity;84-97 isolated mounts/network;103-131 reaped cleanup/revalidation. Embedded RUNNER line numbers below.",
+      "preflight": "Runner5-10 verifies Python3.13.7 isolated/no_site and exact source/driver pins before app imports.26-43 validates own loopback PG/database/identity, READ COMMITTED, disabled default gates and SQLAlchemy2.0.36/psycopg3.2.3.",
+      "ordinaryPG": {
+        "db": "api_activation51v2_b41_test_20261101",
+        "usr": "clearledger",
+        "dboid": 16385,
+        "owner": 16384,
+        "roid": 16384,
+        "rolsuper": false,
+        "rolcreatedb": false,
+        "rolcreaterole": false,
+        "rolreplication": false,
+        "rolbypassrls": false,
+        "version": 160015
+      },
+      "ordinaryRoleProof": "All elevated flags false, database owner OID equals role OID; server version160015 = PG16.15. No assumption that clearledger role name alone proves this.",
+      "driverManifestSHA256": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+      "driverBoundary": "Public manifest independently hashed; embedded runner/controller enforce its dependency hashes/version before and after execution. Dependency files and external helper were not separately opened: named-artifact scope; no independent full library audit claimed.",
+      "bootstrap": "Runner208-241 uses original schema_migrations runner prefix3, original database preflight/require/create_all under startup lock, native revision4 and catalogue checks.341 source models match independently reconstructed AST registry; exact physical universes341 then347.",
+      "schema": {
+        "prefix3": {
+          "modelDefinitions": 341,
+          "tables": 341,
+          "columns": 4675,
+          "primaryAndForeignKeys": 1131,
+          "foreignKeys": 790,
+          "RItriggers": 3160,
+          "extraColumnsExplicit": 1,
+          "extraFKExplicit": 2,
+          "sourceRegistryAndTableUniverseIndependentlyMatch": true,
+          "allOwnersClearledgerOrdinaryTables": true,
+          "allKeysValidated": true,
+          "allRIEnabledInternal": true,
+          "fourRIperFK": true
+        },
+        "prefix4": {
+          "modelDefinitions": 341,
+          "tables": 347,
+          "columns": 4720,
+          "primaryAndForeignKeys": 1150,
+          "foreignKeys": 803,
+          "RItriggers": 3212,
+          "extraColumnsExplicit": 1,
+          "extraFKExplicit": 3,
+          "sourceRegistryAndTableUniverseIndependentlyMatch": true,
+          "allOwnersClearledgerOrdinaryTables": true,
+          "allKeysValidated": true,
+          "allRIEnabledInternal": true,
+          "fourRIperFK": true
+        }
+      },
+      "sourceModelRegistrySHA256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a",
+      "lifespanSeed": "app.main and app.seed ARE imported (427 app modules loaded); their lifespan/seed entry points are not invoked. Runner directly calls original native bootstrap only; app/database.py has no seed/lifespan call, app/main.py seed calls belong to _prepare_database144-190 not entered by runner; ASGITransport uses the selected in-process FastAPI router, no listening HTTP server.",
+      "networkAndSideEffects": "Runner12-24 audit denies process/fork/exec/bind and every socket target except owned127.0.0.1:5432. RAW denied=[], connects6. PG has network none, Python shares only owned PG namespace; no published ports. No third-party API/SSH/network service used.",
+      "actualFixture": "Runner254-280 actual create_async_engine+async_sessionmaker(expire_on_commit=False), DB/user/schema/isolation checks and live-loop dispose. Fresh synthetic RSA key for isolated settings, restored at teardown. No replacement Session/auth/grant/verifier/B/capability; tests world40-125 seeds actual SQL User/member/client/profile and signs each actor own claims, overrides only get_db with real factory. Selected delegating observers invoke originals exactly once.",
+      "pytest": "Runner321 --noconftest -c /dev/null --assert=plain exact unit+DPL files and two selected PG node IDs; no fake app modules or positive ACL result patches. Audit/progress plugins observe, fixture plugin supplies actual Session factory.",
+      "helperBoundary": "Controller pins external helper98a86e5395561903d67546dcf3fb221c404b816baf0801847bf6ff8671d5470c; external helper not reopened under restricted input scope. Public execution shows operations/ownership/cleanup, rather than assuming success from result label."
+    },
+    "rawReconciliation": {
+      "collected": 51,
+      "uniqueCollected": 51,
+      "originalDefinitions": 22,
+      "families": {
+        "unit": {
+          "definitions": 8,
+          "cases": 37
+        },
+        "DPL": {
+          "definitions": 12,
+          "cases": 12
+        },
+        "actualNativePG": {
+          "definitions": 2,
+          "cases": 2
+        }
+      },
+      "phases": {
+        "setupPassed": 51,
+        "callPassed": 51,
+        "teardownPassed": 51,
+        "total": 153,
+        "startRows": 51
+      },
+      "progressMatchesResultPhaseByPhase": true,
+      "eachCaseHasExactlyThreePhases": true,
+      "exitCode": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "allReportErrorsNull": true,
+      "denied": [],
+      "observerErrors": [],
+      "poolErrors": [],
+      "secondsIncludingBootstrap": 52.951319891028106,
+      "pytestStdoutSeconds": 25.58,
+      "timingBoundary": "52.951319891s includes bootstrap; stdout25.58s is pytest scope. Neither is a representative activation latency benchmark.",
+      "warnings": [
+        "pytest_asyncio instance session fixture deprecation",
+        "Expected Pydantic serializer warning from deliberately forged bool DTO",
+        "Two invalid-escape SyntaxWarnings in stderr"
+      ],
+      "selectedOriginalDefinitions": {
+        "tests/test_partner_contract_activation.py": [
+          {
+            "symbol": "test_all_activation_fields_are_required_and_not_nullable",
+            "line": 22,
+            "cases": 3,
+            "sourceExpansion": 3
+          },
+          {
+            "symbol": "test_generation_is_strict_positive_bigint",
+            "line": 33,
+            "cases": 7,
+            "sourceExpansion": 7
+          },
+          {
+            "symbol": "test_flags_are_exact_booleans",
+            "line": 40,
+            "cases": 14,
+            "sourceExpansion": 14
+          },
+          {
+            "symbol": "test_activation_has_no_child_or_authority_input",
+            "line": 46,
+            "cases": 6,
+            "sourceExpansion": 6
+          },
+          {
+            "symbol": "test_forged_construct_and_copy_are_revalidated",
+            "line": 53,
+            "cases": 4,
+            "sourceExpansion": 4
+          },
+          {
+            "symbol": "test_exact_dto_type_and_instance_fields_cannot_be_forged",
+            "line": 61,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_source_exact_private_composition_one_b_and_no_children_dml",
+            "line": 75,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_source_activation_only_gate_stage_and_whole_root_completion",
+            "line": 96,
+            "cases": 1,
+            "sourceExpansion": 1
+          }
+        ],
+        "tests/test_docs_portal_logout_scoped_locks.py": [
+          {
+            "symbol": "test_accepted_create_scope_extension_preserves_old_eligible_policy_projection",
+            "line": 138,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_source_digest_keeps_legacy_pin_and_detects_semantic_changes",
+            "line": 152,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_transport_authority_and_wire_are_unchanged",
+            "line": 169,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_clean_admission_precedes_any_attribute_sql_or_flush",
+            "line": 189,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_full_original_composition_precedes_all_mutation",
+            "line": 201,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_scoped_docs_row_follows_family_and_token",
+            "line": 229,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_callback_requires_actual_writer_and_finishes_checked",
+            "line": 256,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_preserves_existing17_and_canonical12",
+            "line": 273,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_logout_adds_no_runner_config_fixture_or_authority_surface",
+            "line": 306,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_accepted_org_order_extension_is_exact_and_preserves_scope_projection",
+            "line": 319,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_explicit_http_extension_keeps_original_gorg_and_full_issuer_semantics",
+            "line": 375,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_activation_explicit_overlay_preserves_whole_identity_routes_profile_and_schema",
+            "line": 464,
+            "cases": 1,
+            "sourceExpansion": 1
+          }
+        ],
+        "tests/test_partner_contract_activation_pg.py": [
+          {
+            "symbol": "test_enable_same_flags_disable_and_new_cas_rollback_keep_children_and_counts",
+            "line": 153,
+            "cases": 1,
+            "sourceExpansion": 1
+          },
+          {
+            "symbol": "test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union",
+            "line": 230,
+            "cases": 1,
+            "sourceExpansion": 1
+          }
+        ]
+      }
+    },
+    "observerReview": {
+      "path": "tests/test_partner_contract_activation_pg.py",
+      "target": "test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union:230-485",
+      "finiteSourceGrammar": "247-267: exact mapped tables/columns, finite exact SQL node classes and four original TextClause strings; no general SQL detector.",
+      "closedOpaqueBoundaries": "304-406: noncompiled/driver SQL, executemany, CTE (including emptied ctes mapping), DML subclasses, post-values/INSERT SELECT/multi-values, UPDATE extra FROM, hints/prefixes/suffixes/dialect extensions, custom/literal nodes/types/operators, nested SELECT locks/DML/TextClause are denied before positive return.",
+      "DML": "412-425,462-468: primitive exact Insert AuditEvent table and Update Profile table by compiled identity/schema; exact flags/current params/one execution/same acquired Connection; Counter demands exactly one each. schema=None is actual ORM metadata under verified core search_path, not an omitted core guard.",
+      "parentUnion": "269-284 obtains current execution compiled_parameters (not cached bind values);434-453 checks tenant, one exact mapped FROM and SHARE/read flags, no key_share/nowait/skip_locked/of.475-483 demands whole exact ordered CP2/Org2/Location2 union followed by exact Member2; no count-only or partial membership oracle.",
+      "capability": "289-303,469-485: original B once, same Session/root/Connection/registered capability, unique full plan keys, X Installation/Profile, home Company/Role/principal closure and postcommit capability invalidation; no authority substitute.",
+      "sourceSafety": "Production A/I/P/locks hashes unchanged. A64-158 whole graph/raw canonical closure freeze/recheck, A160-185 physical stages/checkpoints, A247-264 CAS/flags+audit/flush/current checks and A268-281 whole-root commit/rollback remain original. DPL477 retains19 raw/17 writer/12 canonical policies with explicit inverse activation overlay, not broad repin.",
+      "nativeCase1": "T153-166: four actual PUTs enable/same flags/disable/re-enable with new CAS, independent state()135-146 confirms unchanged whole children and Contract/Intent/Grant counts, exact four audit generation payloads; stale generation1 returns409.",
+      "unknownSQLBoundary": "This review approves the source-bounded observer for this frozen activation grammar, not universal SQLAlchemy compilation safety; no independent synthetic negative runtime performed here."
+    },
+    "sqlEvidence": {
+      "scope": "Root Engine observer captures only CALL phase, including requests after inner PUT listener removed. SQL shapes contain no parameters or values captured. Not a production-only query/latency sample.",
+      "events": 10909,
+      "uniquePerTestSQLClassShapes": 150,
+      "sumExecutionsMatchesEvents": true,
+      "noParametersCaptured": true,
+      "cases": {
+        "tests/test_partner_contract_activation_pg.py::test_enable_same_flags_disable_and_new_cas_rollback_keep_children_and_counts": {
+          "events": 8717,
+          "shapes": 76,
+          "DML": [
+            {
+              "class": "sqlalchemy.sql.dml.Insert",
+              "table": "audit_events",
+              "schema": null,
+              "executions": 4
+            },
+            {
+              "class": "sqlalchemy.sql.dml.Update",
+              "table": "partner_contract_create_profiles",
+              "schema": null,
+              "executions": 4
+            }
+          ]
+        },
+        "tests/test_partner_contract_activation_pg.py::test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union": {
+          "events": 2192,
+          "shapes": 74,
+          "DML": [
+            {
+              "class": "sqlalchemy.sql.dml.Insert",
+              "table": "audit_events",
+              "schema": null,
+              "executions": 1
+            },
+            {
+              "class": "sqlalchemy.sql.dml.Update",
+              "table": "partner_contract_create_profiles",
+              "schema": null,
+              "executions": 1
+            }
+          ]
+        }
+      },
+      "GETBoundary": "Target full CALL2192 includes activation PUT and later GET readback atT473. Corrected metadata oracle now reaches GET; old diagnostic1775 CALL failed before it. Counts are not M15 optimization before/after, no new performance acceptance."
+    },
+    "cleanup": {
+      "actualFactory": {
+        "status": "PASS_PROFILE_FACTORY_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 1
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "syntheticKeyOnly": true
+      },
+      "appPool": {
+        "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "poolErrors": []
+      },
+      "databaseAfter": {
+        "clients": 0,
+        "locks": 0
+      },
+      "owned": [
+        {
+          "kind": "postgres",
+          "removed": true,
+          "exit": 0,
+          "running": false,
+          "OOM": false,
+          "ports": {}
+        },
+        {
+          "kind": "python",
+          "removed": true,
+          "exit": 0,
+          "running": false,
+          "OOM": false,
+          "ports": {}
+        }
+      ],
+      "all25ControllerOperationsExitZeroReaped": true,
+      "foreignSafeProjection": {
+        "entries": 41,
+        "beforeAfterBytesEqual": true,
+        "fields": [
+          "Id",
+          "Image",
+          "Running",
+          "StartedAt"
+        ],
+        "limit": "Equality of recorded safe container projection, not a full foreign DB/data integrity audit."
+      }
+    },
+    "historicalCheckpoint": {
+      "pathPrefix": "clearledger/docs/api/PARTNER_ACTIVATION_ROOT_CHECKPOINT_20261101",
+      "unchangedBytesVsGit9d": true,
+      "MDsha256": "1a003f6105742920ec5bbc8a604e37301f0ed38bea214d6651d3f214bfe8ffd5",
+      "JSONsha256": "9967061867710ed3f916e30b109ec17de97051a3eca2c143f1f5fe3e343a27cc",
+      "oldStatus": "Root3127 initial51 remains NOT_ACCEPTED49 diagnostic pass/2fail; missing DPL read dependency and core-prefix oracle error are historical facts. New composition adds ten unchanged read-only files and integrates reviewed fad2 one-body observer. No retroactive PASS."
+    },
+    "limitations": [
+      "PASS is exact Activation51V2 component51 only: not full139 activation, fullOAuth/profile/CREATE suites, CI, deploy or production flags",
+      "Only2 of19 PG definitions executed; actual wait/revoke/cancel/unknown-ACK/foreign graph parameter matrices are not transferred from Source or history",
+      "No M15 optimization implemented or accepted, no production load/latency assertion",
+      "External helper/dependency bytes not independently rereviewed; public manifests/source/runtime receipts establish the bounded composition",
+      "Full original M00-M19+11 remains OPEN; no global percentage or summed historical acceptance"
+    ],
+    "inputsSHA256": {
+      "source-manifest.json": {
+        "sha256": "251c0aeeaaee16f7a1622371d4802e8285a7cf0683412b7c6cc5f6ec472a7ff2",
+        "bytes": 60760
+      },
+      "driver-manifest.json": {
+        "sha256": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+        "bytes": 11546
+      },
+      "execution.json": {
+        "sha256": "f48034dea1fe49b5732501e8767532e41f158273a3b812e0c35c18d98edf61b5",
+        "bytes": 11069
+      },
+      "role-identity-before-imports.json": {
+        "sha256": "c885ed85eb4e827991a01ac84e6ceb7777c0e54ddaaa0836ed6ffd811e1be035",
+        "bytes": 272
+      },
+      "database-after.json": {
+        "sha256": "2ad0513260f927e09cf4f0741bb1c11fb8d7e45c5c5a3dfdc6ba5f94e630a965",
+        "bytes": 33
+      },
+      "foreign-before.json": {
+        "sha256": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+        "bytes": 10093
+      },
+      "foreign-after.json": {
+        "sha256": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+        "bytes": 10093
+      },
+      "python.stdout": {
+        "sha256": "c07404c51482605a35f083a5beb5a33e18d13482fbbc88ae145171c1938fbc10",
+        "bytes": 1515
+      },
+      "python.stderr": {
+        "sha256": "70f4d7ad367f4b18335855f3c01fb3b75e3a18da47d3443a3dacfba2b412ca14",
+        "bytes": 118
+      },
+      "evidence/actual-sql-classes.json": {
+        "sha256": "cf49abae7fe7c576a41cbb6eaf4b95da1cdad23aec9b063806c7455641ca2be4",
+        "bytes": 105331
+      },
+      "evidence/full-native-bootstrap.json": {
+        "sha256": "45f650460b6ff3a275773f19f92c892b5ecca7949f7b29c7a511b59830f43fe3",
+        "bytes": 4296647
+      },
+      "evidence/pool-cleanup.json": {
+        "sha256": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+        "bytes": 208
+      },
+      "evidence/profile-factory-cleanup.json": {
+        "sha256": "05bd61b9c84d1322db9ee8c37baaa35f635584882c1291263bd91df68e0b1a05",
+        "bytes": 212
+      },
+      "evidence/progress.jsonl": {
+        "sha256": "2b6fe4aca1c0e5d196b46a41f3baeccae0587e2872406be01c535c56cfdfd8c1",
+        "bytes": 42904
+      },
+      "evidence/result.json": {
+        "sha256": "d65e9b81f6f6a622ca4d6e1c0406e1f8f61459137685ad6f3390bd805936a9bb",
+        "bytes": 60519
+      }
+    },
+    "findingsRequiringChanges": []
+  }
+}
