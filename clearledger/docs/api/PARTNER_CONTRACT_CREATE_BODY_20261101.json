@@ -1,0 +1,348 @@
+{
+  "version": 1,
+  "date": "2026-11-01",
+  "status": "SOURCE_ONLY_RUNTIME0_AUTHORED_NOTRUN",
+  "base_commit": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+  "allowed_exact_paths": [
+    "clearledger/server/app/product_api/contract_create_body.py",
+    "clearledger/server/tests/test_partner_contract_create_body.py",
+    "clearledger/docs/api/PARTNER_CONTRACT_CREATE_BODY_20261101.md",
+    "clearledger/docs/api/PARTNER_CONTRACT_CREATE_BODY_20261101.json"
+  ],
+  "source_pins_sha256": {
+    "clearledger/server/app/product_api/contract_create_body.py": "07c5b7976bc6284a6dc10b43579aaa41047c41e8581d34a19f5f93338b824a8e",
+    "clearledger/server/tests/test_partner_contract_create_body.py": "4cb2c54213d736e057e4415f12b226646be8c8a171b07c3f227341a8364aba5e",
+    "clearledger/docs/api/PARTNER_CONTRACT_CREATE_BODY_20261101.md": "09ac6058fd534c0f695d9383d9e7c4505c65d1fa833b2b068d98b19a06a66af3"
+  },
+  "input_pins_sha256": {
+    "clearledger/server/app/product_api/dto.py": "4483753b34db18912cae8102c84550038ddd42c711ffeeac49840ce5764cf94c",
+    "clearledger/docs/api/CONTRACT_PARTNER_WRITE_ADMISSION_20261031.md": "fdf070edc449dc20f82d58dd90680849285785cff557a260f68b10e0283ea1e1",
+    "clearledger/docs/api/CONTRACT_PARTNER_WRITE_ADMISSION_20261031.json": "a7e47dc13d10fe2221a65f722b13806d786df1b0695465476c6a4258686dff02",
+    "clearledger/docs/api/CONTRACT_PARTNER_SCHEMA_V4_HANDOFF_20261101.md": "fe7a713c3b3549bf8d2119320754819b01a55bcee33455f1d27e57b45095e716",
+    "clearledger/docs/api/H01_NAMED_CONTRACT_RECEIPT_PERMISSION_20261101.md": "f186871476aafeedfb8de2cd7139f24102e0c355c9c36323c27bd2133c1cd0ae"
+  },
+  "public_contracts": {
+    "models": [
+      "ContractCreateBody",
+      "ContractCreateLocations"
+    ],
+    "error": {
+      "class": "ContractCreateBodyError",
+      "safe_fields": [
+        "status",
+        "code"
+      ],
+      "codes": {
+        "413": "request_too_large",
+        "415": "unsupported_media_type",
+        "422": "invalid_request"
+      }
+    },
+    "parser": "async parse_contract_create_body(request: starlette.requests.Request) -> ContractCreateBody",
+    "canonical": "canonical_contract_create_bytes(body: exact ContractCreateBody) -> bytes",
+    "hash": "contract_create_hash(body: exact ContractCreateBody) -> str (SHA256 hex)",
+    "cap": {
+      "actual_stream_bytes_inclusive": 16384,
+      "content_length_ignored": true,
+      "oversized_chunk_copied": false,
+      "next_chunk_after_excess_read": false
+    },
+    "media": {
+      "content_type": "exactly one application/json; optional charset=utf-8 token, case-insensitive, OWS allowed",
+      "content_encoding": "absent or exactly one identity; no decompression"
+    },
+    "schema": {
+      "closed_strict_frozen": true,
+      "aliases": false,
+      "kind": "contract-card",
+      "UUID_fields": [
+        "creationKey",
+        "organizationId",
+        "counterpartyId"
+      ],
+      "UUID_wire": "exact str hyphenated ASCII hex; uppercase accepted",
+      "UUID_typed": "exact UUID also accepted; subclasses/bool/int rejected",
+      "number_type": "exact nonblank string1..100, preserved",
+      "typeCode": "exact nonblank string1..256, no enum",
+      "date": "exact calendar YYYY-MM-DD only, stored str",
+      "validUntil": "required nullable exact string0..20, not date",
+      "comment": "optional nullable exact string<=2000, omission=null",
+      "coverage": "locations discriminator only, exact raw list1..100 then immutable tuple; unique exact ObjectId string1..40",
+      "text": "UTF8 encodable, no NUL or unpaired surrogate"
+    },
+    "exception_propagation": "stream cancellation/disconnection/upstream exceptions unchanged; sanitized parse/hash errors have no raw context/cause"
+  },
+  "hash_v1": {
+    "algorithm": "SHA256",
+    "encoding": "UTF8",
+    "json": {
+      "ensure_ascii": false,
+      "sort_keys": true,
+      "separators": [
+        ",",
+        ":"
+      ]
+    },
+    "payload_keys": [
+      "version",
+      "kind",
+      "number",
+      "date",
+      "type",
+      "typeCode",
+      "organizationId",
+      "counterpartyId",
+      "coverage",
+      "validUntil",
+      "comment"
+    ],
+    "version": 1,
+    "excluded": [
+      "creationKey",
+      "actor",
+      "company",
+      "app",
+      "install",
+      "grant",
+      "credential",
+      "token",
+      "jti"
+    ],
+    "UUID": "lower-hyphenated",
+    "location_order": "exact Unicode scalar sequence; no normalization",
+    "equivalent": [
+      "wire member order",
+      "location array order",
+      "UUID uppercase/lowercase",
+      "different creationKey",
+      "comment omitted/null"
+    ],
+    "distinct": [
+      "validUntil null/empty",
+      "comment null/empty",
+      "exact whitespace",
+      "case",
+      "NFC/NFD IDs"
+    ],
+    "revalidation": "exact root and nested classes/keys + fresh full model validation; rejects tampered construct/copy contents",
+    "goldens": [
+      {
+        "name": "base",
+        "canonical_utf8_text": "{\"comment\":null,\"counterpartyId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"coverage\":{\"kind\":\"locations\",\"locationIds\":[\"A \",\"é\",\"é\",\"я\",\"￿\",\"😀\"]},\"date\":\"2024-02-29\",\"kind\":\"contract-card\",\"number\":\" Д-01 \",\"organizationId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"type\":\" Lease \",\"typeCode\":\"Custom/А \",\"validUntil\":null,\"version\":1}",
+        "canonical_utf8_hex": "7b22636f6d6d656e74223a6e756c6c2c22636f756e74657270617274794964223a2262626262626262622d626262622d346262622d386262622d626262626262626262626262222c22636f766572616765223a7b226b696e64223a226c6f636174696f6e73222c226c6f636174696f6e496473223a5b224120222c2265cc81222c22c3a9222c22d18f222c22efbfbf222c22f09f9880225d7d2c2264617465223a22323032342d30322d3239222c226b696e64223a22636f6e74726163742d63617264222c226e756d626572223a2220d0942d303120222c226f7267616e697a6174696f6e4964223a2261616161616161612d616161612d346161612d386161612d616161616161616161616161222c2274797065223a22204c6561736520222c2274797065436f6465223a22437573746f6d2fd09020222c2276616c6964556e74696c223a6e756c6c2c2276657273696f6e223a317d",
+        "byte_count": 343,
+        "sha256": "d11891751cc46939e67c4f41312af59d85dbe4b48a477bb7369ba3def36df3d8"
+      },
+      {
+        "name": "valid_until_empty",
+        "canonical_utf8_text": "{\"comment\":null,\"counterpartyId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"coverage\":{\"kind\":\"locations\",\"locationIds\":[\"A \",\"é\",\"é\",\"я\",\"￿\",\"😀\"]},\"date\":\"2024-02-29\",\"kind\":\"contract-card\",\"number\":\" Д-01 \",\"organizationId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"type\":\" Lease \",\"typeCode\":\"Custom/А \",\"validUntil\":\"\",\"version\":1}",
+        "canonical_utf8_hex": "7b22636f6d6d656e74223a6e756c6c2c22636f756e74657270617274794964223a2262626262626262622d626262622d346262622d386262622d626262626262626262626262222c22636f766572616765223a7b226b696e64223a226c6f636174696f6e73222c226c6f636174696f6e496473223a5b224120222c2265cc81222c22c3a9222c22d18f222c22efbfbf222c22f09f9880225d7d2c2264617465223a22323032342d30322d3239222c226b696e64223a22636f6e74726163742d63617264222c226e756d626572223a2220d0942d303120222c226f7267616e697a6174696f6e4964223a2261616161616161612d616161612d346161612d386161612d616161616161616161616161222c2274797065223a22204c6561736520222c2274797065436f6465223a22437573746f6d2fd09020222c2276616c6964556e74696c223a22222c2276657273696f6e223a317d",
+        "byte_count": 341,
+        "sha256": "ca612fc837888c422a0fad83280dc811cfe0da42f123f2f003308109f22cc77e"
+      },
+      {
+        "name": "number_whitespace",
+        "canonical_utf8_text": "{\"comment\":null,\"counterpartyId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"coverage\":{\"kind\":\"locations\",\"locationIds\":[\"A \",\"é\",\"é\",\"я\",\"￿\",\"😀\"]},\"date\":\"2024-02-29\",\"kind\":\"contract-card\",\"number\":\"Д-01\",\"organizationId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"type\":\" Lease \",\"typeCode\":\"Custom/А \",\"validUntil\":null,\"version\":1}",
+        "canonical_utf8_hex": "7b22636f6d6d656e74223a6e756c6c2c22636f756e74657270617274794964223a2262626262626262622d626262622d346262622d386262622d626262626262626262626262222c22636f766572616765223a7b226b696e64223a226c6f636174696f6e73222c226c6f636174696f6e496473223a5b224120222c2265cc81222c22c3a9222c22d18f222c22efbfbf222c22f09f9880225d7d2c2264617465223a22323032342d30322d3239222c226b696e64223a22636f6e74726163742d63617264222c226e756d626572223a22d0942d3031222c226f7267616e697a6174696f6e4964223a2261616161616161612d616161612d346161612d386161612d616161616161616161616161222c2274797065223a22204c6561736520222c2274797065436f6465223a22437573746f6d2fd09020222c2276616c6964556e74696c223a6e756c6c2c2276657273696f6e223a317d",
+        "byte_count": 341,
+        "sha256": "74b66c5002c9710fd1612920851aa1e67d0a9c0eba1df7c3caabc8acebc83b60"
+      },
+      {
+        "name": "type_case",
+        "canonical_utf8_text": "{\"comment\":null,\"counterpartyId\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"coverage\":{\"kind\":\"locations\",\"locationIds\":[\"A \",\"é\",\"é\",\"я\",\"￿\",\"😀\"]},\"date\":\"2024-02-29\",\"kind\":\"contract-card\",\"number\":\" Д-01 \",\"organizationId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"type\":\" lease \",\"typeCode\":\"Custom/А \",\"validUntil\":null,\"version\":1}",
+        "canonical_utf8_hex": "7b22636f6d6d656e74223a6e756c6c2c22636f756e74657270617274794964223a2262626262626262622d626262622d346262622d386262622d626262626262626262626262222c22636f766572616765223a7b226b696e64223a226c6f636174696f6e73222c226c6f636174696f6e496473223a5b224120222c2265cc81222c22c3a9222c22d18f222c22efbfbf222c22f09f9880225d7d2c2264617465223a22323032342d30322d3239222c226b696e64223a22636f6e74726163742d63617264222c226e756d626572223a2220d0942d303120222c226f7267616e697a6174696f6e4964223a2261616161616161612d616161612d346161612d386161612d616161616161616161616161222c2274797065223a22206c6561736520222c2274797065436f6465223a22437573746f6d2fd09020222c2276616c6964556e74696c223a6e756c6c2c2276657273696f6e223a317d",
+        "byte_count": 343,
+        "sha256": "233cbbf4fcf2184cb762010cf544082bb326b25210afe2a34d9047ee77a49579"
+      }
+    ]
+  },
+  "test_method_count": 27,
+  "tests": [
+    {
+      "function": "ContractCreateModelTests.test_valid_exact_frozen_models",
+      "line": 103,
+      "parameter_inventory": "exact model classes; tuple storage; preserved text/default; frozen root/nested and tuple assignment",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_all_required_fields",
+      "line": 118,
+      "parameter_inventory": "each of 10 required root fields; both required coverage fields",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_forbidden_fields_every_level_and_snake_aliases",
+      "line": 130,
+      "parameter_inventory": "25 forbidden names at root and coverage (50 combinations); 5 camelCase-to-snake replacements",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_discriminators_and_coverage_shape",
+      "line": 149,
+      "parameter_inventory": "5 root kind/coverage shape cases; 8 coverage discriminator values",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_uuid_strict_wire_and_exact_typed_uuid",
+      "line": 163,
+      "parameter_inventory": "3 UUID fields x 16 invalid and 3 valid forms (lowercase/uppercase/exact UUID)",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_strict_calendar_date",
+      "line": 181,
+      "parameter_inventory": "22 invalid dates/types and 3 valid boundary/leap dates",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_text_bounds_types_and_nonblank",
+      "line": 196,
+      "parameter_inventory": "5 text fields x 3 valid values; 8 invalid types/lengths each plus 5 nonblank violations for 3 fields",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_postgres_text_and_utf8_every_text_field",
+      "line": 214,
+      "parameter_inventory": "5 text fields x 3 invalid NUL/surrogate strings; 3 invalid location strings",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_location_bounds_raw_arrays_and_element_types",
+      "line": 226,
+      "parameter_inventory": "19 invalid raw arrays/elements including list subclass; 3 valid arrays (1/100/space ID)",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_location_uniqueness_uses_exact_unicode_identity",
+      "line": 239,
+      "parameter_inventory": "10 distinct Unicode/space/case/URI-looking identifiers; 4 exact duplicate pairs",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_required_nullable_and_optional_nullable_distinctions",
+      "line": 248,
+      "parameter_inventory": "required validUntil null/missing/empty/non-date; comment omitted/null/empty",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_canonical_independent_literal_and_digest",
+      "line": 263,
+      "parameter_inventory": "independent 343-byte literal plus fixed SHA256 (no encoder oracle)",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_canonical_order_uuid_spelling_comment_and_creation_key",
+      "line": 269,
+      "parameter_inventory": "reversed locations/member order; lower UUID spelling; different creationKey; comment omitted=null",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_canonical_exact_differences",
+      "line": 280,
+      "parameter_inventory": "3 fixed bytes/digest variations (empty validUntil, number whitespace, type case); 2 additional exact differences",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_canonical_rejects_non_exact_model",
+      "line": 300,
+      "parameter_inventory": "5 non-exact inputs (dict/None/object/dataclass/model subclass) x 2 helpers",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateModelTests.test_canonical_revalidates_model_construct_and_copy",
+      "line": 311,
+      "parameter_inventory": "26 corrupt construct/copy instances x 2 helpers; 1 valid constructed instance revalidated",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_real_request_chunked_utf8_and_no_body_method",
+      "line": 366,
+      "parameter_inventory": "4 chunk stream including empty chunk; forbidden body(); bytewise stream splitting UTF8 scalars",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_content_length_missing_false_zero_large_and_invalid",
+      "line": 379,
+      "parameter_inventory": "6 Content-Length variants: missing/0/1/huge/invalid/negative",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_inclusive_actual_byte_boundary",
+      "line": 389,
+      "parameter_inventory": "actual bytes 16383/16384 accepted, 16385 rejected; Unicode payload",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_oversized_chunk_stops_before_more_receive_and_before_json",
+      "line": 398,
+      "parameter_inventory": "oversized first chunk and cumulative excess second chunk; trailing chunk remains unread; 413 before malformed JSON",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_media_accepts_only_json_optional_utf8_token",
+      "line": 408,
+      "parameter_inventory": "4 media tokens x 3 encodings: absent/identity/mixed-case identity",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_media_rejections_do_not_read_stream",
+      "line": 419,
+      "parameter_inventory": "22 rejected header combinations: absent/duplicate type, 13 bad media values, 6 bad encodings, duplicate encoding; zero reads",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_json_objects_only_malformed_trailing_and_constants",
+      "line": 435,
+      "parameter_inventory": "21 malformed/non-object/trailing/nonfinite inputs plus 3 nonfinite validUntil replacements",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_duplicate_keys_at_root_nested_and_escaped_spelling",
+      "line": 446,
+      "parameter_inventory": "6 duplicates: root, validUntil, coverage kind, nested object, nested array object, escaped-equivalent key",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_invalid_utf8_escaped_surrogates_nul_and_deep_json",
+      "line": 457,
+      "parameter_inventory": "8 invalid UTF8/surrogate/NUL/deep inputs; 1 valid escaped surrogate-pair scalar",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_parser_maps_dto_failure_without_raw_input",
+      "line": 470,
+      "parameter_inventory": "unknown authority field and oversized DTO string; safe status/code, no raw value/context/cause",
+      "status": "AUTHORED_NOTRUN"
+    },
+    {
+      "function": "ContractCreateParserTests.test_cancellation_disconnect_and_upstream_errors_propagate",
+      "line": 478,
+      "parameter_inventory": "same-object CancelledError/RuntimeError propagation after one chunk; ASGI disconnect => ClientDisconnect",
+      "status": "AUTHORED_NOTRUN"
+    }
+  ],
+  "source_checks": [
+    "stdlib AST parse both Python files",
+    "in-memory compile AST without execution",
+    "stdlib SHA256 literal golden bytes",
+    "JSON readback and source pin verification",
+    "Git diff --check and exact four-path diff"
+  ],
+  "runtime_executed": false,
+  "tests_executed": false,
+  "integration_144_cases_replaced_or_deleted": false,
+  "limitations": [
+    "no auth",
+    "no quotas",
+    "no DB",
+    "no HTTP registration",
+    "no response DTO",
+    "no SDK",
+    "no runtime evidence",
+    "Root owns hermetic isolated actual dependency execution",
+    "M00–M19+11 remains open"
+  ],
+  "receipt_history_policy": "schema/H01 handoff takes precedence; no receipt history hard cap or UUID materialization introduced",
+  "publication": "local source commit [skip ci] only; Root owns Source review/publication; no push/PR/merge/deploy",
+  "self_pin": "JSON SHA256 and exact commit supplied in worker_done; no cyclic self hash"
+}
