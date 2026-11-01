@@ -1,0 +1,19 @@
+{
+  "parentRoot": "2f295526667de0f6032d725ca08aa78c12e15b7c",
+  "sourceConsumer": "native_doc_create_locks._replay_pointer[1:6] -> users -> doc_create_plan -> UserKey",
+  "fields": [
+    "archive_accepted_by",
+    "author_id",
+    "registered_by",
+    "responsible_id",
+    "signatory_id"
+  ],
+  "onlyFactoryNameChanges": 5,
+  "CoreAdaptedColumns": 34,
+  "allAdaptedColumns": 86,
+  "unchanged": "DDL UUID/defaults/FKs/nullable/index, driver/kernel/bind/literal, DocCard.id/company/kind",
+  "modelsBeforeSHA256": "1a48c7d296134818f098d68116e5a7ae97b1bf11a96c9d034903b339be7a3e41",
+  "modelsAfterSHA256": "bee511c0f1682519a6f074fd58dd88bc14068981599ba91e773838ed58ab6a49",
+  "runtime": "NOTRUN latestDoccomposition; previousProfile95source984immutable",
+  "scope": "NativecreateDoc20defs forthcoming, noallDocs/OrgDeleteclosure"
+}

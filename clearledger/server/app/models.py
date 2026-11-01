@@ -12829,7 +12829,7 @@ class DocCard(Base):
     # он внутренний идентификатор, а не capability-токен.
     verify_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     registered_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     # Номер введён руками только при переносе нашего прежнего бумажного журнала.
     # Чужой исходящий номер хранится отдельно в external_number.
     number_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -12858,11 +12858,11 @@ class DocCard(Base):
         nullable=True)
 
     author_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     responsible_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     signatory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # company | private. Закрытую карточку дополнительно открывают правила
@@ -12893,7 +12893,7 @@ class DocCard(Base):
     archive_accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     archive_accepted_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey(
+        CanonicalUUID(as_uuid=True), ForeignKey(
             "users.id", ondelete="SET NULL", name="fk_doc_cards_archive_accepted_by"),
         nullable=True)
     primary_purged_at: Mapped[datetime | None] = mapped_column(
