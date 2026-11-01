@@ -223,6 +223,31 @@
       "sourceOwner": "ctx_321ba93f28be",
       "source": "b0aa31e2",
       "noRuntimeInterpretationAltered": true
+    },
+    "latestAccepted": {
+      "status": "ACCEPT_SCOPED_SOURCE_RAW_OPENAPI22_152_AND_SDK_REFRESH",
+      "acceptedAt": "2026-11-01T09:56:39.472357+00:00",
+      "sut": "24f0460cdccda77aa5924ec35e368e651c633832",
+      "primary": 22,
+      "subtests": 152,
+      "reports": 218,
+      "secondsIncludingBootstrap": 43.8861474012956,
+      "reviewHashes": {
+        "REVIEW.md": "915a5033a9be3c51cd61f5af837db2247ae85e3da80e235511d010a36fbcf2ad",
+        "REVIEW.json": "e7b5511a1e2cded6db92959eac75a114a0d54b4c278640207d61b694f191b36b"
+      },
+      "reviewPath": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/product-openapi-null-examples-root-raw-review-20261101",
+      "limitations": [
+        "Только GET/schema/header/binary transport component с FAKE verifier и domain projections; physical native bootstrap не превращает request cases в OAuth/SQL authorization proof, positive POST, activation или ingress/full-main/lifespan proof.",
+        "Прежний C1P3 arbitrary Response cycle может попасть в formal OAS validator до resolve seen-set; bounded-all-refs гарантия не утверждается.",
+        "Singleton/header/DEFAULT/named-ref branches helper прочитаны, но новых actual route cases для них нет; текущие declarations14 namedJSON200.",
+        "Никаких общих full-suite/HTTP70/CI/GO утверждений; no deployment/commit/push.",
+        "Reviewer не использовал private control, DSN/env/credentials, SQL/PG/Docker/network/Node/browser/install/collection/pytest/generator/subagents; только чтение public evidence и создание own REVIEW.md/json."
+      ],
+      "sdk": "actualgenerate/check/fiveconsumerstsc; onlyschemaSHAcommentchanged; old6testsnotrepeated",
+      "nodeDependencyLimit": "freshRoot2014attestation; reviewerdoesnotclaimnewindependenthashmanifestproof",
+      "C1P3ArbitraryResponseCycleOpen": true,
+      "fullCIandOverallCompletion": false
     }
   },
   "nativeG1": {
@@ -272,7 +297,23 @@
       },
       "remaining49": "NOTRUN",
       "parent50941": "EXIT1_REAPED",
-      "graphDiagnostic2": "RUNNING_HOST99699"
+      "graphDiagnostic2": "EXIT1_REAPED_ORIGINAL_2FAIL_PRESERVED_REAL_SOFTQUEUE_PROVED"
+    },
+    "full89V2": {
+      "source": "c3fd7cf89035cae5bd9317c7e6ac18624e12d136",
+      "status": "ACCEPT_BOUNDED_SOURCE_RAW_89_WITH_LIMITS",
+      "defs": 33,
+      "phases": 267,
+      "separateWorlds": 5,
+      "secondsSumIncludingBootstrap": 201.8084542118013,
+      "parent32486": "EXIT0_REAPED",
+      "reviewer": "ctx_15d9d1980601",
+      "independentReview": {
+        "REVIEW.md": "fe7ae12458854eea2452ae81906c88362753c338adc5a960237e1bb0fb68cb75",
+        "REVIEW.json": "f80629aaa75b18f7e2890afe086a6d403346ffcb7e5bfb2fc27806cdb36ca06e"
+      },
+      "reviewerReleased": true,
+      "canonical": "NATIVE_DOC_REGISTER_ROOT_VERIFICATION_20261101.md/json"
     }
   },
   "preview": "http://10.10.70.56:8000/api-platform-20261029/contracts-http.html",

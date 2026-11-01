@@ -1,0 +1,180 @@
+{
+  "acceptance": {
+    "status": "ACCEPT_SCOPED_SOURCE_RAW_OPENAPI22_152_AND_SDK_REFRESH",
+    "acceptedAt": "2026-11-01T09:56:39.472357+00:00",
+    "sut": "24f0460cdccda77aa5924ec35e368e651c633832",
+    "primary": 22,
+    "subtests": 152,
+    "reports": 218,
+    "secondsIncludingBootstrap": 43.8861474012956,
+    "reviewHashes": {
+      "REVIEW.md": "915a5033a9be3c51cd61f5af837db2247ae85e3da80e235511d010a36fbcf2ad",
+      "REVIEW.json": "e7b5511a1e2cded6db92959eac75a114a0d54b4c278640207d61b694f191b36b"
+    },
+    "reviewPath": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/product-openapi-null-examples-root-raw-review-20261101",
+    "limitations": [
+      "Только GET/schema/header/binary transport component с FAKE verifier и domain projections; physical native bootstrap не превращает request cases в OAuth/SQL authorization proof, positive POST, activation или ingress/full-main/lifespan proof.",
+      "Прежний C1P3 arbitrary Response cycle может попасть в formal OAS validator до resolve seen-set; bounded-all-refs гарантия не утверждается.",
+      "Singleton/header/DEFAULT/named-ref branches helper прочитаны, но новых actual route cases для них нет; текущие declarations14 namedJSON200.",
+      "Никаких общих full-suite/HTTP70/CI/GO утверждений; no deployment/commit/push.",
+      "Reviewer не использовал private control, DSN/env/credentials, SQL/PG/Docker/network/Node/browser/install/collection/pytest/generator/subagents; только чтение public evidence и создание own REVIEW.md/json."
+    ],
+    "sdk": "actualgenerate/check/fiveconsumerstsc; onlyschemaSHAcommentchanged; old6testsnotrepeated",
+    "nodeDependencyLimit": "freshRoot2014attestation; reviewerdoesnotclaimnewindependenthashmanifestproof",
+    "C1P3ArbitraryResponseCycleOpen": true,
+    "fullCIandOverallCompletion": false
+  },
+  "actual": {
+    "status": "ACTUAL22_AND152_PASS_CURRENT_NULL_EXAMPLE_FIX_PENDING_INDEPENDENT_RAW",
+    "sut": "24f0460cdccda77aa5924ec35e368e651c633832",
+    "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/get-oas-transport-v4-24f0460c-fullnative-pg-20261101-c562415e51a9",
+    "hostSession": 46695,
+    "hostExit": 0,
+    "reaped": true,
+    "primary": 22,
+    "subtests": 152,
+    "reports": 218,
+    "secondsIncludingBootstrap": 43.8861474012956,
+    "rawDeniedBlockedProbe": [
+      {
+        "event": "socket.bind",
+        "reason": "process or bind operation",
+        "phase": "native-doc-create-collection-after-owned-preflight",
+        "testStarted": false,
+        "family": 10,
+        "socketType": 1,
+        "proto": 0,
+        "address": [
+          "::1",
+          0
+        ],
+        "stack": [
+          {
+            "file": "<frozen importlib._bootstrap>",
+            "function": "_load_unlocked",
+            "line": 935
+          },
+          {
+            "file": "<frozen importlib._bootstrap_external>",
+            "function": "exec_module",
+            "line": 1026
+          },
+          {
+            "file": "<frozen importlib._bootstrap>",
+            "function": "_call_with_frames_removed",
+            "line": 488
+          },
+          {
+            "file": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/urllib3/util/__init__.py",
+            "function": "<module>",
+            "line": 4
+          },
+          {
+            "file": "<frozen importlib._bootstrap>",
+            "function": "_find_and_load",
+            "line": 1360
+          },
+          {
+            "file": "<frozen importlib._bootstrap>",
+            "function": "_find_and_load_unlocked",
+            "line": 1331
+          },
+          {
+            "file": "<frozen importlib._bootstrap>",
+            "function": "_load_unlocked",
+            "line": 935
+          },
+          {
+            "file": "<frozen importlib._bootstrap_external>",
+            "function": "exec_module",
+            "line": 1026
+          },
+          {
+            "file": "<frozen importlib._bootstrap>",
+            "function": "_call_with_frames_removed",
+            "line": 488
+          },
+          {
+            "file": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/urllib3/util/connection.py",
+            "function": "<module>",
+            "line": 137
+          },
+          {
+            "file": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/urllib3/util/connection.py",
+            "function": "_has_ipv6",
+            "line": 127
+          },
+          {
+            "file": "/test/control/run.py",
+            "function": "audit",
+            "line": 27
+          }
+        ]
+      }
+    ],
+    "unexpectedDenied": [],
+    "poolCleanup": {
+      "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+      "before": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "after": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "loopAlive": true,
+      "poolErrors": []
+    },
+    "db": {
+      "clients": 0,
+      "locks": 0
+    },
+    "files": {
+      "source-manifest.json": "ae268a47299d0b98e1a904510afb4df1fd937a2e546a0ab5bc5dd56b7395358e",
+      "evidence/result.json": "e9a2a2355a6c58011645452f155dc4223b9f559be70fae85524828909dcaa660",
+      "execution.json": "d7fe2bb1efff9868bba83a9c20a86963b7f1702745fc05b0b57d9b69d70de26c",
+      "role-identity-before-imports.json": "ab2928f0c060fc798d8f11a0a5f4c8ff1cdb875205bfb7dd8687e05a4cecf5a3"
+    },
+    "scope": "formalvalidationall14canonical/publicdeclaredexamples+oldprotocol; FAKEauth/projection noAuthSQL/positivePOST/fullmainproof"
+  },
+  "sdkRefresh": {
+    "status": "PASS_SDK16_NULL_EXAMPLES_REFRESH_PENDING_INDEPENDENT_RAW",
+    "source": "24f0460cdccda77aa5924ec35e368e651c633832",
+    "operations": [
+      {
+        "operation": "generate",
+        "exit": 0,
+        "seconds": 4.055572343990207,
+        "stdoutBytes": 90,
+        "stderrBytes": 0
+      },
+      {
+        "operation": "check",
+        "exit": 0,
+        "seconds": 3.8924884432926774,
+        "stdoutBytes": 52,
+        "stderrBytes": 0
+      },
+      {
+        "operation": "five-consumers",
+        "exit": 0,
+        "seconds": 1.9516889285296202,
+        "stdoutBytes": 0,
+        "stderrBytes": 0
+      }
+    ],
+    "generatedSHA256": "ef38b9c59780a3286b89e832a2d4d52e0f72dfcb2e223158ea35606467f39d62",
+    "generatedBytes": 210165,
+    "schemaSHA256": "a888f5203eccdd26c921f6773212c22c6a55b372eacfd363b674efbf9cfedad4",
+    "wireDeclarationsByteEqualAfterRemovingComments": true,
+    "previousGeneratedSHA256": "bab793ef2f30131cbcd8fd5541c8d7275ee5c6a4c9a7217e0ea940dce48c690e",
+    "sourceFiles": 536,
+    "nodeFiles": 2014,
+    "cases": "generate/check/fiveconsumerstsc; old6testresultimmutableNOTnewrun",
+    "scope": "offlinewiretypes/commentsexamples noNetworkClientNoAuthSQLProof"
+  },
+  "generatedCommitted": "2ab443351a8a0c8a365856a85987d81a35e90d90",
+  "originalProgramUnchanged": true,
+  "overallCompletion": false
+}
