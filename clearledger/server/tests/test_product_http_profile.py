@@ -43,26 +43,28 @@ EXPECTED_GET_MANIFEST = frozenset({
     ("GET", "/documents/{docId}/versions/{versionId}/content", "downloadDocumentVersion"),
 })
 OPTIONS_MANIFEST = frozenset({("GET", "/contracts/create-options", "getContractCreateOptions")})
-EXPECTED_PRODUCT_MANIFEST = EXPECTED_GET_MANIFEST | OPTIONS_MANIFEST | {("POST", "/contracts", "createContract")}
+NETWORK_STATE_MANIFEST = frozenset({("GET", "/monitoring/network-state", "getNetworkState")})
+EXPECTED_PRODUCT_MANIFEST = EXPECTED_GET_MANIFEST | NETWORK_STATE_MANIFEST | OPTIONS_MANIFEST | {("POST", "/contracts", "createContract")}
 USER_ONLY_GET_IDS = frozenset({"listContractDocuments", "listDocuments", "getDocument", "downloadDocumentVersion"})
 
 
 def assert_product_manifest(schema, registry):
     """Exact method/path/id oracle; no HTTP or fixture execution."""
     operations = registry["operations"]
-    assert len(operations) == 17
+    assert len(operations) == 18
     assert {(e["method"], e["path"], e["operationId"]) for e in operations} == EXPECTED_PRODUCT_MANIFEST
-    assert len({e["operationId"] for e in operations}) == 17
+    assert len({e["operationId"] for e in operations}) == 18
     assert {(e["method"], e["path"], e["operationId"]) for e in operations
-            if e["method"] == "GET"} == EXPECTED_GET_MANIFEST | OPTIONS_MANIFEST
+            if e["method"] == "GET"} == EXPECTED_GET_MANIFEST | NETWORK_STATE_MANIFEST | OPTIONS_MANIFEST
     documented = [(method.upper(), path, op["operationId"])
                   for path, item in schema["paths"].items() for method, op in item.items()]
-    assert len(documented) == 17 and set(documented) == EXPECTED_PRODUCT_MANIFEST
+    assert len(documented) == 18 and set(documented) == EXPECTED_PRODUCT_MANIFEST
+    assert len(schema["paths"]) == 17
 
 
 def assert_product_policy_manifest(entries):
-    """Keep 11 service GETs, four user-only GETs and the separate CREATE stage."""
-    assert len(entries) == 17
+    """Preserve the original 15 READs, plus network-state and CREATE/options."""
+    assert len(entries) == 18
     assert {(method, e["path"], e["operationId"]) for e in entries
             for method in e["methods"]} == EXPECTED_PRODUCT_MANIFEST
     reads = [e for e in entries if e["operationId"] in {item[2] for item in EXPECTED_GET_MANIFEST}]
@@ -74,6 +76,12 @@ def assert_product_policy_manifest(entries):
     assert {e["operationId"] for e in reads if e["principalKinds"] == ["partner"]} == USER_ONLY_GET_IDS
     assert all(e["principalKinds"] == (["partner"] if e["operationId"] in USER_ONLY_GET_IDS
                                       else ["partner", "service"]) for e in reads)
+    network, = [e for e in entries if e["operationId"] == "getNetworkState"]
+    assert (network["methods"], network["path"]) == (["GET"], "/monitoring/network-state")
+    assert network["principalKinds"] == ["partner", "service"]
+    assert network["scopes"] == ["monitoring:read", "objects:read"]
+    assert network["owner"] == network["resourceType"] == "objects" and network["action"] == "read"
+    assert network["tenantRequired"] is True and network["securityScheme"] == "ProductOAuth"
     writes = [e for e in entries if "POST" in e["methods"]]
     assert len(writes) == 1
     create = writes[0]
@@ -339,6 +347,32 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                 for missing in scopes:
                     self.state["scopes"] = SCOPES - {missing}
                     self.problem(await self.request(path=path), 403)
+        self.assertEqual(self.state["domain"], [])
+
+    def test_network_state_metadata_is_separate_from_legacy_read_transport(self):
+        # Source/schema expectation only; actual owner/PG admission has its own suite.
+        schema = curated_openapi(self.app)
+        operation = schema["paths"]["/monitoring/network-state"]["get"]
+        self.assertEqual(operation["operationId"], "getNetworkState")
+        self.assertEqual(operation["security"], [
+            {"ProductOAuth": ["monitoring:read", "objects:read"]},
+            {"ProductServiceOAuth": ["monitoring:read", "objects:read"]}])
+        self.assertEqual({p["name"] for p in operation["parameters"] if p["in"] == "query"},
+                         {"pageSize", "cursor", "asOf", "region", "onlyProblems"})
+        self.assertEqual(operation["responses"]["200"]["content"]["application/json"]["schema"],
+                         {"$ref": "#/components/schemas/NetworkState"})
+        self.assertEqual(set(operation["responses"]),
+                         {"200", "400", "401", "403", "404", "405", "422", "429", "500", "503"})
+        components = schema["components"]["schemas"]
+        self.assertEqual(set(components["NetworkStateItem"]["required"]),
+                         {"objectId", "status", "lastChargeAt", "silentDays", "mismatch"})
+        self.assertEqual(set(components["NetworkStateContext"]["required"]),
+                         {"asOf", "dataThrough", "dataLagHours", "requestedDate", "catalogMode",
+                          "boundaryScope", "availability"})
+        self.assertEqual(set(components["NetworkStateStatusCounts"]["required"]),
+                         {"working", "no_link", "disabled", "decommissioned", "on_repair",
+                          "maintenance", "not_working", "unknown"})
+        self.assertEqual(self.state["sessions"], 0)
         self.assertEqual(self.state["domain"], [])
 
     async def test_create_contract_metadata_is_separate_from_get_transport_fixtures(self):

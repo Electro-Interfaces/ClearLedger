@@ -209,7 +209,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
                                         checked_create_options += 1
                                     else:
                                         checked += 1
-            self.assertEqual(checked, 14)
+            self.assertEqual(checked, 15)
             self.assertEqual(checked_create_options, 1)
             options_media = document["paths"]["/contracts/create-options"]["get"]["responses"]["200"][
                 "content"]["application/json"]
@@ -254,6 +254,10 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
                 ("/objects", "200", "application/json", "fictional", ("items", 0, "latitude"), "55.75"),
                 ("/objects/{objectId}/monitoring", "200", "application/json", "fictional",
                  ("window", "start"), "not-a-date-time"),
+                ("/monitoring/network-state", "200", "application/json", "fictional",
+                 ("summary", "byStatus", "no_link"), "0"),
+                ("/monitoring/network-state", "200", "application/json", "fictional",
+                 ("items", 0, "status"), "invented"),
                 ("/objects", "429", "application/problem+json", "quotaExhausted", ("status",), "429"),
                 ("/objects", "429", "application/problem+json", "injectedHTTP429", ("status",), "429")):
             schema = deepcopy(self.schema)
@@ -434,7 +438,7 @@ def assert_operation_405_contracts(document):
     actual = {(method.upper(), path, operation["operationId"])
               for path, item in document["paths"].items()
               for method, operation in item.items()}
-    assert actual == expected and len(actual) == 17
+    assert actual == expected and len(actual) == 18
     components = document["components"]
     contracts = {}
     for method, path, operation_id in expected:
@@ -497,7 +501,7 @@ class ProductOperationMethodNotAllowed(unittest.IsolatedAsyncioTestCase):
             budget_policy=product.budget.Policy(enabled=False))
         self.schema = product.curated_openapi(self.app)
 
-    def test_formal_405_all_17_operations_and_browser_projection(self):
+    def test_formal_405_all_18_operations_and_browser_projection(self):
         original = deepcopy(self.schema)
         canonical = assert_operation_405_contracts(self.schema)
         projected = product.public_client_openapi(self.schema)

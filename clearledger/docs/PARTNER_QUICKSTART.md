@@ -1,15 +1,15 @@
 # Подключение внешнего приложения: кандидат API
 
 [Руководство партнёра](partner/onboarding.md): регистрация приложения, авторизация,
-описание данных и рецепты чтения и создания договора. Текущий состав из 17 операций
+описание данных и рецепты чтения и создания договора. Текущий состав из 18 операций
 приведён ниже; руководство описывает кандидат API и границы его проверок.
 
 <a id="current-source-contract-20261101"></a>
 
 ## Текущий Source-контракт · 01.11.2026
 
-На исходниках `f196f8aa8113090540ca19bfc07a2dfb55a8b3d2` объявлены **17 операций:
-16 GET и один POST на 16 путях**. Прежние 11 GET допускают user/service, четыре
+Контракт на базе `24af3535565381d46f9e51c2841c2feb80b1c8f3` включает **18 операций:
+17 GET и один POST на 17 путях**. Прежние 11 GET и новый network-state допускают user/service, четыре
 документных GET требуют delegated user consent; GET вариантов создания и POST
 создания допускают user/approved service с отдельным текущим CREATE-профилем.
 В таблице «пользователь» означает principal `partner` / `ProductOAuth`,
@@ -22,6 +22,7 @@ scope сам по себе не даёт права на ресурс, запи�
 | GET | `/api/v1/objects` | `listObjects` | `objects:read` | Пользователь / сервис |
 | GET | `/api/v1/objects/{objectId}` | `getObject` | `objects:read` | Пользователь / сервис |
 | GET | `/api/v1/objects/{objectId}/monitoring` | `getObjectMonitoring` | `monitoring:read` + `objects:read` | Пользователь / сервис |
+| GET | `/api/v1/monitoring/network-state` | `getNetworkState` | `monitoring:read` + `objects:read` | Пользователь / одобренный сервис, energy |
 | GET | `/api/v1/equipment` | `listEquipment` | `equipment:read` | Пользователь / сервис |
 | GET | `/api/v1/equipment/{equipmentId}` | `getEquipment` | `equipment:read` | Пользователь / сервис |
 | GET | `/api/v1/counterparties` | `listCounterparties` | `counterparties:read` | Пользователь / сервис |
@@ -44,8 +45,32 @@ scope сам по себе не даёт права на ресурс, запи�
 OAuth/API/docs feature gates и не подтверждает публикацию или состояние живого
 пространства. Для этой редакции выполнена только статическая сверка документации,
 без generation, typecheck, тестов или runtime-приёмки.
-Назначение [шести typed consumers и 405/Allow](PARTNER_SDK_TYPES.md#шесть-конкретных-consumers)
+Назначение [семи typed consumers и 405/Allow](PARTNER_SDK_TYPES.md#семь-конкретных-consumers)
 описано в SDK-документе.
+
+### Состояние обслуживаемой сети РусГидро
+
+`GET /api/v1/monitoring/network-state` читает доступную обслуживаемую сеть профиля
+`energy`. Требуются оба scopes, typed objects grant и текущие права пользователя
+либо approved service. Строка содержит только `objectId`, `status`, `lastChargeAt`,
+`silentDays`, `mismatch`; финансовых полей и финансового отбора нет. `summary`
+считает весь отбор M после `onlyProblems` до страницы, `nextCursor` продолжает его
+в порядке точных UTF-8 bytes ID. Не нормализуйте Unicode, регистр или пробелы ID.
+
+Query ограничен `pageSize/cursor/asOf/region/onlyProblems`. `asOf` ограничивает
+наблюдения по МСК, каталог и статусы остаются текущими. Подписанный cursor связан
+с авторизацией, отбором, pageSize и границей данных; авторизация повторяется на
+каждой странице. После 400 начинайте новый обход без cursor и отбросьте частичный
+результат; 401/403 требуют решения доступа. 503 не является частичным успехом.
+Полные параметры, время, восемь status keys и вымышленный ответ — в
+[рецепте](partner/recipes/monitoring.md#getnetworkstate).
+
+Root отдельно принял backend серии 25 старых + 50 новых = 75 уникальных случаев
+на этой базе (225 фаз, без errors/failures/skips; сообщение `msg_11824f7b96be`).
+Это ограниченная backend-приёмка; DX-правка здесь проверяется по Source, генерация
+и проверка свежести SDK ещё предстоят Root. [Конечный план DX](api/RUSHYDRO_NETWORK_STATE_DX_PLAN_20261101.md)
+разделяет эти свидетельства; production SLA, CI, пилот, браузер и весь API ими
+не приняты.
 
 Серверная и браузерная схемы описывают эти же операции. Отличается профиль
 авторизации: confidential client_credentials описан только в серверной схеме;
@@ -261,14 +286,14 @@ docs session: `/api/developer/docs/openapi.server.json`. В нём отдель�
 пользовательский Code+PKCE и confidential client_credentials с обязательным
 прикладным `grant_id`. Файл `/api/developer/docs/openapi.json` служит Swagger
 в браузере и предлагает только пользовательский Code+PKCE; секрет серверного
-приложения в браузер не вводится. Оба Source-представления относятся к одним 17
+приложения в браузер не вводится. Оба Source-представления относятся к одним 18
 операциям и тем же политикам доступа.
 
 
 ## История контрактных срезов
 
 Срезы ниже сохранены для истории. Их counts и результаты не заменяют текущую
-таблицу 17 операций и не подтверждают свежесть SDK для нынешней редакции.
+таблицу 18 операций и не подтверждают свежесть SDK для нынешней редакции.
 
 M06-R3 от 31.10.2026 добавил required nullable `typeCode` и `validUntil` в Contract
 list/detail. Оба source-valued: код не является глобальным enum, срок хранится

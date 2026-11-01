@@ -5,12 +5,49 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { exportSchema, render, root } from "./generate.mjs";
+import { exportSchema, render, root, validateSchema } from "./generate.mjs";
 
 const script = fileURLToPath(new URL("generate.mjs", import.meta.url));
 const schema = JSON.parse(exportSchema());
 const cli = (mode, file, env = {}) => spawnSync(process.execPath, [script, mode, "--output", file], {
   encoding: "utf8", env: { ...process.env, ...env },
+});
+
+test("network state is the eighteenth operation with complete fictional non-financial wire example", async () => {
+  const operations = Object.entries(schema.paths).flatMap(([path, item]) =>
+    Object.entries(item).filter(([, value]) => value?.operationId).map(([method, value]) => [method, path, value.operationId]));
+  assert.equal(operations.length, 18);
+  assert.equal(Object.keys(schema.paths).length, 17);
+  assert.equal(operations.filter(([method]) => method === "get").length, 17);
+  assert.deepEqual(operations.filter(([method]) => method === "post"), [["post", "/contracts", "createContract"]]);
+  const operation = schema.paths["/monitoring/network-state"].get;
+  assert.equal(operation.operationId, "getNetworkState");
+  assert.deepEqual(operation.security, [
+    { ProductOAuth: ["monitoring:read", "objects:read"] },
+    { ProductServiceOAuth: ["monitoring:read", "objects:read"] },
+  ]);
+  const sample = operation.responses[200].content["application/json"].examples.fictional;
+  assert.match(sample.summary, /Fictional/);
+  assert.deepEqual(Object.keys(sample.value.items[0]).sort(), ["lastChargeAt", "mismatch", "objectId", "silentDays", "status"]);
+  assert.deepEqual(Object.keys(sample.value.summary.byStatus).sort(),
+    ["decommissioned", "disabled", "maintenance", "no_link", "not_working", "on_repair", "unknown", "working"]);
+  assert.equal(sample.value.items[0].lastChargeAt, null);
+  assert.equal(sample.value.context.dataThrough, null);
+  assert.equal(sample.value.context.dataLagHours, null);
+  assert.equal(sample.value.context.catalogMode, "current");
+  assert.equal(sample.value.context.boundaryScope, "authorizedOperatedRegion");
+  for (const mutate of [
+    copy => { delete copy.paths["/monitoring/network-state"]; },
+    copy => { copy.paths["/monitoring/network-state"].get.operationId = "inventedNetworkState"; },
+    copy => { copy.paths["/monitoring/network-state"].post = copy.paths["/monitoring/network-state"].get; },
+  ]) {
+    const copy = structuredClone(schema);
+    mutate(copy);
+    assert.throws(() => validateSchema(copy), /operation manifest/);
+  }
+  const config = JSON.parse(await readFile(new URL("tsconfig.json", import.meta.url), "utf8"));
+  assert.equal(config.files.length, 7);
+  assert.equal(config.files.filter(file => file === "network-state-consumer.ts").length, 1);
 });
 
 test("offline schema exactly matches real database-module factory without startup or connection", () => {

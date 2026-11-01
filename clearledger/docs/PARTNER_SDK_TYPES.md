@@ -2,10 +2,10 @@
 
 ## Текущий Source-контракт · 01.11.2026
 
-На исходниках `f196f8aa8113090540ca19bfc07a2dfb55a8b3d2` manifest содержит
-**17 операций: 16 GET и один POST на 16 путях**. Единая
+На базе `24af3535565381d46f9e51c2841c2feb80b1c8f3` DX manifest содержит
+**18 операций: 17 GET и один POST на 17 путях**. Единая
 [таблица method, public path, operationId, scopes и principal profiles](PARTNER_QUICKSTART.md#current-source-contract-20261101)
-находится в quickstart. Прежние 11 read GET допускают user/service, четыре
+находится в quickstart. Прежние 11 read GET и новый network-state допускают user/service, четыре
 документных GET — только delegated user consent. GET `/contracts/create-options`
 и POST `/contracts` требуют `contracts:create` и текущего CREATE-профиля
 пользователя либо approved machine grant; `contracts:read` их не разрешает
@@ -42,7 +42,7 @@ replay — тот же ID и `replayed: true`. После неизвестног
 grant/actor; тип результата не даёт READ. Точные body/status/cursor semantics
 и канонические HTTP/options отчёты — в quickstart по ссылке выше.
 
-### Шесть конкретных consumers
+### Семь конкретных consumers
 
 Все файлы ниже перечислены в [tsconfig](../tools/partner-api-types/tsconfig.json).
 Таблица описывает назначение их исходников; успешная компиляция на текущем pin
@@ -56,6 +56,21 @@ grant/actor; тип результата не даёт READ. Точные body/s
 | [contract-classification-consumer.ts](../tools/partner-api-types/contract-classification-consumer.ts) | Required nullable typeCode/validUntil, source strings и scoped metadata; required code, запрет enumeration/search/cursor, tenant override, body и classifier write |
 | [contract-create-consumer.ts](../tools/partner-api-types/contract-create-consumer.ts) | CREATE body с creationKey и required nullable validUntil, discriminator coverage; 201/200 result и 403 Problem, запрет tenant override и утечки читаемой карточки |
 | [contract-create-options-consumer.ts](../tools/partner-api-types/contract-create-options-consumer.ts) | Четыре resource, required resource/nextCursor, value/selectionVersion, 429 headers; запрет internal ID/body/POST и точные required 405 Allow для GET и коллекции GET/POST |
+| [network-state-consumer.ts](../tools/partner-api-types/network-state-consumer.ts) | Точные query/response, пять полей строки, восемь underscore status keys и required nullable; сохранение operation/access boundary, фильтров и pageSize при continuation, restart без cursor; 400/401/403/503, отрицательные financial/query/status/body/POST примеры |
+
+Новый consumer — wire example без сетевых запросов и SDK transport. Строка
+`accessBoundary` — локальный маркер вызывающего кода; она не выдаётся API и не
+заменяет серверную проверку прав на каждой странице. 400 требует нового обхода
+и отбрасывания частичного результата; 401/403 останавливают обход, 503 передаётся
+ограниченной политике повторов клиента. Функции не обновляют токены и не выдают
+разрешения. TypeScript не проверяет реальный JSON, диапазоны query, подпись cursor
+или актуальные права.
+
+Generated `src/generated/partner-api.d.ts` и canonical JSON в этой Source-правке
+намеренно оставлены прежними. Седьмой consumer до генерации Root не считается
+скомпилированным; новый официальный generator test только написан.
+Root далее выполняет конечную [DX-матрицу](api/RUSHYDRO_NETWORK_STATE_DX_PLAN_20261101.md),
+включая export/generate/check, Node tests и TSC семи consumers в offline isolation.
 
 ### 405, заголовки и границы профиля
 
@@ -78,7 +93,7 @@ ingress/proxy и ошибки после отправки заголовков �
 к файлу или авторизацию; TS не валидирует входной JSON и cursor integrity/TTL.
 
 Описания архитектуры и команды ниже сохранены как документация. Исторические
-результаты M12/M06-R3 относятся к своим pins, а не к текущим 17 операциям.
+результаты M12/M06-R3 относятся к своим pins, а не к текущим 18 операциям.
 
 ## Источник и offline граница
 
@@ -264,7 +279,7 @@ M06-R3 от 31.10.2026 содержал **15 GET: 11 user/service и четыр�
 Принятые source/new103/regression84 с 152 subtests, SDK15 generation/freshness,
 6 generator checks и 4 consumers относятся к тому срезу;
 [канон M06-R3](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
-Эти результаты не перенесены на текущие 17 операций или шесть consumers.
+Эти результаты не перенесены на текущие 18 операций или семь consumers.
 
 NEXT-R2 от30.10.2026 добавил `GET /api/v1/contracts/{contractId}/documents`
 (`listContractDocuments`): явные subject/graph связи с независимо доступными

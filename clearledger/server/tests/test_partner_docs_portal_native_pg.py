@@ -61,6 +61,7 @@ OPERATIONS = {
     ("/objects", "get"): "listObjects",
     ("/objects/{objectId}", "get"): "getObject",
     ("/objects/{objectId}/monitoring", "get"): "getObjectMonitoring",
+    ("/monitoring/network-state", "get"): "getNetworkState",
     ("/equipment", "get"): "listEquipment",
     ("/equipment/{equipmentId}", "get"): "getEquipment",
     ("/counterparties", "get"): "listCounterparties",
@@ -310,6 +311,7 @@ async def test_native_employee_code_pkce_cookie_and_exact_product_projection(nat
         actual = {(path, method): operation["operationId"] for path, item in schema["paths"].items()
             for method, operation in item.items() if isinstance(operation, dict) and "operationId" in operation}
         assert actual == OPERATIONS
+        assert len(actual) == 18 and len(schema["paths"]) == 17
         assert schema["servers"] == [{"url": ORIGIN + "/api/v1"}]
     assert set(browser["components"]["securitySchemes"]) == {"ProductOAuth"}
     assert set(server["components"]["securitySchemes"]) == {"ProductOAuth", "ProductServiceOAuth"}

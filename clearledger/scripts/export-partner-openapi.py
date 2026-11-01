@@ -85,6 +85,7 @@ def export_schema(*, runtime_database=False):
         ('get', '/objects', 'listObjects'),
         ('get', '/objects/{objectId}', 'getObject'),
         ('get', '/objects/{objectId}/monitoring', 'getObjectMonitoring'),
+        ('get', '/monitoring/network-state', 'getNetworkState'),
         ('get', '/equipment', 'listEquipment'),
         ('get', '/equipment/{equipmentId}', 'getEquipment'),
         ('get', '/counterparties', 'listCounterparties'),
@@ -106,7 +107,7 @@ def export_schema(*, runtime_database=False):
     if (len(operations) != len(expected) or set(operations) != expected
             or any(operation.get("x-elsy-readiness") != "candidate"
                    for item in schema["paths"].values() for method, operation in item.items() if method in methods)):
-        raise RuntimeError("Expected exact 15 READ + createContract POST + getContractCreateOptions GET method/path/id manifest")
+        raise RuntimeError("Expected exact 16 READ + createContract POST + getContractCreateOptions GET method/path/id manifest")
     unexpected = {"app.main", "app.auth", "app.services.partner_identity"}
     if not runtime_database:
         unexpected.add("app.config")

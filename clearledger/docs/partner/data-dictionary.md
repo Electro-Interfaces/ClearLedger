@@ -5,13 +5,15 @@
 [Мониторинг](recipes/monitoring.md) · [Документы](recipes/documents.md)
 
 Candidate, default-off, source-only. Source pin:
-`9eb236a4d69f0452208857ac603fd1da515f52d8`; schema/HTTP/runtime **NOTRUN**.
+`24af3535565381d46f9e51c2841c2feb80b1c8f3`; автором DX schema/HTTP/runtime **NOTRUN**.
 Ниже описан текущий wire DTO, не обещание полноты будущих отраслевых процессов.
 Состав и профили — в [единой таблице операций](../PARTNER_QUICKSTART.md#current-source-contract-20261101).
 
 ## Значения и IDs
 
-JSON product API использует camelCase. Все перечисленные поля ответных DTO входят в
+JSON product API использует camelCase; ключи `NetworkState.summary.byStatus`
+сохраняют точные underscore status codes (`no_link`, `on_repair`, `not_working`).
+Все перечисленные поля ответных DTO входят в
 ответ, в том числе nullable поля с явным `null`. **Nullable не означает optional.**
 `null` — неизвестное/недоступное значение, иногда redacted ссылка. Это не ноль,
 пустая строка, отрицательный результат проверки или доказательство отсутствия
@@ -68,7 +70,8 @@ date query не принимается. `q` ищет только в одном 
 Порядок фиксирован: `created_at ASC, id ASC`. `offset`, `sort`, `companyId` и
 другие неизвестные query отклоняются, а не игнорируются. Detail и download
 используют пустой query. Contract relations допускают только `pageSize/cursor`.
-Monitoring допускает только `days/asOf`; metadata classifier — только `typeCode`.
+Object monitoring допускает только `days/asOf`; metadata classifier — только `typeCode`.
+Network-state имеет отдельные `pageSize/cursor/asOf/region/onlyProblems` ниже.
 
 Page содержит `items`, `total`, `nextCursor`. `total` считает текущий доступный
 отбор **до cursor**, не размер страницы и не глобальный размер компании.
@@ -82,6 +85,64 @@ grant, scopes, resource policy и фильтрам. Смена отбора/ра
 Для клиента полезны последовательный обход, собственный deadline и предел страниц,
 контроль повторяющегося cursor и dedup по resource ID. Эти клиентские ограничения
 не являются серверными квотами или гарантией snapshot.
+
+## NetworkState: обслуживаемая сеть без финансовых полей
+
+`GET /monitoring/network-state` требует `objects:read` AND `monitoring:read`, typed
+objects grant, текущего пользователя либо approved service и профиль `energy`.
+M — доступные текущие сетевые точки после native правила обслуживаемого владельца,
+точного региона и `onlyProblems`. `summary` считается по всему M до cursor/page,
+включая на следующих страницах; это не размер страницы и не вся компания.
+
+| Query | Правило |
+|---|---|
+| `pageSize` | Integer 1..200, default 50; фиксировать на весь обход |
+| `cursor` | Необязательный string/null, 1..4096 при наличии; передавать exact nextCursor, URL-encode целиком, для restart опустить |
+| `asOf` | ISO date `2000-01-01`..сегодня МСК; timestamp и будущие даты запрещены |
+| `region` | 1..200 символов, до 20 непустых exact tokens через `\|`; регистр и пробелы значимы |
+| `onlyProblems` | Default false; в HTTP только `true`/`false`, в TS boolean |
+
+`days`, `q`, `sort`, `offset`, `companyId` и финансовые фильтры не принимаются.
+Неизвестные query keys, invalid значения и непустое GET body дают 422 после
+предусмотренной проверки доступа/квоты. Это отдельный strict query, общий ListQuery
+к нему неприменим.
+
+| Поле ответа | Тип и смысл |
+|---|---|
+| `items[].objectId` | Exact opaque ObjectId, порядок по UTF-8 bytes; не UUID и не label |
+| `items[].status` | `working`, `no_link`, `disabled`, `decommissioned`, `on_repair`, `maintenance`, `not_working`, `unknown` |
+| `items[].lastChargeAt` | Обязательный datetime/null: последняя сессия с energy > 0 до effective asOf |
+| `items[].silentDays` | Обязательный integer >=0/null: разность календарных дат МСК; null при отсутствии такой зарядки |
+| `items[].mismatch` | Boolean: native `working` и (нет зарядки либо silentDays >7); только этот нефинансовый признак отбирает onlyProblems |
+| `summary.stations`, `summary.mismatch` | Integer >=0 по всему M до страницы |
+| `summary.byStatus` | Обязательны все восемь точных status keys с integer >=0, включая нули |
+| `context.asOf` | Effective endpoint МСК: boundary доступного обслуживаемого региона, ограниченная концом requested дня; при отсутствии boundary — текущее время с тем же ограничением |
+| `context.dataThrough` | Обязательный datetime/null: max started_at в доступном обслуживаемом регионе до onlyProblems; может быть позже исторического asOf |
+| `context.dataLagHours` | Обязательный number >=0/null: давность dataThrough от текущего времени |
+| `context.requestedDate` | Обязательный date/null: исходный asOf |
+| `context.catalogMode` | Всегда `current`; история состава и статусов не восстанавливается |
+| `context.boundaryScope` | Всегда `authorizedOperatedRegion` |
+| `context.availability` | `observed` при наличии boundary, иначе `unknown`; это не uptime/SLA |
+| `nextCursor` | Обязательный string/null; null завершает текущий обход |
+
+Состав сети, владельцы и статусы текущие при любом asOf. Boundary считается до
+`onlyProblems`, поэтому скрытая этим фильтром разрешённая станция может влиять на
+время; чужие/необслуживаемые/другие регионы его не расширяют. Финансовые поля,
+выручка и сортировка по потерям не опубликованы.
+
+Cursor подписан и связан с operation/version, principal/company/client/install/
+grant/scopes/object/org/policy, всеми фильтрами, pageSize и scoped boundary.
+Каждая страница проходит текущую авторизацию раньше продолжения. Изменённые
+binding или boundary дают 400 `invalid_cursor`; начните новый обход без cursor
+и не склеивайте его с прежними частичными страницами. 401/403 останавливают обход,
+404 может означать неподходящий профиль. 503 `api_unavailable` не содержит
+частичного результата; лимит 10000 разрешённых текущих сетевых кандидатов
+считается до owner/region (запрашивается максимум 10001), read/SQL deadline 5 s.
+Это инженерные admission limits, не измерение ёмкости или production SLA.
+Пагинация live, общий snapshot между страницами не обещан.
+
+Полный [вымышленный пример](recipes/monitoring.md#getnetworkstate) содержит все
+required nullable поля. Generated types проверяет Root после этой Source-правки.
 
 ## Объект: текущая точка обслуживания
 

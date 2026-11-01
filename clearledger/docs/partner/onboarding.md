@@ -1,8 +1,8 @@
 # Первое подключение внешнего приложения
 
-Это инструкция кандидата Product API на Source
-`9eb236a4d69f0452208857ac603fd1da515f52d8`: **17 операций, 16 GET и один POST
-на 16 путях; 13 user/service и четыре delegated user-only**. Единая
+Это Source-инструкция кандидата Product API
+на базе `24af3535565381d46f9e51c2841c2feb80b1c8f3`: **18 операций, 17 GET и один POST
+на 17 путях; 14 user/service и четыре delegated user-only**. Единая
 [таблица операций, scopes и профилей](../PARTNER_QUICKSTART.md#current-source-contract-20261101)
 находится в quickstart. OAuth, Product API и docs portal
 по умолчанию выключены независимо друг от друга. Подготовка этой инструкции
@@ -21,7 +21,8 @@ OAuth-клиент, пилоты и эксплуатация **NOTRUN**, буд�
 3. Прочитайте [объекты, оборудование и контрагентов](recipes/read-catalogs.md).
 4. Пройдите цепочку [договор → объекты → документы](recipes/contracts.md),
    затем [версии → файл](recipes/documents.md).
-5. Для энергетического профиля прочитайте [мониторинг](recipes/monitoring.md).
+5. Для энергетического профиля прочитайте [мониторинг](recipes/monitoring.md):
+   состояние обслуживаемой сети `getNetworkState` и отдельные агрегаты объекта.
 6. При обработке ответа используйте [словарь данных](data-dictionary.md)
    и [ошибки и повторы](errors.md).
 
@@ -65,7 +66,7 @@ scopes → grant**. Consent сотрудника не заменяет approval 
 | Core login | Core-сессия сотрудника | Страница входа и согласия в Core; пароль вводится только там |
 | OIDC identity, `openid` | ID token, pairwise `sub`; `profile/email` по отдельным scopes | Вход в ваше приложение, не продуктовый Bearer |
 | Delegated Code + PKCE S256 | Partner access token от имени сотрудника | Чтение и отдельный CREATE/options при достаточных текущих правах и CREATE-профиле |
-| Confidential client credentials + `grant_id` | Machine partner access token без User | 11 read GET и отдельные CREATE/options из 13 user/service операций; без identity, docs и файлов |
+| Confidential client credentials + `grant_id` | Machine partner access token без User | 12 read GET и отдельные CREATE/options из 14 user/service операций; без identity, docs и файлов |
 | Public docs Code + PKCE | Отдельный `openid docs:read` grant и короткий docs cookie | Docs UI, browser/server OpenAPI и локальные assets |
 
 Core bearer, SSO handoff, ID token и docs cookie не являются взаимозаменяемыми
@@ -89,6 +90,14 @@ typed grants: выдача объекта не выдаёт оборудован
 - Объекты договора: `contracts:read` AND `objects:read`, оба typed grants.
 - Документы договора: `contracts:read` AND `documents:read`, оба typed grants и User.
 - Файл: `documents:read` AND `documents.files:download`, documents grant, User и file ACL.
+
+Новый `GET /monitoring/network-state` доступен только профилю `energy` при текущем
+пользовательском доступе либо одобренном service grant. Он отдаёт состояние
+обслуживаемой сети без финансовых полей; `summary` относится ко всему отбору M
+до page. Не переносите сюда `days` или created_at-фильтры каталогов. Сохраняйте
+`pageSize/asOf/region/onlyProblems` и контекст авторизации между страницами;
+подписанный cursor не является snapshot. Полный вымышленный пример и порядок
+restart/отказов — в [рецепте](recipes/monitoring.md#getnetworkstate).
 
 Чтобы увидеть `equipment.objectId`, нужно независимо видеть объект. Чтобы увидеть
 `contract.counterpartyId` или ссылки документа, нужно независимо видеть их цели.
@@ -138,7 +147,7 @@ partner WS/SSE/change feed не объявлены в этом контракт�
 ## Свидетельства исходников
 
 Блок нужен сопровождающему; для прохождения инструкции читать код не требуется.
-Текущие свидетельства на `9eb236a4d69f0452208857ac603fd1da515f52d8`:
+Текущие Source-свидетельства на `24af3535565381d46f9e51c2841c2feb80b1c8f3`:
 
 - `clearledger/server/app/product_api/app.py:create_product_api, _policy, curated_openapi`: методы, principal kinds и AND scopes.
 - `clearledger/server/app/product_api/access.py:resolve, create_preflight, options_preflight`: independent grants и разные READ/CREATE boundaries.
@@ -148,6 +157,9 @@ partner WS/SSE/change feed не объявлены в этом контракт�
 История: исходный walkthrough от 31.10.2026 на
 `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9` содержал 15 GET (11 user/service и
 четыре user-only). Его свидетельства и отдельные принятые серии не означают
-приёмку нынешних 17 операций. Канонические отчёты и их границы — в quickstart.
+приёмку нынешних 18 операций. Канонические отчёты и их границы — в quickstart.
+Root сообщил об отдельной backend-приёмке network-state 75/225 без ошибок;
+эта документация и седьмой consumer остаются Source-only до конечных проверок
+Root из [DX-плана](../api/RUSHYDRO_NETWORK_STATE_DX_PLAN_20261101.md).
 
 Далее: [аутентификация](auth.md) · [словарь](data-dictionary.md) · [ошибки](errors.md).

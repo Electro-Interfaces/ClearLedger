@@ -17,6 +17,7 @@ const operationManifest = new Set([
   "get /objects listObjects",
   "get /objects/{objectId} getObject",
   "get /objects/{objectId}/monitoring getObjectMonitoring",
+  "get /monitoring/network-state getNetworkState",
   "get /equipment listEquipment",
   "get /equipment/{equipmentId} getEquipment",
   "get /counterparties listCounterparties",
@@ -121,7 +122,7 @@ export async function main(args = process.argv.slice(2)) {
         await writeFile(staging, bytes);
         await rename(staging, output);
       } finally { await rm(staging, { force: true }); }
-      process.stdout.write("Generated partner wire types from exact 15 READ + createContract POST + getContractCreateOptions GET candidate operations\n");
+      process.stdout.write("Generated partner wire types from exact 16 READ + createContract POST + getContractCreateOptions GET candidate operations\n");
     }
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }

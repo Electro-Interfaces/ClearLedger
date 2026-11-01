@@ -275,8 +275,27 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                    "business read and local SQL timeout are 5 seconds, safe 503 on admission/timeout. "
                    "These are engineering admission limits, not measured capacity or SLA. "
                    "Current product Problem/Bearer/quota/no-store/X-Request-Id profile applies. "
-                   "Generated Swagger/SDK and consumer migration await independent Root acceptance."
-               ))
+                   "Each item has only objectId/status/lastChargeAt/silentDays/mismatch; nullable fields "
+                   "are required. objectId is opaque Unicode, never UUID-parse or normalize. "
+                   "mismatch means working with no charge or more than seven silent MSK calendar days. "
+                   "All eight summary.byStatus keys are present, including underscore wire keys. "
+                   "The example is fictional, not a captured response; DX generation awaits Root checks."
+               ),
+               responses={200: {"content": {"application/json": {"examples": {
+                   "fictional": {"summary": "Fictional unobserved operated station; not a captured response",
+                       "value": {
+                           "items": [{"objectId": "Учебная точка 1", "status": "working",
+                                      "lastChargeAt": None, "silentDays": None, "mismatch": True}],
+                           "summary": {"stations": 1, "mismatch": 1, "byStatus": {
+                               "working": 1, "no_link": 0, "disabled": 0, "decommissioned": 0,
+                               "on_repair": 0, "maintenance": 0, "not_working": 0, "unknown": 0}},
+                           "context": {"asOf": "2026-10-30T23:59:59.999999+03:00",
+                                       "dataThrough": None, "dataLagHours": None,
+                                       "requestedDate": "2026-10-30", "catalogMode": "current",
+                                       "boundaryScope": "authorizedOperatedRegion", "availability": "unknown"},
+                           "nextCursor": None,
+                       }},
+               }}}}})
     async def get_network_state(request: Request,
                                 params: Annotated[dto.NetworkStateQuery, QueryParams()],
                                 context: AccessContext = Depends(get_access_context)):

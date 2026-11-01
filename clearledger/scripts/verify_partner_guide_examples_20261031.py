@@ -15,7 +15,7 @@ import re
 import subprocess
 from urllib.parse import parse_qsl, urlsplit
 
-BASE = 'cec2c9845431a0bc07e4b4f115eb21eed8d5caa9'
+BASE = '24af3535565381d46f9e51c2841c2feb80b1c8f3'
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = (
     'onboarding.md', 'auth.md', 'data-dictionary.md', 'errors.md',
@@ -24,6 +24,19 @@ DOCS = (
 )
 DTO_PATH = 'clearledger/server/app/product_api/dto.py'
 APP_PATH = 'clearledger/server/app/product_api/app.py'
+# These eight guide pages cover the original 15 GETs plus network-state only.
+# CREATE/options use router.operation and separate existing contract guidance;
+# this bounded checker does not claim full 18-operation example validation.
+GUIDE_GETS = frozenset({
+    'listObjects', 'getObject', 'getObjectMonitoring', 'getNetworkState',
+    'listEquipment', 'getEquipment', 'listCounterparties', 'getCounterparty',
+    'listContracts', 'getContractTypeMetadata', 'getContract', 'listContractObjects',
+    'listContractDocuments', 'listDocuments', 'getDocument', 'downloadDocumentVersion',
+})
+EXCLUDED_DECLARATIONS = frozenset({
+    ('POST', '/contracts', 'createContract'),
+    ('GET', '/contracts/create-options', 'getContractCreateOptions'),
+})
 
 
 def original(path):
@@ -56,6 +69,14 @@ class SourceDTO:
                 if name in {'Id', 'ObjectId'}:
                     assert isinstance(node.value, ast.Call)
                     self.aliases[name] = node.value.args[1]
+                elif name == 'NetworkStateStatus':
+                    assert isinstance(node.value, ast.Subscript) and short_name(node.value.value) == 'Literal'
+                    assert isinstance(node.value.slice, ast.Tuple)
+                    assert all(isinstance(x, ast.Constant) and type(x.value) is str for x in node.value.slice.elts)
+                    assert tuple(x.value for x in node.value.slice.elts) == (
+                        'working', 'no_link', 'disabled', 'decommissioned', 'on_repair',
+                        'maintenance', 'not_working', 'unknown')
+                    self.aliases[name] = node.value
 
     def fields(self, name):
         cls = self.classes[name]
@@ -65,7 +86,16 @@ class SourceDTO:
                 result.update(self.fields(base.id))
         for node in cls.body:
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                result[wire_name(node.target.id)] = node
+                key = wire_name(node.target.id)
+                if isinstance(node.value, ast.Call) and short_name(node.value.func) == 'Field':
+                    aliases = [kw.value for kw in node.value.keywords if kw.arg == 'alias']
+                    if aliases:
+                        assert name == 'NetworkStateStatusCounts' and node.target.id in {'no_link', 'on_repair', 'not_working'}
+                        assert len(aliases) == 1 and isinstance(aliases[0], ast.Constant)
+                        assert aliases[0].value == node.target.id
+                        key = aliases[0].value
+                assert key not in result, ('duplicate wire field', name, key)
+                result[key] = node
         return result
 
     def check(self, annotation, value, location='$', bindings=None):
@@ -164,6 +194,7 @@ class SourceDTO:
 
 def declarations(text):
     result = {}
+    excluded = set()
     for node in ast.walk(ast.parse(text)):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -172,7 +203,15 @@ def declarations(text):
                 path, resource, operation = [ast.literal_eval(x) for x in dec.args[:3]]
                 result[operation] = {'path': path, 'resource': resource,
                     'model': dec.args[3] if len(dec.args) > 3 else None, 'line': dec.lineno}
-    assert len(result) == 15
+            elif (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)
+                    and isinstance(dec.func.value, ast.Name) and dec.func.value.id == 'router'
+                    and dec.func.attr == 'operation'):
+                keywords = {kw.arg: kw.value for kw in dec.keywords}
+                methods = ast.literal_eval(keywords['methods'])
+                assert len(methods) == 1
+                excluded.add((methods[0], ast.literal_eval(dec.args[0]), ast.literal_eval(keywords['operation_id'])))
+    assert set(result) == GUIDE_GETS and len(result) == 16
+    assert excluded == EXCLUDED_DECLARATIONS
     return result
 
 
@@ -180,6 +219,7 @@ def verify(guide_root):
     dto = SourceDTO(original(DTO_PATH))
     operations = declarations(original(APP_PATH))
     seen, links, json_count = {}, 0, 0
+    excluded_seen = set()
     records = []
     for relative in DOCS:
         path = guide_root / relative
@@ -195,6 +235,16 @@ def verify(guide_root):
             links += 1
         regions = re.findall(r'<!-- operation:([A-Za-z0-9]+) -->\s*(.*?)<!-- /operation:\1 -->', text, re.S)
         for operation, region in regions:
+            excluded = [entry for entry in EXCLUDED_DECLARATIONS if entry[2] == operation]
+            if excluded:
+                # Explicitly outside the DTO oracle, never silently treated as checked.
+                method, public_path, _ = excluded[0]
+                assert operation not in excluded_seen, ('duplicate excluded region', operation)
+                request = re.search(r'^(GET|POST) (/api/v1/\S+) HTTP/1\.1$', region, re.M)
+                assert request and request[1] == method
+                assert urlsplit(request[2]).path == '/api/v1' + public_path
+                excluded_seen.add(operation)
+                continue
             assert operation in operations and operation not in seen, operation
             declaration = operations[operation]
             request = re.search(r'^GET (/api/v1/\S+) HTTP/1\.1$', region, re.M)
@@ -227,10 +277,15 @@ def verify(guide_root):
                 'source_decorator_line': declaration['line'], 'json_successes': len(successes),
                 'problem_examples': len(denials), 'binary': declaration['model'] is None})
     assert set(seen) == set(operations), ('missing guide regions', set(operations)-set(seen))
+    assert excluded_seen == {entry[2] for entry in EXCLUDED_DECLARATIONS}
     return {'kind': 'source/document examples check; no framework/application execution',
         'baseline': BASE, 'guide_pages': len(DOCS), 'operations': len(seen),
+        'coverage': '16 bounded GET guide regions; original 15 plus getNetworkState',
+        'excluded_existing_declarations': sorted(EXCLUDED_DECLARATIONS),
+        'excluded_existing_regions': sorted(excluded_seen),
         'local_links': links, 'json_blocks': json_count, 'examples': records,
         'limitations': ['limited explicit AST grammar, not Pydantic coercion/schema validation',
+            'CREATE/options regions: JSON/link/request-path checks only, no DTO/body/status validation',
             'not OIDC, HTTP, policy execution, binary download or partner acceptance'],
         'files': [{'path': str(Path('clearledger/docs/partner') / x),
                    'sha256': hashlib.sha256((guide_root / x).read_bytes()).hexdigest()} for x in DOCS]}
