@@ -54,3 +54,17 @@ onlyProblems — true/false; неизвестные query, непустое те
 исторической даты и страниц/отзыва доступа. Пакет READ25 на `2da44d38`
 принят отдельно; его результат не переносится на новую реализацию.
 Экспорт Swagger/SDK и миграция потребителей следуют после проверки метода.
+
+## Уточнение ручного oracle: EMPTY
+
+Текущий access отклоняет EMPTY обязательный typed resource grant ответом403
+до domain. Это отличается от последующего пустого Facts.objects. В частности,
+при installation.all_locations=True, непустом typed SET и member.object_scope=[]
+live_grant не сужает location_ids по пустому списку (truthiness), а access затем
+сужает Facts.objects по `is not None`. Principal admitted, E пуст, ответ200.
+Это существующие два слоя, а не изменение policy. Оба случая проверяются
+отдельно настоящими токенами; ожидание member-empty200 в TARGET применимо
+именно при этих предпосылках. Пустой E после org/network/owner/region также
+даёт200. Ни в одном domain SQL пустой set не превращается в None/ALL.
+Статус отзыва/истечения следует точной причине текущего canonical профиля,
+без изменения verifier.
