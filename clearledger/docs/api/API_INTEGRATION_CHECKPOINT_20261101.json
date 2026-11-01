@@ -1697,5 +1697,101 @@
       "all remaining original M00–M19 and11 requirements, endpoint/receipt/admin/query/OpenAPI/SDK/CI/pilots"
     ],
     "mergeDeployActivation": false
+  },
+  "oneCActualFailureAndHistoricalFixtureCheckpoint20261101": {
+    "status": "ROOT_OBSERVED_ONEC_FAILURE_NOT_ACCEPTED",
+    "asOfUTC": "2026-11-01 02:11 UTC",
+    "source": "e4c86ad071af8e168c5aba3fdef8672c9e9adf62",
+    "oneC": {
+      "testDefinitions": 9,
+      "actualCases": 21,
+      "passed": 3,
+      "failures": 18,
+      "errors": 0,
+      "skipped": 0,
+      "resultSHA256": "3fb2bc3b8608f319db205aa793d337a4fa2bb6c1cb81ab2c780436f77105eddd",
+      "executionSHA256": "08a30fbaab9f814a728461e932ee94a968bde4d45e04162f3c246fb44331e9cc",
+      "artifact": "onec-fullnative-pg-20261101-8915cf2db85f",
+      "seconds": 114.22542715352029,
+      "bootstrap": {
+        "status": "PASS_NATIVE_BOOTSTRAP_ONLY",
+        "models": 341,
+        "tablesBefore4": 341,
+        "tablesAfter4": 347,
+        "scope": "unchanged native create_all + explicit owners3/4, mapped names/columns/PK/FK/actions and enabled RI coverage; no lifecycle/seeds/server",
+        "proofSHA256": "5b87d84d4c6d00ae77bd5e2597066a1174baaaa992a32e579884dad2e5f2f363"
+      },
+      "observation": "actual persisted OneCConnection rejected before synchronization; other failures include timeouts and unobserved waits; full rerun required after fix"
+    },
+    "UUIDDiagnostic": {
+      "status": "ACTUAL_ORM_TYPE_AND_REFUSALS_OBSERVED_NOT_COMPONENT_ACCEPTANCE",
+      "artifact": "uuid-orm-diagnostic-20261101-d00b74395535",
+      "resultSHA256": "5ea164aa3119922c8dc8ffc2ec9af2d4dc02d2d83ebb66d04d2ded863fa6bef7",
+      "executionSHA256": "89a0a2da68523c4ae8dc2ec2391da38e0a9ed077939898e49ded212585977444",
+      "actualORM": {
+        "ormClass": "app.models.OneCConnection",
+        "persisted": true,
+        "identity": {
+          "class": "asyncpg.pgproto.pgproto.UUID",
+          "exactStdlibUUID": false,
+          "isinstanceStdlibUUID": true,
+          "canonicalEquality": true,
+          "mro": [
+            "asyncpg.pgproto.pgproto.UUID",
+            "uuid.UUID",
+            "builtins.object"
+          ]
+        },
+        "companyID": {
+          "class": "asyncpg.pgproto.pgproto.UUID",
+          "exactStdlibUUID": false,
+          "isinstanceStdlibUUID": true,
+          "canonicalEquality": true,
+          "mro": [
+            "asyncpg.pgproto.pgproto.UUID",
+            "uuid.UUID",
+            "builtins.object"
+          ]
+        },
+        "actualOneCRefusal": {
+          "class": "app.services.contract_write_locks.ScopedLockError",
+          "message": "Persisted OneCConnection identity required"
+        },
+        "actualKernelRefusal": {
+          "class": "builtins.TypeError",
+          "message": "company_id requires exact nonempty UUID"
+        }
+      },
+      "seconds": 29.669501507654786,
+      "childExitCode": 0,
+      "rootHostExitCode": 1,
+      "rootHostError": "bookkeeping KeyError: diagnostic result has no exitCode; original NOT_ACCEPTED execution preserved",
+      "scope": "actual Company/OneC insert commit then new-session ORM reload on new fullnative DB; not OneC remediation/concurrency PASS"
+    },
+    "cleanup": {
+      "bothWorldsOwnedContainersRemoved": true,
+      "PGClientsAndLocks": [
+        0,
+        0
+      ],
+      "foreign41SafeProjectionsUnchanged": true,
+      "wholeForeignStateProven": false
+    },
+    "historicalFixture": {
+      "source": "38db6925099c222f12abb5bbdd16a321c5923e90",
+      "rootIntegration": "f6c6619caec053ddab83799b1556d3da488307cb",
+      "status": "INDEPENDENT_SOURCE_RECHECK_ACCEPTED_HISTORICAL7_NOTRUN",
+      "helperSHA256": "29aa8465a646862439737248fc6ec280b2579db6c1a3d8e1a5454a565035a17c",
+      "manifestSHA256": "5fb1b380e06b21bfb461e744153b16db34ebbd249b3441c6800a5b6f10040f76",
+      "independentTargetedReviewSHA256": "048da166dbc8459b21ce0047367cceca879bb64e13ea1dbe724e874098ed5a2e"
+    },
+    "next": "Root Source-only shared UUID-boundary strategy, bounded implementation + independent review + rerun original21 and R1/identity affected suites",
+    "originalScope": {
+      "sections": 20,
+      "crossCutting": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "preserved": "47/54 schema variants and24 unit cases retain previous distinct immutable composition boundaries; no new OneC PASS/overall CI/merge/deploy/flags"
   }
 }
