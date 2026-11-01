@@ -246,7 +246,36 @@ async def test_native_writer_first_blocks_shared_admission_until_real_completion
                 assert not any(label == "reader" and "for update" in s for label, s, _ in w.sql)
                 await blocker.rollback()
                 assert await asyncio.wait_for(wt, 10)
-                assert await asyncio.wait_for(rt, 10)
+                if root == "update_kind":
+                    # Original B saw no default Case before the catalog S wait.
+                    # The committed new parent requires a new request/root.
+                    with pytest.raises(HTTPException) as error:
+                        await asyncio.wait_for(rt, 10)
+                    assert error.value.status_code == 409
+                    assert error.value.detail == "Данные изменились одновременно; повторите запрос"
+                    assert not any(label == "reader" and s.lstrip().startswith(
+                        ("insert ", "update ", "delete ")) for label, s, _ in w.sql)
+                    assert not admission.new and not admission.dirty and not admission.deleted
+                    doc = await admission.get(DocCard, w.doc)
+                    assert doc.status == "draft" and doc.case_id is None
+                    assert doc.reg_number is None and doc.reg_date is None and doc.verify_token is None
+                    assert not w.notifications
+                    assert await admission.scalar(select(func.count()).select_from(DocCounter).where(
+                        DocCounter.company_id == w.cid)) == 0
+                    await admission.rollback()  # The caller discards the whole stale root.
+                    assert not admission.in_transaction()
+                    async with w.factory() as fresh:
+                        await tag(fresh, "reader-new-request")
+                        result = await reader(w, fresh, "register")
+                        assert result["case_id"] == str(w.case) and result["reg_number"]
+                    async with w.factory() as check:
+                        saved = await check.get(DocCard, w.doc)
+                        assert saved.status == "registered" and saved.case_id == w.case
+                        assert saved.reg_number == result["reg_number"] and saved.verify_token
+                        assert await check.scalar(select(DocKind.default_case_id).where(
+                            DocKind.id == w.kind)) == w.case
+                else:
+                    assert await asyncio.wait_for(rt, 10)
 
 
 @pytest.mark.parametrize("root", READERS)

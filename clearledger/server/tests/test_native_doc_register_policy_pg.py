@@ -46,13 +46,16 @@ pytestmark = pytest.mark.asyncio
 async def native_revoke(w, db, branch):
     admin = await db.get(User, w.admin)
     if branch == "role":
-        return await roles.update_role(str(w.role), CompanyRoleUpdate(
-            company_id=str(w.cid), name="Synthetic revoked", modules=["info"]), db, admin)
+        with native_claims_context({"sub": str(admin.id), "tv": admin.token_version or 0}, None):
+            return await roles.update_role(str(w.role), CompanyRoleUpdate(
+                company_id=str(w.cid), name="Synthetic revoked", modules=["info"]), db, admin)
     if branch == "product":
-        return await users.set_member_access(str(w.uid), MemberAccessUpdate(
-            company_id=str(w.cid), mode="custom", modules=["info"]), db, admin)
+        with native_claims_context({"sub": str(admin.id), "tv": admin.token_version or 0}, None):
+            return await users.set_member_access(str(w.uid), MemberAccessUpdate(
+                company_id=str(w.cid), mode="custom", modules=["info"]), db, admin)
     actor = await db.get(User, w.uid)
-    return await auth.logout_all(Response(), actor, db)
+    with native_claims_context({"sub": str(actor.id), "tv": actor.token_version or 0}, None):
+        return await auth.logout_all(Response(), actor, db)
 
 
 @pytest.mark.parametrize("branch", ["role", "product", "session"])
@@ -164,16 +167,27 @@ async def test_actual_admin_revoke_between_early_check_and_discovery_is_rechecke
         member = await setup.get(UserCompany, (w.uid, w.cid))
         member.role = "admin"
         sub_id = await seed_substitution(w, setup)
+        before = (await setup.execute(select(UserSubstitution.__table__).where(
+            UserSubstitution.company_id == w.cid).order_by(UserSubstitution.id))).all()
     original = native.prepare_substitution
-    revoked = False
+    revoked = prepared = False
     async def revoke_then_prepare(db, actor, company_ref, **kw):
-        nonlocal revoked
+        nonlocal revoked, prepared
         if not revoked:
             async with w.factory() as writer:
                 admin = await writer.get(User, w.admin)
-                await users.update_user(str(w.uid), UserAdminUpdate(company_id=str(w.cid), role="user"), writer, admin)
+                with native_claims_context({"sub": str(admin.id), "tv": admin.token_version or 0}, None):
+                    await users.update_user(str(w.uid), UserAdminUpdate(
+                        company_id=str(w.cid), role="user"), writer, admin)
+                    # This direct caller owns completion normally done by get_db.
+                    await writer.commit()
+            async with w.factory() as check:
+                assert await check.scalar(select(UserCompany.role).where(
+                    UserCompany.user_id == w.uid, UserCompany.company_id == w.cid)) == "user"
             revoked = True
-        return await original(db, actor, company_ref, **kw)
+        result = await original(db, actor, company_ref, **kw)
+        prepared = True
+        return result
     monkeypatch.setattr(native, "prepare_substitution", revoke_then_prepare)
     async with w.factory() as db:
         actor = await db.get(User, w.uid)
@@ -185,7 +199,10 @@ async def test_actual_admin_revoke_between_early_check_and_discovery_is_rechecke
             else:
                 await docs.stop_substitution(str(sub_id), str(w.cid), db, actor)
         assert error.value.status_code == 403
+        assert revoked and prepared  # Both entries reached the post-prepare native guard.
         assert not db.new and not db.dirty and not db.deleted
+        assert (await db.execute(select(UserSubstitution.__table__).where(
+            UserSubstitution.company_id == w.cid).order_by(UserSubstitution.id))).all() == before
         await db.rollback()
 
 
