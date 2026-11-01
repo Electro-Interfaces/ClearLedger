@@ -63,8 +63,9 @@ class PartnerResourceScope(Base):
     kind: Mapped[str] = mapped_column(String(20), primary_key=True)
     mode: Mapped[str] = mapped_column(String(5), nullable=False, default="EMPTY")
     __table_args__ = (
-        CheckConstraint("kind IN ('objects','equipment','counterparties','contracts','documents')", name="ck_partner_resource_kind"),
+        CheckConstraint("kind IN ('objects','equipment','counterparties','contracts','documents','sites')", name="ck_partner_resource_kind"),
         CheckConstraint("mode IN ('ALL','SET','EMPTY')", name="ck_partner_resource_mode"),
+        CheckConstraint("kind <> 'sites' OR mode='SET' OR mode='EMPTY'", name="ck_partner_sites_mode"),
     )
 
 
@@ -78,10 +79,11 @@ class PartnerResourceItem(Base):
     counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="CASCADE"), nullable=True)
     contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"), nullable=True)
     document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("doc_cards.id", ondelete="CASCADE"), nullable=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE", name="fk_partner_resource_site"), nullable=True)
     __table_args__ = (
         ForeignKeyConstraint(["installation_id", "kind"], ["partner_resource_scopes.installation_id", "partner_resource_scopes.kind"], ondelete="CASCADE"),
-        CheckConstraint("num_nonnulls(object_id,equipment_id,counterparty_id,contract_id,document_id)=1", name="ck_partner_resource_one_id"),
-        CheckConstraint("(kind='objects' AND object_id IS NOT NULL) OR (kind='equipment' AND equipment_id IS NOT NULL) OR (kind='counterparties' AND counterparty_id IS NOT NULL) OR (kind='contracts' AND contract_id IS NOT NULL) OR (kind='documents' AND document_id IS NOT NULL)", name="ck_partner_resource_typed_id"),
+        CheckConstraint("num_nonnulls(object_id,equipment_id,counterparty_id,contract_id,document_id,site_id)=1", name="ck_partner_resource_one_id"),
+        CheckConstraint("(kind='objects' AND object_id IS NOT NULL) OR (kind='equipment' AND equipment_id IS NOT NULL) OR (kind='counterparties' AND counterparty_id IS NOT NULL) OR (kind='contracts' AND contract_id IS NOT NULL) OR (kind='documents' AND document_id IS NOT NULL) OR (kind='sites' AND site_id IS NOT NULL)", name="ck_partner_resource_typed_id"),
     )
 
 

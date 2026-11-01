@@ -274,6 +274,8 @@ class LiveGrant:
 
 
 def resource_scopes(db: Session, installation_id, company_id, member_locations):
+    from app.services.site_authority import require_schema
+    require_schema(db)
     # All profiles stay live, including SET kinds unused by the current endpoint.
     # Scalar item columns avoid stale values from a previously loaded ORM item.
     profiles = {profile.kind: profile for profile in db.scalars(select(PartnerResourceScope).where(
@@ -304,11 +306,32 @@ def resource_scopes(db: Session, installation_id, company_id, member_locations):
             ids = member_locations if mode == "ALL" else ids & member_locations
             mode = "SET" if ids else "EMPTY"
         result[kind] = VerifiedResourceScope(mode, ids)
+    # Additive Site kind; the original five-kind loop and ALL rules stay frozen.
+    from app.models import EzsSite
+    site_profile = profiles.get("sites")
+    site_mode = site_profile.mode if site_profile else "EMPTY"
+    if site_mode not in {"SET", "EMPTY"}:
+        raise InvalidGrantError()
+    site_ids = frozenset()
+    if site_mode == "SET":
+        raw_sites = db.scalars(select(PartnerResourceItem.site_id).where(
+            PartnerResourceItem.installation_id == installation_id,
+            PartnerResourceItem.kind == "sites")).all()
+        site_ids = frozenset(str(v) for v in raw_sites)
+        valid_sites = frozenset(str(v) for v in db.scalars(select(EzsSite.id).where(
+            EzsSite.company_id == company_id, EzsSite.id.in_(raw_sites))).all())
+        if None in raw_sites or site_ids != valid_sites:
+            raise InvalidGrantError()
+        if not site_ids:
+            site_mode = "EMPTY"
+    result["sites"] = VerifiedResourceScope(site_mode, site_ids)
     return MappingProxyType(result)
 
 
 def live_grant(db: Session, grant_id: uuid.UUID, *, family: PartnerTokenFamily | None = None,
                scope: str | None = None) -> LiveGrant:
+    from app.services.site_authority import require_schema
+    require_schema(db)
     denied = InvalidGrantError()
     grant = fresh(db, PartnerGrant, grant_id)
     if grant is None or not grant.approved:
@@ -423,7 +446,7 @@ def _installation_sets(db, iid):
         PartnerInstallationLocation.installation_id == iid).order_by(PartnerInstallationLocation.location_id)))
     profiles = tuple(tuple(row) for row in db.execute(select(PartnerResourceScope.kind, PartnerResourceScope.mode).where(
         PartnerResourceScope.installation_id == iid).order_by(PartnerResourceScope.kind)))
-    columns = tuple(getattr(PartnerResourceItem, column) for _, column in RESOURCE_MODELS.values())
+    columns = tuple(getattr(PartnerResourceItem, column) for _, column in RESOURCE_MODELS.values()) + (PartnerResourceItem.site_id,)
     items = tuple(tuple(row) for row in db.execute(select(PartnerResourceItem.id, PartnerResourceItem.kind, *columns).where(
         PartnerResourceItem.installation_id == iid).order_by(PartnerResourceItem.id)))
     return locations, profiles, items
@@ -510,6 +533,8 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
     before advisory SQL, protocol locks, FK waits or any write. Capability proves
     issuance/lifetime/coverage, NOT row ownership or eligibility.
     """
+    from app.services.site_authority import require_schema
+    require_schema(db)
     if db.new or db.dirty or db.deleted:
         raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
     profile_purpose = mutation in {"contract-profile-read", "contract-profile-write"}
@@ -1205,6 +1230,8 @@ async def require_core_user(user: User = Depends(get_current_user)) -> User:
 
 
 def verify_access(db: Session, token: str) -> VerifiedPartnerToken:
+    from app.services.site_authority import require_schema
+    require_schema(db)
     require_enabled()
     denied = HTTPException(401, "Invalid partner access token", headers={**NO_STORE, "WWW-Authenticate": 'Bearer error="invalid_token"'})
     try:

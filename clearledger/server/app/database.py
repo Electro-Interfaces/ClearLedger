@@ -2241,6 +2241,16 @@ def preflight_startup_sources() -> None:
     preflight_bootstrap_source()
 
 
+async def _require_site_schema(connection) -> None:
+    """Borrowed actual connection, read-only schema6 admission before new ORM."""
+    from schema_migrations.runner import require_site_prefix
+    await connection.execute(text("SELECT pg_catalog.current_schema()"))
+    raw = await connection.get_raw_connection()
+    if not raw.driver_connection.is_in_transaction():
+        raise RuntimeError("Site authority requires a caller transaction")
+    await require_site_prefix(raw.driver_connection)
+
+
 async def require_startup_schema() -> None:
     """Read-only actual namespace/Core audience admission; explicit public may be fresh.
 
@@ -2251,6 +2261,7 @@ async def require_startup_schema() -> None:
     from app import models_product_budget  # register every namespace-owned name
     from app import models_partner_contracts  # noqa: F401 — versioned names, без startup DDL
     from app import models_partner_contract_cycle_receipts  # noqa: F401 — revision0005, no consumer query
+    from app import models_site_authority  # noqa: F401 — explicit revision0006 only
     from app.services.schema_version_gate import require_connection
     from app.services.pulse_view_role_schema import require_connection as require_pulse
     async with engine.connect() as conn:
@@ -2261,6 +2272,7 @@ async def require_startup_schema() -> None:
             if namespace not in {"core", "public"}:
                 raise RuntimeError("Database schema ownership check failed; review namespace provisioning")
             if namespace == "core":
+                await _require_site_schema(conn)
                 await require_pulse(conn)
 
 
@@ -2270,6 +2282,7 @@ async def create_all() -> None:
     from app import models_product_budget  # noqa: F401 — register before namespace guard/create_all
     from app import models_partner_contracts  # регистрация только через существующего bootstrap owner
     from app import models_partner_contract_cycle_receipts  # revision0005, только регистрация
+    from app import models_site_authority  # explicit revision0006, never create_all
 
     async with engine.begin() as conn:
         if settings.managed_core_budget_enabled:
@@ -2279,6 +2292,7 @@ async def create_all() -> None:
         from app.models import PulseViewRoleGrant
         from app.services.pulse_view_role_schema import require_connection as require_pulse_schema
         if namespace == "core":
+            await _require_site_schema(conn)
             # Managed Core audience DDL belongs only to explicit revision0003.
             # Fail before legacy DDL/seed/jobs; fresh provisioning is separate.
             await require_pulse_schema(conn)
@@ -2290,6 +2304,8 @@ async def create_all() -> None:
         # Revision0005 запрещён legacy create_all при любом schema/namespace/flags.
         excluded.update(table for table in Base.metadata.tables.values()
                         if table.name in models_partner_contract_cycle_receipts.VERSIONED_TABLE_NAMES)
+        excluded.update(table for table in Base.metadata.tables.values()
+                        if table.name in models_site_authority.VERSIONED_TABLE_NAMES)
         if settings.managed_core_budget_enabled:
             excluded.add(models_product_budget.ProductAPIBudget.__table__)
         tables = [table for table in Base.metadata.tables.values() if table not in excluded]

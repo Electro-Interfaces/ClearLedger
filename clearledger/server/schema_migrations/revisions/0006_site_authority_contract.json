@@ -1,0 +1,727 @@
+{
+  "format": 1,
+  "namespace": "core",
+  "revision": "0006_site_authority",
+  "actions": [
+    "site.read",
+    "site.link_edit",
+    "contract.create",
+    "document.create",
+    "document.read",
+    "document.edit",
+    "document.download",
+    "document.print",
+    "document.export",
+    "document.send",
+    "document.approve",
+    "document.sign",
+    "document.archive",
+    "document.manage_acl"
+  ],
+  "prerequisites": {
+    "companies": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "users": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "organizations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "ezs_sites": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "location_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "service_locations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "ezs_equipment_units": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "counterparties": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "contracts": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "doc_cards": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "partner_installations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "user_companies": {
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "own_organization_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "object_scope",
+          "type": "jsonb",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "user_id",
+        "company_id"
+      ]
+    },
+    "ezs_projects": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "site_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "location_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    }
+  },
+  "tenant_keys": {
+    "ezs_sites": {
+      "name": "uq_site_authority_site_company",
+      "columns": [
+        "company_id",
+        "id"
+      ]
+    },
+    "organizations": {
+      "name": "uq_site_authority_org_company",
+      "columns": [
+        "company_id",
+        "id"
+      ]
+    }
+  },
+  "tables": {
+    "site_authority_contexts": {
+      "name": "site_authority_contexts",
+      "columns": [
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "site_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "organization_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "approved",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "false"
+        },
+        {
+          "name": "revoked",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "true"
+        },
+        {
+          "name": "policy_generation",
+          "type": "int4",
+          "typmod": -1,
+          "not_null": true,
+          "default": "1"
+        }
+      ],
+      "primary": [
+        "company_id",
+        "site_id"
+      ],
+      "unique": {},
+      "checks": {
+        "ck_site_context_generation": "policy_generation > 0"
+      },
+      "foreign_keys": {
+        "fk_site_context_site": {
+          "columns": [
+            "company_id",
+            "site_id"
+          ],
+          "table": "ezs_sites",
+          "target_columns": [
+            "company_id",
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_site_context_organization": {
+          "columns": [
+            "company_id",
+            "organization_id"
+          ],
+          "table": "organizations",
+          "target_columns": [
+            "company_id",
+            "id"
+          ],
+          "delete": "c"
+        }
+      },
+      "indexes": {
+        "site_authority_contexts_pkey": {
+          "columns": [
+            "company_id",
+            "site_id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    },
+    "site_user_permissions": {
+      "name": "site_user_permissions",
+      "columns": [
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "site_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "action",
+          "type": "varchar",
+          "typmod": 36,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "approved",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "false"
+        }
+      ],
+      "primary": [
+        "company_id",
+        "site_id",
+        "user_id",
+        "action"
+      ],
+      "unique": {},
+      "checks": {
+        "ck_site_permission_action": "action='site.read' OR action='site.link_edit' OR action='contract.create' OR action='document.create' OR action='document.read' OR action='document.edit' OR action='document.download' OR action='document.print' OR action='document.export' OR action='document.send' OR action='document.approve' OR action='document.sign' OR action='document.archive' OR action='document.manage_acl'"
+      },
+      "foreign_keys": {
+        "fk_site_permission_context": {
+          "columns": [
+            "company_id",
+            "site_id"
+          ],
+          "table": "site_authority_contexts",
+          "target_columns": [
+            "company_id",
+            "site_id"
+          ],
+          "delete": "c"
+        },
+        "fk_site_permission_membership": {
+          "columns": [
+            "user_id",
+            "company_id"
+          ],
+          "table": "user_companies",
+          "target_columns": [
+            "user_id",
+            "company_id"
+          ],
+          "delete": "c"
+        }
+      },
+      "indexes": {
+        "site_user_permissions_pkey": {
+          "columns": [
+            "company_id",
+            "site_id",
+            "user_id",
+            "action"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    }
+  },
+  "altered_tables": {
+    "partner_resource_scopes": {
+      "name": "partner_resource_scopes",
+      "columns": [
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "type": "varchar",
+          "typmod": 24,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "mode",
+          "type": "varchar",
+          "typmod": 9,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "installation_id",
+        "kind"
+      ],
+      "unique": {},
+      "checks": {
+        "ck_partner_resource_kind": "kind='objects' OR kind='equipment' OR kind='counterparties' OR kind='contracts' OR kind='documents' OR kind='sites'",
+        "ck_partner_resource_mode": "mode = ANY (ARRAY['ALL'::text,'SET'::text,'EMPTY'::text])",
+        "ck_partner_sites_mode": "kind <> 'sites' OR mode='SET' OR mode='EMPTY'"
+      },
+      "foreign_keys": {
+        "partner_resource_scopes_installation_id_fkey": {
+          "columns": [
+            "installation_id"
+          ],
+          "table": "partner_installations",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        }
+      },
+      "indexes": {
+        "partner_resource_scopes_pkey": {
+          "columns": [
+            "installation_id",
+            "kind"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    },
+    "partner_resource_items": {
+      "name": "partner_resource_items",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "type": "varchar",
+          "typmod": 24,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "object_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "equipment_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "counterparty_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "contract_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "document_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "site_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "unique": {},
+      "checks": {
+        "ck_partner_resource_one_id": "num_nonnulls(object_id,equipment_id,counterparty_id,contract_id,document_id,site_id)=1",
+        "ck_partner_resource_typed_id": "(kind='objects' AND object_id IS NOT NULL) OR (kind='equipment' AND equipment_id IS NOT NULL) OR (kind='counterparties' AND counterparty_id IS NOT NULL) OR (kind='contracts' AND contract_id IS NOT NULL) OR (kind='documents' AND document_id IS NOT NULL) OR (kind='sites' AND site_id IS NOT NULL)"
+      },
+      "foreign_keys": {
+        "partner_resource_items_installation_id_kind_fkey": {
+          "columns": [
+            "installation_id",
+            "kind"
+          ],
+          "table": "partner_resource_scopes",
+          "target_columns": [
+            "installation_id",
+            "kind"
+          ],
+          "delete": "c"
+        },
+        "partner_resource_items_object_id_fkey": {
+          "columns": [
+            "object_id"
+          ],
+          "table": "service_locations",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "partner_resource_items_equipment_id_fkey": {
+          "columns": [
+            "equipment_id"
+          ],
+          "table": "ezs_equipment_units",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "partner_resource_items_counterparty_id_fkey": {
+          "columns": [
+            "counterparty_id"
+          ],
+          "table": "counterparties",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "partner_resource_items_contract_id_fkey": {
+          "columns": [
+            "contract_id"
+          ],
+          "table": "contracts",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "partner_resource_items_document_id_fkey": {
+          "columns": [
+            "document_id"
+          ],
+          "table": "doc_cards",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_partner_resource_site": {
+          "columns": [
+            "site_id"
+          ],
+          "table": "ezs_sites",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        }
+      },
+      "indexes": {
+        "partner_resource_items_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    }
+  },
+  "before_checks": {
+    "partner_resource_scopes": {
+      "ck_partner_resource_kind": "kind = ANY (ARRAY['objects'::text,'equipment'::text,'counterparties'::text,'contracts'::text,'documents'::text])",
+      "ck_partner_resource_mode": "mode = ANY (ARRAY['ALL'::text,'SET'::text,'EMPTY'::text])"
+    },
+    "partner_resource_items": {
+      "ck_partner_resource_one_id": "num_nonnulls(object_id,equipment_id,counterparty_id,contract_id,document_id)=1",
+      "ck_partner_resource_typed_id": "(kind='objects' AND object_id IS NOT NULL) OR (kind='equipment' AND equipment_id IS NOT NULL) OR (kind='counterparties' AND counterparty_id IS NOT NULL) OR (kind='contracts' AND contract_id IS NOT NULL) OR (kind='documents' AND document_id IS NOT NULL)"
+    }
+  }
+}
