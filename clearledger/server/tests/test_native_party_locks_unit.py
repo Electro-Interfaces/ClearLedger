@@ -1,7 +1,7 @@
-"""AUTHORED / NOTRUN. ROOT must review an isolated preimport composition first.
+"""AUTHORED / NOTRUN. До импорта ROOT должен проверить изолированный состав.
 
-Repository conftest may import app and DROP schemas before this file's guard.
-This file grants no execution, provisioning, runner or installation permission.
+conftest репозитория может импортировать app и удалить схемы до этой проверки.
+Файл не разрешает запуск, подготовку БД, установку или создание runner.
 """
 import os
 from urllib.parse import urlsplit
@@ -99,7 +99,7 @@ async def test_all_actual_roots_reject_pending_state_before_discovery_or_flush(m
         with pytest.raises(locks.ScopedLockError, match="clean entry"):
             await calls[root]()
         assert actor in db.new and actor.email == "synthetic@unit.invalid"
-        # Restore the real rollback for AsyncSession's context manager cleanup.
+        # Восстановить настоящий rollback для выхода из контекста AsyncSession.
         monkeypatch.undo()
 
 

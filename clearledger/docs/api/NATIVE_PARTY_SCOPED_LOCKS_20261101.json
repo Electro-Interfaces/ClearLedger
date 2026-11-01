@@ -110,6 +110,7 @@
     "release, merge, deployment and partner pilot"
   ],
   "original_program": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
     "sections": [
       {
         "id": "M00",
@@ -309,7 +310,8 @@
         "completion": "unproven"
       }
     ],
-    "completion_asserted": false
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
   },
   "section_status": {
     "M00": "OPEN",
@@ -345,5 +347,34 @@
     "FINAL-COMPOSITION": "OPEN",
     "LIVE-PILOT": "OPEN",
     "RELEASE": "OPEN"
+  },
+  "runtime_prerequisite": {
+    "status": "OPEN_RUNTIME_PREREQUISITE",
+    "observed_by": "separate synthetic ROOT profile; Source8 was not executed",
+    "observed_models": [
+      "Company",
+      "OneCConnection"
+    ],
+    "observed_value_type": "asyncpg.pgproto.pgproto.UUID",
+    "strict_stdlib_UUID_type_check": "rejected; isinstance-compatible is not exact type",
+    "owner": "Core/ROOT boundary codec",
+    "constraints": [
+      "strict kernel unchanged",
+      "no local UUID casts",
+      "no driver imports or runtime execution by Source author"
+    ],
+    "completion_asserted": false
+  },
+  "uncovered_authored_cases_OPEN": [
+    "separate company slug move during wait",
+    "separate incoming organization selector/member own-organization context cases",
+    "separate token-version revocation during wait",
+    "separate CP owner pointer drift during wait"
+  ],
+  "test_definition_status": {
+    "unit_definitions": 7,
+    "postgres_definitions": 27,
+    "total": 34,
+    "status": "AUTHORED / NOTRUN; missing cases remain OPEN"
   }
 }

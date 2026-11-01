@@ -1,8 +1,8 @@
-"""AUTHORED / NOTRUN: real native commands, INN checker and two-session PG waits.
+"""AUTHORED / NOTRUN: реальные native-команды, проверка ИНН и две PG-сессии.
 
-ROOT owns the preimport composition and disposable, preprovisioned synthetic DB.
-Ordinary repository conftest can import app and DROP schemas before this guard.
-No schema DDL, execution script, installation or runtime permission is supplied.
+ROOT владеет составом до импорта и заранее подготовленной одноразовой БД.
+conftest репозитория может импортировать app и удалить схемы до этой проверки.
+Файл не даёт DDL, скрипта запуска или разрешения на установку и runtime.
 """
 import os
 from urllib.parse import urlsplit
@@ -383,7 +383,7 @@ async def onec_peer(w, db, monkeypatch):
     async def synthetic_client(connection):
         return EmptySyntheticCatalog()
     monkeypatch.setattr(service, "_open_client", synthetic_client)
-    # Real mixed root/log and all five real catalog loops; only external I/O is substituted.
+    # Смешанный root, журнал и пять циклов реальные; заменён лишь внешний ввод-вывод.
     return await service.sync_catalogs(await db.get(OneCConnection, w.connection))
 
 
@@ -502,7 +502,7 @@ async def test_real_cross_company_contract_fk_error_is_exact_409_and_requires_wh
         return result
     monkeypatch.setattr(router, "prepare_native_party_write", observe_preparation)
     async with w.factory() as db:
-        # Real FK restrict: usage's company predicate misses this legacy foreign row.
+        # Настоящий FK restrict: фильтр компании в usage пропускает чужую legacy-строку.
         with pytest.raises(HTTPException) as failure:
             await invoke(w, db, "cp_delete")
         assert failure.value.status_code == 409
@@ -567,7 +567,7 @@ async def test_preparation_cannot_cross_actual_transaction_or_connection_lifetim
 async def test_partial_actual_b_cancellation_poison_never_allows_same_root_retry_and_releases_on_rollback(world, sql_log):
     w = world
     plan = native.native_party_plan(w.uid, w.cid, w.cid)
-    # Hold the last physical key, so earlier physical acquisitions are real.
+    # Держим последний физический ключ, чтобы предыдущие были действительно взяты.
     key = max(plan.requests, key=lambda request: locks.advisory_key(request.key)).key
     async with w.factory() as owner, w.factory() as db, w.factory() as observer:
         owner_pid, waiter_pid = await pid(owner, "owner"), await pid(db, "waiter")
@@ -651,7 +651,7 @@ async def test_contact_original_pointer_is_checked_after_all_b_waits_without_lat
                 await asyncio.wait_for(task, 10)
             assert failure.value.status_code == expected
             no_writes(statements(sql_log))
-            # Changed keys were not appended after discovering the new pointer.
+            # После обнаружения нового указателя изменённые ключи не добавлялись.
             assert not any("FOR SHARE" in s or "FOR UPDATE" in s for s in statements(sql_log))
 
 

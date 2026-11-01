@@ -1,8 +1,8 @@
-"""Clean native party command entrance; policy and completion stay with callers.
+"""Вход чистой native-команды; права и завершение транзакции остаются у caller.
 
-Card mutations exclude reference readers. Contact commands share the reference
-barrier and hold their CP parent before the contact row. Organization deletion
-and other owners are deliberately outside this entrance's supported commands.
+Изменения карточек исключают читателей справочников. Контактные команды делят
+барьер справочников и держат родительскую CP до строки контакта. Удаление
+организации и команды других владельцев этим входом не поддерживаются.
 """
 from dataclasses import dataclass
 from uuid import UUID
@@ -87,10 +87,10 @@ def require_native_party_write(db: AsyncSession, prepared: NativePartyWrite) -> 
 
 
 async def check_native_party_authority(db: AsyncSession, prepared: NativePartyWrite) -> None:
-    """Repeat the native session/visit checks without presence or completion.
+    """Повторить native session/visit без presence и завершения транзакции.
 
-    The router repeats its original member/get_owned policy after the final wait.
-    A direct native User without claims remains supported, as in native contracts.
+    После последнего ожидания роутер повторяет прежнюю member/get_owned проверку.
+    Прямой native User без claims поддерживается, как и в native-договорах.
     """
     require_native_party_write(db, prepared)
     assert_native_party_clean(db)
@@ -131,8 +131,8 @@ async def _check_pointers(db: AsyncSession, actor_id: UUID, home: UUID | None,
         if owner is not None and owner != company_id:
             _changed_parent()
     if contact_id is not None:
-        # Only an initially admitted id+CP child reaches this scalar recheck.
-        # A surviving moved child is a conflict, never a late parent key.
+        # Скалярно перепроверяем лишь контакт, уже допущенный по id+CP.
+        # Смена родителя существующего контакта даёт конфликт, а не поздний ключ.
         pointer = (await db.execute(select(CounterpartyContact.company_id,
             CounterpartyContact.counterparty_id).where(CounterpartyContact.id == contact_id))).one_or_none()
         if pointer is None:
@@ -147,11 +147,11 @@ async def prepare_native_party_write(
     organization_selector: UUID | None = None,
     contact_pointer: tuple[UUID, UUID] | None = None,
 ) -> NativePartyWrite:
-    """One complete B, legacy CP when needed, then fresh authority/party rows.
+    """Один полный B, при необходимости legacy CP, затем свежие строки прав и сторон.
 
-    Discovery may share an already-autobegun clean root. Call only before the
-    command's first row/advisory/FK lock or pending write; cleanliness cannot
-    prove that another caller did not previously flush SQL in that root.
+    Поиск может использовать уже автоматически начатый чистый root. Вход допустим
+    лишь до первой row/advisory/FK блокировки и pending-записи команды: чистота
+    сессии не доказывает, что другой caller ранее не сделал flush SQL в этом root.
     """
     assert_native_party_clean(db)
     if (entity not in ("counterparty", "organization", "contact")
@@ -179,8 +179,8 @@ async def prepare_native_party_write(
                 CounterpartyContact.id == contact_id,
                 CounterpartyContact.counterparty_id == party_id))).one_or_none()
             if observed is None:
-                # Initial caller already admitted this child. Distinguish a
-                # vanished row from a surviving moved pointer before any lock.
+                # Исходный caller уже допустил контакт. До любой блокировки отличаем
+                # исчезнувшую строку от сохранившейся строки с изменённым указателем.
                 await _check_pointers(db, aid, home, model, company_id, party_id,
                                       contact_id, contact_pointer)
             elif tuple(observed) != contact_pointer:
@@ -221,7 +221,7 @@ async def prepare_native_party_write(
             raise HTTPException(401, "Пользователь не найден")
         if fresh_actor.company_id != home:
             _changed_parent()
-        # No Role row: the historical member/get_owned/verified policies don't read it.
+        # Строка Role не нужна: прежние member/get_owned/verified проверки её не читают.
         (await db.execute(select(UserCompany).where(
             UserCompany.user_id == aid, UserCompany.company_id == company_id)
             .with_for_update(read=True).execution_options(populate_existing=True))).scalar_one_or_none()
@@ -250,8 +250,8 @@ async def prepare_native_party_write(
                 CounterpartyContact.counterparty_id == party_id)
                 .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
             require_scoped_locks(db.sync_session, capability, plan.requests)
-        # Ownership/membership errors remain in the caller's native validators.
-        # Recheck parent after the final contact wait without widening the plan.
+        # Ошибки владельца и членства остаются у native-валидаторов caller.
+        # После последнего ожидания контакта сверяем родителя без расширения плана.
         await _check_pointers(db, aid, home, model, company_id, party_id, contact_id, contact_pointer)
         prepared = NativePartyWrite(company_id, aid, home, plan, capability, fresh_actor,
                                     entity, party_id, contact_id, organization_selector, contact_pointer)
