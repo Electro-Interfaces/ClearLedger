@@ -24,7 +24,7 @@ VERSIONED = frozenset({
     'partner_contract_create_refs', 'partner_contract_create_types',
     'partner_contract_success_intents', 'partner_contract_intent_locations',
 })
-REGISTRY_SHA256 = '908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49'
+REGISTRY_SHA256 = 'd865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a'
 # Real database.create_all raw owners in this empty-edge energy baseline.
 # SKU/MATRIX/MARK_GROUP sets require edge.item and therefore are NOT executed.
 RAW_TABLES = frozenset({
@@ -46,7 +46,7 @@ def _identifier(value):
 
 def _source_models(root):
     rows = []
-    for path in sorted((root / 'app').glob('models*.py')):
+    for path in sorted((root / 'app').rglob('*.py')):
         for node in ast.parse(path.read_bytes()).body:
             if isinstance(node, ast.ClassDef):
                 for item in node.body:
@@ -54,7 +54,7 @@ def _source_models(root):
                             isinstance(target, ast.Name) and target.id == '__tablename__'
                             for target in item.targets):
                         rows.append([str(path.relative_to(root)),
-                                     'app.' + path.stem + '.' + node.name,
+                                     '.'.join(path.relative_to(root).with_suffix('').parts) + '.' + node.name,
                                      ast.literal_eval(item.value)])
     digest = hashlib.sha256(json.dumps(rows, separators=(',', ':')).encode()).hexdigest()
     _require(digest == REGISTRY_SHA256, 'complete source model registry differs')

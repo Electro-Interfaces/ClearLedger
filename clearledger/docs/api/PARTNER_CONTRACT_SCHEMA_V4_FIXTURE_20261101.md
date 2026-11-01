@@ -1,13 +1,17 @@
 # Native fixture schema0004: исходники для отдельного прогона ROOT
 
 Статус текущего successor: **SOURCE-only, AFTER_FIX_NOTRUN; runtime NOTRUN**.
-Base рабочего дерева `aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3`, Task `task_839265468ed1`,
-Dispatch `ctx_39ba6806031c`. Первый локальный коммит `be49c4e688c80b3d7c40aedc6b283b477732b01e`
-содержит ровно `app/product_api/dto.py` и новый
-`tests/test_product_contract_date_dto.py`. Второй локальный коммит содержит ровно
-approval и эти MD/JSON; push не выполняется. Admission-код изменён только в двух
-literal constants `IMMUTABLE_SHA256` / `IMMUTABLE_BYTES`; guards не ослаблены.
-Fixture, cases и bytes всех 13 групп сохранены относительно `aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3`.
+Base этой правки `50f28a4d11704f14a518563edf1761dfd9192591`, Task `task_957cab87eb79`,
+Dispatch `ctx_77956bcc6aa3`. Изменены ровно fixture и эти MD/JSON; локальный коммит
+с `[skip ci]`, без amend/push. Fixture меняет только обход `app/**/*.py`, построение
+qualified module из относительного пути и literal `REGISTRY_SHA256`.
+Approval, cases/13 групп, DDL, runner, app source и состав helper closure3 не менялись;
+DSN, lease, private-root admission и остальные guards сохранены.
+
+Предыдущий DTO successor содержал локальный коммит
+`be49c4e688c80b3d7c40aedc6b283b477732b01e` с ровно `app/product_api/dto.py`
+и `tests/test_product_contract_date_dto.py`; его второй коммит repin approval/MD/JSON
+привёл к текущему base. Те изменения и hostfix ниже остаются историческими.
 
 ## Текущий DTO overlay и законный repin
 
@@ -23,8 +27,9 @@ Manifest построен чтением всех **535** app/schema blobs из 
 Все 535 paths прежние; 534 записи побайтно равны base; schema_migrations,
 models, main и database неизменны. Новый профиль: **14,634,482 bytes**,
 SHA256 `040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56`. AST registry восстановлен независимо из Git blobs:
-337 models, SHA256 `908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49`.
-Полный список 535 записей сохранён в JSON; изменена лишь запись DTO и aggregate.
+341 models, SHA256 `d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a`.
+Полный список 535 записей сохранён в JSON и побайтно сохранён этой правкой.
+В предыдущем DTO successor изменялась лишь запись DTO и aggregate.
 
 Предыдущий профиль **535 / 14634443**,
 `0ee5f6b05c6988af5260b365bb3f0cdd6ee9e0dd88b1e5919a74e1b3a21aa7d1` остаётся явно историческим, вместе с previous DTO pin в JSON.
@@ -45,7 +50,55 @@ controller: app base плюс exact DTO overlay, новый aggregate и approva
 Approval/fixture/cases остаются ровно тремя helpers; test не расширяет closure.
 Это изменение исходников и integrity expectations, **не execution approval**.
 
-## Последний реальный отказ ROOT после hostfix
+## Два реальных отказа ROOT на неполном source registry
+
+Root V4 `schema4-native-smoke-prefix3-20261101-e37373b25021` и новый namespace V5
+`schema4-native-smoke-prefix3-20261101-150385ca1555` использовали fixture base
+`50f28a4d11704f14a518563edf1761dfd9192591`, app base aaf + exact DTO overlay be49.
+В обоих actual native `create_all` был достигнут, выполнено **3762 SQL**, затем
+coverage отказал: `app.main registration must include every actual source model`.
+Оба `result.json`: **FAIL_COMPONENT_CASE**, `execution.json`: **NOT_ACCEPTED**.
+V5 сохранил границы/source/guards V4 и добавил только read-only registry diagnostic
+после отказа. Smoke/schema4/native-world PASS нет; DTO regression test не достигнут,
+он остаётся **NOTRUN**. Owned namespaces удалены, PG clients=0/locks=0 по ROOT
+передаче; безопасные execution JSON подтверждают owned removed / foreign unchanged.
+
+Артефакты находятся в `.artifacts/` worktree `api-modernization-integration-20261029`:
+
+| Запуск | evidence/result.json SHA256 | execution.json SHA256 |
+|---|---|---|
+| e37373b25021 | 1daea458fdbcb146a82cfad172b389e34a97766384dd68f4130ddd75bd593fd6 | a52b4d6f3f17eea4f9249bffa5cd9cb1a361ada0f94b22461bd16f037c02ef15 |
+| 150385ca1555 | 0371704a2f84d027cd33cd584f6dbc860de7ffcae0ad36b2d2b7368aebe6fcad | b041e82d00669b2ff4aad2e95e9f6fefcb6d869c5a96339d3b19c4d39dced99e |
+
+Безопасный V5 `evidence/independent-registry-diagnostic.json`, SHA256
+`2eb9182182c8396faaad9c4bc65e634538284d8ff1c507860cfad837e1eb4d02`,
+показывает expected337 / registered341 / metadata341, missing=[], extra4.
+Четыре пропущенные прежним glob source-модели:
+
+| Qualified class | Table |
+|---|---|
+| app.routers.pulse_home.PulseHomePreference | pulse_home_preferences |
+| app.services.support_context_models.ContextBinding | support_context_bindings |
+| app.services.support_context_models.ContextGrant | support_context_grants |
+| app.services.support_context_models.ContextReplay | support_context_replays |
+
+Независимый AST scan всех **500** `app/**/*.py` из immutable aaf + DTO be49
+восстановил 341 top-level ClassDef с literal `__tablename__`; полный named set
+совпал с зарегистрированными классами и metadata именами исторической диагностики.
+Порядок: sorted paths, class source order; канонический JSON `[path, class, table]`
+с `separators=(',', ':')`, SHA256 `d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a`.
+Fixture теперь использует полный rglob и module path со всеми package segments.
+Это увеличивает expected coverage: сравнения source↔mapper↔metadata↔physical
+остались точными, без subset, skip, whitelist или игнорирования extra.
+
+Старый **337** / `908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49`
+описывает только исторический неполный `models*.py` inventory. Прежние физические
+ожидания 337/343 заменены source-derived 341/347, actual physical count после этой
+правки ещё не измерен. Новый source имеет статус **AFTER_FIX_NOTRUN**; worker
+не создавал private contract/controller, ROOT нужен новый review/freeze и свежий
+независимый execution envelope с обновлённым fixture pin.
+
+## Исторический реальный отказ ROOT после hostfix
 
 Исторический isolated run `schema4-native-smoke-prefix3-20261101-4162e71e93e6`
 использовал app base `aaf472b8123bf1d01538049ef8b5308c9b72fd6b` и fixture source `aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3`.
@@ -59,7 +112,8 @@ Result SHA256 `38b9dbae7cc809827846a7e2cef4236640d24e4dde3a64e3d591e88bb39c1260`
 execution SHA256 `d57afa4aa79b08730ee86b536e8117e4f128cd6cdc72a8dfcd3d6394e278bf26`. Оба безопасных файла прочитаны как JSON;
 private approval/env/секреты не читались. Owned namespaces удалены, процессы
 reaped, PG clients=0/locks=0 по ROOT dispatch; foreign unchanged по execution.
-Текущий DTO fix после этого запуска **AFTER_FIX_NOTRUN**.
+DTO fix был после этого запуска **AFTER_FIX_NOTRUN**; поздние V4/V5
+достигли native create_all, но DTO regression test не запускался.
 
 Историческая исходная оснастка создана от
 `aaf472b8123bf1d01538049ef8b5308c9b72fd6b` в Task `task_eda7770863f3`,
@@ -186,9 +240,10 @@ Frozen source inventory текущего DTO overlay: **535** app/schema source 
 и `schema_migrations/`; executable runtime dependencies/envelope ROOT проверяет
 отдельно. Полные source entries и AST model inventory находятся в парном JSON.
 
-AST текущих шести `models*.py` даёт 337 named models, registry SHA256
-`908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49`:
-models.py316, partner12, partner_contracts6, product_budget1, dedup1, docs_portal1.
+AST всех 500 `app/**/*.py` даёт **341** named models, registry SHA256
+`d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a`:
+models.py316, partner12, partner_contracts6, product_budget1, dedup1, docs_portal1,
+routers/pulse_home1, services/support_context_models3.
 Это ожидаемый source set, **не доказательство runtime completeness**. Код требует
 точного совпадения qualified mapped class/table names, metadata table set и
 origin каждого app/schema module, включая настоящий PEP420 bootstrap namespace.
@@ -199,12 +254,13 @@ enabled internal RI triggers каждого physical FK. Native дополнит
 старых моделей не заявляется. Точные0004 columns/types/defaults/constraints/
 indexes/functions/triggers/ACL проверяет неизменённый native revision verifier.
 
-Для этого empty-edge energy baseline ожидается физический set:
+Для этого empty-edge energy baseline ожидается физический set. Это source-derived
+ожидания; actual physical counts новой правки ещё не измерены:
 
 | Этап | Модельные таблицы core | Дополнительные raw core | edge | Всего ожидается |
 |---|---:|---:|---:|---:|
-| После native create_all, prefix3 | 331: все337 кроме шести0004 | 5 | 1 | 337 |
-| После explicit0004, prefix4 | 337 | 5 | 1 | 343 |
+| После native create_all, prefix3 | 335: все341 кроме шести0004 | 5 | 1 | 341 |
+| После explicit0004, prefix4 | 341 | 5 | 1 | 347 |
 
 Пять raw core: `accounting_adjustments`, `accounting_closing_date`,
 `contract_types`, `edge_packet_revision_decisions`, `core_schema_versions`.
@@ -212,7 +268,7 @@ indexes/functions/triggers/ACL проверяет неизменённый nativ
 `edge.item` отсутствует; SKU/MATRIX/MARK_GROUP/LOCAL_BARCODE ветви не включаются,
 их store-only raw tables не обещаны. Это полный текущий native **Core** с полным
 model registry; provisioned Edge/станция не входят в него. Табличные количества
-выше только вывод named set, код не принимает одну цифру276/337 за покрытие.
+выше только вывод named set, код требует точного совпадения named sets, а не только количества.
 Managed budget0001 и Pulse0003 созданы их owner до native DDL; native managed
 mode исключает budget, Core исключает Pulse, во всех namespace исключаются шесть0004.
 
@@ -314,7 +370,11 @@ native world. Все строки **NOTRUN**, включая поддержан�
 ## Source-проверка и передача
 
 В этой работе разрешены и выполнены только чтение файлов/Git, stdlib AST/hash/JSON,
-in-memory compile без exec и `git diff --check`. Application/helper/test modules
+in-memory compile без exec под native Python3.13 и `git diff --check`.
+Все 535 исходников сверены с Git aaf + exact DTO be49; записи, bytes и aggregate
+не изменились. AST всего приложения прочитан без импорта (есть PEP701).
+AST fixture равен base, кроме двух выражений и registry literal; остальные
+функции и все 13 case function byte pins сохранены. Application/helper/test modules
 не импортированы, функции не запускались, collection/pytest/SQL/SSH/Docker/Node/
 network отсутствуют. Private approval и живой execution envelope не создавались.
 Ошибку native DDL/mapping/coverage будущий запуск обязан сохранить как FAIL либо
@@ -324,7 +384,7 @@ network отсутствуют. Private approval и живой execution envelop
 | Source | Bytes | SHA256 |
 |---|---:|---|
 | tests/partner_contract_schema_v4_approval.py | 8363 | e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920 |
-| tests/partner_contract_schema_v4_fixture.py | 26294 | 63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20 |
+| tests/partner_contract_schema_v4_fixture.py | 26325 | 5fbd458cfb1b07c86f4e835e8699aba3608c01cf7d86fe713ad9bdf3d6dca777 |
 | tests/partner_contract_schema_v4_cases.py | 28676 | 9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7 |
 
 Остаются source review/freeze ROOT, отдельный реальный PG16 запуск с новым

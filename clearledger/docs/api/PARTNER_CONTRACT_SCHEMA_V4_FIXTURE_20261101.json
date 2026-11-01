@@ -1,14 +1,12 @@
 {
   "format": 1,
   "status": "SOURCE_ONLY_AFTER_FIX_NOTRUN",
-  "base": "aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3",
-  "task_id": "task_839265468ed1",
-  "dispatch_id": "ctx_39ba6806031c",
+  "base": "50f28a4d11704f14a518563edf1761dfd9192591",
+  "task_id": "task_957cab87eb79",
+  "dispatch_id": "ctx_77956bcc6aa3",
   "scope": "M00–M19 +11 original criteria retained, not wholly completed",
   "files_modified": [
-    "clearledger/server/app/product_api/dto.py",
-    "clearledger/server/tests/test_product_contract_date_dto.py",
-    "clearledger/server/tests/partner_contract_schema_v4_approval.py",
+    "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
     "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
     "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.json"
   ],
@@ -18,8 +16,8 @@
       "bytes": 8363
     },
     "tests/partner_contract_schema_v4_fixture.py": {
-      "sha256": "63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20",
-      "bytes": 26294
+      "sha256": "5fbd458cfb1b07c86f4e835e8699aba3608c01cf7d86fe713ad9bdf3d6dca777",
+      "bytes": 26325
     },
     "tests/partner_contract_schema_v4_cases.py": {
       "sha256": "9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7",
@@ -28,8 +26,8 @@
   },
   "markdown_pin": {
     "path": "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
-    "sha256": "b0b4441fe628061be73d45256c60543f5d6277b7069bfec696b7c94855deae85",
-    "bytes": 28837
+    "sha256": "361723a16bc1d7792ca7eb5e9fc49e70d6ed327da6876c7b2e62a3779f5307e2",
+    "bytes": 33661
   },
   "immutable_source": {
     "files": 535,
@@ -2715,7 +2713,7 @@
     ]
   },
   "source_registry": {
-    "sha256": "908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49",
+    "sha256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a",
     "models": [
       [
         "app/models.py",
@@ -4401,6 +4399,26 @@
         "app/models_product_budget.py",
         "app.models_product_budget.ProductAPIBudget",
         "product_api_budgets"
+      ],
+      [
+        "app/routers/pulse_home.py",
+        "app.routers.pulse_home.PulseHomePreference",
+        "pulse_home_preferences"
+      ],
+      [
+        "app/services/support_context_models.py",
+        "app.services.support_context_models.ContextBinding",
+        "support_context_bindings"
+      ],
+      [
+        "app/services/support_context_models.py",
+        "app.services.support_context_models.ContextGrant",
+        "support_context_grants"
+      ],
+      [
+        "app/services/support_context_models.py",
+        "app.services.support_context_models.ContextReplay",
+        "support_context_replays"
       ]
     ],
     "by_file": {
@@ -4409,9 +4427,15 @@
       "app/models_docs_portal.py": 1,
       "app/models_partner.py": 12,
       "app/models_partner_contracts.py": 6,
-      "app/models_product_budget.py": 1
+      "app/models_product_budget.py": 1,
+      "app/routers/pulse_home.py": 1,
+      "app/services/support_context_models.py": 3
     },
-    "runtime_completeness_claimed": false
+    "runtime_completeness_claimed": false,
+    "model_count": 341,
+    "scan": "all app/**/*.py; top-level ClassDef with literal __tablename__; sorted paths then class source order",
+    "canonical": "JSON [relative_path, qualified_class, table], separators=(',', ':')",
+    "app_python_files_parsed": 500
   },
   "expected_baseline": {
     "prefix3": {
@@ -5470,6 +5494,10 @@
         ],
         [
           "core",
+          "pulse_home_preferences"
+        ],
+        [
+          "core",
           "pulse_targets"
         ],
         [
@@ -5642,6 +5670,18 @@
         ],
         [
           "core",
+          "support_context_bindings"
+        ],
+        [
+          "core",
+          "support_context_grants"
+        ],
+        [
+          "core",
+          "support_context_replays"
+        ],
+        [
+          "core",
           "support_sync_cursors"
         ],
         [
@@ -5765,8 +5805,11 @@
           "nsi_proposal"
         ]
       ],
-      "core_tables": 336,
-      "edge_tables": 1
+      "core_tables": 340,
+      "edge_tables": 1,
+      "total_tables": 341,
+      "mapped_core_tables": 335,
+      "actual_physical_count_after_fix": null
     },
     "prefix4": {
       "tables": [
@@ -6848,6 +6891,10 @@
         ],
         [
           "core",
+          "pulse_home_preferences"
+        ],
+        [
+          "core",
           "pulse_targets"
         ],
         [
@@ -7020,6 +7067,18 @@
         ],
         [
           "core",
+          "support_context_bindings"
+        ],
+        [
+          "core",
+          "support_context_grants"
+        ],
+        [
+          "core",
+          "support_context_replays"
+        ],
+        [
+          "core",
           "support_sync_cursors"
         ],
         [
@@ -7143,8 +7202,11 @@
           "nsi_proposal"
         ]
       ],
-      "core_tables": 342,
-      "edge_tables": 1
+      "core_tables": 346,
+      "edge_tables": 1,
+      "total_tables": 347,
+      "mapped_core_tables": 341,
+      "actual_physical_count_after_fix": null
     },
     "managed_exclusions": [
       "partner_contract_create_principals",
@@ -7671,11 +7733,10 @@
   },
   "verification": {
     "stdlib_ast_and_in_memory_compile_without_exec": {
-      "files": 5,
-      "result": "syntax accepted; no exec/import/test/collection",
-      "scope": "DTO, regression test, approval, unchanged fixture and cases"
+      "files": 1,
+      "result": "fixture syntax accepted; no exec/import/test/collection",
+      "scope": "current fixture; native Python3.13 AST scan of all 500 app Python files separately"
     },
-    "minimal_cases_transition_and_13_function_byte_equality": true,
     "live_imports": 0,
     "collection": 0,
     "tests_run": 0,
@@ -7685,15 +7746,26 @@
     "network_execution": 0,
     "runtime_verdict": "NOTRUN",
     "source_only_is_not_schema4_or_program_PASS": true,
-    "fixture_ast_equality_except_exact_host_sql": true,
     "current_runtime_status": "AFTER_FIX_NOTRUN",
-    "dto_ast_equal_except_one_import_and_Contract_date_annotation": true,
-    "approval_ast_equal_except_IMMUTABLE_SHA256_and_BYTES_literals": true,
     "base535_from_git_plus_exact_dto_overlay_only": true,
-    "fixture_cases_and_13_groups_bytes_unchanged_from_task_base": true
+    "historical_dto_successor_verification": {
+      "fixture_ast_equality_except_exact_host_sql": true,
+      "fixture_cases_and_13_groups_bytes_unchanged_from_task_base": true,
+      "dto_ast_equal_except_one_import_and_Contract_date_annotation": true,
+      "approval_ast_equal_except_IMMUTABLE_SHA256_and_BYTES_literals": true,
+      "minimal_cases_transition_and_13_function_byte_equality": true
+    },
+    "fixture_bytes_equal_except_two_expressions_and_REGISTRY_SHA256_literal": true,
+    "fixture_ast_equal_except_two_expressions_and_REGISTRY_SHA256_literal": true,
+    "all_other_fixture_functions_bytes_unchanged": true,
+    "approval_cases_bytes_unchanged_from_current_task_base": true,
+    "all_13_case_function_byte_pins_unchanged": true,
+    "source_registry_from_immutable_app_base_plus_exact_DTO_overlay": true,
+    "source341_equals_historical_diagnostic_registered341_and_metadata_names341": true,
+    "all_535_entries_bytes_and_aggregate_unchanged_from_current_task_base": true
   },
   "remaining": [
-    "ROOT full source review, external immutable contract/controller update for exact app base + DTO overlay and repinned helper; new independent test/bootstrap/runtime authorization (worker grants none)",
+    "ROOT independent review/freeze of app base + exact DTO overlay + corrected341 source registry and helper pin, then fresh external immutable contract/controller and execution envelope; worker grants no execution approval",
     "ROOT source review and independent execution-envelope freeze",
     "Root-only physical PG16 DDL/ORM/native lifecycle execution",
     "full-native prefix0/1/2 lawful source recipe, preserving original cases",
@@ -7722,7 +7794,8 @@
     "target_admission_runtime_limits_unchanged": true,
     "current_runtime": "Historical host-fixed smoke reached 1034 SQL then failed on Contract.date; current DTO overlay AFTER_FIX_NOTRUN",
     "worker_execution_approval_issued": false,
-    "root_next_action": "Independently freeze a new contract for the same three helper names with the updated fixture pin, then perform a new real isolated run."
+    "root_next_action": "Independently freeze a new contract for the same three helper names with the updated fixture pin, then perform a new real isolated run.",
+    "historical_source_phase_only": true
   },
   "historical_root_source_review": {
     "markdown_sha256": "a60ecb7a264fa37ea23009f83565069e317e0f114a6306528692e6315e64304a",
@@ -7780,6 +7853,64 @@
       "schema4_pass": false,
       "cleanup": "owned namespaces removed; processes reaped; PG clients=0/locks=0 per ROOT dispatch; foreign unchanged",
       "not_current_fix_runtime_proof": true
+    },
+    {
+      "artifact_directory": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-e37373b25021",
+      "app_base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "dto_overlay": "be49c4e688c80b3d7c40aedc6b283b477732b01e",
+      "fixture_source": "50f28a4d11704f14a518563edf1761dfd9192591",
+      "result_path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-e37373b25021/evidence/result.json",
+      "result_pin": {
+        "sha256": "1daea458fdbcb146a82cfad172b389e34a97766384dd68f4130ddd75bd593fd6",
+        "bytes": 16905
+      },
+      "execution_path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-e37373b25021/execution.json",
+      "execution_pin": {
+        "sha256": "a52b4d6f3f17eea4f9249bffa5cd9cb1a361ada0f94b22461bd16f037c02ef15",
+        "bytes": 12414
+      },
+      "result_status": "FAIL_COMPONENT_CASE",
+      "execution_status": "NOT_ACCEPTED",
+      "sql_count": 3762,
+      "failure": "schema4 native fixture refused: app.main registration must include every actual source model",
+      "failure_phase": "native-world",
+      "actual_native_create_all_reached": true,
+      "smoke_pass": false,
+      "native_world_pass": false,
+      "schema4_pass": false,
+      "dto_regression_test": "NOTRUN; not reached",
+      "cleanup": "owned removed / foreign unchanged verified in execution JSON; PG clients=0/locks=0 per ROOT dispatch",
+      "not_current_fix_runtime_proof": true,
+      "read_only_registry_diagnostic_on_failure_only": false
+    },
+    {
+      "artifact_directory": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-150385ca1555",
+      "app_base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "dto_overlay": "be49c4e688c80b3d7c40aedc6b283b477732b01e",
+      "fixture_source": "50f28a4d11704f14a518563edf1761dfd9192591",
+      "result_path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-150385ca1555/evidence/result.json",
+      "result_pin": {
+        "sha256": "0371704a2f84d027cd33cd584f6dbc860de7ffcae0ad36b2d2b7368aebe6fcad",
+        "bytes": 16905
+      },
+      "execution_path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-150385ca1555/execution.json",
+      "execution_pin": {
+        "sha256": "b041e82d00669b2ff4aad2e95e9f6fefcb6d869c5a96339d3b19c4d39dced99e",
+        "bytes": 12412
+      },
+      "result_status": "FAIL_COMPONENT_CASE",
+      "execution_status": "NOT_ACCEPTED",
+      "sql_count": 3762,
+      "failure": "schema4 native fixture refused: app.main registration must include every actual source model",
+      "failure_phase": "native-world",
+      "actual_native_create_all_reached": true,
+      "smoke_pass": false,
+      "native_world_pass": false,
+      "schema4_pass": false,
+      "dto_regression_test": "NOTRUN; not reached",
+      "cleanup": "owned removed / foreign unchanged verified in execution JSON; PG clients=0/locks=0 per ROOT dispatch",
+      "not_current_fix_runtime_proof": true,
+      "read_only_registry_diagnostic_on_failure_only": true
     }
   ],
   "historical_independent_wire_identity": {
@@ -7842,8 +7973,8 @@
     ],
     "unchanged_entries": 534,
     "file_count": 535,
-    "source_registry_models": 337,
-    "source_registry_sha256": "908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49",
+    "source_registry_models": 341,
+    "source_registry_sha256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a",
     "schema_migrations_models_main_database_unchanged": true,
     "other_dto_fields_validators_descriptions_examples_wire_unchanged": true,
     "approval_ast_only_literal_changes": [
@@ -7851,9 +7982,9 @@
       "IMMUTABLE_BYTES"
     ],
     "helper_closure_names_unchanged": true,
-    "fixture_cases_and_13_function_byte_pins_unchanged": true,
-    "worker_runtime": "AFTER_FIX_NOTRUN",
-    "worker_execution_approval_issued": false
+    "worker_runtime": "Historical DTO fix was AFTER_FIX_NOTRUN; ROOT V4/V5 reached native create_all then registry mismatch; regression test NOTRUN",
+    "worker_execution_approval_issued": false,
+    "historical_fixture_cases_and_13_function_byte_pins_unchanged_before_registry_fix": true
   },
   "previous_source_successor": {
     "status": "SOURCE_ONLY_AFTER_FIX_NOTRUN",
@@ -7884,5 +8015,142 @@
       "sha256": "ec243bfdff7a9d63ec552da3ba7b46b510d28d6da50290b015a32b3b3502702e",
       "bytes": 24127
     }
+  },
+  "previous_registry_successor": {
+    "status": "SOURCE_ONLY_AFTER_FIX_NOTRUN",
+    "base": "aea8c7a9f9fb8e581abf9cbb0c529f22d3fb69e3",
+    "task_id": "task_839265468ed1",
+    "dispatch_id": "ctx_39ba6806031c",
+    "files_modified": [
+      "clearledger/server/app/product_api/dto.py",
+      "clearledger/server/tests/test_product_contract_date_dto.py",
+      "clearledger/server/tests/partner_contract_schema_v4_approval.py",
+      "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.json"
+    ],
+    "helper_pins": {
+      "tests/partner_contract_schema_v4_approval.py": {
+        "sha256": "e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920",
+        "bytes": 8363
+      },
+      "tests/partner_contract_schema_v4_fixture.py": {
+        "sha256": "63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20",
+        "bytes": 26294
+      },
+      "tests/partner_contract_schema_v4_cases.py": {
+        "sha256": "9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7",
+        "bytes": 28676
+      }
+    },
+    "markdown_pin": {
+      "path": "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
+      "sha256": "b0b4441fe628061be73d45256c60543f5d6277b7069bfec696b7c94855deae85",
+      "bytes": 28837
+    },
+    "source_registry": {
+      "sha256": "908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49",
+      "by_file": {
+        "app/models.py": 316,
+        "app/models_dedup.py": 1,
+        "app/models_docs_portal.py": 1,
+        "app/models_partner.py": 12,
+        "app/models_partner_contracts.py": 6,
+        "app/models_product_budget.py": 1
+      },
+      "runtime_completeness_claimed": false,
+      "model_count": 337
+    },
+    "expected_baseline_counts": {
+      "prefix3": {
+        "total": 337,
+        "core": 336,
+        "edge": 1
+      },
+      "prefix4": {
+        "total": 343,
+        "core": 342,
+        "edge": 1
+      }
+    },
+    "historical_only": true
+  },
+  "registry_source_fix": {
+    "before": {
+      "scan": "app/models*.py only; module='app.' + path.stem",
+      "models": 337,
+      "sha256": "908ed501126a74b20ee97b4a790e41f4371d90dad5a0a18d7e49e744aead9f49",
+      "historical_incomplete_inventory": true
+    },
+    "after": {
+      "scan": "app/**/*.py; module='.'.join(path.relative_to(root).with_suffix('').parts)",
+      "models": 341,
+      "sha256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a",
+      "added_rows": [
+        [
+          "app/routers/pulse_home.py",
+          "app.routers.pulse_home.PulseHomePreference",
+          "pulse_home_preferences"
+        ],
+        [
+          "app/services/support_context_models.py",
+          "app.services.support_context_models.ContextBinding",
+          "support_context_bindings"
+        ],
+        [
+          "app/services/support_context_models.py",
+          "app.services.support_context_models.ContextGrant",
+          "support_context_grants"
+        ],
+        [
+          "app/services/support_context_models.py",
+          "app.services.support_context_models.ContextReplay",
+          "support_context_replays"
+        ]
+      ],
+      "no_removed_rows": true
+    },
+    "diagnostic": {
+      "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-150385ca1555/evidence/independent-registry-diagnostic.json",
+      "pin": {
+        "sha256": "2eb9182182c8396faaad9c4bc65e634538284d8ff1c507860cfad837e1eb4d02",
+        "bytes": 68863
+      },
+      "expected_count": 337,
+      "registered_count": 341,
+      "metadata_count": 341,
+      "missing": [],
+      "extra": [
+        [
+          "app.routers.pulse_home.PulseHomePreference",
+          "pulse_home_preferences"
+        ],
+        [
+          "app.services.support_context_models.ContextBinding",
+          "support_context_bindings"
+        ],
+        [
+          "app.services.support_context_models.ContextGrant",
+          "support_context_grants"
+        ],
+        [
+          "app.services.support_context_models.ContextReplay",
+          "support_context_replays"
+        ]
+      ],
+      "historical_evidence_not_after_fix_runtime": true
+    },
+    "source_validation": "All 535 blobs independently reconstructed from Git aaf app base + exact be49 DTO overlay and compared byte-for-byte with working source; AST all 500 app Python files under native Python3.13 without imports",
+    "coverage_equality_unchanged": true,
+    "no_subset_skip_whitelist_ignore_extra": true,
+    "approval_cases_DDL_runner_app_unchanged": true,
+    "helper_closure_names_unchanged": true,
+    "DSN_lease_private_root_guards_unchanged": true,
+    "all_13_case_groups_unchanged": true,
+    "prefix0_1_2_still_pending_mandatory": true,
+    "worker_runtime": 0,
+    "current_runtime_status": "AFTER_FIX_NOTRUN",
+    "worker_execution_approval_issued": false,
+    "private_contract_or_controller_created": false,
+    "root_next_action": "independent review/freeze with new fixture pin and fresh execution envelope; no prior runtime approval transfers"
   }
 }
