@@ -1,0 +1,89 @@
+{
+  "asOf": "2026-11-01T05:25:50.317097+00:00",
+  "status": "G3_COMPONENT_SOURCE_RAW_ACCEPTED",
+  "testedSource": "1eac5f0f7256d3ff25511456e32a8e2bf9f04c5f",
+  "integratedG3": "8b0a68440a794fcd78aa742cd62159f8f12ef6fc",
+  "peerSource": "3507a3108d80266e37567978da3de49c9b769e7c",
+  "cases": 51,
+  "definitions": 29,
+  "phases": 153,
+  "unit": 17,
+  "genericPostgreSQL": 25,
+  "nativeRegisterPostgreSQL": 9,
+  "seconds": 32.28005564305931,
+  "hostSession": 19295,
+  "hostExit": 0,
+  "hostReaped": true,
+  "evidence": "g3-after-root-commit-fullnative-pg-v2-20261101-4b7637a35236",
+  "hashes": {
+    "evidence/result.json": "69624c61557cc46ec26eab3c3804ea081e15c1d7cb65e96f03a322d79a2f1dab",
+    "execution.json": "f983603ae6525278ec11044ee0afc6e5d20698c74d1bd86ebfeab43e8c9b37f2",
+    "evidence/full-native-bootstrap.json": "f203de33a81da100bb2d89e34fa5ee0bf1d13dcee37c3e76bd58770598ac5c10",
+    "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+    "source-manifest.json": "42ec5881d07e8964eec2ded5dee8dd96675961f14ff8f6371b56f715ead6d748",
+    "driver-manifest.json": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae"
+  },
+  "independentReview": {
+    "REVIEW.md": "b328cb7c4bc9fe0c77dd56b0455c7d7bb729fe037b015d3229e7ce067e724a22",
+    "REVIEW.json": "d073a7bc6dd2ada05a6da3b5dd8af31d9502add469955e75c9130bf1a018632a"
+  },
+  "semantics": [
+    "register_doc uses opt-in after_root_commit,105otherlegacycalls stayimmediate",
+    "immutable4primitivequeue exactsession/root; SQLAlchemy2.0.36 ownedEnginebound only",
+    "actualphysicalrootcommit before callback, independentSession sees AuditEvent/DocEvent/registeredDoc/transactionalOutbox",
+    "ordinaryORMsavepoint merge/subtree discard/order; rollback/cancel/close/invalidate/reuse/reentrance nooldpayload",
+    "CoreSAVEPOINTbefore/afterenqueue andAUTOCOMMITEngine/Connection/lateenlistment failclosed, stickyrootpoison untilfullrollback",
+    "nativeauto/manual/repeat/collision409 andactualcommitconstraintfailure atomic rollback",
+    "ordinaryACL andstrictsuperadminreadbreakglass do not authorizeedit; noAuditUseonDeniedregister"
+  ],
+  "schema": "fullnative341models347tables803validatedFK3212RI; noordinaryCFimports/noSEED/lifespan",
+  "cleanup": {
+    "PG": {
+      "clients": 0,
+      "locks": 0
+    },
+    "pool": {
+      "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+      "before": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "after": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "loopAlive": true,
+      "poolErrors": []
+    },
+    "normal2OwnedRemoved": true,
+    "foreign41SafeProjectionEqual": true
+  },
+  "historicalV1": {
+    "status": "NOT_ACCEPTED",
+    "source": "8b0a68440a794fcd78aa742cd62159f8f12ef6fc",
+    "collected": 51,
+    "diagnosticPassedCalls": 42,
+    "setupErrors": 9,
+    "cause": "native URLsubscription fixture missing requiredencryptedsecret; fixedtestonly actualencrypt_secret/synthetickey; constraint/prod unchanged",
+    "resultSHA256": "50c046cfa8d35def450c8d903ae8f7e459627592a6395fbb07f0e9015e2a67c5"
+  },
+  "limits": [
+    "direct native handlers/programmatic actor, noHTTPJWT acceptance",
+    "callbackcapture only noSMTP/push/realdelivery",
+    "best effortmemoryqueue no durable/exactlyonce/crashguarantee",
+    "rawtransactionSQL/directdriverisolation excluded",
+    "recipientDocACL/Chatreadvisibility remainsseparateP1",
+    "G1Case/numbering/postUPSERTfreshadmission remainsopen",
+    "no fullDocs/globalOrgDelete/currentfullCI/overallGO"
+  ],
+  "originalScope": {
+    "M00_M19": 20,
+    "crossCutting": 11,
+    "unchanged": true,
+    "completion": false,
+    "overallPercent": null
+  },
+  "merge": false,
+  "deployment": false,
+  "liveFlagsChanged": false
+}
