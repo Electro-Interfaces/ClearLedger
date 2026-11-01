@@ -1,11 +1,50 @@
 # Native fixture schema0004: исходники для отдельного прогона ROOT
 
-Статус **SOURCE-only, runtime NOTRUN**. Base
-`aaf472b8123bf1d01538049ef8b5308c9b72fd6b`, Task `task_eda7770863f3`,
-Dispatch `ctx_91dad10f4b5e`. Изменены ровно пять разрешённых путей: новый fixture,
-новый approval, только admit-import/comment в существующих cases, этот MD и парный
-JSON. Все остальные байты cases, включая 13 групп, варианты, DSN, SQL и assertions,
-сохранены. Schema/DDL/catalog/manifest/database/models/main и frozen Core3 не менялись.
+Статус текущего successor: **SOURCE-only, AFTER_FIX_NOTRUN; runtime NOTRUN**.
+Base `220c4e32eec1111505ac0da0b45e2d987b57825a`, Task `task_8fa731254d5e`,
+Dispatch `ctx_5afe573e64e7`. Изменены ровно три пути: fixture, этот MD и парный
+JSON. Единственная правка кода — host-выражение SELECT в `preflight_identity`.
+Approval, все cases и 535 app/schema source files сохранены побайтно.
+
+Историческая исходная оснастка создана от
+`aaf472b8123bf1d01538049ef8b5308c9b72fd6b` в Task `task_eda7770863f3`,
+Dispatch `ctx_91dad10f4b5e`: тогда изменялись пять путей, включая approval и
+admit-import/comment cases. Все остальные байты cases, включая 13 групп,
+варианты, DSN, SQL и assertions, сохранены. Schema/DDL/catalog/manifest/database/
+models/main и frozen Core3 не менялись.
+
+## Исторический отказ ROOT и узкое исправление SOURCE
+
+ROOT на исходнике `220c4e32` реально выполнил два isolated PG16.15 запуска:
+`schema4-native-smoke-prefix3-20261101-7b43b3b8e135` и
+`schema4-native-smoke-prefix3-20261101-dcea0020c64a` (каталог `.artifacts/`
+worktree `api-modernization-integration-20261029`). Оба `evidence/result.json`
+имеют `FAIL_COMPONENT_CASE`, `execution.json` — `NOT_ACCEPTED`: RuntimeError
+`schema4 native fixture refused: actual exact PG target/search_path` возник
+до migration DDL и native bootstrap; schema4 PASS нет.
+
+Во втором новом namespace независимый read-only wire SELECT доказал tuple:
+DB `api_partner_contract_schema_v4_test_20261101`, user `clearledger`,
+namespace/search_path `core`/`core`, port33546; `inet_server_addr()::text`
+вернул `127.0.0.1/32`, а `host(inet_server_addr())` — `127.0.0.1`.
+Безопасный `evidence/independent-wire-identity.json` второго запуска имеет SHA256
+`1b0d2f354a300ffe37b402fd6f9299507c36e17fe2157840cc21369ec3eb76ab`.
+Первый запуск отказал на том же сравнении без этой отдельной диагностики.
+Оба namespace удалены, процессы reaped, PG clients=0/locks=0, foreign unchanged
+по сохранённым execution/database-after JSON; worker runtime не запускал.
+
+Исправлено только `inet_server_addr()::text AS host` на
+`pg_catalog.host(pg_catalog.inet_server_addr()) AS host`. Точное сравнение
+`127.0.0.1`/33546/DB/user/search_path, OIDs, role flags, replication и extensions
+сохранено. Target/admission/runtime limits и остальные helper AST не менялись;
+нет broad allow, CIDR stripping, URL override или fallback.
+
+Root SOURCE review REVIEW.md/JSON с SHA256 `a60ecb7a`/`6da63176` прочитан;
+его вердикт и прежние snapshots/results остаются историческими. P2 docfix
+`220c4e32` сохранён: filesystem admission предшествует unsupported-prefix отказу.
+После host fix runtime **NOTRUN**, execution approval worker не выдавал.
+ROOT отдельно должен freeze новый контракт ровно трёх прежних helpers с новым
+fixture pin и выполнить новый реальный запуск; прежнее разрешение не переносится.
 
 Это конкретная тестовая оснастка native Core. Она не владеет production bootstrap,
 не выбирает существующую БД, не создаёт контейнеры/роли/порты, не запускает server,
@@ -76,8 +115,8 @@ source-рецепт не доказан. Fixture сначала выполняе
 с filesystem I/O; только после успешного admission отказывает prefix0–2 до
 runtime app/ORM/driver imports и DB I/O. Без private contract первым будет отказ
 admission, а не отказ prefix. Все случаи prefix0–2 остаются обязательными/NOTRUN.
-Это описание исправляет неточный docstring `native_world`; helper bytes и порядок
-кода сохранены. Удаление journal или переименование managed
+P2 docfix исправил описание неточного docstring `native_world`; порядок
+кода и bytes `native_world` сохранены. Удаление journal или переименование managed
 calendar в «доревизионный» не применяется. `head.parent` при head4 — Pulse3;
 старое `head.parent.contract` не является calendar contract.
 
@@ -229,7 +268,7 @@ network отсутствуют. Private approval и живой execution envelop
 | Source | Bytes | SHA256 |
 |---|---:|---|
 | tests/partner_contract_schema_v4_approval.py | 8363 | b04d51a5f7dcf9bc58d743e3ef4b05cac9dfa123dff27d1d4bbfdf0091d40958 |
-| tests/partner_contract_schema_v4_fixture.py | 26272 | f58d08b78bde7b999d919181b4779f6d3452922a3573541cfbab54d3ead25698 |
+| tests/partner_contract_schema_v4_fixture.py | 26294 | 63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20 |
 | tests/partner_contract_schema_v4_cases.py | 28676 | 9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7 |
 
 Остаются source review/freeze ROOT, отдельный реальный PG16 запуск с новым

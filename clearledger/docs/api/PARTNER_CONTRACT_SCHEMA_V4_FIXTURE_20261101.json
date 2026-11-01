@@ -1,14 +1,12 @@
 {
   "format": 1,
-  "status": "SOURCE_ONLY_NOTRUN",
-  "base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
-  "task_id": "task_eda7770863f3",
-  "dispatch_id": "ctx_91dad10f4b5e",
+  "status": "SOURCE_ONLY_AFTER_FIX_NOTRUN",
+  "base": "220c4e32eec1111505ac0da0b45e2d987b57825a",
+  "task_id": "task_8fa731254d5e",
+  "dispatch_id": "ctx_5afe573e64e7",
   "scope": "M00–M19 +11 original criteria retained, not wholly completed",
   "files_modified": [
-    "clearledger/server/tests/partner_contract_schema_v4_approval.py",
     "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
-    "clearledger/server/tests/partner_contract_schema_v4_cases.py",
     "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
     "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.json"
   ],
@@ -18,8 +16,8 @@
       "bytes": 8363
     },
     "tests/partner_contract_schema_v4_fixture.py": {
-      "sha256": "f58d08b78bde7b999d919181b4779f6d3452922a3573541cfbab54d3ead25698",
-      "bytes": 26272
+      "sha256": "63c2b37d53b5be400369892100ad78ccc298d54eaf5fb4b087ee37d25fac7d20",
+      "bytes": 26294
     },
     "tests/partner_contract_schema_v4_cases.py": {
       "sha256": "9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7",
@@ -28,8 +26,8 @@
   },
   "markdown_pin": {
     "path": "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
-    "sha256": "5a5aee42c05c7ffddd730037535240be23c3d27814fc5ac33a5da1738726c72d",
-    "bytes": 21140
+    "sha256": "ec243bfdff7a9d63ec552da3ba7b46b510d28d6da50290b015a32b3b3502702e",
+    "bytes": 24127
   },
   "immutable_source": {
     "files": 535,
@@ -7683,12 +7681,86 @@
     "container_execution": 0,
     "network_execution": 0,
     "runtime_verdict": "NOTRUN",
-    "source_only_is_not_schema4_or_program_PASS": true
+    "source_only_is_not_schema4_or_program_PASS": true,
+    "fixture_ast_equality_except_exact_host_sql": true,
+    "current_runtime_status": "AFTER_FIX_NOTRUN"
   },
   "remaining": [
     "ROOT source review and independent execution-envelope freeze",
     "Root-only physical PG16 DDL/ORM/native lifecycle execution",
     "full-native prefix0/1/2 lawful source recipe, preserving original cases",
     "all M00–M19 +11 scope beyond fixture remains open"
-  ]
+  ],
+  "original_authorship": {
+    "status": "SOURCE_ONLY_NOTRUN",
+    "base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+    "task_id": "task_eda7770863f3",
+    "dispatch_id": "ctx_91dad10f4b5e",
+    "files_modified": [
+      "clearledger/server/tests/partner_contract_schema_v4_approval.py",
+      "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
+      "clearledger/server/tests/partner_contract_schema_v4_cases.py",
+      "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_SCHEMA_V4_FIXTURE_20261101.json"
+    ]
+  },
+  "host_source_fix": {
+    "function": "preflight_identity",
+    "before": "inet_server_addr()::text AS host",
+    "after": "pg_catalog.host(pg_catalog.inet_server_addr()) AS host",
+    "fixture_bytes_and_ast_equal_to_base_except_exact_host_sql": true,
+    "other_helper_bytes_and_ast_unchanged": true,
+    "exact_target_comparison_oids_roleflags_replication_extensions_unchanged": true,
+    "target_admission_runtime_limits_unchanged": true,
+    "current_runtime": "AFTER_FIX_NOTRUN",
+    "worker_execution_approval_issued": false,
+    "root_next_action": "Independently freeze a new contract for the same three helper names with the updated fixture pin, then perform a new real isolated run."
+  },
+  "historical_root_source_review": {
+    "markdown_sha256": "a60ecb7a264fa37ea23009f83565069e317e0f114a6306528692e6315e64304a",
+    "json_sha256": "6da63176ae253c280742006843566226f1c36ef5e9ff6c73b4c5fbf1c274a565",
+    "verdict": "SOURCE_REVIEW_WITH_P2_NOTE",
+    "p2_docfix": "220c4e32 preserves filesystem admission before unsupported-prefix refusal; not execution approval",
+    "prior_snapshots_and_results": "historical, unchanged; do not prove the current fix runtime"
+  },
+  "historical_root_runs": [
+    {
+      "artifact_directory": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-7b43b3b8e135",
+      "fixture_source": "220c4e32eec1111505ac0da0b45e2d987b57825a",
+      "postgres": "16.15",
+      "result_status": "FAIL_COMPONENT_CASE",
+      "execution_status": "NOT_ACCEPTED",
+      "failure": "schema4 native fixture refused: actual exact PG target/search_path",
+      "failure_before_migration_ddl_and_native_bootstrap": true,
+      "result_sha256": "e9a4a65dbb72fc94b58b59768d5966278214f45399a9ce8c1ad198153f10ed3e",
+      "independent_wire_diagnostic": false,
+      "cleanup": "owned namespaces removed; processes reaped; PG clients=0/locks=0; foreign unchanged"
+    },
+    {
+      "artifact_directory": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-dcea0020c64a",
+      "fixture_source": "220c4e32eec1111505ac0da0b45e2d987b57825a",
+      "postgres": "16.15",
+      "result_status": "FAIL_COMPONENT_CASE",
+      "execution_status": "NOT_ACCEPTED",
+      "failure": "schema4 native fixture refused: actual exact PG target/search_path",
+      "failure_before_migration_ddl_and_native_bootstrap": true,
+      "result_sha256": "dffd6293a563c3aeb87a11665f2b85562c1e95dea18cf5c5df2773be827c6b98",
+      "independent_wire_diagnostic": true,
+      "cleanup": "owned namespaces removed; processes reaped; PG clients=0/locks=0; foreign unchanged"
+    }
+  ],
+  "historical_independent_wire_identity": {
+    "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/schema4-native-smoke-prefix3-20261101-dcea0020c64a/evidence/independent-wire-identity.json",
+    "sha256": "1b0d2f354a300ffe37b402fd6f9299507c36e17fe2157840cc21369ec3eb76ab",
+    "tuple": {
+      "db": "api_partner_contract_schema_v4_test_20261101",
+      "usr": "clearledger",
+      "ns": "core",
+      "path": "core",
+      "cast_host": "127.0.0.1/32",
+      "canonical_host": "127.0.0.1",
+      "port": 33546
+    },
+    "not_current_fix_runtime_proof": true
+  }
 }

@@ -90,7 +90,7 @@ async def preflight_identity(conn):
         current_schema() AS ns,current_setting('search_path') AS path,
         current_setting('server_version_num')::int AS version,
         current_setting('session_replication_role') AS replication,
-        inet_server_addr()::text AS host,inet_server_port() AS port,
+        pg_catalog.host(pg_catalog.inet_server_addr()) AS host,inet_server_port() AS port,
         d.oid::int AS database_oid,d.datdba::int AS database_owner,
         r.oid::int AS role_oid,r.rolsuper,r.rolcreatedb,r.rolcreaterole,
         r.rolreplication,r.rolbypassrls,
