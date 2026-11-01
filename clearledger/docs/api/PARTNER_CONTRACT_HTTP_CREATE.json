@@ -1,0 +1,151 @@
+{
+  "classification": "AUTHOR_SOURCE_CONTRACT_NOT_RUNTIME_ACCEPTANCE",
+  "source_base": "cdb65361f3207f82283c88da8b431625a5b1804c",
+  "source_commit": "0e0cc68ab702e73695b3b0a48325e6fc52e7d8a3",
+  "ratifications": [
+    "msg_dc2f907bf07e",
+    "msg_85a4864d991c"
+  ],
+  "operation": {
+    "method": "POST",
+    "path": "/api/v1/contracts",
+    "child_path": "/contracts",
+    "operationId": "createContract",
+    "api_version": "v1",
+    "info_version": "1.1.0",
+    "tag": "Договоры",
+    "scope": "contracts:create",
+    "stage": "CREATE_NEWBORN"
+  },
+  "principals": {
+    "user": "actual delegated user grant + current profile user flag/principal + canonical current permissions",
+    "machine": "actual confidential client_secret_basic + exact machine grant/principal + user_id NULL + service flag"
+  },
+  "request": {
+    "model": "app.product_api.contract_create_body.ContractCreateBody",
+    "parser": "app.product_api.contract_create_body.parse_contract_create_body",
+    "max_actual_bytes_inclusive": 16384,
+    "wire_reader_count": 1,
+    "content_length_authority": false,
+    "automatic_fastapi_body": false,
+    "openapi_source": "same model_json_schema(by_alias=True,mode=validation); same canonical nested definitions",
+    "new_model_schema_hash": false
+  },
+  "success": {
+    "201": "new",
+    "200": "current authorized original-grant/actor/reference replay",
+    "allowlist": [
+      "contractId",
+      "replayed"
+    ],
+    "Location": false,
+    "read_permission_promise": false
+  },
+  "problems": {
+    "401": "invalid_credentials",
+    "403": "access_denied",
+    "409": "conflict",
+    "413": "request_too_large",
+    "415": "unsupported_media_type",
+    "422": "invalid_request",
+    "429_quota": "rate_limited",
+    "429_generic": "internal_error",
+    "500": "internal_error",
+    "503": "api_unavailable"
+  },
+  "metadata": {
+    "content_type": "application/problem+json",
+    "cache_control": "no-store",
+    "request_id": "X-Request-Id = Problem.requestId",
+    "bearer_challenge": [
+      401,
+      403
+    ],
+    "quota_retry_after": true,
+    "generic_retry_after": "only trusted supplied header for 429/503",
+    "collection_allow": "GET, POST",
+    "other_existing_allow": "GET"
+  },
+  "lifecycle": [
+    "short canonical read Session + shared coarse gate",
+    "close read Session",
+    "independent configured quota transaction/commit",
+    "new actual request Session/root",
+    "canonical Bearer reauth + shared coarse gate",
+    "request-bound non-SQL descriptor and guard",
+    "sole bounded strict stream parser",
+    "real create_partner_contract on same Session/root/Connection",
+    "allowlist DTO serialization",
+    "caller commit",
+    "Session close",
+    "response escapes"
+  ],
+  "rollback": [
+    "handler denial",
+    "parse/validation failure",
+    "serialization failure",
+    "cancellation with shielded HTTP rollback",
+    "commit failure including unknown acknowledgement"
+  ],
+  "unknown_commit": "new request/new root/same key/current auth/original grant+actor+refs; no old stamp or automatic retry",
+  "preserved": {
+    "GET_endpoint_AST_with_decorators": 15,
+    "read_resolver": "inverse AST projection identical",
+    "authority": "complete module inverse AST projection identical to source base",
+    "contracts_EMPTY": "unchanged; neither CREATE authority nor newborn veto",
+    "atomic_business_parts": 5,
+    "canonical_B": "one original complete composition",
+    "actual_flags_defaults_adminPUT": "unchanged; no activation"
+  },
+  "openapi": {
+    "advertised_code_operations": 16,
+    "exact_manifest": "15 GET + POST method/path/operationId; source app/exporter/generator agree statically",
+    "canonical_profiles": [
+      "ProductOAuth",
+      "ProductServiceOAuth"
+    ],
+    "browser_execution_profiles": [
+      "ProductOAuth"
+    ],
+    "browser_service_credential_widgets": false,
+    "offline_import_guards": "unchanged; runtime identity/authority/consumer imports lazy"
+  },
+  "tests": {
+    "definitions": 21,
+    "parameterized_cases": 57,
+    "fixture": "tests.partner_contract_issuer_fixture.issuer_world",
+    "factory": "ROOT-owned external partner_contract_issuer_factory",
+    "positive_auth_or_authority_mocks": false,
+    "runtime_status": "NOTRUN_INCLUDING_IMPORTS_COLLECTION"
+  },
+  "deferred": [
+    "GET create-options",
+    "OPTIONS",
+    "activation",
+    "generated SDK refresh",
+    "controlled runtime HTTP/SQL/auth/body/quota/replay/cancel verification",
+    "independent source review",
+    "FK/foreign/wait/parity gaps"
+  ],
+  "acceptance": {
+    "independent_source_review": "PENDING",
+    "runtime0": true,
+    "HTTP": false,
+    "whole_SQL_issuer": false,
+    "API": false,
+    "B": false,
+    "full_partner": false,
+    "pilot": false,
+    "release": false,
+    "CI_pass": false,
+    "SDK_fresh": false
+  },
+  "original_program": {
+    "ref": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "sections": 20,
+    "criteria": 11,
+    "completion": false,
+    "copied": false
+  }
+}
