@@ -80,6 +80,7 @@ async def world(monkeypatch):
             db.add(CompanyRole(id=w.role, company_id=w.cid, name="Synthetic docs", modules=["docs"]))
             db.add(Organization(id=w.org, company_id=w.cid, name="Synthetic organization", inn="", prefix="S"))
             db.add(Counterparty(id=w.cp, company_id=w.cid, name="Synthetic correspondent", aliases=[]))
+            await db.flush()
             db.add(DocCase(id=w.case, company_id=w.cid, organization_id=w.org,
                 year=w.year, index="01-01", title="Synthetic case", storage_years=5,
                 retention_class="temporary", status="open"))
