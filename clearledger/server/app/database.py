@@ -2250,6 +2250,7 @@ async def require_startup_schema() -> None:
     preflight_startup_sources()
     from app import models_product_budget  # register every namespace-owned name
     from app import models_partner_contracts  # noqa: F401 — versioned names, без startup DDL
+    from app import models_partner_contract_cycle_receipts  # noqa: F401 — revision0005, no consumer query
     from app.services.schema_version_gate import require_connection
     from app.services.pulse_view_role_schema import require_connection as require_pulse
     async with engine.connect() as conn:
@@ -2268,6 +2269,7 @@ async def create_all() -> None:
     from app.services.phone_e164 import PHONE_FUNCTION_DDL
     from app import models_product_budget  # noqa: F401 — register before namespace guard/create_all
     from app import models_partner_contracts  # регистрация только через существующего bootstrap owner
+    from app import models_partner_contract_cycle_receipts  # revision0005, только регистрация
 
     async with engine.begin() as conn:
         if settings.managed_core_budget_enabled:
@@ -2285,6 +2287,9 @@ async def create_all() -> None:
         # Revision0004 — только явно, во всех namespace независимо от flags.
         excluded.update(table for table in Base.metadata.tables.values()
                         if table.schema is None and table.name in models_partner_contracts.VERSIONED_TABLE_NAMES)
+        # Revision0005 запрещён legacy create_all при любом schema/namespace/flags.
+        excluded.update(table for table in Base.metadata.tables.values()
+                        if table.name in models_partner_contract_cycle_receipts.VERSIONED_TABLE_NAMES)
         if settings.managed_core_budget_enabled:
             excluded.add(models_product_budget.ProductAPIBudget.__table__)
         tables = [table for table in Base.metadata.tables.values() if table not in excluded]

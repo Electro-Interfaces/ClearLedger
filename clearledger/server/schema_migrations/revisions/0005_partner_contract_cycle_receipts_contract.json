@@ -1,0 +1,325 @@
+{
+  "format": 1,
+  "namespace": "core",
+  "revision": "0005_partner_contract_cycle_receipts",
+  "prerequisites": {
+    "companies": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    }
+  },
+  "tables": {
+    "partner_contract_cycle_receipts": {
+      "name": "partner_contract_cycle_receipts",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "app_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "operation",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "command_key",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "grant_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "profile_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "operation_version",
+          "type": "int4",
+          "typmod": -1,
+          "not_null": true,
+          "default": "2"
+        },
+        {
+          "name": "request_hash",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "hash_version",
+          "type": "int4",
+          "typmod": -1,
+          "not_null": true,
+          "default": "1"
+        },
+        {
+          "name": "target_kind",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "target_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "result",
+          "type": "jsonb",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "typmod": -1,
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "created_txid",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": "(pg_current_xact_id())::text"
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "checks": {
+        "ck_pcc_receipt_client": "length(client_id) > 0",
+        "ck_pcc_receipt_operation_version": "operation_version = 2",
+        "ck_pcc_receipt_hash_version": "hash_version = 1",
+        "ck_pcc_receipt_hash": "length(request_hash) = 64 AND request_hash ~ '^[0-9a-f]{64}$'",
+        "ck_pcc_receipt_target": "(operation = 'v2.contract.create' AND target_kind = 'contract') OR (operation = 'v2.contract.patch' AND target_kind = 'contract') OR (operation = 'v2.contract.location.link' AND target_kind = 'contract') OR (operation = 'v2.term.create' AND target_kind = 'term') OR (operation = 'v2.term.version' AND target_kind = 'term') OR (operation = 'v2.term.coverage' AND target_kind = 'term') OR (operation = 'v2.site.contract.link' AND target_kind = 'site') OR (operation = 'v2.site.location.link' AND target_kind = 'site') OR (operation = 'v2.document.draft.create' AND target_kind = 'document') OR (operation = 'v2.document.contract.link' AND target_kind = 'document') OR (operation = 'v2.document.register' AND target_kind = 'document') OR (operation = 'v2.document.version.upload' AND target_kind = 'version')",
+        "ck_pcc_receipt_result_object": "jsonb_typeof(result) = 'object'",
+        "ck_pcc_receipt_result_bytes": "octet_length(convert_to(result::text, 'UTF8')) <= 131072"
+      },
+      "unique": {
+        "uq_pcc_receipt_namespace": [
+          "company_id",
+          "app_id",
+          "installation_id",
+          "operation",
+          "command_key"
+        ]
+      },
+      "foreign_keys": {
+        "fk_pcc_receipt_company": {
+          "columns": [
+            "company_id"
+          ],
+          "table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "r"
+        }
+      },
+      "indexes": {
+        "partner_contract_cycle_receipts_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        },
+        "uq_pcc_receipt_namespace": {
+          "columns": [
+            "company_id",
+            "app_id",
+            "installation_id",
+            "operation",
+            "command_key"
+          ],
+          "unique": true,
+          "primary": false,
+          "predicate": null
+        }
+      }
+    },
+    "partner_contract_cycle_receipt_refs": {
+      "name": "partner_contract_cycle_receipt_refs",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "receipt_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "uuid_value",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "location_value",
+          "type": "text",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "checks": {
+        "ck_pcc_ref_typed": "(kind = 'location' AND uuid_value IS NULL AND location_value IS NOT NULL) OR (kind = 'organization' AND uuid_value IS NOT NULL AND location_value IS NULL) OR (kind = 'counterparty' AND uuid_value IS NOT NULL AND location_value IS NULL) OR (kind = 'site' AND uuid_value IS NOT NULL AND location_value IS NULL) OR (kind = 'contract' AND uuid_value IS NOT NULL AND location_value IS NULL) OR (kind = 'term' AND uuid_value IS NOT NULL AND location_value IS NULL) OR (kind = 'document' AND uuid_value IS NOT NULL AND location_value IS NULL) OR (kind = 'version' AND uuid_value IS NOT NULL AND location_value IS NULL)",
+        "ck_pcc_ref_location": "location_value IS NULL OR (length(location_value) > 0 AND length(location_value) <= 40)"
+      },
+      "unique": {},
+      "foreign_keys": {
+        "fk_pcc_ref_receipt": {
+          "columns": [
+            "receipt_id"
+          ],
+          "table": "partner_contract_cycle_receipts",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "r"
+        }
+      },
+      "indexes": {
+        "partner_contract_cycle_receipt_refs_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        },
+        "uq_pcc_ref_uuid": {
+          "columns": [
+            "receipt_id",
+            "kind",
+            "uuid_value"
+          ],
+          "unique": true,
+          "primary": false,
+          "predicate": "uuid_value IS NOT NULL"
+        },
+        "uq_pcc_ref_location": {
+          "columns": [
+            "receipt_id",
+            "kind",
+            "location_value"
+          ],
+          "unique": true,
+          "primary": false,
+          "predicate": "location_value IS NOT NULL"
+        }
+      }
+    }
+  },
+  "functions": {
+    "pcc_receipt_immutable": "\nBEGIN\n    IF TG_OP = 'INSERT' THEN\n        NEW.created_at := pg_catalog.transaction_timestamp();\n        NEW.created_txid := pg_catalog.pg_current_xact_id()::text;\n        RETURN NEW;\n    END IF;\n    RAISE EXCEPTION 'immutable contract cycle receipt' USING ERRCODE = '23514';\nEND;\n",
+    "pcc_ref_immutable": "\nDECLARE\n    parent_txid text;\nBEGIN\n    IF TG_OP = 'INSERT' THEN\n        SELECT created_txid INTO parent_txid FROM core.partner_contract_cycle_receipts WHERE id = NEW.receipt_id;\n        IF parent_txid IS DISTINCT FROM pg_catalog.pg_current_xact_id()::text THEN\n            RAISE EXCEPTION 'contract cycle refs require original top transaction' USING ERRCODE = '23514';\n        END IF;\n        RETURN NEW;\n    END IF;\n    RAISE EXCEPTION 'immutable contract cycle receipt ref' USING ERRCODE = '23514';\nEND;\n"
+  },
+  "triggers": {
+    "tr_pcc_receipt_immutable": {
+      "table": "partner_contract_cycle_receipts",
+      "function": "pcc_receipt_immutable",
+      "type": 31
+    },
+    "tr_pcc_receipt_truncate": {
+      "table": "partner_contract_cycle_receipts",
+      "function": "pcc_receipt_immutable",
+      "type": 34
+    },
+    "tr_pcc_ref_immutable": {
+      "table": "partner_contract_cycle_receipt_refs",
+      "function": "pcc_ref_immutable",
+      "type": 31
+    },
+    "tr_pcc_ref_truncate": {
+      "table": "partner_contract_cycle_receipt_refs",
+      "function": "pcc_ref_immutable",
+      "type": 34
+    }
+  }
+}

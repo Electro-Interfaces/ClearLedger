@@ -60,6 +60,21 @@
       "parent": "0003_pulse_view_role_grants",
       "runner_format": 1,
       "source_commit": "d71e4f3754efce7c911cc95cb46eb22707e8efbc"
+    },
+    {
+      "artifact_sha256": "99d6c539f5a5e4962926e6d8978db3a5487bab0d5fb20531b31cd95daf59d42d",
+      "files": {
+        "revisions/0005_partner_contract_cycle_receipts.sql": "8fa567ecb000b348792da84cd5af8885268752a59ebe92117506989d5b370704",
+        "revisions/0005_partner_contract_cycle_receipts_contract.json": "c8107137adf8ad55a5fb5bbcf199e18350b4ea3150387cf56dd89af512841603",
+        "revisions/catalog_partner_contract_cycle_receipts_v1.py": "d92abc00a1fe9cf36b80519560794a49a1e7a6e1292b2596db518da363da69a7",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0005_partner_contract_cycle_receipts",
+      "namespace": "core",
+      "ordinal": 5,
+      "parent": "0004_partner_contract_create",
+      "runner_format": 1,
+      "source_commit": "cfd804c469d203c505b57668af8b57d9b4a866a2"
     }
   ]
 }

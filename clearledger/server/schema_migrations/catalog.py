@@ -58,3 +58,13 @@ async def inspect_contract_create(conn, contract, owner, *, applied):
 async def contract_create_prerequisites(conn, contract, owner):
     from schema_migrations.revisions.catalog_partner_contract_create_v1 import prerequisites
     return await prerequisites(conn, contract, owner)
+
+
+async def inspect_contract_cycle_receipts(conn, contract, owner, *, applied):
+    from schema_migrations.revisions.catalog_partner_contract_cycle_receipts_v1 import inspect
+    return await inspect(conn, contract, owner, applied=applied)
+
+
+async def contract_cycle_receipts_prerequisites(conn, contract, owner):
+    from schema_migrations.revisions.catalog_partner_contract_cycle_receipts_v1 import prerequisites
+    return await prerequisites(conn, contract, owner)
