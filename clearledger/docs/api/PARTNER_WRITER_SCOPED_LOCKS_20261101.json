@@ -1,0 +1,3978 @@
+{
+  "format": "partner-writer-scoped-locks-source-only-v1",
+  "status": "SOURCE_AUTHORED_NOT_INDEPENDENTLY_ACCEPTED",
+  "base": "e51876f994172c1d8306b934840541d2700486a6",
+  "source_commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+  "task_id": "task_82094ea824cc",
+  "dispatch_id": "ctx_d5825debaf38",
+  "run": "run_1e4d8306c273",
+  "workspace": "/home/mag/orca/workspaces/ledger-app/partner-writer-locks-author-20261101",
+  "scope": {
+    "exact7": [
+      "clearledger/server/app/routers/partner_admin_router.py",
+      "clearledger/server/app/routers/partner_oauth_router.py",
+      "clearledger/server/app/services/partner_identity.py",
+      "clearledger/server/tests/test_partner_writer_scoped_locks.py",
+      "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
+      "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.md",
+      "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.json"
+    ],
+    "outside_writes": 0,
+    "runtime_executions": 0,
+    "application_imports": 0,
+    "pure_helper_imports": 0,
+    "collection": "NOTRUN",
+    "tests": "NOTRUN",
+    "sql_http_ssh_docker_build_ci": "NOTRUN",
+    "push_pr_merge_deploy": "NOTRUN",
+    "immutable_base_no_pull_no_rebase": true
+  },
+  "authority_provenance": {
+    "technical_scope": "ROOT msg_0ef070c034f0 as supplied in live dispatch",
+    "secondary_user_authorization": "Coordinator msg_e07898532950 relays ROOT msg_5397173e27b5: «Разрешаю код, тесты и документацию в отдельных ветках». Full parent user history not directly available here.",
+    "temporary_hold": "msg_86c386e19e87 hold; partial exact2 diff preserved, no commit/runtime; lifted by msg_e07898532950 on same Task/Dispatch. One identity patch shared an exec with inbox read before hold was sampled; reported transparently as msg_81c6b7c4f874."
+  },
+  "proposal": {
+    "path": "/srv/projects/preview/partner-writer-scope-proposal-20261101/proposal.json",
+    "raw_sha256": "5c78604af14905db9b00c1bceffa27c1114c9f1792e130cb2e1634180f5ecd33",
+    "historical_base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+    "historical_lock_order_doc": "clearledger/docs/api/CONTRACT_PARTNER_WRITE_LOCK_ORDER_20261031.md A/B unselected on historical4e61, not current authority; typed B selected in base e518"
+  },
+  "source_files": [
+    {
+      "path": "clearledger/server/app/routers/partner_admin_router.py",
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "raw_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c",
+      "bytes": 13161,
+      "lines": 235,
+      "symbols": [
+        {
+          "symbol": "committed_response",
+          "start": 26,
+          "end": 29,
+          "raw_span_sha256": "d2c988b6474b86c7e8b265cfcd7968d26b8499ae732c3325f274383bb26ec65b"
+        },
+        {
+          "symbol": "scope_set",
+          "start": 32,
+          "end": 36,
+          "raw_span_sha256": "ac6b385cccad939928e494e59988b4ef77ecc02272d918f7ec33e162a1de162e"
+        },
+        {
+          "symbol": "finish",
+          "start": 39,
+          "end": 43,
+          "raw_span_sha256": "a20f4caba376fcb93f9d67e452830cb914f1d2ecd91653aceab00f1a9ea7a25b"
+        },
+        {
+          "symbol": "owned_client",
+          "start": 46,
+          "end": 54,
+          "raw_span_sha256": "32e202c4f9bfa9b94e6b75968219ae5b385f63ded0ffead3b30be04271da5566"
+        },
+        {
+          "symbol": "register",
+          "start": 58,
+          "end": 79,
+          "raw_span_sha256": "d2e04839ea99776eeea3d4b0e0a938c8c5def6d358f576202c811d9049c479b9"
+        },
+        {
+          "symbol": "register.create",
+          "start": 64,
+          "end": 78,
+          "raw_span_sha256": "84d739a08a457ebb70c8c53e64d47673d992061e6d048506b62eb968a6a4eef8"
+        },
+        {
+          "symbol": "client_status",
+          "start": 83,
+          "end": 89,
+          "raw_span_sha256": "893d1447035b6b7efea646547a4767e71048ed9c6ed9e9b0fd107338a3d52c27"
+        },
+        {
+          "symbol": "client_status.change",
+          "start": 85,
+          "end": 88,
+          "raw_span_sha256": "d88b86eabfd5a2543904ee0a6dd858c49308b5cd124ffae647d9f77793b48bf1"
+        },
+        {
+          "symbol": "issue_credential",
+          "start": 93,
+          "end": 107,
+          "raw_span_sha256": "f1b1421e6a678ab052c1c67236ee55038e2e86e8db64626b6a3aa0f8e325bdb5"
+        },
+        {
+          "symbol": "issue_credential.issue",
+          "start": 95,
+          "end": 105,
+          "raw_span_sha256": "fafe8c7e9a170628b800bd778e27d832ba84e70669b80f07819beb6eab57ce44"
+        },
+        {
+          "symbol": "revoke_credential",
+          "start": 111,
+          "end": 120,
+          "raw_span_sha256": "93419e1b0534a8fed143acc20a888e78ff90d4d7d12789825b8f12d2e80221fb"
+        },
+        {
+          "symbol": "revoke_credential.revoke",
+          "start": 113,
+          "end": 119,
+          "raw_span_sha256": "a1192e65336725f3c38f3062dc9f681a0c99433005b132b931ef04fad177ceb1"
+        },
+        {
+          "symbol": "approve_installation",
+          "start": 124,
+          "end": 180,
+          "raw_span_sha256": "c70d51ba1f0964d66070010aa6426996119b4f94b0220f3b9906a67798753b55"
+        },
+        {
+          "symbol": "approve_installation.approve",
+          "start": 127,
+          "end": 179,
+          "raw_span_sha256": "5fa0c4295194255adf5e00fcee6526c0fd6fb1348fe55aa2ed5a85918ba3215f"
+        },
+        {
+          "symbol": "admin_install",
+          "start": 183,
+          "end": 191,
+          "raw_span_sha256": "fc88216927c2830cdeb08c3b8454b5d1edb7c26375ad6ef99ea8e2a27b197414"
+        },
+        {
+          "symbol": "revoke_installation",
+          "start": 195,
+          "end": 201,
+          "raw_span_sha256": "5141860bc0248151fd8476f65d243ce5581b83711cf6a27a4768f0fcc044618f"
+        },
+        {
+          "symbol": "revoke_installation.revoke",
+          "start": 197,
+          "end": 200,
+          "raw_span_sha256": "f49a5b15a74f3ee513d1ea3aaf0a38193105042bddb27da4b448bf8474623955"
+        },
+        {
+          "symbol": "machine_grant",
+          "start": 205,
+          "end": 220,
+          "raw_span_sha256": "a027708d1fd4c7069f985463917a52f6727d281ed46069f2425a89764fb89083"
+        },
+        {
+          "symbol": "machine_grant.approve",
+          "start": 208,
+          "end": 219,
+          "raw_span_sha256": "d0467a3915afb44ded079d3f4fb177f585fd1fb195bca14dca3c35121a6ab137"
+        },
+        {
+          "symbol": "revoke_grant",
+          "start": 224,
+          "end": 235,
+          "raw_span_sha256": "f10bcd6c343eaf1eab2a7af6adcb71e440f14391026e8758cb61615891004b3e"
+        },
+        {
+          "symbol": "revoke_grant.revoke",
+          "start": 226,
+          "end": 234,
+          "raw_span_sha256": "f01c29357f111596eff901245080d6ec0614e06bea647304a5145baca555cd61"
+        }
+      ],
+      "authored_test_functions": []
+    },
+    {
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "raw_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382",
+      "bytes": 19056,
+      "lines": 372,
+      "symbols": [
+        {
+          "symbol": "protocol_error",
+          "start": 34,
+          "end": 36,
+          "raw_span_sha256": "e21c032e25fdfcb1297c72b31105f98ea7cc77b9602fb39d09c5c92a873c1718"
+        },
+        {
+          "symbol": "result_response",
+          "start": 39,
+          "end": 45,
+          "raw_span_sha256": "1631a54584e86d68aa76f1257458cde50dcde8338df5b604cba96e70a90e1e4d"
+        },
+        {
+          "symbol": "throttle",
+          "start": 48,
+          "end": 62,
+          "raw_span_sha256": "0f8bb8b5524f456c71a6760360f3f3c1a653d6c11a152fe1f2e2da5e30061f99"
+        },
+        {
+          "symbol": "parameters",
+          "start": 65,
+          "end": 73,
+          "raw_span_sha256": "73540c9a30bdc7a676707dcc1f6af8e33057a0230618122fbb395a802e1231d9"
+        },
+        {
+          "symbol": "form_request",
+          "start": 76,
+          "end": 101,
+          "raw_span_sha256": "224f56983e1f16a56cd06c79950835bf2a33260d4153c3fafaabad1e7d34e9d8"
+        },
+        {
+          "symbol": "authorize",
+          "start": 105,
+          "end": 132,
+          "raw_span_sha256": "3fa241edb30bac531cf6ae81d5bdb1323edce792702dedb112475bfc55452ac5"
+        },
+        {
+          "symbol": "token",
+          "start": 136,
+          "end": 149,
+          "raw_span_sha256": "4f0ae1ddda087caf267ed2b64947e99e9e23745391095f03c3c95c0d1f3e4885"
+        },
+        {
+          "symbol": "revoke",
+          "start": 153,
+          "end": 164,
+          "raw_span_sha256": "4f6ddfee4531617c103e062757bcb7215bd4b65a0706ae9933dc415238084de6"
+        },
+        {
+          "symbol": "_protocol_response",
+          "start": 167,
+          "end": 186,
+          "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5"
+        },
+        {
+          "symbol": "discovery",
+          "start": 191,
+          "end": 204,
+          "raw_span_sha256": "d069fb871b50f68f987791da2e48d1d7d9dd1075e756f9c595b339b3559054a3"
+        },
+        {
+          "symbol": "jwks",
+          "start": 208,
+          "end": 210,
+          "raw_span_sha256": "fcc32a1b339957566e329fc591734ad9a22de9f7da21a0eb993fe8fd740c4ee1"
+        },
+        {
+          "symbol": "userinfo",
+          "start": 214,
+          "end": 229,
+          "raw_span_sha256": "6ba422de681219982b93e81ac80f3fed7e6447e816ef2dff2a5d055c8c327e14"
+        },
+        {
+          "symbol": "userinfo.detail",
+          "start": 218,
+          "end": 226,
+          "raw_span_sha256": "147c9b2f27b4ff82b7ed27e54ac8b3ac8acd2ec665fc72098587ada47811f568"
+        },
+        {
+          "symbol": "pending_request",
+          "start": 232,
+          "end": 245,
+          "raw_span_sha256": "ae1d9083a1195a80e605326c760d7baef96200ff03fbb34863f30d7a31ae6424"
+        },
+        {
+          "symbol": "eligible_installations",
+          "start": 248,
+          "end": 260,
+          "raw_span_sha256": "6f9e14726cf1c5ab3a5f0a91764d8b6de4c0bacb19e9a892044b69baa227eaaa"
+        },
+        {
+          "symbol": "get_request",
+          "start": 264,
+          "end": 289,
+          "raw_span_sha256": "52e206ae750ac689a12cda7b494d0c0d6de04f018eef3dccdf023a2e6e00acfb"
+        },
+        {
+          "symbol": "get_request.detail",
+          "start": 266,
+          "end": 283,
+          "raw_span_sha256": "b05be9fcea23eeec1f6c6ef3f469e5fb84a74d8ae02dacc65064614cba60934a"
+        },
+        {
+          "symbol": "approve",
+          "start": 293,
+          "end": 346,
+          "raw_span_sha256": "5a856a0838822715497e74f6c32946097ef76c41039def93bfeaa8dbcd586611"
+        },
+        {
+          "symbol": "approve.accept",
+          "start": 296,
+          "end": 339,
+          "raw_span_sha256": "7ff9398231eb68926fbe5f9de2069fc20ec77bd57c2e8b712d9ca57a583fc475"
+        },
+        {
+          "symbol": "deny",
+          "start": 350,
+          "end": 372,
+          "raw_span_sha256": "c4b0a455dfaf79daa9038c28a39941461f56bd05a223f84e5f6750875153dd30"
+        },
+        {
+          "symbol": "deny.decline",
+          "start": 352,
+          "end": 366,
+          "raw_span_sha256": "39d5c819af0bb0738f1154786b7c51351c498ff0eb9f4bbc65026080fd95cf0e"
+        }
+      ],
+      "authored_test_functions": []
+    },
+    {
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "raw_sha256": "2239e9ba627a98497c1d6e937655b47974fc209ae4e8c5039fee05924b8a6152",
+      "bytes": 59326,
+      "lines": 1201,
+      "symbols": [
+        {
+          "symbol": "partner_bearer_headers",
+          "start": 68,
+          "end": 73,
+          "raw_span_sha256": "c41c856afd41d089da69deccef774c1c24c80f92b3a7cb03b62ff31a333f6549"
+        },
+        {
+          "symbol": "PartnerProblem",
+          "start": 76,
+          "end": 79,
+          "raw_span_sha256": "7a958b68df3e5d4623d3b881dfafe2c6ddd7db375915190640cd2091d5e8897a"
+        },
+        {
+          "symbol": "PartnerProblem.__init__",
+          "start": 77,
+          "end": 79,
+          "raw_span_sha256": "3e752a79d3e2cf49c6afe011edcd6c2adf97778d0766b5fc386d63f06a90ab83"
+        },
+        {
+          "symbol": "problem_handler",
+          "start": 82,
+          "end": 87,
+          "raw_span_sha256": "59bc7bfe57a165e0ae5e7ba6ee12cf2bc14a3466f5be6a158554b129f83e30f7"
+        },
+        {
+          "symbol": "PartnerRoute",
+          "start": 90,
+          "end": 110,
+          "raw_span_sha256": "3d4041e9dd356b56d5700b25d29832aba398d814f7c36eb2be9f9ec70dd600d6"
+        },
+        {
+          "symbol": "PartnerRoute.get_route_handler",
+          "start": 92,
+          "end": 110,
+          "raw_span_sha256": "2dbeee1aa321ed955fc99b73ea530f315ea8fa9548944a089751997e804e125b"
+        },
+        {
+          "symbol": "PartnerRoute.get_route_handler.handler",
+          "start": 95,
+          "end": 108,
+          "raw_span_sha256": "353dc8ea0d906d612ce4e4497b2c4557bf0d04436b307561162a3b31cf3966e3"
+        },
+        {
+          "symbol": "now",
+          "start": 113,
+          "end": 114,
+          "raw_span_sha256": "3e33bf0580a6805dc163bfd07493fd7a45eca05248874ab021509b07a4efd03f"
+        },
+        {
+          "symbol": "digest",
+          "start": 117,
+          "end": 118,
+          "raw_span_sha256": "51b84d16c5bb1accce8f76902d38852882106267c9b47c9fc5be1ca39987eff1"
+        },
+        {
+          "symbol": "require_enabled",
+          "start": 121,
+          "end": 145,
+          "raw_span_sha256": "fd153ec27592e991d7846472b73fc48a2354c855a32bbcdc226b4676394395f8"
+        },
+        {
+          "symbol": "signing_key",
+          "start": 148,
+          "end": 149,
+          "raw_span_sha256": "8f3fcbbb11a8729dfd4a1c176d857dd4ef99ad2ba44b33665c73499637bdbd5c"
+        },
+        {
+          "symbol": "public_jwks",
+          "start": 152,
+          "end": 157,
+          "raw_span_sha256": "f5ca39d2d5d8e3562ea03c8579fa001c21c3065fed6f8299bbe869aca3a512e0"
+        },
+        {
+          "symbol": "validate_redirect",
+          "start": 160,
+          "end": 174,
+          "raw_span_sha256": "249ca383757bb42126e302e964f65096a3abebd2714708f19645c15135be2338"
+        },
+        {
+          "symbol": "validate_scopes",
+          "start": 177,
+          "end": 183,
+          "raw_span_sha256": "5f74ebe533aced5e293c7ef799f763559d51dff5669a7d6aaab124f3e8c25c2f"
+        },
+        {
+          "symbol": "fresh",
+          "start": 186,
+          "end": 187,
+          "raw_span_sha256": "7ef5bc7cc3290b5d520a71d63d9e0f3fe6ff457625b7e13ebcd1719fd581468b"
+        },
+        {
+          "symbol": "active_user",
+          "start": 190,
+          "end": 194,
+          "raw_span_sha256": "ff534aaf5c309916eae1e14a801927c0d0d15ca13159dac174ff2eda4a32648f"
+        },
+        {
+          "symbol": "admin",
+          "start": 197,
+          "end": 202,
+          "raw_span_sha256": "fcde2a74cf742182f8e81e324d95adc82cff4ecf2ff56cb0fcb3290ab7dcbdf2"
+        },
+        {
+          "symbol": "eligible_scopes",
+          "start": 205,
+          "end": 235,
+          "raw_span_sha256": "658cbc7493a175a5f9962e2d2ef0db5664cb24eae2a6405aca323627c7b98207"
+        },
+        {
+          "symbol": "VerifiedResourceScope",
+          "start": 239,
+          "end": 241,
+          "raw_span_sha256": "f789e556bf0d89b41b8f97e4b62b508945047f251c0489dbf5cd442ff635d373"
+        },
+        {
+          "symbol": "VerifiedPartnerToken",
+          "start": 245,
+          "end": 260,
+          "raw_span_sha256": "cc8ee9d9ce3841c98064726edd1bed866c74243516e22f1e1454818c822347dd"
+        },
+        {
+          "symbol": "LiveGrant",
+          "start": 264,
+          "end": 272,
+          "raw_span_sha256": "85261e650b38ff9e4f85140f47a47a10393d02bf42b40dc9d157a870eea65976"
+        },
+        {
+          "symbol": "resource_scopes",
+          "start": 275,
+          "end": 306,
+          "raw_span_sha256": "6ff5de2b7c663ba4e5490f504a469970231f3ab329237208bfbd1edca5d860be"
+        },
+        {
+          "symbol": "live_grant",
+          "start": 309,
+          "end": 363,
+          "raw_span_sha256": "cdcfdfc46c95f7411cd816bc332cb020125c4f6a8d3350979e0c3367fe2465aa"
+        },
+        {
+          "symbol": "pairwise_subject",
+          "start": 366,
+          "end": 373,
+          "raw_span_sha256": "4972e5014584ea762e8a8832a3d6fa8827c767e715561637061777d3a1c0ce4c"
+        },
+        {
+          "symbol": "_PartnerRow",
+          "start": 396,
+          "end": 410,
+          "raw_span_sha256": "d62d3ede4b0d2159326ce3748a0e357ff0a8727b53138cd8c8aaa565a4754edd"
+        },
+        {
+          "symbol": "_PartnerRow.statement",
+          "start": 403,
+          "end": 410,
+          "raw_span_sha256": "c664faafbd7930173607105066e8389f1111372ac7fd1d5f253c30b39c96e8b9"
+        },
+        {
+          "symbol": "_writer_drift",
+          "start": 413,
+          "end": 416,
+          "raw_span_sha256": "db21190c51cae8c64cbbce03a72ae603594d8f07b31e81b77ac5274bb4d734f5"
+        },
+        {
+          "symbol": "_installation_sets",
+          "start": 419,
+          "end": 428,
+          "raw_span_sha256": "a6f4ef4cade5daf18519db9b66f4e6d7c4e6538c1dba3b6e1d51c33c45f2d05d"
+        },
+        {
+          "symbol": "_native_authority",
+          "start": 431,
+          "end": 451,
+          "raw_span_sha256": "73b76c214a9e3792bf5db8c0c25fedd83fc9994f091d964f80ef3daa85d49b71"
+        },
+        {
+          "symbol": "_native_authority.check",
+          "start": 438,
+          "end": 446,
+          "raw_span_sha256": "130ce78e3f99032df32d8c3fcaebed93783a5505c9b28f4f5cda437f2486d6d7"
+        },
+        {
+          "symbol": "_native_authority.on_same_session",
+          "start": 447,
+          "end": 450,
+          "raw_span_sha256": "c003a429db07c132efda0b17f24fd36dc8d2b95f404b8c6ea9d57e58f84294a2"
+        },
+        {
+          "symbol": "_PartnerWrite",
+          "start": 455,
+          "end": 490,
+          "raw_span_sha256": "bc392670b42baec22ed0c645a3ddfca80c6001b761074292fe93bdf1a585a9a9"
+        },
+        {
+          "symbol": "_PartnerWrite.discovered",
+          "start": 466,
+          "end": 467,
+          "raw_span_sha256": "c20440303bc97d2b2becdc9127ebdfeee73a242468d0cee241bcb75b9e754a03"
+        },
+        {
+          "symbol": "_PartnerWrite.checkpoint",
+          "start": 469,
+          "end": 490,
+          "raw_span_sha256": "453b8163e48fa26cd15dc969fee5faae56b9d358052c10d42b8736ddc6bfa1d8"
+        },
+        {
+          "symbol": "_prepare_partner_write",
+          "start": 493,
+          "end": 713,
+          "raw_span_sha256": "97f4cfe53615a3a4135e72c64c49d5b4e3a00e2a915e7a0ebbe55ee7f2145849"
+        },
+        {
+          "symbol": "_prepare_partner_write.key",
+          "start": 510,
+          "end": 511,
+          "raw_span_sha256": "7e99ec5c58952c749000d700a8ab65d84e1ce8f03f82efd65472fea35b4db915"
+        },
+        {
+          "symbol": "_prepare_partner_write.remember",
+          "start": 513,
+          "end": 522,
+          "raw_span_sha256": "279e3fd3a3240bc4115ad4f0e7a249e71c100d3e935c4dcff7b817aa4401794e"
+        },
+        {
+          "symbol": "_prepare_partner_write.get",
+          "start": 524,
+          "end": 530,
+          "raw_span_sha256": "82078066293a5dcaf9c2c1e55e5ce77e5567a07731d81acd085a85e4bdb7dc5d"
+        },
+        {
+          "symbol": "_prepare_partner_write.company",
+          "start": 532,
+          "end": 534,
+          "raw_span_sha256": "b1a24868984312d49600a2b7b0dce84f4ca710aa4e6c135ed2b73f23c29afcb8"
+        },
+        {
+          "symbol": "_prepare_partner_write.references",
+          "start": 536,
+          "end": 546,
+          "raw_span_sha256": "d5e3e24fb1fdc737ed8304bde2d9d47f9fce3a8c00b59f22fb8850eb9c133201"
+        },
+        {
+          "symbol": "_prepare_partner_write.person",
+          "start": 548,
+          "end": 564,
+          "raw_span_sha256": "8fd8409f243f26d4195d10565cb16cfc070d519056b8b5084ebdb003c385b83c"
+        },
+        {
+          "symbol": "_prepare_partner_write.client",
+          "start": 566,
+          "end": 578,
+          "raw_span_sha256": "87d9a3723a6082cbbc0c7bd7306bf7ed54436d2d67ac75ae79e629db192c0105"
+        },
+        {
+          "symbol": "_prepare_partner_write.installation",
+          "start": 580,
+          "end": 599,
+          "raw_span_sha256": "7c5723af3d6302556e5e672eae9cc1a967fee84a433314185700d6c7584246ae"
+        },
+        {
+          "symbol": "_prepare_partner_write.grant",
+          "start": 601,
+          "end": 606,
+          "raw_span_sha256": "2c61351eef97ed75a28311ca02793209617a45489cc29253926f45d16a7bdd1c"
+        },
+        {
+          "symbol": "ClientAdapter",
+          "start": 716,
+          "end": 762,
+          "raw_span_sha256": "8a094a12e6b876965425ada438c752cc94e508dc83e1e4e4b184eb0fc00b427a"
+        },
+        {
+          "symbol": "ClientAdapter.__init__",
+          "start": 717,
+          "end": 719,
+          "raw_span_sha256": "791f32097ed7d17b9c92d6731f0c174ec9a1da8f20f9fa00675170712e2972f0"
+        },
+        {
+          "symbol": "ClientAdapter.get_client_id",
+          "start": 721,
+          "end": 722,
+          "raw_span_sha256": "93826783ae69f7fe57dcfc6d543d2632d3fa9d0cb3f1e5677280492297f056b5"
+        },
+        {
+          "symbol": "ClientAdapter.check_redirect_uri",
+          "start": 724,
+          "end": 733,
+          "raw_span_sha256": "479a67bcd1665ec20f8d818d0e00c5d0cb47d83702710cb9fcdd9ff30b3ef93f"
+        },
+        {
+          "symbol": "ClientAdapter.get_default_redirect_uri",
+          "start": 735,
+          "end": 737,
+          "raw_span_sha256": "97669a01b6d269402a04168385b8bf04791c88d31433e4762c547e5a9b169b4c"
+        },
+        {
+          "symbol": "ClientAdapter.check_client_secret",
+          "start": 739,
+          "end": 746,
+          "raw_span_sha256": "406fb3218219a8394885fb77e60d5812a6b47752d9540e8897dacf0b29ec7424"
+        },
+        {
+          "symbol": "ClientAdapter.check_endpoint_auth_method",
+          "start": 748,
+          "end": 749,
+          "raw_span_sha256": "9cfae68023657fde48aa689e99be6849d5caa065cf8ea9989bf619f3c256b686"
+        },
+        {
+          "symbol": "ClientAdapter.check_response_type",
+          "start": 751,
+          "end": 752,
+          "raw_span_sha256": "182a9b70cbff5a5869142281d09507858027a1e66fc25c47defae3cd81773a98"
+        },
+        {
+          "symbol": "ClientAdapter.check_grant_type",
+          "start": 754,
+          "end": 756,
+          "raw_span_sha256": "6cb2daa95b33b25cb549f2f390b6ba74ca62c4297b87f81d16063666992b96d2"
+        },
+        {
+          "symbol": "ClientAdapter.get_allowed_scope",
+          "start": 758,
+          "end": 762,
+          "raw_span_sha256": "31e16143c1d2e726bd6ba34e1e38ae14cbd1a438b63c557b0ec8ded23d139eb5"
+        },
+        {
+          "symbol": "ProtocolRequest",
+          "start": 765,
+          "end": 777,
+          "raw_span_sha256": "9ef4dc0cc7c8cbdf4b131b048f9db3330366e5dd236cf67287de5dcaf1e80bdd"
+        },
+        {
+          "symbol": "ProtocolRequest.__init__",
+          "start": 766,
+          "end": 769,
+          "raw_span_sha256": "a77562f1556aa19aea47165e4076e1b21009e11a2975177e0f8164b766d9daf1"
+        },
+        {
+          "symbol": "ProtocolRequest.form",
+          "start": 772,
+          "end": 773,
+          "raw_span_sha256": "c794a293136b5c320634197e0e30f6b0af45ae31c4cbfc82843a67d47feb3341"
+        },
+        {
+          "symbol": "ProtocolRequest.args",
+          "start": 776,
+          "end": 777,
+          "raw_span_sha256": "85b1dc96e7f4cad1d4c374c1f91ee413b18cca52ad05e24f80c60d294f390178"
+        },
+        {
+          "symbol": "S256Challenge",
+          "start": 780,
+          "end": 787,
+          "raw_span_sha256": "ac16ddc95acfe035afb36ee558a3acc79ee9fa15114f87df57d014af623fbcbb"
+        },
+        {
+          "symbol": "S256Challenge.validate_code_challenge",
+          "start": 783,
+          "end": 787,
+          "raw_span_sha256": "062b34648747525fad3864380d8eaba41b6e1852ab95c14dc886ea1a16c1654f"
+        },
+        {
+          "symbol": "CodeGrant",
+          "start": 790,
+          "end": 831,
+          "raw_span_sha256": "03075ec03b9dd7497df7ede8f33c494ee9ae1423cd9ab9cf68b6d86d2e2f9a8e"
+        },
+        {
+          "symbol": "CodeGrant.save_authorization_code",
+          "start": 793,
+          "end": 803,
+          "raw_span_sha256": "fc6ea77e600239cb408de023975430e9e5c66ecd37b8c3ac40b58aae726e63cb"
+        },
+        {
+          "symbol": "CodeGrant.query_authorization_code",
+          "start": 805,
+          "end": 818,
+          "raw_span_sha256": "78c26ae01f6610b8b537de32e45fdcbfb7eb908662b0d808cb5481d9b3ceb67e"
+        },
+        {
+          "symbol": "CodeGrant.delete_authorization_code",
+          "start": 820,
+          "end": 823,
+          "raw_span_sha256": "3d7dda3336a01444943770bf9a3b89c45a438f6bb3597d9768c034809ae90d84"
+        },
+        {
+          "symbol": "CodeGrant.authenticate_user",
+          "start": 825,
+          "end": 831,
+          "raw_span_sha256": "adaaddcc34c78e955e920085c0cc79e2a45b4bd4fcebd20d3cf5980740f0ca00"
+        },
+        {
+          "symbol": "RefreshHandle",
+          "start": 835,
+          "end": 843,
+          "raw_span_sha256": "dee279fef35c3c373303f2a62abfa80b1a2c8f76cd7cba991b32f740657187e9"
+        },
+        {
+          "symbol": "RefreshHandle.check_client",
+          "start": 839,
+          "end": 840,
+          "raw_span_sha256": "55a162727ed0bdd7900350ec66231f8c22e4e4080cae9c22f3782a68958a49b9"
+        },
+        {
+          "symbol": "RefreshHandle.get_scope",
+          "start": 842,
+          "end": 843,
+          "raw_span_sha256": "f72d7029b1906743b54004fe1bfe49a8ed841fb63263db373366acb62678d161"
+        },
+        {
+          "symbol": "RotatingRefreshGrant",
+          "start": 846,
+          "end": 889,
+          "raw_span_sha256": "522571a1b869eff0108e58cd506adeb7b28a8098c4e5db516db4ee26be0c7f3c"
+        },
+        {
+          "symbol": "RotatingRefreshGrant.authenticate_refresh_token",
+          "start": 850,
+          "end": 881,
+          "raw_span_sha256": "45150024a763df3f81fef7da24140d671d9147c32bb073545379be37c1d3f984"
+        },
+        {
+          "symbol": "RotatingRefreshGrant.authenticate_user",
+          "start": 883,
+          "end": 884,
+          "raw_span_sha256": "aa4fcd82d861d41041afd2c219c701b206d25aaa3eb1679ba590296b1b6fecf9"
+        },
+        {
+          "symbol": "RotatingRefreshGrant.revoke_old_credential",
+          "start": 886,
+          "end": 889,
+          "raw_span_sha256": "183fdc389760e9c8ab01d0fdb50520baf9c9cead798271001ed0cf3670662698"
+        },
+        {
+          "symbol": "MachineGrant",
+          "start": 892,
+          "end": 907,
+          "raw_span_sha256": "b827bac565c90875a8fe6fc0588f96780f2d4f1eb8c625709121023920930362"
+        },
+        {
+          "symbol": "MachineGrant.validate_token_request",
+          "start": 893,
+          "end": 907,
+          "raw_span_sha256": "5a72bf636071fa4f272c24dc0738a319d80f4555c7802423b462a8bbdef1fcf1"
+        },
+        {
+          "symbol": "PartnerOpenIDCode",
+          "start": 910,
+          "end": 945,
+          "raw_span_sha256": "83d4c81ff1653e41db83f80a1168ae2ed764cbae8fde9ee7aecf9d40dbcc0c7b"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.__init__",
+          "start": 911,
+          "end": 913,
+          "raw_span_sha256": "387f3ac185f0161d88efcc9fbd74b852ea0a746ece330607cb6e71fc5a7e4cd6"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.exists_nonce",
+          "start": 915,
+          "end": 924,
+          "raw_span_sha256": "edc2270d614710552b748120fc00acf3ce92504e943b8e016ee8c4e9e520292f"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.resolve_client_private_key",
+          "start": 926,
+          "end": 928,
+          "raw_span_sha256": "9167dd77199c0ad597c0ad270179fc2b5cc82fc0fb27a5b1dd4ce7c6b4b1b01f"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.get_client_algorithm",
+          "start": 930,
+          "end": 931,
+          "raw_span_sha256": "fb4e3156724dc30c4f05a8dd3db0976b6d9d17b9e265a9c16e30f4d917b60990"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.get_encode_header",
+          "start": 933,
+          "end": 934,
+          "raw_span_sha256": "aa619b57da1852603b8e9cf1b4362287a721e1d05e976c0a1a87cf95403b9162"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.get_client_claims",
+          "start": 936,
+          "end": 939,
+          "raw_span_sha256": "1a45859cfbb0bf629a1012ed9862862edddf7ff4cb66bfd4d87cca293dd57de5"
+        },
+        {
+          "symbol": "PartnerOpenIDCode.generate_user_info",
+          "start": 941,
+          "end": 945,
+          "raw_span_sha256": "a1a87cf3b62a80e0da7f45b70da5dfee29e8da96f1a4287036804bca476710c0"
+        },
+        {
+          "symbol": "RevokeEndpoint",
+          "start": 948,
+          "end": 979,
+          "raw_span_sha256": "1a6922840ea543aaddc7408a4cc5749150e3560db124fb2ca0e2bd219d11e64e"
+        },
+        {
+          "symbol": "RevokeEndpoint.query_token",
+          "start": 951,
+          "end": 970,
+          "raw_span_sha256": "0d6712bd9729ea77f334c186e02a5236557bd5a56dab31bb2948aa6d4fc68b2c"
+        },
+        {
+          "symbol": "RevokeEndpoint.revoke_token",
+          "start": 972,
+          "end": 979,
+          "raw_span_sha256": "6881e53a54ecb11bb05cb6d33a19ee4865cb6b8537c49d6feb76fb19a24b2b19"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer",
+          "start": 982,
+          "end": 1080,
+          "raw_span_sha256": "236340cc25106881c9f42de3dea15bd3bfc92e564a7942e9bf145df58d04a000"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.__init__",
+          "start": 983,
+          "end": 995,
+          "raw_span_sha256": "f9da7631d5acb2350e0e045908d937da9d5b6473afe1c5600ba6d9db8f10a039"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.checkpoint",
+          "start": 997,
+          "end": 1014,
+          "raw_span_sha256": "fadff11be4fee84f7dff1e32f87f591afb49864f3f2c29d5bbe4859714284e22"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.query_client",
+          "start": 1016,
+          "end": 1023,
+          "raw_span_sha256": "d7b8ebf74337ab4fb5ef2d0999a945dde3b44c7e9b0a1bb46073513dba52669e"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.create_oauth2_request",
+          "start": 1025,
+          "end": 1026,
+          "raw_span_sha256": "0c7b924878a1ef42282dac41ed6b71da2e9585cf6fc72643ac1e6e3f62f62911"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.handle_response",
+          "start": 1028,
+          "end": 1029,
+          "raw_span_sha256": "28678a005be8156d7c94f9df35239f5210edef550788ec8a82dd05384bbbcccd"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.send_signal",
+          "start": 1031,
+          "end": 1032,
+          "raw_span_sha256": "050a98aeeb5063589e169536b10a2880321c44bf5873f6568b37ae354f20bc37"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.issue_token",
+          "start": 1034,
+          "end": 1074,
+          "raw_span_sha256": "90d90ce60a69ebf82f7fb01a4a5905511999721d2792127732ec21c586a4857d"
+        },
+        {
+          "symbol": "PartnerAuthorizationServer.save_token",
+          "start": 1076,
+          "end": 1080,
+          "raw_span_sha256": "7cb1f8d3a366903539d36f1627cda6c802639895f5ccf26ac1ac089954c1a800"
+        },
+        {
+          "symbol": "user_info",
+          "start": 1083,
+          "end": 1090,
+          "raw_span_sha256": "11b3cc0cc9a43dcbc5e4ebfeef716346e80f6741d3be507c102772f2761400f9"
+        },
+        {
+          "symbol": "require_core_user",
+          "start": 1093,
+          "end": 1099,
+          "raw_span_sha256": "34ee87978e57ebdc50b39dab985869a2a91c068fa9b0bce3b5978ef4c15cb833"
+        },
+        {
+          "symbol": "verify_access",
+          "start": 1102,
+          "end": 1140,
+          "raw_span_sha256": "7331097505f8407853195cbdc88700d95db5319f28c14ad13f036665dc347336"
+        },
+        {
+          "symbol": "verify_locked_partner_access",
+          "start": 1143,
+          "end": 1172,
+          "raw_span_sha256": "b6e0509065f7847de9a836b4b243bbf4a9d2b903aee22e744e8754ae53ca9ccc"
+        },
+        {
+          "symbol": "verify_partner_access_token",
+          "start": 1175,
+          "end": 1191,
+          "raw_span_sha256": "4be98775f4f4feead30f0959100736362d1976229a3deac506485e9a82bc05cc"
+        },
+        {
+          "symbol": "get_verified_partner_token",
+          "start": 1197,
+          "end": 1201,
+          "raw_span_sha256": "ac88537ea7c04dc5dee6af5149f0f717c67db2c2bf6e61d9b86a70fd9aac8142"
+        }
+      ],
+      "authored_test_functions": []
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_writer_scoped_locks.py",
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "raw_sha256": "7e23fc9077f78813d8a2b1c3ad15049438fdc7d8908ef9bf39e90b22cdc7d806",
+      "bytes": 10313,
+      "lines": 194,
+      "symbols": [
+        {
+          "symbol": "tree",
+          "start": 16,
+          "end": 17,
+          "raw_span_sha256": "02a293ffe18576e544fdf24c06dab8a39e93d9f1f4ac3d33830e722d3a90d949"
+        },
+        {
+          "symbol": "symbol",
+          "start": 20,
+          "end": 24,
+          "raw_span_sha256": "41ad84fd6840c7a05a73e3b41a9624de83dab1b32f30ca074701da1286ce0cc8"
+        },
+        {
+          "symbol": "body_nodes",
+          "start": 27,
+          "end": 33,
+          "raw_span_sha256": "58fa7b50d91d3aa5ac284c14a28ecc504bf821f561d0af6a099f1439856235e8"
+        },
+        {
+          "symbol": "calls",
+          "start": 36,
+          "end": 39,
+          "raw_span_sha256": "bb1aa4087604631f269c4389672649453accd6dc1a6333ce82c3500285192536"
+        },
+        {
+          "symbol": "text",
+          "start": 42,
+          "end": 43,
+          "raw_span_sha256": "03a15d195ff5a47528be457e10fa2a332514c119362c74f345477b40587b592c"
+        },
+        {
+          "symbol": "test_all_eight_admin_roots_enter_shared_composer_before_changes",
+          "start": 46,
+          "end": 58,
+          "raw_span_sha256": "7cc54f6ddb989945a5727815270252e624cc8fcb3267f4ea93ccaaec56997c7d"
+        },
+        {
+          "symbol": "test_oauth_seven_named_roots_and_three_token_branches_share_composition",
+          "start": 61,
+          "end": 69,
+          "raw_span_sha256": "27c155589b28946d2df0b613360cb20133bdf656a721877f6dfa02fabe51dd1d"
+        },
+        {
+          "symbol": "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
+          "start": 72,
+          "end": 80,
+          "raw_span_sha256": "4108e2876fb1d0fb613510cef216111705e15dfcb168f90f26be23e2fa5309fc"
+        },
+        {
+          "symbol": "test_row_protocol_is_canonical_share_or_update_and_tenant_before_lock",
+          "start": 83,
+          "end": 94,
+          "raw_span_sha256": "603a6a908cd78b8e539dc5dab8dd8aa761987c7e9f9459391cd437e642ee1a52"
+        },
+        {
+          "symbol": "test_native_reverification_uses_original_bearer_and_public_auth_same_session",
+          "start": 97,
+          "end": 105,
+          "raw_span_sha256": "d68e4eff312cc0099cc3c208dcce398d23b9fcf80de0c3cfbf84de5de464cae8"
+        },
+        {
+          "symbol": "test_seam_reuses_one_verifier_and_compares_original_stable_identity",
+          "start": 108,
+          "end": 116,
+          "raw_span_sha256": "528810bcbd77bb3273a97d30a69cecd4dfb27cd5d7b7f9823daa3a907f409511"
+        },
+        {
+          "symbol": "test_userinfo_canonical_rows_before_seam_and_rechecks_after_subject_flush",
+          "start": 119,
+          "end": 128,
+          "raw_span_sha256": "2780ed9eeebc18c9b2c0347ddce5b16d1852a8bec367bbb5459802e396483a65"
+        },
+        {
+          "symbol": "test_conflict_winner_checked_before_new_ca_lock_and_root_rollback",
+          "start": 131,
+          "end": 138,
+          "raw_span_sha256": "3fdd95c654afec2d278414989fa187f08a635f67d9d79ee17dcb723db968d86a"
+        },
+        {
+          "symbol": "test_consent_selected_company_and_self_revoke_policy_remain_distinct",
+          "start": 141,
+          "end": 147,
+          "raw_span_sha256": "d0a193b4203dc6a07965be616118fc6043d839bcde009cee1a37a5ab6438056b"
+        },
+        {
+          "symbol": "test_reuse_is_only_explicit_oauth_error_durability_exception",
+          "start": 150,
+          "end": 158,
+          "raw_span_sha256": "058a56027991b4f188a26e395b65b5f1d04107be8b323a7fc926b4a53ce39dec"
+        },
+        {
+          "symbol": "test_family_before_token_and_no_late_protocol_identity",
+          "start": 161,
+          "end": 167,
+          "raw_span_sha256": "bf4ca2a6b0b5aa60ec07661c07ad0d6f51dc349a4af38387e485dc998c3dd66b"
+        },
+        {
+          "symbol": "test_final_callbacks_and_native_checks_never_acquire_another_plan",
+          "start": 170,
+          "end": 177,
+          "raw_span_sha256": "0d4c673f3fa8e79f71d6bb581f5436399a2892a34443d4f6a8d73bc80829f111"
+        },
+        {
+          "symbol": "test_protocol_nonce_and_subject_uniqueness_are_preserved",
+          "start": 180,
+          "end": 185,
+          "raw_span_sha256": "9aff340d3f27e5b2f003f845af52af97aa3e940f1aaf4dad2c1975fad622798d"
+        },
+        {
+          "symbol": "test_absent_members_roles_and_parent_pointer_drift_are_explicit",
+          "start": 188,
+          "end": 194,
+          "raw_span_sha256": "2d8b345e73960475d39df7d5bbd6e78f17b8eb28bf64ffe1c3ea6b0956299aab"
+        }
+      ],
+      "authored_test_functions": [
+        "test_all_eight_admin_roots_enter_shared_composer_before_changes",
+        "test_oauth_seven_named_roots_and_three_token_branches_share_composition",
+        "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
+        "test_row_protocol_is_canonical_share_or_update_and_tenant_before_lock",
+        "test_native_reverification_uses_original_bearer_and_public_auth_same_session",
+        "test_seam_reuses_one_verifier_and_compares_original_stable_identity",
+        "test_userinfo_canonical_rows_before_seam_and_rechecks_after_subject_flush",
+        "test_conflict_winner_checked_before_new_ca_lock_and_root_rollback",
+        "test_consent_selected_company_and_self_revoke_policy_remain_distinct",
+        "test_reuse_is_only_explicit_oauth_error_durability_exception",
+        "test_family_before_token_and_no_late_protocol_identity",
+        "test_final_callbacks_and_native_checks_never_acquire_another_plan",
+        "test_protocol_nonce_and_subject_uniqueness_are_preserved",
+        "test_absent_members_roles_and_parent_pointer_drift_are_explicit"
+      ]
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "raw_sha256": "a5495f8e8244824769cf9ec6a89c538ea17139c82bc7d924eb0d7a2920fb68cd",
+      "bytes": 36103,
+      "lines": 622,
+      "symbols": [
+        {
+          "symbol": "pid",
+          "start": 51,
+          "end": 52,
+          "raw_span_sha256": "b5b347af720a97b5321a593b215caba9b424ec1fec0d96fd23a0e710be77b8ae"
+        },
+        {
+          "symbol": "contender",
+          "start": 56,
+          "end": 80,
+          "raw_span_sha256": "27bae1333b81d47f3c5a8fe2889d5d3f1dcc06241f4e7c6494aeb2abf1316a58"
+        },
+        {
+          "symbol": "contender.record",
+          "start": 63,
+          "end": 67,
+          "raw_span_sha256": "601d5f1ad70a47d3f543f2e2149e906d2f579a1e6ff72a4b5e715f8af015e585"
+        },
+        {
+          "symbol": "observed_wait",
+          "start": 83,
+          "end": 94,
+          "raw_span_sha256": "cec54dd383389154fee493f864dc46dd87789b3f70fab7588931dba85f3f03e4"
+        },
+        {
+          "symbol": "token_rows",
+          "start": 97,
+          "end": 103,
+          "raw_span_sha256": "0838b959a4a03b4da91025abec4e97c0c15687a023f8d39847675e9535ef5a98"
+        },
+        {
+          "symbol": "counts",
+          "start": 106,
+          "end": 112,
+          "raw_span_sha256": "d081040acd921a4d3efc9f5fb55934e0f4c32aac9703881bbecce9a9b3f9c043"
+        },
+        {
+          "symbol": "test_real_seam_same_session_optionengine_original_cap_and_fresh_resources",
+          "start": 115,
+          "end": 136,
+          "raw_span_sha256": "b60f656306ebda93d6f302fe3047cb59f62b4b1fb563703fd187787842eafa79"
+        },
+        {
+          "symbol": "test_issued_cap_not_transferable_to_another_real_session_or_after_root_end",
+          "start": 139,
+          "end": 151,
+          "raw_span_sha256": "2f64a57f3584b4dc93e0489542d056077ebf56cf27fc420a5cfb1041a66053ef"
+        },
+        {
+          "symbol": "test_access_rechecks_actual_current_authority_after_client_wait",
+          "start": 155,
+          "end": 180,
+          "raw_span_sha256": "864d18702f8e1f16e58a46cfba9394a3a0e771bf3b30e5fa68ca867a82b5fa2a"
+        },
+        {
+          "symbol": "test_access_expiry_after_real_family_row_wait",
+          "start": 184,
+          "end": 220,
+          "raw_span_sha256": "ac074b6ec5e005e4aefb07a65dc0fc14dc4f851884c23ebdc8de9a90d7b721ee"
+        },
+        {
+          "symbol": "test_family_then_old_token_rotation_and_durable_reuse_error",
+          "start": 223,
+          "end": 245,
+          "raw_span_sha256": "480850c24606592209cd2adc6b6f9e134c13b0d0ed3b5b9e088de4bf73adeea1"
+        },
+        {
+          "symbol": "test_code_single_use_and_nonce_request_single_completion",
+          "start": 248,
+          "end": 261,
+          "raw_span_sha256": "c976a8d5c64e214c878b3d6863325cd66ddc2b9cb9cc0eed16dd5e6ad5499e6b"
+        },
+        {
+          "symbol": "test_real_protocol_principals_do_not_construct_core_users",
+          "start": 265,
+          "end": 282,
+          "raw_span_sha256": "0873dbdea5557467fb8302b8aad83c209c0b840f09c6d369130aec50ac4e48e9"
+        },
+        {
+          "symbol": "test_revocation_unknown_repeated_and_pre_revoked_grant_remain_idempotent",
+          "start": 285,
+          "end": 296,
+          "raw_span_sha256": "7548c082f03566302fb23908bca00bf3e53e30cd083d0784ec0a3aabd373d196"
+        },
+        {
+          "symbol": "test_native_actual_bearer_expiry_after_nonce_wait",
+          "start": 300,
+          "end": 335,
+          "raw_span_sha256": "c9616f2e248b5db2e4c7cf87bd27bf5258660e36b51877181771d6d19ef51d4b"
+        },
+        {
+          "symbol": "test_real_visit_bearer_is_rejected_before_identity_writer",
+          "start": 338,
+          "end": 352,
+          "raw_span_sha256": "62ae5c7af0cfa514166b41513f69c50a9f093ab1d5b482483fe97448d3e49f66"
+        },
+        {
+          "symbol": "test_native_membership_role_and_session_after_typed_wait",
+          "start": 356,
+          "end": 379,
+          "raw_span_sha256": "19768f2aad6444ffe289e3c2a0d343a4762352a242b4926da6c06cba0215c718"
+        },
+        {
+          "symbol": "test_missing_ca_conflict_rolls_back_whole_root_without_other_install_key",
+          "start": 382,
+          "end": 401,
+          "raw_span_sha256": "4d5efc1ad722c844f0a208e9d345922d299c0d578a6077951e9a8cf84f262878"
+        },
+        {
+          "symbol": "test_same_client_blocks_and_different_client_progresses_without_global_lock",
+          "start": 404,
+          "end": 419,
+          "raw_span_sha256": "dcd235bbf7a3954c91d6a1cd01a6f792cb9ba846a9d960c4b5a7552e38ed606b"
+        },
+        {
+          "symbol": "test_conditional_get_writes_and_self_grant_revoke_without_admin",
+          "start": 422,
+          "end": 439,
+          "raw_span_sha256": "1ce54a682d4b9b80cf17e05706f10282dafd36cae49c9a2a64f7521bf30383f1"
+        },
+        {
+          "symbol": "test_post_token_flush_denial_rolls_back_family_token_code_consumption",
+          "start": 442,
+          "end": 458,
+          "raw_span_sha256": "79baf168cb64eae327bda141c50e2e3443eaf187de887f6d46e96f74e7e00242"
+        },
+        {
+          "symbol": "test_post_token_flush_denial_rolls_back_family_token_code_consumption.after_token_flush",
+          "start": 447,
+          "end": 452,
+          "raw_span_sha256": "d815a387c12c7f10ba96060ad67bcd63246a59e39bb7c730bf4e3bf643f5c117"
+        },
+        {
+          "symbol": "test_cancel_at_typed_wait_and_rollback_leave_no_partial_installation",
+          "start": 461,
+          "end": 477,
+          "raw_span_sha256": "e953909b0adbfd7f5c6d191323a91523fcf80e7c61c9627f932896dbfde8bc2b"
+        },
+        {
+          "symbol": "test_ca_row_precedes_installation_row_under_actual_http_wait",
+          "start": 480,
+          "end": 496,
+          "raw_span_sha256": "2b9bd2135cbd59444536bbc1db8db2c7f331c49c067175561aab992c3708b6a2"
+        },
+        {
+          "symbol": "test_consent_get_actual_request_wait_rechecks_single_use_and_owner",
+          "start": 500,
+          "end": 519,
+          "raw_span_sha256": "fa2c2be21c0a80a43479c16aa2c60dc1d8ada87e801dbd44fb12dcdfec94eefb"
+        },
+        {
+          "symbol": "test_code_update_wait_rechecks_current_deadlines_and_consumption",
+          "start": 523,
+          "end": 540,
+          "raw_span_sha256": "4c3ff036e3a0895223c5728f2d0f97777444a3f2218e3224661d5100e60e8657"
+        },
+        {
+          "symbol": "test_selected_credential_does_not_replace_original_family_credential",
+          "start": 543,
+          "end": 554,
+          "raw_span_sha256": "529a1ab00b708317a9d5efa7740e2daccdf70418e6aec50fe8e91aa2d6353ba6"
+        },
+        {
+          "symbol": "test_original_b1_borrowed_connection_root_rejects_late_plan",
+          "start": 557,
+          "end": 573,
+          "raw_span_sha256": "c288511c898be8a1097c251c351b4915e4723680a59fd2d1daeb8a09415f0293"
+        },
+        {
+          "symbol": "test_real_reader_cap_blocks_actual_credential_revoke_until_root_end",
+          "start": 576,
+          "end": 595,
+          "raw_span_sha256": "1ff089e5bfe300e7b839ade923092821d5414fa85890261129fb7b4a592df61d"
+        },
+        {
+          "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets",
+          "start": 598,
+          "end": 622,
+          "raw_span_sha256": "8e39900ea283cb14be18c18aa13c99d9786eb1154f4f4c3a58ebf11bfb325092"
+        },
+        {
+          "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets.Clock",
+          "start": 603,
+          "end": 605,
+          "raw_span_sha256": "8ef88b28e28afc0aa1e04d44b17572b1063ad97dca884545ada35a8f84c19224"
+        },
+        {
+          "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets.Clock.now",
+          "start": 605,
+          "end": 605,
+          "raw_span_sha256": "00ff8ad38ae59b7f7cc242ed26c01dfee394c893bef9356fe7c088f5b58fa248"
+        },
+        {
+          "symbol": "test_final_native_denial_after_replacement_flush_restores_complete_old_sets.expire_after_insert",
+          "start": 607,
+          "end": 610,
+          "raw_span_sha256": "86a7ca8307a1c35cb7f44c0a7f8c836767c1ec7da144664edd38b2710db9802c"
+        }
+      ],
+      "authored_test_functions": [
+        "test_real_seam_same_session_optionengine_original_cap_and_fresh_resources",
+        "test_issued_cap_not_transferable_to_another_real_session_or_after_root_end",
+        "test_access_rechecks_actual_current_authority_after_client_wait",
+        "test_access_expiry_after_real_family_row_wait",
+        "test_family_then_old_token_rotation_and_durable_reuse_error",
+        "test_code_single_use_and_nonce_request_single_completion",
+        "test_real_protocol_principals_do_not_construct_core_users",
+        "test_revocation_unknown_repeated_and_pre_revoked_grant_remain_idempotent",
+        "test_native_actual_bearer_expiry_after_nonce_wait",
+        "test_real_visit_bearer_is_rejected_before_identity_writer",
+        "test_native_membership_role_and_session_after_typed_wait",
+        "test_missing_ca_conflict_rolls_back_whole_root_without_other_install_key",
+        "test_same_client_blocks_and_different_client_progresses_without_global_lock",
+        "test_conditional_get_writes_and_self_grant_revoke_without_admin",
+        "test_post_token_flush_denial_rolls_back_family_token_code_consumption",
+        "test_cancel_at_typed_wait_and_rollback_leave_no_partial_installation",
+        "test_ca_row_precedes_installation_row_under_actual_http_wait",
+        "test_consent_get_actual_request_wait_rechecks_single_use_and_owner",
+        "test_code_update_wait_rechecks_current_deadlines_and_consumption",
+        "test_selected_credential_does_not_replace_original_family_credential",
+        "test_original_b1_borrowed_connection_root_rejects_late_plan",
+        "test_real_reader_cap_blocks_actual_credential_revoke_until_root_end",
+        "test_final_native_denial_after_replacement_flush_restores_complete_old_sets"
+      ]
+    }
+  ],
+  "unchanged_dependency_pins": [
+    {
+      "path": "clearledger/server/app/services/contract_write_locks.py",
+      "commit": "e51876f994172c1d8306b934840541d2700486a6",
+      "raw_sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
+      "bytes": 16309,
+      "lines": 416,
+      "symbols": [
+        {
+          "symbol": "ScopedLockError",
+          "start": 25,
+          "end": 26,
+          "raw_span_sha256": "864215e7cddc5211df4ee68a19ee8bb13f9708bb3abc5c67ad4a81e03cbe34d1"
+        },
+        {
+          "symbol": "LockMode",
+          "start": 29,
+          "end": 31,
+          "raw_span_sha256": "8153fb678c3c3facfa5f93c861ff1b4241556669cb2f74b380f5ce927dba9866"
+        },
+        {
+          "symbol": "_TypedKey",
+          "start": 34,
+          "end": 38,
+          "raw_span_sha256": "52c457a7218a59c7497736712aadcfec82b71acadb01689ccdf544281d1b13c1"
+        },
+        {
+          "symbol": "_TypedKey.__post_init__",
+          "start": 37,
+          "end": 38,
+          "raw_span_sha256": "6712597f9593411fa3d56406aa15282282d8cf927084b968193160861ba980d8"
+        },
+        {
+          "symbol": "AppKey",
+          "start": 42,
+          "end": 43,
+          "raw_span_sha256": "ec394543d44bcabbe6c4d8693467bacf9d3802f1a589477e17e0179b5063b25f"
+        },
+        {
+          "symbol": "ClientKey",
+          "start": 47,
+          "end": 48,
+          "raw_span_sha256": "44bc67ce0cc04abfebf961705867a3ee45d4d84f4f23129169899a97facb2aff"
+        },
+        {
+          "symbol": "UserKey",
+          "start": 52,
+          "end": 53,
+          "raw_span_sha256": "f7957c6400fa679f9fbd291792d4307bc015710cf96703a09deeae2a1603556b"
+        },
+        {
+          "symbol": "CompanyKey",
+          "start": 57,
+          "end": 58,
+          "raw_span_sha256": "45ed2c9046e0950f1c81b7a53a3695c0a66cde795bfcdfa5d581a47e32624413"
+        },
+        {
+          "symbol": "InstallationKey",
+          "start": 62,
+          "end": 63,
+          "raw_span_sha256": "588cce3535ce06c61df8719adb2782a7f38706d4ea1df17630dca382f13aa6c4"
+        },
+        {
+          "symbol": "CreateProfileKey",
+          "start": 67,
+          "end": 68,
+          "raw_span_sha256": "613162b0b62128a54097925127ae52c076d64cecb61846c8e4c84254b059ac67"
+        },
+        {
+          "symbol": "RoleKey",
+          "start": 72,
+          "end": 74,
+          "raw_span_sha256": "8f9fef6e83075fe543f7053b86ea092d2360e79efd7182dcb83c6c0074ab73de"
+        },
+        {
+          "symbol": "MemberKey",
+          "start": 78,
+          "end": 80,
+          "raw_span_sha256": "ac11929e722c99b10616ae9160159cba26c8f610f30f9a1f44f2608ab22c4933"
+        },
+        {
+          "symbol": "RefCompositeKey",
+          "start": 84,
+          "end": 85,
+          "raw_span_sha256": "3adb6c9f6bd7a6e26e37fa1a4ceb223a17e4afdc5d7e889745402f8104fa5327"
+        },
+        {
+          "symbol": "TypeCatalogKey",
+          "start": 89,
+          "end": 90,
+          "raw_span_sha256": "c3469cdcbc18138533a22913f6e0909f8a1238a2dbe11c616b2b4af18d0ada8f"
+        },
+        {
+          "symbol": "_validate_key",
+          "start": 113,
+          "end": 120,
+          "raw_span_sha256": "e64ec7c46ec3fedb683f579a691be03fc5d607facfc3042772e02a2d1eb2ff12"
+        },
+        {
+          "symbol": "encode_key",
+          "start": 123,
+          "end": 131,
+          "raw_span_sha256": "3f8e2a1ea31fd6b85f752b518533eeddf036ca580785aa9ad4cb18ff6b18107b"
+        },
+        {
+          "symbol": "advisory_key",
+          "start": 134,
+          "end": 137,
+          "raw_span_sha256": "b6f23b4f65140be8bbab0f2d9442c6ed4dc786e7c8a314a48e6be4cec2517aa3"
+        },
+        {
+          "symbol": "LockRequest",
+          "start": 141,
+          "end": 148,
+          "raw_span_sha256": "7c0da346f38cb70a0af65001d2089af62e56649215c563caba8201028d9d00bf"
+        },
+        {
+          "symbol": "LockRequest.__post_init__",
+          "start": 145,
+          "end": 148,
+          "raw_span_sha256": "7da05dabbfc364d8061a1a14764e399bcc7dc4704ea88af559db4b089b89f677"
+        },
+        {
+          "symbol": "ActualLock",
+          "start": 152,
+          "end": 155,
+          "raw_span_sha256": "ea75bf8a8dfbb8a07460e770762db921af413a6ec7b9977fa2804d0d51ad51e9"
+        },
+        {
+          "symbol": "LockPlan",
+          "start": 159,
+          "end": 178,
+          "raw_span_sha256": "4db7bd3ea36865c32d9f5082b2336bb4245fff792a6413783ed09e2e170b9f1f"
+        },
+        {
+          "symbol": "LockPlan.__post_init__",
+          "start": 165,
+          "end": 178,
+          "raw_span_sha256": "2b0fe888ec6b3f0b7c4c097a733955eb49c532943e01fd871c4dd714918fb76e"
+        },
+        {
+          "symbol": "ScopedLockCapability",
+          "start": 182,
+          "end": 185,
+          "raw_span_sha256": "e794d28ca0d0dee4a3a92457ff59762b3e7452cef84e05c7ca5128e864e3016b"
+        },
+        {
+          "symbol": "_Entrance",
+          "start": 189,
+          "end": 195,
+          "raw_span_sha256": "87054208c9835ab56d153cab075c398ba922bb43d08c0a52a57ec35383cca5f0"
+        },
+        {
+          "symbol": "_transaction_created",
+          "start": 221,
+          "end": 224,
+          "raw_span_sha256": "edd3ee573eece8237a92f8545990752fa82b674d5909823877fc36e15c3801f0"
+        },
+        {
+          "symbol": "_transaction_ended",
+          "start": 227,
+          "end": 231,
+          "raw_span_sha256": "0311968ddaf1bb049cafd5c4f0e73c7dce4ea2a1266f28e64788c77521bd9ba3"
+        },
+        {
+          "symbol": "_connection_begun",
+          "start": 234,
+          "end": 240,
+          "raw_span_sha256": "e7138104d787a960663878fc2275685b422b1bf3542dccb819a1d5bbdf15a37c"
+        },
+        {
+          "symbol": "_watch_session",
+          "start": 243,
+          "end": 250,
+          "raw_span_sha256": "9b4e6eb8cadcfc1cd308490d2025797dd88aff874635ff6b212acc96ca6634a8"
+        },
+        {
+          "symbol": "_connection_lifetime_changed",
+          "start": 253,
+          "end": 257,
+          "raw_span_sha256": "349fa4881b53e0334503a5f3ee4a6a1c1627bab8c61d7ec47202c8c49cc1e5b8"
+        },
+        {
+          "symbol": "_watch_connection",
+          "start": 260,
+          "end": 275,
+          "raw_span_sha256": "fcab49fc07d6cfbfcce368590b5c1174ff92d2425518d8ee01de5be09ae464ae"
+        },
+        {
+          "symbol": "_reject",
+          "start": 278,
+          "end": 279,
+          "raw_span_sha256": "4f7858a62bf3718de5886353cd2ff0bda5cf31d7e8888eff97990393793ad823"
+        },
+        {
+          "symbol": "_single_connection",
+          "start": 282,
+          "end": 289,
+          "raw_span_sha256": "449c004f1fb61ff960cec704312a6a1f20288c7103b6949df516bbf9adf1197c"
+        },
+        {
+          "symbol": "_live",
+          "start": 292,
+          "end": 306,
+          "raw_span_sha256": "ba35fa0bb3d3c164bdf848c017f0da41e90e4f33bcca7629c8c39f730180705d"
+        },
+        {
+          "symbol": "acquire_scoped_locks",
+          "start": 317,
+          "end": 380,
+          "raw_span_sha256": "019230492a3050183dfe80d23722d3fb26ea507a5957ae41a67e146290895285"
+        },
+        {
+          "symbol": "acquire_scoped_locks_async",
+          "start": 383,
+          "end": 389,
+          "raw_span_sha256": "e0f09abcce9f9b15f2891ce87c343cfb54fa61d1662bb9fed4ceffdc87eb4572"
+        },
+        {
+          "symbol": "require_scoped_locks",
+          "start": 392,
+          "end": 416,
+          "raw_span_sha256": "0bf2663c905fd07d05fe451819efa904638b7d81dd67f2b8ba6f57b167cc9313"
+        }
+      ],
+      "authored_test_functions": []
+    },
+    {
+      "path": "clearledger/server/app/auth.py",
+      "commit": "e51876f994172c1d8306b934840541d2700486a6",
+      "raw_sha256": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889",
+      "bytes": 38400,
+      "lines": 730,
+      "symbols": [
+        {
+          "symbol": "hash_password",
+          "start": 35,
+          "end": 37,
+          "raw_span_sha256": "0089cbf3e3c80416e737479de4c3e13db9153ef3d6941f441069629af909e653"
+        },
+        {
+          "symbol": "verify_password",
+          "start": 40,
+          "end": 42,
+          "raw_span_sha256": "8be22221a982d7535358823c5912c32a470287f7dd0a5e1adfbe187d3d79c246"
+        },
+        {
+          "symbol": "create_access_token",
+          "start": 50,
+          "end": 72,
+          "raw_span_sha256": "0291b28cd5c8587b61ce005fead01d77e48d3ed69607d57a27fdc2384b87efc8"
+        },
+        {
+          "symbol": "set_gate_cookie",
+          "start": 83,
+          "end": 86,
+          "raw_span_sha256": "452988a9b999088fef6965ab475e9634019706cf6570c9a851b819f42b95183d"
+        },
+        {
+          "symbol": "clear_gate_cookie",
+          "start": 89,
+          "end": 90,
+          "raw_span_sha256": "fabdc428dd4c6f72770ad0b1f67d34d1a63bb403d23f088dc016f7d3833bb269"
+        },
+        {
+          "symbol": "gate_ok",
+          "start": 93,
+          "end": 103,
+          "raw_span_sha256": "7fefabe0d18771053fb9ae4edb3141d0a73a0a63e292447e374128638d06c0cd"
+        },
+        {
+          "symbol": "token_for",
+          "start": 106,
+          "end": 108,
+          "raw_span_sha256": "0c52b56daccb3a120d64a89d2ca28e96ccaca17ca6d7c2e73ebbe9db1dcacf3c"
+        },
+        {
+          "symbol": "session_valid",
+          "start": 111,
+          "end": 118,
+          "raw_span_sha256": "ea009a7fb2c212811236896342c8ac3adac7a0047671ad47af87b4e2884289d6"
+        },
+        {
+          "symbol": "visit_company",
+          "start": 137,
+          "end": 139,
+          "raw_span_sha256": "5acd691b82ee4172cdb80c9550b8a622cb432b88b2a44cf0b449d6e3eb1beaad"
+        },
+        {
+          "symbol": "current_token_claims",
+          "start": 142,
+          "end": 143,
+          "raw_span_sha256": "57042657989717d8d086fa01ad3f473b161715da47158d674e925a264297da20"
+        },
+        {
+          "symbol": "_install_visit_scope",
+          "start": 146,
+          "end": 169,
+          "raw_span_sha256": "abc03b673d6ab3b169a60b0cb33f9d14c205014b184a8851459f16f80e8b97c1"
+        },
+        {
+          "symbol": "_install_visit_scope._apply",
+          "start": 161,
+          "end": 169,
+          "raw_span_sha256": "3f3085906ee5819e790272023c73cceb4b221d85b5029f365ee66d9dd420f8d1"
+        },
+        {
+          "symbol": "_check_visit",
+          "start": 175,
+          "end": 193,
+          "raw_span_sha256": "bd31c12186e2fb14bf994d84b71d70222dc56556f000120ab6ef4e5b47613bf5"
+        },
+        {
+          "symbol": "decode_token",
+          "start": 196,
+          "end": 212,
+          "raw_span_sha256": "f201822d0bde5e0bf5cc589bbf21ed17e22dc6030a3b87410857c486d204f929"
+        },
+        {
+          "symbol": "native_user_from_claims",
+          "start": 215,
+          "end": 245,
+          "raw_span_sha256": "e58bd7bd95fd71130adefc8d5c5d61d7c064acf530e76409b27bb7503c61dde6"
+        },
+        {
+          "symbol": "native_visit_from_claims",
+          "start": 248,
+          "end": 255,
+          "raw_span_sha256": "918c08f17dfa539502255dc1b1d999f6199cf6246f9a505016b8bab1891b0a7b"
+        },
+        {
+          "symbol": "native_claims_context",
+          "start": 259,
+          "end": 267,
+          "raw_span_sha256": "0f837ab80fa613a743b9a0e0d72738504070865e6b94fbcfec477381a805b829"
+        },
+        {
+          "symbol": "get_current_user",
+          "start": 270,
+          "end": 291,
+          "raw_span_sha256": "8c15c3d04dbe44a2d960c47c2410150b3c9b0f920edc44c4d43f39d366bb11ee"
+        },
+        {
+          "symbol": "_touch_presence",
+          "start": 300,
+          "end": 314,
+          "raw_span_sha256": "d9bce712ae10458b6eb4e1a2e115148645ece80f8ddf925ba28a8e7df72dc2a2"
+        },
+        {
+          "symbol": "assert_company_member",
+          "start": 317,
+          "end": 368,
+          "raw_span_sha256": "1d8edb81fca3f746ea5987868400646689461caf86d25653fc37cce350050fc2"
+        },
+        {
+          "symbol": "CompanyScope",
+          "start": 371,
+          "end": 388,
+          "raw_span_sha256": "bab18db07143d89b820f63e162be72db970811ea99d77c311d1c307b38c2fef3"
+        },
+        {
+          "symbol": "CompanyScope._dep",
+          "start": 381,
+          "end": 386,
+          "raw_span_sha256": "2716cd1350e3c2a998ecb23656c828920a29ba2820ccbce9d7245a3ffbb511f9"
+        },
+        {
+          "symbol": "resolve_member_modules",
+          "start": 391,
+          "end": 401,
+          "raw_span_sha256": "d41ee7337646be17c7918db26fd4065a6b28d1fb428767d71649405a4799b3e8"
+        },
+        {
+          "symbol": "_module_allowed",
+          "start": 419,
+          "end": 425,
+          "raw_span_sha256": "7c35fbb05a17000013ecf9cd9e18e9e94ce4cf793bb84ed4c288fa7aba2ccb5f"
+        },
+        {
+          "symbol": "check_module_access",
+          "start": 428,
+          "end": 448,
+          "raw_span_sha256": "c1bb7a03e4cad2d1c34cb047165dd4f6461c49c424b2212d90dfda9a9f5e793e"
+        },
+        {
+          "symbol": "assert_company_module",
+          "start": 451,
+          "end": 461,
+          "raw_span_sha256": "ea07211746271fb7f88a03b0ea46f852a9a37acd99c5cbc59d206430f57487ed"
+        },
+        {
+          "symbol": "assert_company_product",
+          "start": 464,
+          "end": 493,
+          "raw_span_sha256": "0e3c7e4af46a8595068ce9a7f04307a3920be5a88d4912328b0cbb55bb212a08"
+        },
+        {
+          "symbol": "assert_company_item",
+          "start": 496,
+          "end": 521,
+          "raw_span_sha256": "407c9e1af506f673638e880c90664cb7e09e486c48921e44a5381f9102547dc3"
+        },
+        {
+          "symbol": "CompanyModuleScope",
+          "start": 524,
+          "end": 534,
+          "raw_span_sha256": "6309e9b6ce6910c996003a0eed06f8f483e5782700083dfefdae23338613984f"
+        },
+        {
+          "symbol": "CompanyModuleScope._dep",
+          "start": 527,
+          "end": 532,
+          "raw_span_sha256": "1b4f87446053ac6349dd35fc1977d98918dc2d8ff0dfd81ffd6fef33276ff0e2"
+        },
+        {
+          "symbol": "legacy_key_value",
+          "start": 543,
+          "end": 546,
+          "raw_span_sha256": "3dbedc0a8a444264aa4fb7eb56a65312a120adbf44581476f5277b90d031fa53"
+        },
+        {
+          "symbol": "touch_key_used",
+          "start": 591,
+          "end": 633,
+          "raw_span_sha256": "25a1c1119781fd3f15c3c58c57e53c52b5501f414727f9005f2fe5bd28a76b90"
+        },
+        {
+          "symbol": "touch_key_used._write",
+          "start": 616,
+          "end": 628,
+          "raw_span_sha256": "9d6c1c380a9ad569e33225137e873ba6651a798a477639b9e59671e9e8b493ac"
+        },
+        {
+          "symbol": "_named_key",
+          "start": 643,
+          "end": 653,
+          "raw_span_sha256": "98b3fa5fffb8a134b73b28a01f27897b1970d0ba0d41b80d67e42ac8c1922f14"
+        },
+        {
+          "symbol": "CompanyByKeyScope",
+          "start": 656,
+          "end": 681,
+          "raw_span_sha256": "c2dd5cecc23f7a9db5b58d41781172b7214cc1b8675b3b7555c995b90108bba3"
+        },
+        {
+          "symbol": "CompanyByKeyScope._dep",
+          "start": 663,
+          "end": 679,
+          "raw_span_sha256": "62c602916b551f31ac7a6a258053287ce78ff9c7f1e2b80312f5e845b4fe5ece"
+        },
+        {
+          "symbol": "get_company_by_api_key",
+          "start": 684,
+          "end": 730,
+          "raw_span_sha256": "6805ba98961c4781e2228ab83ee1b9d00773fc7af1b3d2c8fe941d969d77df99"
+        }
+      ],
+      "authored_test_functions": []
+    },
+    {
+      "path": "clearledger/server/app/services/docs_portal.py",
+      "commit": "e51876f994172c1d8306b934840541d2700486a6",
+      "raw_sha256": "2d073a7036fd59f85d1334a54516de183654016097f2d55e715a58ca29a15532",
+      "bytes": 8936,
+      "lines": 195,
+      "symbols": [
+        {
+          "symbol": "enabled",
+          "start": 24,
+          "end": 27,
+          "raw_span_sha256": "6c1ed9b6fc75c127bd90233a8bdf69331266286599b26417bc2c699b3174fbe7"
+        },
+        {
+          "symbol": "issuer",
+          "start": 30,
+          "end": 32,
+          "raw_span_sha256": "95420566a35dd9d9236496627ef3a44f1ca8d0336fcd05480bcc09996ed1d696"
+        },
+        {
+          "symbol": "client_config",
+          "start": 35,
+          "end": 44,
+          "raw_span_sha256": "151ed18ae2201778f9fd7b82f7b5e7e6d19376ba6e72c56a20cf0e533061e33d"
+        },
+        {
+          "symbol": "metadata",
+          "start": 47,
+          "end": 61,
+          "raw_span_sha256": "7ecd99feb11fbcc5cbee3d0270ef3552eb481da9578208c18c536f5190fb167f"
+        },
+        {
+          "symbol": "mutation_origin",
+          "start": 64,
+          "end": 67,
+          "raw_span_sha256": "06f9de9b67cfb8fbf6f33c31a4d4712eb2d7bed658f015a6efa0b63333ad6dfc"
+        },
+        {
+          "symbol": "csrf",
+          "start": 70,
+          "end": 71,
+          "raw_span_sha256": "74c761d4ea07ecaf509f5aca206fd847b5c02d01b4f9dee5abce18297fcbccdd"
+        },
+        {
+          "symbol": "verification_profile",
+          "start": 74,
+          "end": 79,
+          "raw_span_sha256": "86f821a2890f30bc4e2ce7690ed21f4b8b4f3e9a0c3ff9123de9447423399e20"
+        },
+        {
+          "symbol": "check_csrf",
+          "start": 82,
+          "end": 86,
+          "raw_span_sha256": "e5fd0f2ab3504b637a329a2c652a3d4b4dc6885a38d6dedf8846c890e2d99c98"
+        },
+        {
+          "symbol": "live_session",
+          "start": 89,
+          "end": 111,
+          "raw_span_sha256": "69425a348c134b512416d5fe4968e053f1bb133dca195c652276195e00e4bb68"
+        },
+        {
+          "symbol": "create_session",
+          "start": 114,
+          "end": 131,
+          "raw_span_sha256": "144858a60e197301ec54c531a0758c513dac229b7257faf006d71ce87cd8e05c"
+        },
+        {
+          "symbol": "session_info",
+          "start": 134,
+          "end": 139,
+          "raw_span_sha256": "836fdf539c5401d448cbb179cfff429a2ba00a9b4c80b0961449774cae240e8f"
+        },
+        {
+          "symbol": "close_session",
+          "start": 142,
+          "end": 154,
+          "raw_span_sha256": "a157c6342c926189e3e7545e3d3cb47c999876c1df8cc7ea4b7a585d3c8f80d6"
+        },
+        {
+          "symbol": "product_schema",
+          "start": 157,
+          "end": 177,
+          "raw_span_sha256": "699353b28da98767e24ac3f057a63ca8b33decdda542b7c963c3bf5c48b0890c"
+        },
+        {
+          "symbol": "asset",
+          "start": 180,
+          "end": 195,
+          "raw_span_sha256": "25a45aa0143463847def2d1f40820a2b9b34c0cf69591e00322e877548cd6aa0"
+        }
+      ],
+      "authored_test_functions": []
+    }
+  ],
+  "primary_installed": {
+    "authlib": {
+      "version": "1.9.1",
+      "metadata": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib-1.9.1.dist-info/METADATA"
+    },
+    "sqlalchemy": {
+      "version": "2.0.36",
+      "metadata": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/SQLAlchemy-2.0.36.dist-info/METADATA"
+    },
+    "pins": [
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authorization_server.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "bad5c25d7f6c9f9d5e8478610ad85514150b87b869abd75cd1bd7b2e6d8d9373",
+        "bytes": 15929,
+        "lines": 419,
+        "symbols": [
+          {
+            "symbol": "AuthorizationServer",
+            "start": 18,
+            "end": 411,
+            "raw_span_sha256": "90f53695f414f306f2c2954bf1916c252a92a27593f323001c6d8eba18dc02d1"
+          },
+          {
+            "symbol": "AuthorizationServer.__init__",
+            "start": 25,
+            "end": 33,
+            "raw_span_sha256": "767c8514554a214925845a68141e936ac7ab78ecb972e848c08ff7e858da1569"
+          },
+          {
+            "symbol": "AuthorizationServer.query_client",
+            "start": 35,
+            "end": 40,
+            "raw_span_sha256": "fbe482d45bbcbbe2b29d6ac70d2665300f533188472915d0c70ea51242cffe73"
+          },
+          {
+            "symbol": "AuthorizationServer.save_token",
+            "start": 42,
+            "end": 44,
+            "raw_span_sha256": "eddd5737d9db1eb50bf9b4667de4b32f4d24c95a6bf6022bacf89d7bccba6e0a"
+          },
+          {
+            "symbol": "AuthorizationServer.generate_token",
+            "start": 46,
+            "end": 80,
+            "raw_span_sha256": "b645777a20208899652a49bfe17d3dc7fbda465d7ab1789ce4284f72f02e47e0"
+          },
+          {
+            "symbol": "AuthorizationServer.register_token_generator",
+            "start": 82,
+            "end": 117,
+            "raw_span_sha256": "a78a7f46b04573eb9394dfaa7144b8274778668e01f107bca93602e7342c4c38"
+          },
+          {
+            "symbol": "AuthorizationServer.authenticate_client",
+            "start": 119,
+            "end": 125,
+            "raw_span_sha256": "f47f73efa8c88357114d8bd4c14665010fc8f81f41610e71139edd10510032ab"
+          },
+          {
+            "symbol": "AuthorizationServer.register_client_auth_method",
+            "start": 127,
+            "end": 154,
+            "raw_span_sha256": "a34720cdb24af4c064d1f89150b8a84accb2d9d71558241ce1c8965bd55c3f1b"
+          },
+          {
+            "symbol": "AuthorizationServer.register_extension",
+            "start": 156,
+            "end": 157,
+            "raw_span_sha256": "6fa2e6ab9951f512d23bd41d21ea4fcff1c48039665508f9a9f911d44e2af7ab"
+          },
+          {
+            "symbol": "AuthorizationServer.get_error_uri",
+            "start": 159,
+            "end": 161,
+            "raw_span_sha256": "1aaa623cbb0964fed079177da1491c0a76169e32b412bcde099a22e121b40f97"
+          },
+          {
+            "symbol": "AuthorizationServer.send_signal",
+            "start": 163,
+            "end": 167,
+            "raw_span_sha256": "9aa805782b67e240ced42fa7524391e29101d0a6b2e475eac5fdf8fc88694a7b"
+          },
+          {
+            "symbol": "AuthorizationServer.create_oauth2_request",
+            "start": 169,
+            "end": 176,
+            "raw_span_sha256": "e527cd6b7e84c014b6ca1525351be1f24c65e169e247d58753a050865d648f6b"
+          },
+          {
+            "symbol": "AuthorizationServer.create_json_request",
+            "start": 178,
+            "end": 185,
+            "raw_span_sha256": "8fbffb459e4cc9ecab4f543c154e4529132f6dfef7c13729c592accdb999512a"
+          },
+          {
+            "symbol": "AuthorizationServer.handle_response",
+            "start": 187,
+            "end": 189,
+            "raw_span_sha256": "90ab6a23724a45fd24ed4ef0d9e4ff7753bebc096af2bb8353ecd41625afcf92"
+          },
+          {
+            "symbol": "AuthorizationServer.validate_requested_scope",
+            "start": 191,
+            "end": 198,
+            "raw_span_sha256": "e92cae86d5c8685839d5021e7b8e85cf7abb6fd40c303db20237c802b8ef7458"
+          },
+          {
+            "symbol": "AuthorizationServer.register_grant",
+            "start": 200,
+            "end": 217,
+            "raw_span_sha256": "6b7b27e6d3b08f8ee2d998329d279f361f3a48d66756915905a91bb3cdc30d7c"
+          },
+          {
+            "symbol": "AuthorizationServer.register_endpoint",
+            "start": 219,
+            "end": 233,
+            "raw_span_sha256": "f6029ed62f19602bb1c4e7882268b54d6dbf3825ae2c23226a81af7d30a343d9"
+          },
+          {
+            "symbol": "AuthorizationServer.get_authorization_grant",
+            "start": 236,
+            "end": 261,
+            "raw_span_sha256": "2e9da2588c2b225abf34c10825e3aaefc8d02e826ad593f99948bdf57b305560"
+          },
+          {
+            "symbol": "AuthorizationServer.get_consent_grant",
+            "start": 263,
+            "end": 282,
+            "raw_span_sha256": "20f343a7db30d2b92a14a03a61017e59a3f1d358add0c54ee5b1babcf2c2903d"
+          },
+          {
+            "symbol": "AuthorizationServer.get_token_grant",
+            "start": 284,
+            "end": 293,
+            "raw_span_sha256": "b2ae76629585d94904d003ba2318913ab27cc0512a887d090d9ae11e2cbb8418"
+          },
+          {
+            "symbol": "AuthorizationServer.validate_endpoint_request",
+            "start": 295,
+            "end": 319,
+            "raw_span_sha256": "8f63f0cdba4d108748a542d552e54168bb7d6f0753911a5b564b3ebb6f22ab31"
+          },
+          {
+            "symbol": "AuthorizationServer.create_endpoint_response",
+            "start": 321,
+            "end": 359,
+            "raw_span_sha256": "f53384d7cda3b506cad847313f02c2d66a5d43447301f8b520681ebc1b065720"
+          },
+          {
+            "symbol": "AuthorizationServer.create_authorization_response",
+            "start": 362,
+            "end": 390,
+            "raw_span_sha256": "088a65ac8f3f7da0bf78dbe0d08f02792205017b367c0bcc574408b134c46589"
+          },
+          {
+            "symbol": "AuthorizationServer.create_token_response",
+            "start": 392,
+            "end": 408,
+            "raw_span_sha256": "42d9f1b00a5f4066ec35dae238dff0ef8e6cab923499d9c8040317e2f154d6e2"
+          },
+          {
+            "symbol": "AuthorizationServer.handle_error_response",
+            "start": 410,
+            "end": 411,
+            "raw_span_sha256": "b3b9c4a28af7b127ae0125a9950d0fc44d3a4a3f0a6113078b1629c2b1a044eb"
+          },
+          {
+            "symbol": "_create_grant",
+            "start": 414,
+            "end": 419,
+            "raw_span_sha256": "173ba657bdaef3490049beb41237f092450d6759bec4a6d1d7838bc6b1777a61"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/authorization_code.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "5201a26d069c94879634cac0592428b09aadfde5b6d0024a3d1d7e615b6a3205",
+        "bytes": 15786,
+        "lines": 392,
+        "symbols": [
+          {
+            "symbol": "AuthorizationCodeGrant",
+            "start": 21,
+            "end": 350,
+            "raw_span_sha256": "8f25484db0c9e6343cac116c7a3d378ad0eacf822d7773c9092da5002080b701"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.validate_authorization_request",
+            "start": 65,
+            "end": 111,
+            "raw_span_sha256": "a345715c425c05d98158a9f62e66490ef453bf7b90f023d9022c5f9653d62e2c"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.create_authorization_response",
+            "start": 113,
+            "end": 163,
+            "raw_span_sha256": "4615da6dfd33a46437b8d2583e297c16c3d098d181e87ae80406bf4c4e569984"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.validate_token_request",
+            "start": 166,
+            "end": 236,
+            "raw_span_sha256": "9e6ca002d1d938f96e160462268df5a70f78f3573fa569dee99dc64f3ca4d619"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.create_token_response",
+            "start": 239,
+            "end": 283,
+            "raw_span_sha256": "9c5d4258d3cebd0d9bb231929563a9dd683d26dfaa0709ade7d9dbe0d8dc3226"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.generate_authorization_code",
+            "start": 285,
+            "end": 292,
+            "raw_span_sha256": "bc5ff2f2b7a3dc97181917510b82109c677425e87ce9ec7eb751499c7d24cdcc"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.save_authorization_code",
+            "start": 294,
+            "end": 314,
+            "raw_span_sha256": "8cb14f736678d8f3f6bcac416cebdf744e0eccc5c556357f5ebdc1f437b4c6bf"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.query_authorization_code",
+            "start": 316,
+            "end": 327,
+            "raw_span_sha256": "369b26d2711fcf6e0fdda5bfa50acf57c82674ef1425ab49b7cea9d34257b0a5"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.delete_authorization_code",
+            "start": 329,
+            "end": 338,
+            "raw_span_sha256": "e1e447057a5a3f1d62def2c84d1f4bda9975cd03854c1f2d1395a49bf7309264"
+          },
+          {
+            "symbol": "AuthorizationCodeGrant.authenticate_user",
+            "start": 340,
+            "end": 350,
+            "raw_span_sha256": "262e7b64ac0e529ed6794a4434a09cd0d2a3f9d8c8a24236ff89ae2349eadd45"
+          },
+          {
+            "symbol": "validate_code_authorization_request",
+            "start": 353,
+            "end": 392,
+            "raw_span_sha256": "33f8e161c571f3325a7b8bb7bf83c7251b179f124a2b2ecd573f8a877c5bb18e"
+          },
+          {
+            "symbol": "validate_code_authorization_request.validate_authorization_request_payload",
+            "start": 380,
+            "end": 385,
+            "raw_span_sha256": "815592a191d965949bfd7bbd04a14c1c30c57c7516b626358b92260c5b132a26"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/refresh_token.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "6a04803acafd874853a6679c313edd0e62580a95595de10578eb4dd34d58cc11",
+        "bytes": 6455,
+        "lines": 179,
+        "symbols": [
+          {
+            "symbol": "RefreshTokenGrant",
+            "start": 22,
+            "end": 179,
+            "raw_span_sha256": "92a6e9f5692a43086811b8e57981cd5300209c1ed6442812e3e4cdac64fb6181"
+          },
+          {
+            "symbol": "RefreshTokenGrant._validate_request_client",
+            "start": 32,
+            "end": 44,
+            "raw_span_sha256": "524586ae1d2c916097512bf418c7852c05f85b71ecb2e51779cc643075eebe6c"
+          },
+          {
+            "symbol": "RefreshTokenGrant._validate_request_token",
+            "start": 46,
+            "end": 54,
+            "raw_span_sha256": "ec8a7a0899cc56911a807b9b4e315bf341f1a3222b81f72c595acdce27bad043"
+          },
+          {
+            "symbol": "RefreshTokenGrant._validate_token_scope",
+            "start": 56,
+            "end": 67,
+            "raw_span_sha256": "4b22318136a66f4343c03b4f56660bd79020acc2ddc44b737979d5517326d363"
+          },
+          {
+            "symbol": "RefreshTokenGrant.validate_token_request",
+            "start": 69,
+            "end": 107,
+            "raw_span_sha256": "fb10b1b1cdd667fe000d387357370fbb6e071190a994a624850a241783c24f93"
+          },
+          {
+            "symbol": "RefreshTokenGrant.create_token_response",
+            "start": 110,
+            "end": 128,
+            "raw_span_sha256": "cacc1ea3587cff42f19d1444fd17fcfd09e62d2bc820443dabf16c4ef823f98e"
+          },
+          {
+            "symbol": "RefreshTokenGrant.issue_token",
+            "start": 130,
+            "end": 140,
+            "raw_span_sha256": "757df26d9acb8237ed65314519c57ff30915959a63b486242719821711d11501"
+          },
+          {
+            "symbol": "RefreshTokenGrant.authenticate_refresh_token",
+            "start": 142,
+            "end": 154,
+            "raw_span_sha256": "f799f83e9e7f7d857aa55a08d7a4b93ccb64072700d31e79495b4bbe4fa52c75"
+          },
+          {
+            "symbol": "RefreshTokenGrant.authenticate_user",
+            "start": 156,
+            "end": 166,
+            "raw_span_sha256": "ae71e7c0e6a52a5c9ff42cd4bd1407d90f3eb2c4a44ae5f6c87d8a8fd9807fb8"
+          },
+          {
+            "symbol": "RefreshTokenGrant.revoke_old_credential",
+            "start": 168,
+            "end": 179,
+            "raw_span_sha256": "1183ce9f15db2c9a3bcdd4beea231628fcf56230abc73cf6b3d71602e410d69f"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/client_credentials.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "96c2a63fa0103fefeb9a26bf364f446ae9c6f4a118aa23d91406212fa4da0d79",
+        "bytes": 3992,
+        "lines": 109,
+        "symbols": [
+          {
+            "symbol": "ClientCredentialsGrant",
+            "start": 11,
+            "end": 109,
+            "raw_span_sha256": "bc98d5c995f3d070126ab162065455c73ca0918284b8b4b083d07accb3d0d594"
+          },
+          {
+            "symbol": "ClientCredentialsGrant.validate_token_request",
+            "start": 34,
+            "end": 76,
+            "raw_span_sha256": "8cd1c1c8179a48b3d5ea19a4d4afed80ad77a9b9b32d3751c58a8e009fa4a270"
+          },
+          {
+            "symbol": "ClientCredentialsGrant.create_token_response",
+            "start": 79,
+            "end": 109,
+            "raw_span_sha256": "6bf6d2cbdb68618912125391dd90bd0d33fea02af1fbd9cd34749c1943614b0e"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/base.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "038b1a0d96d9d5d8d76ebc7d9681d4377a3c61926b0950c14f3f0a77c58a63c9",
+        "bytes": 5216,
+        "lines": 156,
+        "symbols": [
+          {
+            "symbol": "BaseGrant",
+            "start": 9,
+            "end": 85,
+            "raw_span_sha256": "db990a9b8f8f1d918b165daf9d7a370fa9027b45821472175059921e238680e1"
+          },
+          {
+            "symbol": "BaseGrant.__init__",
+            "start": 22,
+            "end": 27,
+            "raw_span_sha256": "5bc23e13afcdcf1a4e1aadb37307464f103143090a385855655183357d09d29d"
+          },
+          {
+            "symbol": "BaseGrant.client",
+            "start": 30,
+            "end": 31,
+            "raw_span_sha256": "725a0e8ffdafb1a2defb12dcc97e6f60422f1a07222dd534af29cfc0b0ea9dcd"
+          },
+          {
+            "symbol": "BaseGrant.generate_token",
+            "start": 33,
+            "end": 50,
+            "raw_span_sha256": "aba10aa30ede2a5140b0428bb3c46b92759847fce8de84e8a5b6e0ef0864abed"
+          },
+          {
+            "symbol": "BaseGrant.authenticate_token_endpoint_client",
+            "start": 52,
+            "end": 76,
+            "raw_span_sha256": "6a1c81557ce93744432500ac6e5d977faff8c3b1c2d3c41f96f029fe1c3adde7"
+          },
+          {
+            "symbol": "BaseGrant.save_token",
+            "start": 78,
+            "end": 80,
+            "raw_span_sha256": "cd1dbb2c06fd2b479f2803cf66ef1c3d17649c1326974acecad99bf885ca4a64"
+          },
+          {
+            "symbol": "BaseGrant.validate_requested_scope",
+            "start": 82,
+            "end": 85,
+            "raw_span_sha256": "dffc44ae8346ea46e20115abbe9193b7bc160f41ef45a4ee351f70db8a183deb"
+          },
+          {
+            "symbol": "TokenEndpointMixin",
+            "start": 88,
+            "end": 106,
+            "raw_span_sha256": "67ed299c6c6164d0251eddfb2af1de76cf8599d02034c266607f7abe059d4a51"
+          },
+          {
+            "symbol": "TokenEndpointMixin.check_token_endpoint",
+            "start": 96,
+            "end": 100,
+            "raw_span_sha256": "7b72c3557f0d30473dc45e684b3f589fc8e20412d2059106110177083e81232a"
+          },
+          {
+            "symbol": "TokenEndpointMixin.validate_token_request",
+            "start": 102,
+            "end": 103,
+            "raw_span_sha256": "8c76af18eb983962c7cfdf648a73787d97ca81dd1767a715cf5fff209d8321b9"
+          },
+          {
+            "symbol": "TokenEndpointMixin.create_token_response",
+            "start": 105,
+            "end": 106,
+            "raw_span_sha256": "019ca1a90fe7d70c7a99b598ed217d25202c30570f9fd5b1e9ec1d6cc8c83aff"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin",
+            "start": 109,
+            "end": 156,
+            "raw_span_sha256": "c8ce0dfaadedca63b8b4bf9e2b7b9a4ab6ba95386b66adc79c1debd793f94267"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin.check_authorization_endpoint",
+            "start": 114,
+            "end": 115,
+            "raw_span_sha256": "0dcb9689ef97a1fc9d5a7bd4bffa8bdeb53ea27bf843343b1d03ea872c1a2535"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin.validate_authorization_redirect_uri",
+            "start": 118,
+            "end": 131,
+            "raw_span_sha256": "0b1e3cea57b45f1ce730fc3596772f1c12d75a544878adf073f5f73196da87a5"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin.validate_no_multiple_request_parameter",
+            "start": 134,
+            "end": 144,
+            "raw_span_sha256": "3f3b6887701e035ef6a0ace151769a935276d70136afc232a0bbda13d180503d"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin.validate_consent_request",
+            "start": 147,
+            "end": 150,
+            "raw_span_sha256": "8e37fe66d770113c6b8a8e0d1c110cf14e52d8f6383aac4e4cb16e1adf5044ec"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin.validate_authorization_request",
+            "start": 152,
+            "end": 153,
+            "raw_span_sha256": "554d994600642f389a13eed51609e65fc8cedceca99ad4f3a153e7d2456b3004"
+          },
+          {
+            "symbol": "AuthorizationEndpointMixin.create_authorization_response",
+            "start": 155,
+            "end": 156,
+            "raw_span_sha256": "85144f5a1f1fcd0494c735aa691eefb18162556aaf71b240c435a5f3f10951d0"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/hooks.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "bfc7a63879843407a7dd66ce5e09a12f01eeafafe2e50520444e4d35723fba42",
+        "bytes": 1004,
+        "lines": 37,
+        "symbols": [
+          {
+            "symbol": "Hookable",
+            "start": 4,
+            "end": 15,
+            "raw_span_sha256": "e084b3de5a40fee36afe26d9a83ac002355a633a836be561adbf45b356175117"
+          },
+          {
+            "symbol": "Hookable.__init__",
+            "start": 7,
+            "end": 8,
+            "raw_span_sha256": "d2806a3785a10cbef2a25fdc3fad0fb52c679465a5482cd1e04f5d6adfc84d10"
+          },
+          {
+            "symbol": "Hookable.register_hook",
+            "start": 10,
+            "end": 11,
+            "raw_span_sha256": "291d0f8f45ab52d17784a1adc524d0a38d5cb402c0d457cfee0c463860deb8a5"
+          },
+          {
+            "symbol": "Hookable.execute_hook",
+            "start": 13,
+            "end": 15,
+            "raw_span_sha256": "f2ca5998ac42d59e22f2093c6bd3d5107d5eca9f08485cafdef971504c33d3ce"
+          },
+          {
+            "symbol": "hooked",
+            "start": 18,
+            "end": 37,
+            "raw_span_sha256": "186313540f2033f9198abf9581910cc78b59597f82888faaa0eeb51d23045d27"
+          },
+          {
+            "symbol": "hooked.decorator",
+            "start": 21,
+            "end": 31,
+            "raw_span_sha256": "9cab0398e0b69dd0cfc5ec9fadebb8cba4ac4c5b086e8c29dbec92c040653c2e"
+          },
+          {
+            "symbol": "hooked.decorator.wrapper",
+            "start": 25,
+            "end": 29,
+            "raw_span_sha256": "d24a9d5878dc5d3745eb2280e8cd6dc2fdf4e483cc63f546d1459df384316e9d"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authenticate_client.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "206effd7463af6af48801ee1cf02bc551568719f92428b9d7a453021d9b9f76c",
+        "bytes": 3884,
+        "lines": 111,
+        "symbols": [
+          {
+            "symbol": "ClientAuthentication",
+            "start": 24,
+            "end": 54,
+            "raw_span_sha256": "8de8ff522f73011cda95c31bed9a2169fe0f08c8c29a223d00d0abbf89197026"
+          },
+          {
+            "symbol": "ClientAuthentication.__init__",
+            "start": 25,
+            "end": 31,
+            "raw_span_sha256": "77b19c4d972e229e8dbc8ecf2d81f86b35f5a82a465e84d44299e7eb20e4b46a"
+          },
+          {
+            "symbol": "ClientAuthentication.register",
+            "start": 33,
+            "end": 34,
+            "raw_span_sha256": "d4993a8149c97a48e9054ee62400d91c771a4204f383c14bbd626f387621a1dc"
+          },
+          {
+            "symbol": "ClientAuthentication.authenticate",
+            "start": 36,
+            "end": 51,
+            "raw_span_sha256": "d5a80fdfda6155bd16eb16d068dd590a919a818bb4cb4516eae2607bca48492e"
+          },
+          {
+            "symbol": "ClientAuthentication.__call__",
+            "start": 53,
+            "end": 54,
+            "raw_span_sha256": "f380a17e48d763cadecfdcf99966b3c705e17de1c51a9aa93a20064a0c6eef6b"
+          },
+          {
+            "symbol": "authenticate_client_secret_basic",
+            "start": 57,
+            "end": 67,
+            "raw_span_sha256": "e92cf4565d0b6faef4422c7fd60e61a9dda3dcd6039d55fc617980edc3513ec6"
+          },
+          {
+            "symbol": "authenticate_client_secret_post",
+            "start": 70,
+            "end": 82,
+            "raw_span_sha256": "01de70e2d39d3c20edaf3a1c2309bb1dc14baae9c8fc2ffa1b4f2418f230759d"
+          },
+          {
+            "symbol": "authenticate_none",
+            "start": 85,
+            "end": 94,
+            "raw_span_sha256": "6aa6f7ba447dd174adfd4ad3e2e804b27d99d1cabafe2999306dd9ac20cbd65e"
+          },
+          {
+            "symbol": "_validate_client",
+            "start": 97,
+            "end": 111,
+            "raw_span_sha256": "b7f6fc6d16e54b3feb90b0972272a3013ae12edd66124a2ac7905657657736a6"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc7009/revocation.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "0b6a9fa7f8cb5955603533bb2f7eab91952e0ed0ae1ec1a8bf3a80acae17453a",
+        "bytes": 4118,
+        "lines": 110,
+        "symbols": [
+          {
+            "symbol": "RevocationEndpoint",
+            "start": 9,
+            "end": 110,
+            "raw_span_sha256": "29ac50ed3858e428828c3d31550f82ae2e6f9180d98151a7193c777a590f25a1"
+          },
+          {
+            "symbol": "RevocationEndpoint.authenticate_token",
+            "start": 17,
+            "end": 35,
+            "raw_span_sha256": "d019ce152969029a5ab06873dfe4b51b07a67b3cc74c0225772c45b0d17c0566"
+          },
+          {
+            "symbol": "RevocationEndpoint.check_params",
+            "start": 37,
+            "end": 43,
+            "raw_span_sha256": "318ff69ce60467f3d4f4192aef5de3583a4c7cf5b5c967d2f1091c16d361d099"
+          },
+          {
+            "symbol": "RevocationEndpoint.create_endpoint_response",
+            "start": 45,
+            "end": 74,
+            "raw_span_sha256": "edac8ed2bf108d327c3f1f5d3523d05454ab122d337d8fc64287c12d4e5d3734"
+          },
+          {
+            "symbol": "RevocationEndpoint.query_token",
+            "start": 76,
+            "end": 88,
+            "raw_span_sha256": "eb47162c394f77d293aa8be6c73e1bb49fdbce30cfa5a0a16ccb4b79552f2d25"
+          },
+          {
+            "symbol": "RevocationEndpoint.revoke_token",
+            "start": 90,
+            "end": 110,
+            "raw_span_sha256": "3b194f5f16182ba5979b296354fda43c145aed3541ddab1b059155bf5701566a"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc7636/challenge.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "62ab4720d838275d5fcc5def659528d29b05160b7beea099834d786662aeba46",
+        "bytes": 6234,
+        "lines": 156,
+        "symbols": [
+          {
+            "symbol": "create_s256_code_challenge",
+            "start": 16,
+            "end": 19,
+            "raw_span_sha256": "580ecc749a591a31aa9b3e5b0ea7d84bdf0aa02e7d43ed289ca413a43ef9f875"
+          },
+          {
+            "symbol": "compare_plain_code_challenge",
+            "start": 22,
+            "end": 25,
+            "raw_span_sha256": "27af7d93216def0756bec6d4187b5b77d0258970c06275a05a3e68f222707723"
+          },
+          {
+            "symbol": "compare_s256_code_challenge",
+            "start": 28,
+            "end": 30,
+            "raw_span_sha256": "dce195469ef97ca55c5a32178c9934d36efd7f6c318c1a5127deb118fe66d61e"
+          },
+          {
+            "symbol": "CodeChallenge",
+            "start": 33,
+            "end": 156,
+            "raw_span_sha256": "13bd11ecd3c39e5a509bf9767efe51a44e03f9db05803d4b681f071590086c78"
+          },
+          {
+            "symbol": "CodeChallenge.__init__",
+            "start": 56,
+            "end": 57,
+            "raw_span_sha256": "b77ce6a090f25e6e62c5c49c1ecb63c84c3ab000fdac23c7716cbfa2324f9b61"
+          },
+          {
+            "symbol": "CodeChallenge.__call__",
+            "start": 59,
+            "end": 67,
+            "raw_span_sha256": "0bc1927630e4ccbe71adc2e7b48c1a933b9cf2a3d64e0b550fd6c45f0a113a64"
+          },
+          {
+            "symbol": "CodeChallenge.validate_code_challenge",
+            "start": 69,
+            "end": 89,
+            "raw_span_sha256": "b68af706a464b745cb7549a37cdfab5ba194d647cd2b67f81b55eb8ef48f95c5"
+          },
+          {
+            "symbol": "CodeChallenge.validate_code_verifier",
+            "start": 91,
+            "end": 134,
+            "raw_span_sha256": "fa98e8191662e4a94a3ca855cc1043fcfe6deb90fb62b7a087a83121931d145c"
+          },
+          {
+            "symbol": "CodeChallenge.get_authorization_code_challenge",
+            "start": 136,
+            "end": 145,
+            "raw_span_sha256": "e0feb978619d3fbd72301ec8e40bfbf09deeb5806fd8d1d015dac47806a78a92"
+          },
+          {
+            "symbol": "CodeChallenge.get_authorization_code_challenge_method",
+            "start": 147,
+            "end": 156,
+            "raw_span_sha256": "6fc8a0be06a87065cfe9fe0722810c33b17a3669f66b9ceeabff12f444d6ede0"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oidc/core/grants/code.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "4e507db9b976f7211468a1f272b852bb526a8d6b03299d5c9a1ea6e6986e2ed1",
+        "bytes": 5406,
+        "lines": 159,
+        "symbols": [
+          {
+            "symbol": "OpenIDToken",
+            "start": 27,
+            "end": 102,
+            "raw_span_sha256": "0ebba91fa7cf0a209e95bd72ec4c9049c9dd97bdd046b08a3e8dc8c5adb79efe"
+          },
+          {
+            "symbol": "OpenIDToken.get_authorization_code_claims",
+            "start": 28,
+            "end": 41,
+            "raw_span_sha256": "7391c23d9ba09684112fccb93189747e2d308280c3f9053b28416481a30d13da"
+          },
+          {
+            "symbol": "OpenIDToken.generate_user_info",
+            "start": 43,
+            "end": 60,
+            "raw_span_sha256": "42506143780fd89027de983943c76bb114bc15f18073edb5f5615666609edfdd"
+          },
+          {
+            "symbol": "OpenIDToken.encode_id_token",
+            "start": 62,
+            "end": 87,
+            "raw_span_sha256": "3c3e1f9a8c9fd3f4f6985f48d5755bbead9581231e7cea90499545bcdee8e8a7"
+          },
+          {
+            "symbol": "OpenIDToken.process_token",
+            "start": 89,
+            "end": 99,
+            "raw_span_sha256": "eea16b332504bb83a2e1f7a7ea7d08f3f2b50a76bb52cfae31f0c20ee6ccfbe7"
+          },
+          {
+            "symbol": "OpenIDToken.__call__",
+            "start": 101,
+            "end": 102,
+            "raw_span_sha256": "1588f3d3faf5251db6e32df6b9f55543e64cf9153c9e8b06eac0412cb6795150"
+          },
+          {
+            "symbol": "OpenIDCode",
+            "start": 105,
+            "end": 159,
+            "raw_span_sha256": "1ea55170bd699a1b8956431b2fb635d01cb09810cd7281feb7559a1d818d442f"
+          },
+          {
+            "symbol": "OpenIDCode.__init__",
+            "start": 128,
+            "end": 129,
+            "raw_span_sha256": "ea7a3d3642406828981671bfb3e0c77eb8192c6a3f85a5d42f43478e172e70d9"
+          },
+          {
+            "symbol": "OpenIDCode.exists_nonce",
+            "start": 131,
+            "end": 145,
+            "raw_span_sha256": "3b51e564288fd914915cab31c0e78fffcebf96f9812ecf3e47bbec70babb4120"
+          },
+          {
+            "symbol": "OpenIDCode.validate_openid_authorization_request",
+            "start": 147,
+            "end": 148,
+            "raw_span_sha256": "0065feb07047d3f1bdf651c87ad90e68386f965562e267e3f47d7d7f9d946271"
+          },
+          {
+            "symbol": "OpenIDCode.__call__",
+            "start": 150,
+            "end": 159,
+            "raw_span_sha256": "877870f3089917ab02e541c00b5c8037700e6405708df25ce009f1e8e3ae5ee7"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oidc/core/grants/util.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "a8caf7004e81b2b9a064e1ff7970fa42fe5cc495d4061a56c4ad0aef44029e41",
+        "bytes": 4693,
+        "lines": 167,
+        "symbols": [
+          {
+            "symbol": "is_openid_scope",
+            "start": 18,
+            "end": 20,
+            "raw_span_sha256": "1be9b96c08e406f670271522efcf485ce44495720faf569d841013f0b59c97bf"
+          },
+          {
+            "symbol": "validate_request_prompt",
+            "start": 23,
+            "end": 51,
+            "raw_span_sha256": "f6ef693f07f5348237083e648c8b588e629b0150fd5cd5fc41233b5540aab840"
+          },
+          {
+            "symbol": "validate_nonce",
+            "start": 54,
+            "end": 62,
+            "raw_span_sha256": "cc02cce38da5473dd198234b44a61cac89379ee35fd276e40515907c0fe25624"
+          },
+          {
+            "symbol": "generate_id_token",
+            "start": 65,
+            "end": 121,
+            "raw_span_sha256": "990243b94799f92c4eee701a1e0e1967a1b8e9e18e19f23f43290880a48bf468"
+          },
+          {
+            "symbol": "create_response_mode_response",
+            "start": 124,
+            "end": 147,
+            "raw_span_sha256": "f2a19b3c118f7d41e56a4e1d0bd4663773c8eb3cf7fbab66dc070d0c4c3a6c61"
+          },
+          {
+            "symbol": "_guess_prompt_value",
+            "start": 150,
+            "end": 167,
+            "raw_span_sha256": "0ed816eb6bb5dc529b94d2d8110c547cbe67e748468c286a457164a18d2ccf4e"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/ext/asyncio/session.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "4295e7aaca706274f6f339c3d447695086958d038ed418abb52d0125e0717999",
+        "bytes": 63087,
+        "lines": 1936,
+        "symbols": [
+          {
+            "symbol": "AsyncAttrs",
+            "start": 85,
+            "end": 175,
+            "raw_span_sha256": "10fc24f0ce0bdb1c556e1786c88f6e3fa16b71a10cc72128d6d19faf3084520f"
+          },
+          {
+            "symbol": "AsyncAttrs._AsyncAttrGetitem",
+            "start": 151,
+            "end": 158,
+            "raw_span_sha256": "681180e7cd407dc73a8f9f9543302e44bb4e07563a560f0f56e927a8478aaf73"
+          },
+          {
+            "symbol": "AsyncAttrs._AsyncAttrGetitem.__init__",
+            "start": 154,
+            "end": 155,
+            "raw_span_sha256": "d9aea3ad71dc242e9052f145deb98c628056180fffd8881354b3f13ea8c074cc"
+          },
+          {
+            "symbol": "AsyncAttrs._AsyncAttrGetitem.__getattr__",
+            "start": 157,
+            "end": 158,
+            "raw_span_sha256": "0796b353807fe66e3ee3ac4652bba8a0b2d5ceba09081aa2584ecd62ed438653"
+          },
+          {
+            "symbol": "AsyncAttrs.awaitable_attrs",
+            "start": 161,
+            "end": 175,
+            "raw_span_sha256": "e97875e95e16aafbead8ffa6045b7dd64250f6fa252beaebd574e52b2927b199"
+          },
+          {
+            "symbol": "AsyncSession",
+            "start": 207,
+            "end": 1612,
+            "raw_span_sha256": "1f65af5659068030ca6b1b88b026918f7764fa02209c1b9e65460e17cc1381e3"
+          },
+          {
+            "symbol": "AsyncSession.__init__",
+            "start": 229,
+            "end": 273,
+            "raw_span_sha256": "2e1900c268a5f25840c42727f1e554f78c706c29c521f7792d8a1874f913e803"
+          },
+          {
+            "symbol": "AsyncSession._no_async_engine_events",
+            "start": 305,
+            "end": 309,
+            "raw_span_sha256": "25e04981f8c3491d276497673399348b51129b750a41ef7c5b728da99c51ed44"
+          },
+          {
+            "symbol": "AsyncSession.refresh",
+            "start": 311,
+            "end": 336,
+            "raw_span_sha256": "7a7021a0ad339147d514833b35a5659ed70c4a97f8be7371ab04ae54aaf37661"
+          },
+          {
+            "symbol": "AsyncSession.run_sync",
+            "start": 338,
+            "end": 398,
+            "raw_span_sha256": "372f40a2f1501e13a5c0f625204082ec5b80c65222054f60de8e0863e1bb0194"
+          },
+          {
+            "symbol": "AsyncSession.execute",
+            "start": 401,
+            "end": 410,
+            "raw_span_sha256": "3e275f386a12cde3158a557e3537c4f811a43226b0e7421ce8a9e524f3a34efa"
+          },
+          {
+            "symbol": "AsyncSession.execute",
+            "start": 413,
+            "end": 422,
+            "raw_span_sha256": "5b22966962065e98144fd60b5ff8d2c967e589f0fc05b06649fa10c0b80e3147"
+          },
+          {
+            "symbol": "AsyncSession.execute",
+            "start": 425,
+            "end": 434,
+            "raw_span_sha256": "2a5157b5d2d4e8dec6db28294865d2d5f0438ec77dd6ee6b4af0c481d7411197"
+          },
+          {
+            "symbol": "AsyncSession.execute",
+            "start": 436,
+            "end": 469,
+            "raw_span_sha256": "708e133f0a6348eae87cc7c563b9ee9f30022e69b4d923952de6db9e94f19949"
+          },
+          {
+            "symbol": "AsyncSession.scalar",
+            "start": 472,
+            "end": 480,
+            "raw_span_sha256": "d24188d63bfbb1497fdebb8e3fe56eac1cc3f5c1cbe15669127003d763255ee3"
+          },
+          {
+            "symbol": "AsyncSession.scalar",
+            "start": 483,
+            "end": 491,
+            "raw_span_sha256": "a286f0ffc53b7d5aa99c17168b870ced5997dbc0d5f82380ab5c56f6a6d26cf9"
+          },
+          {
+            "symbol": "AsyncSession.scalar",
+            "start": 493,
+            "end": 524,
+            "raw_span_sha256": "8b2408dddbc76a1e3a5cdb940296f6afaddfa2ad76c05ff389d4907295a90bc4"
+          },
+          {
+            "symbol": "AsyncSession.scalars",
+            "start": 527,
+            "end": 535,
+            "raw_span_sha256": "144ac93547409e65307bc732aacaa0a6c7e19b2accf01a71eae22465383ec473"
+          },
+          {
+            "symbol": "AsyncSession.scalars",
+            "start": 538,
+            "end": 546,
+            "raw_span_sha256": "088c244b0975952f61d4f5c554f07b8f6be5dc7720ad706770eae778ae608ff6"
+          },
+          {
+            "symbol": "AsyncSession.scalars",
+            "start": 548,
+            "end": 581,
+            "raw_span_sha256": "2b8e36e8b797c8368345c6d8d841795114ab5734ae2e9f9b80188339eb1d6f7e"
+          },
+          {
+            "symbol": "AsyncSession.get",
+            "start": 583,
+            "end": 613,
+            "raw_span_sha256": "3e3591700cb0a84a93157e8954f46edd767156df6b706ea70fa36d73157a5e69"
+          },
+          {
+            "symbol": "AsyncSession.get_one",
+            "start": 615,
+            "end": 649,
+            "raw_span_sha256": "57e18db7c9240f89023246afd3efb188fd285b43c81f50d7a92c13c7385ba5bc"
+          },
+          {
+            "symbol": "AsyncSession.stream",
+            "start": 652,
+            "end": 660,
+            "raw_span_sha256": "4abeda2bf46e3ff94d118549445bf4fc9f1ab76bd09bba5b2721e2fa7ce0d137"
+          },
+          {
+            "symbol": "AsyncSession.stream",
+            "start": 663,
+            "end": 671,
+            "raw_span_sha256": "69b164428b57ce576694970d4917dcdd1828cb7cb94fca1934d721a262e9abf5"
+          },
+          {
+            "symbol": "AsyncSession.stream",
+            "start": 673,
+            "end": 702,
+            "raw_span_sha256": "fadae353602dc6e14a46e0ea178e17b2bcf25fad09f6ca2a2c1bc778721c8f17"
+          },
+          {
+            "symbol": "AsyncSession.stream_scalars",
+            "start": 705,
+            "end": 713,
+            "raw_span_sha256": "a48290a42427eba3876f237b5110a77c07ec6bde2b0def9f3bca5614fa509750"
+          },
+          {
+            "symbol": "AsyncSession.stream_scalars",
+            "start": 716,
+            "end": 724,
+            "raw_span_sha256": "7e6b147c3b2aee2647914e6377d371c3360a10b0a297a88961d2d4df5cf37db1"
+          },
+          {
+            "symbol": "AsyncSession.stream_scalars",
+            "start": 726,
+            "end": 756,
+            "raw_span_sha256": "3c41dbce77d4d272ed13cbdf8bb25c3c7c09e686d9db030ca438b0693bae3e20"
+          },
+          {
+            "symbol": "AsyncSession.delete",
+            "start": 758,
+            "end": 771,
+            "raw_span_sha256": "0d62375d502ee39a0a261f040e853185c85d095c0147984a4370301155da4ffc"
+          },
+          {
+            "symbol": "AsyncSession.merge",
+            "start": 773,
+            "end": 790,
+            "raw_span_sha256": "4e393029e9dc2804312d534184600331fa4b4d68338bd529ec5aed5b7f10a3a5"
+          },
+          {
+            "symbol": "AsyncSession.flush",
+            "start": 792,
+            "end": 800,
+            "raw_span_sha256": "51edfd071cc1b3838d8eb6b9a7abff6c6b85ab242c9fd18b4f7932e25cb855b5"
+          },
+          {
+            "symbol": "AsyncSession.get_transaction",
+            "start": 802,
+            "end": 815,
+            "raw_span_sha256": "9dc24a956ba6b577269d3ec239834de7e5912d4d94bf8bfb6781e438ecd6185c"
+          },
+          {
+            "symbol": "AsyncSession.get_nested_transaction",
+            "start": 817,
+            "end": 831,
+            "raw_span_sha256": "a9819a274fb69ff0bbdd3d8ed7abb27c89191b7fc957181ab4f242ed7241de05"
+          },
+          {
+            "symbol": "AsyncSession.get_bind",
+            "start": 833,
+            "end": 915,
+            "raw_span_sha256": "d9dfac25010ee9834f192e6e11ed46e72506bb45850d675243ebf6848cf89bd1"
+          },
+          {
+            "symbol": "AsyncSession.connection",
+            "start": 917,
+            "end": 947,
+            "raw_span_sha256": "a050564c5bd199fca6804cc0f1fd9328c0e29f602b98ba45c649e40afc35a76e"
+          },
+          {
+            "symbol": "AsyncSession.begin",
+            "start": 949,
+            "end": 970,
+            "raw_span_sha256": "38a812c3e1a8a4fe134623737556e5cd92c7bd48a82081f40a5aeb68a01a1f87"
+          },
+          {
+            "symbol": "AsyncSession.begin_nested",
+            "start": 972,
+            "end": 989,
+            "raw_span_sha256": "3d38761b09997632aabe67f30edf0222e9343fe942e6b08fab5941b254cb1bfc"
+          },
+          {
+            "symbol": "AsyncSession.rollback",
+            "start": 991,
+            "end": 999,
+            "raw_span_sha256": "cc1d33dd8f9c86f8690dceb0ba0faf300b06e35f1d5bb4308de5bdd280c20388"
+          },
+          {
+            "symbol": "AsyncSession.commit",
+            "start": 1001,
+            "end": 1009,
+            "raw_span_sha256": "8b287b3957c8248bb4310a5a736645d78d074ef9ec2c75c73344bd9a22f729b3"
+          },
+          {
+            "symbol": "AsyncSession.close",
+            "start": 1011,
+            "end": 1025,
+            "raw_span_sha256": "c8086bdb2f4276b063d96458e3b9233beb2a50118cc29f07d35515eb20529af4"
+          },
+          {
+            "symbol": "AsyncSession.reset",
+            "start": 1027,
+            "end": 1043,
+            "raw_span_sha256": "9bdb3986c09bf5fa42d26fa79615b0ff443465c990fec217e5476074879bd82f"
+          },
+          {
+            "symbol": "AsyncSession.aclose",
+            "start": 1045,
+            "end": 1055,
+            "raw_span_sha256": "e7d685a64f513d13b8886deb1b153b8a0c4c9ff681af2fff57f2c6889d992f45"
+          },
+          {
+            "symbol": "AsyncSession.invalidate",
+            "start": 1057,
+            "end": 1062,
+            "raw_span_sha256": "40d813abcc191e921d9525e4a0e12150b23edbf22ac41f1282310c6725701e54"
+          },
+          {
+            "symbol": "AsyncSession.close_all",
+            "start": 1071,
+            "end": 1073,
+            "raw_span_sha256": "419454918ee5c703642bad509097723dc747b85e8f487cbea8b2923d4c943779"
+          },
+          {
+            "symbol": "AsyncSession.__aenter__",
+            "start": 1075,
+            "end": 1076,
+            "raw_span_sha256": "419451b60ce169809576bbd0c58a069d3fcbf7f78f7f50277b36843da718b0b0"
+          },
+          {
+            "symbol": "AsyncSession.__aexit__",
+            "start": 1078,
+            "end": 1080,
+            "raw_span_sha256": "d01d193ee8fd21026d770f2dab7198b5698cd2d2789eb851eb4bcb710d95ee4a"
+          },
+          {
+            "symbol": "AsyncSession._maker_context_manager",
+            "start": 1082,
+            "end": 1083,
+            "raw_span_sha256": "16c021f65111624bde70e2c29421c7eab0ade2c642b1233bf2ef70f9423173f3"
+          },
+          {
+            "symbol": "AsyncSession.__contains__",
+            "start": 1090,
+            "end": 1104,
+            "raw_span_sha256": "e4485fefafad3a421537c77d0ac6d82d8885610ec3d16189cba2055a34e46842"
+          },
+          {
+            "symbol": "AsyncSession.__iter__",
+            "start": 1106,
+            "end": 1118,
+            "raw_span_sha256": "acd7a586fc5e51c767c63668f94304ea8fd261e4096cc8a83f68f11a30809aa8"
+          },
+          {
+            "symbol": "AsyncSession.add",
+            "start": 1120,
+            "end": 1152,
+            "raw_span_sha256": "1cc17dcf95bed039b1fbdfe814a9113b35756fba7357e3ae0c4060759a72044c"
+          },
+          {
+            "symbol": "AsyncSession.add_all",
+            "start": 1154,
+            "end": 1174,
+            "raw_span_sha256": "a6b6e218ab7871afe342914c74d0307d8599da8870c61b80f9083f0e475ad09a"
+          },
+          {
+            "symbol": "AsyncSession.expire",
+            "start": 1176,
+            "end": 1222,
+            "raw_span_sha256": "c6e7cc62e192053b5dbbadcc211c4e33da627bd8402217a15af65d4b9fd20b93"
+          },
+          {
+            "symbol": "AsyncSession.expire_all",
+            "start": 1224,
+            "end": 1263,
+            "raw_span_sha256": "99e78c19c00e70b7d4817ca5448f0367e1de900960dd1e89260a5a9ba388f68f"
+          },
+          {
+            "symbol": "AsyncSession.expunge",
+            "start": 1265,
+            "end": 1279,
+            "raw_span_sha256": "ce98ae5367de5cea2f69615ecc29325f3bb2843999a90d8e641f4b4acf9c4812"
+          },
+          {
+            "symbol": "AsyncSession.expunge_all",
+            "start": 1281,
+            "end": 1295,
+            "raw_span_sha256": "7ac88a1a2ad57955b367ba6846a89a0203aba7f475b06f10ad3981d90cac025f"
+          },
+          {
+            "symbol": "AsyncSession.is_modified",
+            "start": 1297,
+            "end": 1359,
+            "raw_span_sha256": "39d702f5ac2edb674aa29e04a865cc3cbc8eaa6ab161a4258cb5c1028d7563b9"
+          },
+          {
+            "symbol": "AsyncSession.in_transaction",
+            "start": 1361,
+            "end": 1379,
+            "raw_span_sha256": "a72b14aee51e3b0a6ef61ea46e1c14b2637da91ccdcf61b67933702c05791969"
+          },
+          {
+            "symbol": "AsyncSession.in_nested_transaction",
+            "start": 1381,
+            "end": 1395,
+            "raw_span_sha256": "a213a7ea8f8d024b331d040f14fa7973939de5a74fb264a236a907f7375d62e9"
+          },
+          {
+            "symbol": "AsyncSession.dirty",
+            "start": 1398,
+            "end": 1428,
+            "raw_span_sha256": "56ac37b0b3f3ad02a7bca66524263da66ef3aba9347bc8a1326b94972bd59422"
+          },
+          {
+            "symbol": "AsyncSession.deleted",
+            "start": 1431,
+            "end": 1441,
+            "raw_span_sha256": "5829de83c516d688137a32865bb32058625017afff46ab6599037386e7ac8a83"
+          },
+          {
+            "symbol": "AsyncSession.new",
+            "start": 1444,
+            "end": 1454,
+            "raw_span_sha256": "d8528228ab24e9c46e8c68061c09aef89135978f108e24a29edf5ee6633126c9"
+          },
+          {
+            "symbol": "AsyncSession.identity_map",
+            "start": 1457,
+            "end": 1463,
+            "raw_span_sha256": "8820b90f285c773e5cdbbfa34d458e41d353bec4cc7b8bd895098370b54ce5e5"
+          },
+          {
+            "symbol": "AsyncSession.identity_map",
+            "start": 1466,
+            "end": 1467,
+            "raw_span_sha256": "0bfc736cb587fb1d72455287d1b0f5003e44304ec5e00d4a4a8b002fb8cc4b7b"
+          },
+          {
+            "symbol": "AsyncSession.is_active",
+            "start": 1470,
+            "end": 1504,
+            "raw_span_sha256": "5ac8262b0c46990853b50e99c1755195e1c22f12c761ea18ec5b87979d8162e0"
+          },
+          {
+            "symbol": "AsyncSession.autoflush",
+            "start": 1507,
+            "end": 1513,
+            "raw_span_sha256": "5d94c2a6e1a8589117c441d4fd3c3462aff8fd4e7afa5e5a27fca5719fa4ed48"
+          },
+          {
+            "symbol": "AsyncSession.autoflush",
+            "start": 1516,
+            "end": 1517,
+            "raw_span_sha256": "a69e91cdc8454353b77f12dbff8ea7eac2e3ae85104176b05c76e3a3b6fd11a1"
+          },
+          {
+            "symbol": "AsyncSession.no_autoflush",
+            "start": 1520,
+            "end": 1546,
+            "raw_span_sha256": "21b19a501f4a4ca2c895a9a85185fee8c7a4b2702a5b253696dbcd8ffb008f11"
+          },
+          {
+            "symbol": "AsyncSession.info",
+            "start": 1549,
+            "end": 1566,
+            "raw_span_sha256": "29a6af470354c9cad8831ecfdc6dbc3a3483454cabe3c3d879f69a658233dfbf"
+          },
+          {
+            "symbol": "AsyncSession.object_session",
+            "start": 1569,
+            "end": 1582,
+            "raw_span_sha256": "4a96ef56f7cc998ae0ad801ac344cc294762b088c76fdde9d54abcc00e972f82"
+          },
+          {
+            "symbol": "AsyncSession.identity_key",
+            "start": 1585,
+            "end": 1612,
+            "raw_span_sha256": "a13379b2f9eae0283b6680cfbfdcc6bdbefb187fde212507d7de9f0db068908d"
+          },
+          {
+            "symbol": "async_sessionmaker",
+            "start": 1620,
+            "end": 1785,
+            "raw_span_sha256": "a0a44d77085a2ea00f9f7e627e682cbc1a82f0fbba7933a2371f3c2decb867f4"
+          },
+          {
+            "symbol": "async_sessionmaker.__init__",
+            "start": 1678,
+            "end": 1687,
+            "raw_span_sha256": "04c843d09c05f85e460e5563d358a25025850a267e81c61c701e9f2137df3bef"
+          },
+          {
+            "symbol": "async_sessionmaker.__init__",
+            "start": 1690,
+            "end": 1698,
+            "raw_span_sha256": "c68ff6d934242acd5a6a5339798a2748d4e8df9945b807e88bfa77e8046dbdb7"
+          },
+          {
+            "symbol": "async_sessionmaker.__init__",
+            "start": 1700,
+            "end": 1725,
+            "raw_span_sha256": "4e62fa2eca7e14da301b696b10592bff1e3294d67c66b2e34588c23348973553"
+          },
+          {
+            "symbol": "async_sessionmaker.begin",
+            "start": 1727,
+            "end": 1746,
+            "raw_span_sha256": "50653e8c062bedeecb34b656c1d2ab4178a4fb1611227bbf30165e45c72f6ec3"
+          },
+          {
+            "symbol": "async_sessionmaker.__call__",
+            "start": 1748,
+            "end": 1766,
+            "raw_span_sha256": "36ddbe73ee468536592233b2b0396ef7b772bb65e2591c510f8b1187db2ea14c"
+          },
+          {
+            "symbol": "async_sessionmaker.configure",
+            "start": 1768,
+            "end": 1778,
+            "raw_span_sha256": "93bcc6674e8efd1259e08066a1d22165eb5be02a2f22e3998c5ed587a9caf315"
+          },
+          {
+            "symbol": "async_sessionmaker.__repr__",
+            "start": 1780,
+            "end": 1785,
+            "raw_span_sha256": "ab4c72787387ecc61800ccddd92663e46c6ed0c26b6399da69f4567b8dae18d4"
+          },
+          {
+            "symbol": "_AsyncSessionContextManager",
+            "start": 1788,
+            "end": 1808,
+            "raw_span_sha256": "785fd6354cebdee9ecbce905644661662030c919104ab113e388e1a44da44a49"
+          },
+          {
+            "symbol": "_AsyncSessionContextManager.__init__",
+            "start": 1794,
+            "end": 1795,
+            "raw_span_sha256": "1fdd6f9107fe4fb321b8838d84ee1d1df909ff67178ec126408a43657faa8996"
+          },
+          {
+            "symbol": "_AsyncSessionContextManager.__aenter__",
+            "start": 1797,
+            "end": 1800,
+            "raw_span_sha256": "41f892ec8181f0286d22c1e54673fefb7a9ed737782aa7db99be897fa277b512"
+          },
+          {
+            "symbol": "_AsyncSessionContextManager.__aexit__",
+            "start": 1802,
+            "end": 1808,
+            "raw_span_sha256": "9906044e014f97c2638dcabb1b5b203c6c1e1ae01ec070445430bfc651b25aee"
+          },
+          {
+            "symbol": "_AsyncSessionContextManager.__aexit__.go",
+            "start": 1803,
+            "end": 1805,
+            "raw_span_sha256": "37829c30a68cc9ecbed26c985549a334305ea3f8cb227e0039cb7148f17ee5d2"
+          },
+          {
+            "symbol": "AsyncSessionTransaction",
+            "start": 1811,
+            "end": 1878,
+            "raw_span_sha256": "1fa32bc3b9188747cdf558742146907f53804881fdf4a675641e14fe8d84ca85"
+          },
+          {
+            "symbol": "AsyncSessionTransaction.__init__",
+            "start": 1835,
+            "end": 1838,
+            "raw_span_sha256": "df110ae808ab607c5288acc24c9367bd8516fc79b383770ffb4ecffe409357c7"
+          },
+          {
+            "symbol": "AsyncSessionTransaction.is_active",
+            "start": 1841,
+            "end": 1845,
+            "raw_span_sha256": "d1b4a1664065b3796c0baccddc6decd291034ae9a78604b0ed1ca4ab9c574741"
+          },
+          {
+            "symbol": "AsyncSessionTransaction._sync_transaction",
+            "start": 1847,
+            "end": 1850,
+            "raw_span_sha256": "288729021fdb24e8c7570b07cb897fe528e68ad4def1785f9f94fed1a90e3a2e"
+          },
+          {
+            "symbol": "AsyncSessionTransaction.rollback",
+            "start": 1852,
+            "end": 1854,
+            "raw_span_sha256": "a441ac632191fe5033ebc87e60496029a7f7e29f82f67f19ba316bdc649af412"
+          },
+          {
+            "symbol": "AsyncSessionTransaction.commit",
+            "start": 1856,
+            "end": 1859,
+            "raw_span_sha256": "88d3e29d30613dee94da44fda03beace4f186ca156df26212cf8b7720efdd1be"
+          },
+          {
+            "symbol": "AsyncSessionTransaction.start",
+            "start": 1861,
+            "end": 1873,
+            "raw_span_sha256": "6d79cc62ffeb6ac722d07ddee4ce5be54ae84ada6751b4f59532ba7faff80651"
+          },
+          {
+            "symbol": "AsyncSessionTransaction.__aexit__",
+            "start": 1875,
+            "end": 1878,
+            "raw_span_sha256": "468cd023d358d2c8ee1aab625f2df4786178e7f11cfa7f0564486b69d64d64eb"
+          },
+          {
+            "symbol": "async_object_session",
+            "start": 1881,
+            "end": 1907,
+            "raw_span_sha256": "0cebce60e6a31c3229ea48c835e805c6f3198b8b7eb639eb5928fa6c5b1f8471"
+          },
+          {
+            "symbol": "async_session",
+            "start": 1910,
+            "end": 1920,
+            "raw_span_sha256": "dd212273500aafda983144b9ad21a1d54e5d0ddb76ec45a66eed0cba7c11cb82"
+          },
+          {
+            "symbol": "close_all_sessions",
+            "start": 1923,
+            "end": 1933,
+            "raw_span_sha256": "dd0a883c40d7f79df8d9be15a8fba3a3933bfabe8508ee28a4105d946be84f4a"
+          }
+        ]
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE_NOT_REPO_COMMIT",
+        "raw_sha256": "cdbd01a30d98fd08d375a00212f881104685bea0ee56fa497e6c028dac3cc4d1",
+        "bytes": 9170,
+        "lines": 288,
+        "symbols": [
+          {
+            "symbol": "is_exit_exception",
+            "start": 61,
+            "end": 66,
+            "raw_span_sha256": "781f9b75d7e65dc6c7c6f15ca4722eea9739035a13992560305f5ea1c90be3cb"
+          },
+          {
+            "symbol": "_AsyncIoGreenlet",
+            "start": 74,
+            "end": 82,
+            "raw_span_sha256": "fc6ce97df2f662d03030a652df71d967a7f5a3dd2737d66eb853d297d5b47e69"
+          },
+          {
+            "symbol": "_AsyncIoGreenlet.__init__",
+            "start": 79,
+            "end": 82,
+            "raw_span_sha256": "a47f8dc58b94f71136f7d6d62f8afb9a5f8974d76d7c2fbb7e98b885287c093a"
+          },
+          {
+            "symbol": "_safe_cancel_awaitable",
+            "start": 97,
+            "end": 101,
+            "raw_span_sha256": "3e0b68650eac701a370f67b85da9c2a9617eb3f41dd59f90e2cb531966e5baf6"
+          },
+          {
+            "symbol": "in_greenlet",
+            "start": 104,
+            "end": 106,
+            "raw_span_sha256": "7f669bcb4f3f85499c531c13aae78b85cf072c7aa9066746872d7ac8f3cee366"
+          },
+          {
+            "symbol": "await_only",
+            "start": 109,
+            "end": 132,
+            "raw_span_sha256": "84ec3c042c38e7d098bf8099df1403d6ea607fc0e1e4645504653becec43b43c"
+          },
+          {
+            "symbol": "await_fallback",
+            "start": 135,
+            "end": 164,
+            "raw_span_sha256": "d9de5fdd33260d50c25bcd5cf6e93bbb2e4dcfe3e44395c9c96678b52fb032dc"
+          },
+          {
+            "symbol": "greenlet_spawn",
+            "start": 167,
+            "end": 211,
+            "raw_span_sha256": "35a4fb0ce0bd55b23d2d6ff7694627b214cec455d820668e136e06ce51204d3c"
+          },
+          {
+            "symbol": "AsyncAdaptedLock",
+            "start": 214,
+            "end": 227,
+            "raw_span_sha256": "d862caba7f3e7ff47547c301a796afec71461f97355e4c4f9ef2dcc55ff15c9a"
+          },
+          {
+            "symbol": "AsyncAdaptedLock.mutex",
+            "start": 216,
+            "end": 219,
+            "raw_span_sha256": "599d223789524c04fd49e147335b875353132f31cf57ff81944793b5ed542e74"
+          },
+          {
+            "symbol": "AsyncAdaptedLock.__enter__",
+            "start": 221,
+            "end": 224,
+            "raw_span_sha256": "e8a264dfd10d3860ea3062619707f972b0ee7ea5bd708f40311f0108b43802fd"
+          },
+          {
+            "symbol": "AsyncAdaptedLock.__exit__",
+            "start": 226,
+            "end": 227,
+            "raw_span_sha256": "fa076229cd14eae6b9698a13b21639d6d60512156ade0da1f9d2b54d7cc8e9a9"
+          },
+          {
+            "symbol": "get_event_loop",
+            "start": 230,
+            "end": 241,
+            "raw_span_sha256": "5757e13e24861e0173446fef9ccfc9cbf2a5592bb10eaa1266d55ab77fd20125"
+          }
+        ]
+      }
+    ],
+    "hook_order_within_one_hook": "UNSPECIFIED: Hookable stores callbacks in a set; no relative PKCE/nonce or same-hook order claimed.",
+    "confirmed_source_sequence": [
+      "get_consent_grant -> validate_consent_request -> validate_authorization_request -> authorization payload -> unordered PKCE/nonce hooks; nonce bigint advisory exists already on GET even without code persistence.",
+      "token code client auth -> original Code UPDATE -> code/redirect/PKCE validation -> authenticate_user -> issue family/token -> save -> consume code -> after_create_token_response OIDC hook -> final route checkpoint.",
+      "token refresh client auth -> Family UPDATE -> old Token UPDATE -> reuse/live checks -> issue -> save -> consume old refresh; OAuth2Error caught to response and deliberate reuse revocation committed by transport.",
+      "revoke original client auth -> query token/family -> ownership -> revoke; unknown/revoked responses remain idempotent.",
+      "SQLAlchemy AsyncSession.run_sync passes self.sync_session to greenlet_spawn; execute dispatches to the same self.sync_session.execute. await_only bridge receives that exact sync_session, never creates Session/Connection/root. Bridge execution itself NOTRUN."
+    ]
+  },
+  "canonical_contract": {
+    "typed": "One clean MVCC/noautoflush discovery, immutable LockPlan before first advisory/protocol/FK/flush; unchanged helper numeric-pair sort and strongest merge; no second plan/reentry/late key/upgrade.",
+    "rows": "Company -> App -> Client -> Users -> Role -> Member -> CA -> Installation -> Grant -> Credentials -> Family -> Token -> Request/Code -> known reference rows. UPDATE for mutated rows, SHARE for authority, never KEY SHARE; company/pointer predicates before lock; populate_existing.",
+    "set_drift": "Complete original credential IDs and installation location/profile/item snapshots are scalar-discovered and compared after parent locks; drift rolls back whole root before new rows/keys.",
+    "seam": {
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "verify_locked_partner_access",
+      "start": 1143,
+      "end": 1172,
+      "raw_span_sha256": "b6e0509065f7847de9a836b4b243bbf4a9d2b903aee22e744e8754ae53ca9ccc",
+      "raw_file_sha256": "2239e9ba627a98497c1d6e937655b47974fc209ae4e8c5039fee05924b8a6152"
+    },
+    "non_portable": "Issued capability proves issuance/lifetime/logical coverage, NOT row locks or ACL; returned VerifiedPartnerToken is fresh data, never portable write authority. Caller owns canonical rows on same actual session/root and repeats seam after waits.",
+    "native": {
+      "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "_native_authority",
+      "start": 431,
+      "end": 451,
+      "raw_span_sha256": "73b76c214a9e3792bf5db8c0c25fedd83fc9994f091d964f80ef3daa85d49b71",
+      "raw_file_sha256": "2239e9ba627a98497c1d6e937655b47974fc209ae4e8c5039fee05924b8a6152"
+    },
+    "native_after_wait": "Actual transient raw bearer -> existing decode_token -> public native_user_from_claims/native_visit_from_claims -> native_claims_context/require_core_user; original admin branch only; same actual Session enforced. No get_current_user/presence commit, JWT copy, nested prepare_auth/native.",
+    "error_boundary": "Ordinary failed token/revoke OAuth result => durable False, whole-root rollback before response. Deliberate refresh reuse => family.revoked flush plus reuse_revoked True, durable commit despite invalid_grant. Raised HTTP/policy/OAuth final error unwinds through existing get_db rollback; drift explicitly rolls root back.",
+    "isolation_precondition": {
+      "required": "READ COMMITTED for every participating actual DB root",
+      "reason": "populate_existing refreshes ORM identity state, not the PostgreSQL snapshot; it cannot establish current-after-wait under REPEATABLE READ. No arbitrary isolation support claimed.",
+      "enforcement": "ROOT execution/admission/environment prerequisite; this author did not inspect live settings or execute isolation queries. Current shared helper checks autocommit but does not reject RR.",
+      "source_evidence": {
+        "path": "clearledger/server/app/database.py",
+        "commit": "e51876f994172c1d8306b934840541d2700486a6",
+        "range": [
+          20,
+          41
+        ],
+        "raw_sha256": "c2c028fc528b7260c69de441e41a564595d07c23c74e4433f02fc9f04db005af",
+        "observation": "create_async_engine/get_db factory has no explicit writer isolation_level. A separate readonly connection at2256 sets REPEATABLE READ, not evidence of identity-writer mode."
+      },
+      "actual_get_db_or_pg_target_isolation": "UNCONFIRMED; ROOT must confirm/enforce READ COMMITTED before runtime admission"
+    }
+  },
+  "per_17_branches": [
+    {
+      "id": 1,
+      "branch": "admin.register",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "register",
+        "start": 58,
+        "end": 79,
+        "raw_span_sha256": "d2e04839ea99776eeea3d4b0e0a938c8c5def6d358f576202c811d9049c479b9",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Newborn App X + Client X allocated before acquire.",
+      "row_protocol": "Company/App/Client/User/Role/Member authority; new App flush -> Client flush -> final current native/admin checks -> commit.",
+      "current_authority": "Raw bearer decode + public native policy/admin repeated after FK flush.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 2,
+      "branch": "admin.client_status",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "client_status",
+        "start": 83,
+        "end": 89,
+        "raw_span_sha256": "893d1447035b6b7efea646547a4767e71048ed9c6ed9e9b0fd107338a3d52c27",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
+      "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
+      "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 3,
+      "branch": "admin.issue_credential",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "issue_credential",
+        "start": 93,
+        "end": 107,
+        "raw_span_sha256": "f1b1421e6a678ab052c1c67236ee55038e2e86e8db64626b6a3aa0f8e325bdb5",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
+      "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
+      "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 4,
+      "branch": "admin.revoke_credential",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "revoke_credential",
+        "start": 111,
+        "end": 120,
+        "raw_span_sha256": "93419e1b0534a8fed143acc20a888e78ff90d4d7d12789825b8f12d2e80221fb",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
+      "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
+      "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 5,
+      "branch": "admin.approve_installation",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "approve_installation",
+        "start": 124,
+        "end": 180,
+        "raw_span_sha256": "c70d51ba1f0964d66070010aa6426996119b4f94b0220f3b9906a67798753b55",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; target Company S; existing/preallocated Installation X; original/new resource references scalar-discovered.",
+      "row_protocol": "CA UPDATE before Installation UPDATE; absent CA INSERT ON CONFLICT -> actual-id scalar compare -> whole rollback409 on winner drift BEFORE different CA/install lock; full set replacement/FK flush -> final check.",
+      "current_authority": "Original target admin, client/scopes/resources; exact selected reference rows SHARE by company+id; old/current selection drift aborts without late key.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 6,
+      "branch": "admin.revoke_installation",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "revoke_installation",
+        "start": 195,
+        "end": 201,
+        "raw_span_sha256": "5141860bc0248151fd8476f65d243ce5581b83711cf6a27a4768f0fcc044618f",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; actual Installation X; owner/target companies S.",
+      "row_protocol": "Company -> App -> Client -> User -> Role -> Member -> CA -> Installation; revoke Installation UPDATE; machine new Grant flush after canonical authority.",
+      "current_authority": "Original native target admin; machine confidential client/scope restrictions preserved; no fake user as service principal.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 7,
+      "branch": "admin.machine_grant",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "machine_grant",
+        "start": 205,
+        "end": 220,
+        "raw_span_sha256": "a027708d1fd4c7069f985463917a52f6727d281ed46069f2425a89764fb89083",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; actual Installation S; owner/target companies S.",
+      "row_protocol": "Company -> App -> Client -> User -> Role -> Member -> CA -> Installation; revoke Installation UPDATE; machine new Grant flush after canonical authority.",
+      "current_authority": "Original native target admin; machine confidential client/scope restrictions preserved; no fake user as service principal.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 8,
+      "branch": "admin.revoke_grant",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_admin_router.py",
+        "symbol": "revoke_grant",
+        "start": 224,
+        "end": 235,
+        "raw_span_sha256": "f10bcd6c343eaf1eab2a7af6adcb71e440f14391026e8758cb61615891004b3e",
+        "raw_file_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. Grant grantee User/Member/current Role S when present; native actor User S; N only original nonself.",
+      "row_protocol": "CA -> Installation SHARE -> Grant UPDATE. Self branch has NO new admin/member eligibility gate.",
+      "current_authority": "Actual native bearer/session after waits; original self vs nonself admin branch retained, no live_grant requirement.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 9,
+      "branch": "oauth.authorize",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "authorize",
+        "start": 105,
+        "end": 132,
+        "raw_span_sha256": "3fa241edb30bac531cf6ae81d5bdb1323edce792702dedb112475bfc55452ac5",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "App/Client/actual owner Company S; no chosen User/company/installation.",
+      "row_protocol": "Full typed plan + canonical parents BEFORE get_consent_grant/nonce; Request INSERT flush; final checkpoint -> commit.",
+      "current_authority": "Actual public client/App and existing Authlib redirect/scope/PKCE/nonce; no fake Core actor.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 10,
+      "branch": "consent.get_request",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "get_request",
+        "start": 264,
+        "end": 289,
+        "raw_span_sha256": "52e206ae750ac689a12cda7b494d0c0d6de04f018eef3dccdf023a2e6e00acfb",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "App/Client/owner Company/native User S; original Request pointer/owner discovered.",
+      "row_protocol": "Canonical parents -> Request UPDATE -> bind user; nonce callback may lock bigint; final native check/flush -> commit; GET WRITES.",
+      "current_authority": "Raw native JWT/public native user/visit/ordinary policy repeated after Request/nonce/FK waits; displayed all-company choices remain advisory.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 11,
+      "branch": "consent.approve",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "approve",
+        "start": 293,
+        "end": 346,
+        "raw_span_sha256": "5a856a0838822715497e74f6c32946097ef76c41039def93bfeaa8dbcd586611",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse. Discovery selects ONLY body.companyId; existing chosen Installation S.",
+      "row_protocol": "Canonical parent rows -> Request UPDATE -> nonce wait -> new Grant flush -> nonce/code -> Request finished flush -> final native/live check.",
+      "current_authority": "Same selected-company eligible_scopes before grant and after nonce; current native claims supply code auth_time/tv/parent exp; no contracts:create/profile authority.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 12,
+      "branch": "consent.deny",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "deny",
+        "start": 350,
+        "end": 372,
+        "raw_span_sha256": "c4b0a455dfaf79daa9038c28a39941461f56bd05a223f84e5f6750875153dd30",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "App/Client/owner Company/native User S; original Request user/client pointers.",
+      "row_protocol": "Parents -> Request UPDATE/bind -> Authlib deny response/nonce -> finished flush -> final checkpoint.",
+      "current_authority": "Current native ordinary policy; Request owner/expiry/finished and actual client; no chosen-company ACL introduced.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 13,
+      "branch": "oauth.token-code",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "_protocol_response",
+        "start": 167,
+        "end": 186,
+        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
+      "row_protocol": "Canonical parents/Grant/Credentials SHARE -> original Code UPDATE -> new Family -> new Token flush -> consumed Code; OIDC after-response subject callback -> final checkpoint/flush.",
+      "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 14,
+      "branch": "oauth.token-refresh",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "_protocol_response",
+        "start": 167,
+        "end": 186,
+        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
+      "row_protocol": "Canonical parents/Grant/Credentials SHARE -> Family UPDATE -> old Token UPDATE; issue new token -> mark old refresh used. Reuse family.revoked flush deliberately survives invalid_grant response.",
+      "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 15,
+      "branch": "oauth.token-machine",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "_protocol_response",
+        "start": 167,
+        "end": 186,
+        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
+      "row_protocol": "Canonical actual service-client/App/Company/Installation/Grant/Credentials -> new Family -> new Token; no User row/fake claims.",
+      "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 16,
+      "branch": "oauth.revoke",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "_protocol_response",
+        "start": 167,
+        "end": 186,
+        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
+      "row_protocol": "Original Family UPDATE before Token SHARE; known/revoked family marked revoked; unknown remains protocol success.",
+      "current_authority": "Only original client authentication/token ownership gate; no live_grant/admin/member requirement, no replacement authority for revoked credentials/grants.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    },
+    {
+      "id": 17,
+      "branch": "oauth.userinfo",
+      "source": {
+        "commit": "921538b1aff3722cbcef1155f4c2a5dec62786a9",
+        "path": "clearledger/server/app/routers/partner_oauth_router.py",
+        "symbol": "userinfo",
+        "start": 214,
+        "end": 229,
+        "raw_span_sha256": "6ba422de681219982b93e81ac80f3fed7e6447e816ef2dff2a5d055c8c327e14",
+        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+      },
+      "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
+      "row_protocol": "Caller canonical rows -> issued cap seam(existing verify_access) -> user_info conditional Subject INSERT ON CONFLICT -> flush -> same seam -> commit.",
+      "current_authority": "Stable original token/client/app/install/company/grant/user/kind/subject tuple; fresh returned scopes/resources. Existing verifier requires stored subject; normal issued-token path does not itself prove missing-subject repair reachable.",
+      "acceptance": "SOURCE_AUTHORED; independent SOURCE and runtime NOTRUN"
+    }
+  ],
+  "authored_tests": {
+    "source_functions": 14,
+    "pg_functions": 23,
+    "names": {
+      "clearledger/server/tests/test_partner_writer_scoped_locks.py": [
+        "test_all_eight_admin_roots_enter_shared_composer_before_changes",
+        "test_oauth_seven_named_roots_and_three_token_branches_share_composition",
+        "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
+        "test_row_protocol_is_canonical_share_or_update_and_tenant_before_lock",
+        "test_native_reverification_uses_original_bearer_and_public_auth_same_session",
+        "test_seam_reuses_one_verifier_and_compares_original_stable_identity",
+        "test_userinfo_canonical_rows_before_seam_and_rechecks_after_subject_flush",
+        "test_conflict_winner_checked_before_new_ca_lock_and_root_rollback",
+        "test_consent_selected_company_and_self_revoke_policy_remain_distinct",
+        "test_reuse_is_only_explicit_oauth_error_durability_exception",
+        "test_family_before_token_and_no_late_protocol_identity",
+        "test_final_callbacks_and_native_checks_never_acquire_another_plan",
+        "test_protocol_nonce_and_subject_uniqueness_are_preserved",
+        "test_absent_members_roles_and_parent_pointer_drift_are_explicit"
+      ],
+      "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py": [
+        "test_real_seam_same_session_optionengine_original_cap_and_fresh_resources",
+        "test_issued_cap_not_transferable_to_another_real_session_or_after_root_end",
+        "test_access_rechecks_actual_current_authority_after_client_wait",
+        "test_access_expiry_after_real_family_row_wait",
+        "test_family_then_old_token_rotation_and_durable_reuse_error",
+        "test_code_single_use_and_nonce_request_single_completion",
+        "test_real_protocol_principals_do_not_construct_core_users",
+        "test_revocation_unknown_repeated_and_pre_revoked_grant_remain_idempotent",
+        "test_native_actual_bearer_expiry_after_nonce_wait",
+        "test_real_visit_bearer_is_rejected_before_identity_writer",
+        "test_native_membership_role_and_session_after_typed_wait",
+        "test_missing_ca_conflict_rolls_back_whole_root_without_other_install_key",
+        "test_same_client_blocks_and_different_client_progresses_without_global_lock",
+        "test_conditional_get_writes_and_self_grant_revoke_without_admin",
+        "test_post_token_flush_denial_rolls_back_family_token_code_consumption",
+        "test_cancel_at_typed_wait_and_rollback_leave_no_partial_installation",
+        "test_ca_row_precedes_installation_row_under_actual_http_wait",
+        "test_consent_get_actual_request_wait_rechecks_single_use_and_owner",
+        "test_code_update_wait_rechecks_current_deadlines_and_consumption",
+        "test_selected_credential_does_not_replace_original_family_credential",
+        "test_original_b1_borrowed_connection_root_rejects_late_plan",
+        "test_real_reader_cap_blocks_actual_credential_revoke_until_root_end",
+        "test_final_native_denial_after_replacement_flush_restores_complete_old_sets"
+      ]
+    },
+    "counts_meaning": "AST top-level authored test function definitions only; NOT collection results, collected cases, executions or passes. Parametrized rows not counted as collected cases.",
+    "future_pg_admission": {
+      "url": "UNSUPPLIED",
+      "author_execution": "NOT_GRANTED",
+      "collection": "NOTRUN",
+      "runner": "No new runner/admission/deadline/quota; reuse existing tests/partner_test_safety.py + tests/test_partner_identity.py env/rsa_key/HTTP helpers + conftest full-schema/ordinary-pool factory; parent conftest can DROP schemas before module guard. ROOT must freeze reviewed schema4/execution composition before any imports/collection.",
+      "isolation": "READ COMMITTED REQUIRED; actual external database/session defaults UNSUPPLIED/UNCONFIRMED, no app/test imports or SHOW query executed."
+    },
+    "coverage_contract": [
+      "Actual issued cap + canonical current verifier on same Session/root; OptionEngine/schema_translate_map; B1 borrowed Connection original actual DB root; no reentry/late plan.",
+      "Actual SQL events/PID on request Connection + pg_blocking_pids/pg_locks, no sleep races; same client waits/different client progresses, reader and writer both directions.",
+      "CA before Installation; missing/new CA conflict rollback before different installation key; Family before old Token; code/request/nonce single use; current request owner/expiry/finished after wait.",
+      "Client/App/CA/installation/credential/grant/User tv/lock/member revocation; current Role pointer drift; transient membership; native raw JWT/MAX_SESSION after nonce wait; valid visit bearer rejected before writer.",
+      "Real public PKCE/confidential user/machine without User; original selected credential distinct from family credential; refresh reuse durable revocation on error; unknown/already-revoked token idempotency.",
+      "Conditional GET binding/subject call retained; ordinary partial family/token/code after unordered OIDC failure rolls back; replacement-set flush + native denial restores old complete sets; cancel/rollback no partial."
+    ]
+  },
+  "verification": {
+    "diff_check": "No whitespace diagnostics at source freeze",
+    "stdlib_ast_memory_compile": "5 authored Python files parsed and compiled in memory without exec/import; no syntax diagnostics; NOT runtime acceptance",
+    "independent_source_review": "PENDING",
+    "runtime": "NOTRUN",
+    "full_ci": "NOTRUN"
+  },
+  "outside_closure": [
+    {
+      "path": "clearledger/server/app/services/docs_portal.py",
+      "symbol": "close_session",
+      "range": [
+        142,
+        154
+      ],
+      "raw_sha256": "2d073a7036fd59f85d1334a54516de183654016097f2d55e715a58ca29a15532",
+      "status": "OUTSIDE exact17/exact7; original direct RevokeEndpoint(server).revoke_token has writer None. Compatibility retained ONLY at that callback, no invented cap/plan; ROOT separate owner required for outer logout dirty/autoflush + Family/Token/DocsSession order."
+    },
+    "Auth PR102/native/module/Role/company/AppRegistry/reference writers and schema4 fixture/parser/hashes stay their owners; no source acceptance transferred.",
+    "CreateProfile/allowset/receipt/contracts:create authority absent; no model/schema/DTO/registry/company/flags edits.",
+    "Full B/all API/real partner/live ingress/SSO/release/flags activation remain unproven.",
+    "Arbitrary caller isolation is outside this acceptance: READ COMMITTED is required, RR current-after-wait is not proven/rejected by existing helper. ROOT admission must confirm/enforce actual mode."
+  ],
+  "external_historical_evidence_not_this_task": {
+    "legacy_helper": "Historical minimal99PASS vs native ROOT326 27 cases18FAIL9PASS (16 OptionEngine,2 AST); old failures not erased or relabeled.",
+    "later_root": "Live dispatch/coordinator report helper135/native27/body27 accepted on ROOT composition independently; not run or accepted by this author and not identity acceptance.",
+    "composition_after_this_task": "Final ROOT composition/schema4/admitted URL/runtime receipt UNSUPPLIED."
+  },
+  "original_program": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "original_program_source_pin": {
+    "path": "/home/mag/orca/workspaces/ecosystem-deploy/parallel-ownership-audit-20261031/docs/api/execution-20261029/parallel-ownership-audit-20261031/support-f07-pg-acceptance/ORIGINAL-PROGRAM.json",
+    "bytes": 11555,
+    "sha256": "84f8dd31e6e047bf6fc647f4e601c1c89783dc8ebbeb4fe324814d51a7fb2ba1"
+  },
+  "original_program_read_from": {
+    "path": "/srv/projects/preview/contract-create-workflow-20261101/report.json",
+    "current_raw_sha256": "324a459fa5bf191d488c45425a72c7c6f760de6e2e981eb9b12be7b1eda203d0",
+    "historical_original_raw_sha256": "84f8dd31e6e047bf6fc647f4e601c1c89783dc8ebbeb4fe324814d51a7fb2ba1"
+  },
+  "original_program_semantic_equal": true,
+  "global_completion_asserted": false,
+  "parent_completion_matrix_modified": false
+}
