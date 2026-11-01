@@ -1,6 +1,8 @@
 # РусГидро: Source-пакет будущей приёмки 25 READ-cases
 
-Статус: **Source only; runtime NOT RUN, collection NOT RUN**. Это новый
+Исходный статус авторского пакета: **Source only; runtime NOT RUN, collection NOT RUN**.
+Фактический Root-прогон и его ограничения приведены в
+[отдельном отчёте](RUSHYDRO_PRODUCT_READS_NATIVE_VERIFICATION_20261101.md). Это новый
 сквозной golden существующего API, а не новый API или результат приёмки.
 Файл `server/tests/test_rushydro_product_reads_native_pg.py` содержит четыре
 параметризованных async test-def и ровно 25 буквальных cases. Проверки Source
