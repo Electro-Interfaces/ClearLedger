@@ -266,7 +266,8 @@ async def seed(w, path):
                 valid_until="2030-12-31", created_at=at, raw={"private": "NEVER-EXPOSE"}))
         for identifier, company, obj in ((E1, ca, O1), (E2, ca, O2), (EF, cb, OF)):
             db.add(EzsEquipmentUnit(id=UUID(identifier), company_id=company, kind="station", vendor="Synthetic",
-                model="Model A", serial_number="SYN-001", power_kwt=22.0, state="in_operation",
+                model="Model A", serial_number={E1: "SYN-001", E2: "SYN-HIDDEN", EF: "SYN-FOREIGN"}[identifier],
+                power_kwt=22.0, state="in_operation",
                 current_location_id=obj, created_at=at, extra={"private": "NEVER-EXPOSE"}))
         kinds = (uuid4(), uuid4())
         db.add_all([DocKind(id=kid, company_id=company, code="synthetic-read", name="Учебный вид", fields=[], route=[])
