@@ -44,9 +44,9 @@ def admit(config):
     if (parsed.scheme, parsed.hostname, parsed.port, unquote(parsed.path), parsed.query, parsed.fragment,
         parsed.username, parsed.password) != ('postgresql+asyncpg', '127.0.0.1', 33546, '/' + TARGET, '', '', 'clearledger', 'api_test_only'):
         raise RuntimeError('ROOT exact disposable target required')
-    # Прежний frozen envelope отказывает новому source. Только ROOT готовит
-    # проверенную замену; нового env flag или локального bypass нет.
-    from tests.schema_gate_history_compatibility_approved import require_running_approval
+    # Новый native profile требует независимый private contract ROOT.
+    # До него нет project/ORM/driver/fixture imports или соединений.
+    from tests.partner_contract_schema_v4_approval import require_running_approval
     require_running_approval()
     config.validate()
     expected = EXACT_DSN.replace('postgresql+asyncpg:', 'postgresql:', 1)
