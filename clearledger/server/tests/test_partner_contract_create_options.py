@@ -6,19 +6,20 @@ real auth and database behavior belongs to the separate ROOT-admitted PG suite.
 import ast
 from copy import copy
 from dataclasses import replace
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api_contracts.context import (AccessContext, CREATE_OPTIONS_KEY, CreateOptionsPreflight,
     Principal, PrincipalKind, ResourcePermission, ResourceScope)
 from app.api_contracts.routing import ResourceStage, RoutePolicy, authorize
-from app.product_api import contract_create_options as options, dto
+from app.product_api import budget, contract_create_options as options, dto
 
 KEY = b"fictional-existing-cursor-key-32-bytes"
 BINDING = ("GET", "/api/v1/contracts/create-options", "getContractCreateOptions",
@@ -51,9 +52,73 @@ def test_literal_utf8_not_normalized(value):
     assert options._pack(value) != options._pack(value + " ")
     cursor = options.encode_cursor(KEY, BINDING, "location", 1, value, 1300)
     assert options.decode_cursor(cursor, KEY, BINDING, "location", 1, 1000) == (value, 1300)
-    payload = json.loads(options._unb64(cursor.split(".")[0]))
-    assert set(payload) == {"version", "resource", "pageSize", "lastValue", "expiry", "digest"}
-    assert payload["lastValue"] == value
+    payload = options._unb64(cursor.split(".")[0])
+    assert payload[:3] == bytes((2, 2, 1))
+    assert int.from_bytes(payload[11:13], "big") == len(value.encode("utf-8"))
+    assert payload[45:] == value.encode("utf-8")
+
+
+@pytest.mark.parametrize("value", ["\x01"*255+"a", "\U00010000"*256,
+    " \U0001f600" + "\U0010ffff"*253 + " ", "  Unstripped Type  "])
+def test_legal_type_cursor_capacity_and_exact_roundtrip(value):
+    cursor = options.encode_cursor(KEY, BINDING, "type", 1, value, 1300)
+    assert len(cursor) <= 1470 < 2048
+    assert len(options._unb64(cursor.split(".")[0])) == 45 + len(value.encode("utf-8"))
+    assert options.decode_cursor(cursor, KEY, BINDING, "type", 1, 1000) == (value, 1300)
+
+
+@pytest.mark.parametrize("resource,value", [("organization", str(UUID(int=1))),
+    ("counterparty", str(UUID(int=2))), ("location", "\U0010ffff"*40)])
+def test_other_legal_cursor_domains_are_bounded(resource, value):
+    cursor = options.encode_cursor(KEY, BINDING, resource, 100, value, 1300)
+    assert len(cursor) <= 318  # location: 45 + 40*4 bytes, 274 + 1 + 43 chars.
+    assert options.decode_cursor(cursor, KEY, BINDING, resource, 100, 1000) == (value, 1300)
+
+
+@pytest.mark.parametrize("fault", ["short", "oversize", "version", "resource", "page_size",
+    "length", "trailing", "utf8", "nul", "blank", "long_value", "digest", "uuid"])
+def test_authenticated_malformed_binary_cursor_is400(fault):
+    # Valid MAC deliberately isolates the bounded binary decoder from MAC rejection.
+    raw = options._unb64(options.encode_cursor(KEY, BINDING, "type", 1, "type", 1300).split(".")[0])
+    resource = "type"
+    if fault == "short": raw = raw[:44]
+    elif fault == "oversize": raw += b"x"*1070
+    elif fault == "version": raw = b"\x01" + raw[1:]
+    elif fault == "resource": raw = raw[:1] + b"\xff" + raw[2:]
+    elif fault == "page_size": raw = raw[:2] + b"\x00" + raw[3:]
+    elif fault == "length": raw = raw[:11] + b"\xff\xff" + raw[13:]
+    elif fault == "trailing": raw += b"x"
+    elif fault == "digest": raw = raw[:13] + bytes([raw[13] ^ 1]) + raw[14:]
+    else:
+        value = {"utf8": b"\xff", "nul": b"a\x00", "blank": b" \t ",
+            "long_value": b"x"*257, "uuid": b"not-a-uuid"}[fault]
+        raw = raw[:11] + len(value).to_bytes(2, "big") + raw[13:45] + value
+        if fault == "uuid":
+            resource = "organization"
+            raw = raw[:1] + b"\x00" + raw[2:]
+    encoded = options._b64(raw)
+    cursor = encoded + "." + options._b64(options._mac(KEY, "cursor-v2", (BINDING, encoded)))
+    with pytest.raises(HTTPException) as failure:
+        options.decode_cursor(cursor, KEY, BINDING, resource, 1, 1000)
+    assert failure.value.status_code == 400
+
+
+@pytest.mark.parametrize("error", [HTTPException(403), StarletteHTTPException(429, headers={"Retry-After": "7"}),
+    budget.BudgetExceeded(7), RequestValidationError([])])
+def test_lifetime_source_reraises_framework_protocol_after_mandatory_cleanup(error):
+    # No Session/verifier stand-in. Actual cross-yield 422 and quota429 are PG cases.
+    module = ast.parse((ROOT / "app/product_api/contract_create_options.py").read_bytes())
+    lifetime = next(n for n in module.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "request_lifetime")
+    outer = next(n for n in lifetime.body if isinstance(n, ast.Try))
+    handler = outer.handlers[0]
+    assert ast.dump(handler.type) == ast.dump(ast.parse("(StarletteHTTPException, RequestValidationError)", mode="eval").body)
+    assert isinstance(error, (options.StarletteHTTPException, options.RequestValidationError))
+    assert len(handler.body) == 1 and isinstance(handler.body[0], ast.Raise) and handler.body[0].exc is None
+    cleanups = [n for n in ast.walk(outer) if isinstance(n, ast.Try) and n.finalbody
+        and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "_rollback"
+            for statement in n.finalbody for c in ast.walk(statement))]
+    assert len(cleanups) == 2 and all(not n.handlers for n in cleanups)
+    assert outer.finalbody and "request.scope.pop" in ast.unparse(outer.finalbody[0])
 
 
 def test_canonical_length_prefix_domain_separation_and_set_order():

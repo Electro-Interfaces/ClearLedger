@@ -411,6 +411,63 @@ async def test_opaque_paging_newtoken_binding_ttl_and_generation(options_world, 
     closed(h)
 
 
+@pytest.mark.parametrize("pair", [("\x01"*255+"a", "\x01"*255+"b"),
+    ("\U00010000"*256, "\U00010000"*255+"\U00010001"), ("  Type A  ", "  Type B  ")])
+async def test_actual_legal_type_pair_has_bounded_cursor_and_lossless_second_page(options_world, pair):
+    h, w = options_world, options_world.w
+    async with w.factory() as db:
+        await db.execute(delete(Type).where(Type.profile_id == w.profile))
+        for code in pair:
+            await db.execute(text("INSERT INTO core.contract_types(code,label,is_active) VALUES (:c,'Synthetic',true)"), {"c": code})
+            w.owned["type_codes"] += (code,)
+            db.add(Type(profile_id=w.profile, type_code=code))
+        await db.commit()
+    before, stamps = await state(w), len(authority._ISSUED)
+    first = await get(h, "type", pageSize=1)
+    assert values(first) == [pair[0]]
+    cursor = first.json()["nextCursor"]
+    assert cursor and len(cursor) <= 1470 < 2048
+    second = await get(h, "type", pageSize=1, cursor=cursor)
+    assert values(second) == [pair[1]] and second.json()["nextCursor"] is None
+    assert first.json()["selectionVersion"] == second.json()["selectionVersion"]
+    assert await state(w) == before and len(authority._ISSUED) == stamps
+    closed(h)
+
+
+@pytest.mark.parametrize("query", [{}, dict(resource="wrong"), dict(resource="type", pageSize=0),
+    dict(resource="type", unknown="query")])
+async def test_actual_invalid_query422_consumes_real_quota_then_preserves_original429(options_world, monkeypatch, query):
+    h, w, failures = options_world, options_world.w, []
+    h.child.state.product_settings = replace(h.child.state.product_settings,
+        budget_policy=lambda: budget.Policy(enabled=True, request_limit=1))
+    enforce = budget.enforce
+
+    async def observe_original_enforce(*args):
+        try:
+            return await enforce(*args)
+        except budget.BudgetExceeded as error:
+            failures.append(error)
+            assert h.lifetimes[-1][0] == "closed"
+            raise
+
+    monkeypatch.setattr(budget, "enforce", observe_original_enforce)
+    before, stamps = await state(w), len(authority._ISSUED)
+    first = await h.http.get(PATH, params=query, headers={"Authorization": "Bearer " + w.bearer})
+    problem(first, 422, "invalid_request")
+    assert len(h.sessions) == 3 and len(h.snapshot_sql) == 1 and not failures
+    closed(h)
+    second = await get(h, "type")
+    problem(second, 429, "rate_limited")
+    assert len(failures) == 1 and second.headers["retry-after"] == failures[0].headers["Retry-After"]
+    assert int(second.headers["retry-after"]) >= 1
+    assert len(h.sessions) == 5 and len(h.snapshot_sql) == 1
+    async with w.factory() as reader:
+        assert await reader.scalar(text("SELECT used FROM core.product_api_budgets WHERE company_id=:c AND installation_id=:i AND client_id=:cl"),
+            {"c": w.company, "i": w.iid, "cl": w.client_id}) == 2
+    assert await state(w) == before and len(authority._ISSUED) == stamps
+    closed(h)
+
+
 async def test_quota_closed_before_readonly_root_and_no_business_dml(options_world, monkeypatch):
     h, w, actual = options_world, options_world.w, []
     h.child.state.product_settings = replace(h.child.state.product_settings,

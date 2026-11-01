@@ -8,13 +8,14 @@ import base64
 from contextlib import asynccontextmanager
 import hashlib
 import hmac
-import json
 import time
 from uuid import UUID
 
 from anyio import CancelScope
 from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api_contracts.context import CREATE_OPTIONS_KEY
 from . import access, budget, dto
@@ -82,13 +83,22 @@ def selection_version(key, binding):
 
 
 def encode_cursor(key, binding, resource, page_size, last_value, expires):
-    payload = {"version": 1, "resource": resource, "pageSize": page_size,
-        "lastValue": last_value, "expiry": expires, "digest": selection_version(key, binding)}
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    result = _b64(raw) + "." + _b64(_mac(key, "cursor", (binding, raw.decode("utf-8"))))
-    if len(result) > 2048:
+    # Opaque v2: version/resource/pageSize (1 byte each), expiry (8), UTF8
+    # byte length (2), selection digest (32), then unchanged UTF8 lastValue.
+    # At most 45 + 256*4 = 1069 bytes => 1426 base64 + dot + 43 MAC = 1470.
+    if (type(resource) is not str or resource not in RESOURCES
+            or type(page_size) is not int or not 1 <= page_size <= 100
+            or type(expires) is not int or not 0 <= expires < 2**64
+            or type(last_value) is not str or "\x00" in last_value
+            or not 1 <= len(last_value) <= (256 if resource == "type" else 40)
+            or (resource == "type" and not last_value.strip())
+            or (resource in RESOURCES[:2] and str(UUID(last_value)) != last_value)):
         _unavailable()
-    return result
+    value = last_value.encode("utf-8", errors="strict")
+    raw = (bytes((2, RESOURCES.index(resource), page_size)) + expires.to_bytes(8, "big")
+        + len(value).to_bytes(2, "big") + _mac(key, "selection", binding) + value)
+    encoded = _b64(raw)
+    return encoded + "." + _b64(_mac(key, "cursor-v2", (binding, encoded)))
 
 
 def decode_cursor(cursor, key, binding, resource, page_size, now):
@@ -97,22 +107,24 @@ def decode_cursor(cursor, key, binding, resource, page_size, now):
             raise ValueError()
         encoded, signature = cursor.split(".")
         raw, mac = _unb64(encoded), _unb64(signature)
-        if not hmac.compare_digest(mac, _mac(key, "cursor", (binding, raw.decode("utf-8")))):
+        if not hmac.compare_digest(mac, _mac(key, "cursor-v2", (binding, encoded))):
             raise ValueError()
-        value = json.loads(raw)
-        if (type(value) is not dict or set(value) != {"version", "resource", "pageSize", "lastValue", "expiry", "digest"}
-                or type(value["version"]) is not int or value["version"] != 1
-                or value["resource"] != resource or type(value["pageSize"]) is not int
-                or value["pageSize"] != page_size or type(value["lastValue"]) is not str
-                or not value["lastValue"] or type(value["expiry"]) is not int
-                or not now < value["expiry"] <= now + CURSOR_TTL_SECONDS
-                or type(value["digest"]) is not str
-                or not hmac.compare_digest(value["digest"], selection_version(key, binding))):
+        if (not 45 <= len(raw) <= 1069 or raw[0] != 2
+                or type(resource) is not str or resource not in RESOURCES
+                or raw[1] != RESOURCES.index(resource)
+                or type(page_size) is not int or not 1 <= page_size <= 100 or raw[2] != page_size
+                or int.from_bytes(raw[11:13], "big") != len(raw) - 45
+                or not hmac.compare_digest(raw[13:45], _mac(key, "selection", binding))):
             raise ValueError()
-        # Reject duplicate JSON keys, noncanonical forms and alternate encodings.
-        if json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") != raw:
+        expires = int.from_bytes(raw[3:11], "big")
+        last_value = raw[45:].decode("utf-8", errors="strict")
+        if (not now < expires <= now + CURSOR_TTL_SECONDS
+                or "\x00" in last_value
+                or not 1 <= len(last_value) <= (256 if resource == "type" else 40)
+                or (resource == "type" and not last_value.strip())
+                or (resource in RESOURCES[:2] and str(UUID(last_value)) != last_value)):
             raise ValueError()
-        return value["lastValue"], value["expiry"]
+        return last_value, expires
     except (ValueError, TypeError, KeyError, UnicodeError):
         _invalid_cursor()
 
@@ -290,7 +302,7 @@ async def request_lifetime(request: Request):
                         _unavailable()
                 finally:
                     await _rollback(db)
-    except HTTPException:
+    except (StarletteHTTPException, RequestValidationError):
         raise
     except Exception:
         _unavailable()
