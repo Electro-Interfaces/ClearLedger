@@ -134,7 +134,8 @@ def sign(secret: str, event_id: str, timestamp: int, body: str) -> str:
 async def publish(db: AsyncSession, company_id: uuid.UUID, event_type: str,
                   subject: str, data: dict[str, Any], *,
                   occurred_at: datetime | None = None,
-                  correlation_id: str | None = None) -> int:
+                  correlation_id: str | None = None,
+                  expected_parents: Any = None) -> int:
     """Поставить событие в очередь — В ТОЙ ЖЕ транзакции, что и само изменение.
 
     Возвращает число адресатов. Ноль — законный исход: никто не подписан, значит
@@ -150,6 +151,10 @@ async def publish(db: AsyncSession, company_id: uuid.UUID, event_type: str,
         EventSubscription.company_id == company_id,
         EventSubscription.enabled.is_(True),
         EventSubscription.event_types.any(event_type)))).scalars().all()
+    if expected_parents is not None:
+        if {row.id: row.company_id for row in rows} != expected_parents.require(db):
+            from fastapi import HTTPException
+            raise HTTPException(409, "Подписки изменились одновременно; повторите запрос")
     if not rows:
         return 0
     event_id = uuid.uuid4()
