@@ -513,3 +513,27 @@ async def test_cancelled_partial_B_is_released_for_new_whole_root(store):
                 scope_company_ref="synthetic", scope_organization_id=str(ORG)), 15)
         locks.require_scoped_locks(db.sync_session, prepared.capability, prepared.plan.requests)
         await db.rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor_state", ["transient", "detached", "expired"])
+async def test_direct_caller_actor_state_preserves_raw_identity_and_uses_fresh_db_actor(store, actor_state):
+    async with store.factory() as db:
+        if actor_state == "transient":
+            actor = User(id=A, company_id=OTHER, email="stale@example.invalid", is_superadmin=True)
+        elif actor_state == "detached":
+            async with store.factory() as reader:
+                actor = await reader.get(User, A)
+                reader.expunge(actor)
+        else:
+            actor = await db.get(User, A)
+            db.expire(actor)
+        with native_claims_context(CLAIMS, None):
+            prepared = await native.prepare_native_write(db, actor, company_id=C, target_id=U,
+                scope_org=True, scope_company_ref="synthetic", scope_organization_id=str(ORG))
+        assert prepared.actor.id == A
+        assert prepared.actor.email == f"{A.int}@example.invalid"
+        assert not prepared.actor.is_superadmin
+        assert prepared.actor.company_id == HOME
+        assert prepared.scope_organization_id == ORG
+        await db.rollback()

@@ -50,7 +50,8 @@
     "physical_row_order": "Complete initial B -> Company SHARE -> User SHARE -> Role SHARE -> readonly known-error admission -> scoped proposed Org SHARE -> все Member rows (actor SHARE/target UPDATE), defaultFalse schedule прежний.",
     "transaction": "Setter после всех чтений; прежние audit/action/target/details; explicit route commit, затем прежний _resp; rollback принадлежит caller.",
     "audit_limit": "log_audit вызывает background dispatch_async до commit; новая outbox-гарантия отсутствует.",
-    "candidate_drift": "Фиксируются initial proposed owner/existence и фактически row-locked scalar candidate. После Org-фазы новый effective nonNone SET вне held candidate -> whole-root409 до setter, без late lock/retry; raw None/omitted RETAIN и disappearing/foreign/invalid CLEAR исключены из этого сравнения."
+    "candidate_drift": "Фиксируются initial proposed owner/existence и фактически row-locked scalar candidate. После Org-фазы новый effective nonNone SET вне held candidate -> whole-root409 до setter, без late lock/retry; raw None/omitted RETAIN и disappearing/foreign/invalid CLEAR исключены из этого сравнения.",
+    "actor_identity": "Persisted/expired actor использует ORM identity tuple без синхронной загрузки; transient direct caller сохраняет прежний raw actor.id. После ожиданий actor перечитывается из БД с прежними claims/ACL. UUID не приводится к другому типу."
   },
   "compatibility": {
     "claims_None": "401 по прежнему nativeUserRole контракту",
@@ -512,7 +513,7 @@
     },
     "pg": {
       "path": "clearledger/server/tests/test_native_member_scope_org_locks_pg.py",
-      "top_level_test_function_count": 17,
+      "top_level_test_function_count": 18,
       "parameterized_runtime_case_count": "NOT COLLECTED; не выводится из числа функций",
       "executed": 0,
       "collection": "NOTRUN"

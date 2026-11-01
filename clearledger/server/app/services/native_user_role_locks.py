@@ -98,7 +98,8 @@ async def prepare_native_write(
     Role deletion holds Role X over holder updates, without late holder User keys.
     """
     assert_native_clean(db)
-    aid = inspect(actor).identity[0] if scope_org else actor.id
+    actor_identity = inspect(actor).identity if scope_org else None
+    aid = actor_identity[0] if actor_identity else actor.id
     claims = current_token_claims()
     with db.no_autoflush:
         user_ids = sorted({aid} | ({target_id} if target_id is not None else set()))
