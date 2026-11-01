@@ -1,3 +1,21 @@
+# M15: текущий узкий ремонт after-wait, SOURCE ONLY
+
+Текущий статус: AUTHORED / NOTRUN здесь, включая collection; авторского SOURCE_PASS и runtime acceptance нет. Основание — ROOT msg_32808f0cc2b0. Следующий gate — целевое review ROOT, без новой волны FULL7; после доказательства точного source ROOT повторяет все36 parent cases. Полные497 authored variants/collection остаются NOTRUN.
+
+Текущая композиция ROOT: база `c67b49f94918a3c72faaabc60e814060c7d54af4`, tree `5c917073f18af7bedccb7bcdf6fb2e57ce083dfb`. Новый test source cut `809cbd486200975f41ae78fbbc237680b12d5383`, parent `c67b49f94918a3c72faaabc60e814060c7d54af4`, tree `5418d0f287e1de70459a07c308e54fb66353492c`. Рабочая копия `/home/mag/orca/workspaces/ledger-app/partner-contract-activation-after-wait-repair-20261101`, ветка `MagLook/test-m15-after-wait`. Этот документ и JSON — отдельный docs2-only child; final HEAD фиксируется во внешнем отчёте без self-pin.
+
+В PG изменено только тело `test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates`: parent → `FROM organizations`, profile → `FROM partner_contract_create_profiles`, children → `FROM partner_contract_create_principals`. Typed `pg_advisory_xact_lock` и type `core.contract_types` прежние. Проверка `injected == [True]` отделена с диагностикой phase/fault/injected; status-set {401,403,409,503} и `response.text` сохранены. Raw inverse и AST inverse восстанавливают c67; decorators/parameters, остальные определения и globals прежние. PG SHA256 `05eb6c901e32b925c8db54f379d01825cf415c95758b83d0b5f51b35cd17278a`, blob `aad54ce01e6546d4a509a67c64660a5dc05b0468`. AST-учёт прежний:12 PG definitions,488 PG +6 source +3 M15 guards =497; это не collection.
+
+SECONDARY Root observation `FIRST_PARENT36_NOT_ACCEPTED` относится строго к source `1209792731c697bd0629505a240d804f00d13594`:36 collected,33 PASS,3 FAIL (parent fault на parent/profile/children),0 errors,0 skips. Negative parent UPDATE в этих трёх фазах =0, typed/type =1. Реальные ORM FROM не содержали `core.`; намеренный fault не исполнился, поэтому HTTP200 сам по себе не доказывает обход авторизации. Первые36 не приняты. Все31 checkpoint parent cases PASS сообщены только вторичным сообщением ROOT; здесь не запускались.
+
+Прочитан только разрешённый производный sanitized JSON `/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/m15-parent36-first-failure-observation-20261101.json`, SHA256 `c85a48ef11bde624b03ccd8b041c9b94ac0023c67f3407088dee75f64794d09b`. Приватные RAW/controller/env/DSN и соседние артефакты не читались; чужой runtime не приписывается автору. Исходные failures и evidence SHA сохранены в JSON. Application/source, A/I/DPL, source-unit, oldPG corrected823, SDK, восемь guide pages и Quickstart побайтно прежние относительно c67; весь diff — ровно3 разрешённых пути.
+
+Проверки только FS/Git TEXT и собственный stdlib AST/hash/JSON/compile WITHOUT exec. Приложение, тесты/collection, SQLAlchemy, SQL/PG, HTTP и runtime не выполнялись. Original139 accepted823 и публичный report7c2 остаются отдельной историей, без переноса на497/36. Полная программа открыта: `/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program`, semantic SHA `4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345`,20 разделов M00–M19 +11 критериев, complete=false.
+
+Далее сохранена **история прежних F1/F2/F3 source cuts и gates** без изменения её pins, отрицательных reviews и failures. Упоминания «текущий», «теперь», старой рабочей копии и будущего FULL7 ниже относятся к тому историческому этапу; действующий статус и следующий gate определены выше и в JSON.current_after_wait_repair. Исторические b381/3f pins не переименованы в новый HEAD.
+
+---
+
 # M15: узкий ремонт F1/F2/F3, SOURCE ONLY
 
 Статус: AUTHORED / NOTRUN, включая collection. Авторского SOURCE_PASS нет. После обоих документов нужен свежий независимый FULL7 review всего cumulative exact7, затем отдельные ROOT gates. Код приложения, тесты, SQLAlchemy constructs/compile, SQL/PG/HTTP не запускались.

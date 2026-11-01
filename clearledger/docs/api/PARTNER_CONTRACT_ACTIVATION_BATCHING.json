@@ -1,5 +1,94 @@
 {
-  "status": "F1_F2_AUTHOR_REPAIR_SOURCE_ONLY_NOTRUN_PENDING_FRESH_INDEPENDENT_FULL7",
+  "status": "AFTER_WAIT_TEST_REPAIR_SOURCE_ONLY_NOTRUN_PENDING_ROOT_TARGETED_REVIEW",
+  "historical_status": "F1_F2_AUTHOR_REPAIR_SOURCE_ONLY_NOTRUN_PENDING_FRESH_INDEPENDENT_FULL7",
+  "current_after_wait_repair": {
+    "authority": "msg_32808f0cc2b0; task_25e93addcc16 / ctx_146511d92374",
+    "status": "AFTER_WAIT_TEST_REPAIR_SOURCE_ONLY_NOTRUN_PENDING_ROOT_TARGETED_REVIEW",
+    "root_composition_base": "c67b49f94918a3c72faaabc60e814060c7d54af4",
+    "root_composition_tree": "5c917073f18af7bedccb7bcdf6fb2e57ce083dfb",
+    "test_source_cut": "809cbd486200975f41ae78fbbc237680b12d5383",
+    "test_source_parent": "c67b49f94918a3c72faaabc60e814060c7d54af4",
+    "test_source_tree": "5418d0f287e1de70459a07c308e54fb66353492c",
+    "assigned_worktree": "/home/mag/orca/workspaces/ledger-app/partner-contract-activation-after-wait-repair-20261101",
+    "branch": "MagLook/test-m15-after-wait",
+    "documentation_policy": "One docs2-only child of test_source_cut; final HEAD is recorded in the external report, no self-referential HEAD pin.",
+    "historical_fields": "Existing base/source_cut/code_parent/source/inventories/F1-F3 reviews, pins and next gates below describe historical stages, not this current cut. They are preserved unchanged; current status and next gate are this object.",
+    "pg_path": "clearledger/server/tests/test_partner_contract_activation_batching_pg.py",
+    "pg_raw_sha256": "05eb6c901e32b925c8db54f379d01825cf415c95758b83d0b5f51b35cd17278a",
+    "pg_blob": "aad54ce01e6546d4a509a67c64660a5dc05b0468",
+    "pg_ast_sha256": "e02320c2a30e0a4fa64106e0b1a381593005097cddb818c5b55a9424e0f4a7d2",
+    "ast_serializer": "stdlib ast.dump(include_attributes=False), independently authored inspection; no project helper invoked",
+    "target_function": "test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_and_gates",
+    "target_lines": [
+      338,
+      387
+    ],
+    "target_ast_sha256": "eb4771e0af44230dcefdce8241c79c0b2590434d218bec61ab2ecbdd3c23c9a3",
+    "marker_changes": {
+      "parent": [
+        "core.organizations",
+        "FROM organizations"
+      ],
+      "profile": [
+        "core.partner_contract_create_profiles",
+        "FROM partner_contract_create_profiles"
+      ],
+      "children": [
+        "core.partner_contract_create_principals",
+        "FROM partner_contract_create_principals"
+      ]
+    },
+    "preserved_markers": {
+      "typed": "pg_advisory_xact_lock",
+      "type": "core.contract_types"
+    },
+    "assert_change": "Separate injected == [True] with phase/fault/injected diagnostic; identical status set {401,403,409,503} and response.text assertion.",
+    "invariants": "Only target body changed in PG; raw inverse and AST inverse equal c67. All decorators/parameters/other definitions/module globals and all other tree objects outside these exact3 paths frozen to c67; no source/application edit.",
+    "source_inventory": {
+      "PG_definitions": 12,
+      "PG_authored_variants": 488,
+      "source_guards": 6,
+      "M15_guards": 3,
+      "total_authored_variants": 497,
+      "collection": "NOTRUN here",
+      "runtime": "NOTRUN here; whole497 remains NOTRUN"
+    },
+    "secondary_root_observation": {
+      "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/m15-parent36-first-failure-observation-20261101.json",
+      "sha256": "c85a48ef11bde624b03ccd8b041c9b94ac0023c67f3407088dee75f64794d09b",
+      "status": "FIRST_PARENT36_NOT_ACCEPTED",
+      "exact_source": "1209792731c697bd0629505a240d804f00d13594",
+      "cases": 36,
+      "passed": 33,
+      "failed": 3,
+      "errors": 0,
+      "skips": 0,
+      "negative_parent_UPDATE_count": {
+        "typed": 1,
+        "parent": 0,
+        "profile": 0,
+        "type": 1,
+        "children": 0
+      },
+      "conclusion": "Actual issuer ORM uses the three unqualified FROM fragments; intended fault never ran in these three phases. HTTP200 alone does not demonstrate auth bypass. First36 remain NOT ACCEPTED.",
+      "provenance": "SECONDARY sanitized derived Root observation only; read only this authorized file. No private RAW/controller/env/DSN/sibling artifacts inspected; no own runtime claim.",
+      "all31_checkpoint_parent_cases": "PASS supplied in secondary Root message only; not independently executed or accepted here",
+      "retained_raw_evidence_sha256": {
+        "result": "2cd3d6e5fb0fe813d4c1333e3b36f11d1d723263fe406e860eae7d2c1511d0d9",
+        "actualSQL": "75d0f0084c1ca5930198114af3db49d1da242bb51795607f9fdbb372b7e20003"
+      }
+    },
+    "next_gate": "ROOT targeted review next, no new FULL7 wave per msg_32808f0cc2b0; ROOT reruns whole36 after exact-source proof. No author SOURCE_PASS or runtime acceptance.",
+    "program_reference": {
+      "reference": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+      "semantic_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+      "sections": 20,
+      "additional_criteria": 11,
+      "complete": false
+    },
+    "original139": "Accepted823 + public report7c2 history remains separate; no transfer to497/current36.",
+    "verification": "Own stdlib AST/hash/JSON/compile WITHOUT exec and FS/Git text only; no tests/collection/project imports/calls/SQL/PG/network except fixed Orca lifecycle/messages."
+  },
   "repository": "Electro-Interfaces/ClearLedger",
   "base": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
   "base_tree": "784f145d773619ae0a11379c005ef6bf61d110d2",

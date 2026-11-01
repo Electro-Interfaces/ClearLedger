@@ -359,9 +359,9 @@ async def test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_a
             await blocker.execute(text("SELECT id FROM core.partner_contract_create_principals WHERE profile_id=:p FOR UPDATE"), {"p": pid})
         task = asyncio.create_task(put(w))
         engine = w.factory.kw["bind"].sync_engine
-        marker = {"typed": "pg_advisory_xact_lock", "parent": "core.organizations",
-                  "profile": "core.partner_contract_create_profiles", "type": "core.contract_types",
-                  "children": "core.partner_contract_create_principals"}[phase]
+        marker = {"typed": "pg_advisory_xact_lock", "parent": "FROM organizations",
+                  "profile": "FROM partner_contract_create_profiles", "type": "core.contract_types",
+                  "children": "FROM partner_contract_create_principals"}[phase]
         def after_wait(conn, cursor, statement, params, context, many):
             if injected or marker not in statement or not (phase == "typed" or "FOR SHARE" in statement or "FOR UPDATE" in statement):
                 return
@@ -376,7 +376,8 @@ async def test_actual_listener_barrier_after_wait_keeps_fresh_auth_full_scalar_a
             try:
                 await blocker.commit()
                 response = await asyncio.wait_for(task, 10)
-                assert injected == [True] and response.status_code in {401, 403, 409, 503}, response.text
+                assert injected == [True], f"after-wait fault did not run: phase={phase}, fault={fault}, injected={injected}"
+                assert response.status_code in {401, 403, 409, 503}, response.text
             finally:
                 event.remove(engine, "after_cursor_execute", after_wait)
         finally:
