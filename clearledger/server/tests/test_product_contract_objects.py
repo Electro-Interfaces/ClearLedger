@@ -521,7 +521,8 @@ async def test_native_contract_locations_is_unchanged_and_partner_not_native(env
 async def test_canonical_and_browser_profiles_and_old_object_id_refs(env):
     schema = curated_openapi(env.product)
     registry = export_runtime_registry(env.product)
-    assert len(registry["operations"]) == 15
+    from tests.test_product_http_profile import assert_product_manifest
+    assert_product_manifest(schema, registry)
     operation = schema["paths"]["/contracts/{contractId}/objects"]["get"]
     assert operation["operationId"] == "listContractObjects"
     assert operation["security"] == [{"ProductOAuth": SCOPES}, {"ProductServiceOAuth": SCOPES}]

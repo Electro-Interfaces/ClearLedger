@@ -24,6 +24,67 @@ SCOPES = frozenset({key + ":read" for key in product.access.RESOURCES} |
                    {"monitoring:read", "documents.files:download"})
 
 
+# Current child application: retain the original GET subset as an exact oracle.
+EXPECTED_GET_MANIFEST = frozenset({
+    ("GET", "/objects", "listObjects"),
+    ("GET", "/objects/{objectId}", "getObject"),
+    ("GET", "/objects/{objectId}/monitoring", "getObjectMonitoring"),
+    ("GET", "/equipment", "listEquipment"),
+    ("GET", "/equipment/{equipmentId}", "getEquipment"),
+    ("GET", "/counterparties", "listCounterparties"),
+    ("GET", "/counterparties/{counterpartyId}", "getCounterparty"),
+    ("GET", "/contracts", "listContracts"),
+    ("GET", "/contract-types", "getContractTypeMetadata"),
+    ("GET", "/contracts/{contractId}", "getContract"),
+    ("GET", "/contracts/{contractId}/objects", "listContractObjects"),
+    ("GET", "/contracts/{contractId}/documents", "listContractDocuments"),
+    ("GET", "/documents", "listDocuments"),
+    ("GET", "/documents/{docId}", "getDocument"),
+    ("GET", "/documents/{docId}/versions/{versionId}/content", "downloadDocumentVersion"),
+})
+EXPECTED_PRODUCT_MANIFEST = EXPECTED_GET_MANIFEST | {("POST", "/contracts", "createContract")}
+USER_ONLY_GET_IDS = frozenset({"listContractDocuments", "listDocuments", "getDocument", "downloadDocumentVersion"})
+
+
+def assert_product_manifest(schema, registry):
+    """Exact method/path/id oracle; no HTTP or fixture execution."""
+    operations = registry["operations"]
+    assert len(operations) == 16
+    assert {(e["method"], e["path"], e["operationId"]) for e in operations} == EXPECTED_PRODUCT_MANIFEST
+    assert len({e["operationId"] for e in operations}) == 16
+    assert {(e["method"], e["path"], e["operationId"]) for e in operations
+            if e["method"] == "GET"} == EXPECTED_GET_MANIFEST
+    documented = [(method.upper(), path, op["operationId"])
+                  for path, item in schema["paths"].items() for method, op in item.items()]
+    assert len(documented) == 16 and set(documented) == EXPECTED_PRODUCT_MANIFEST
+
+
+def assert_product_policy_manifest(entries):
+    """Keep 11 service GETs, four user-only GETs and the separate CREATE stage."""
+    assert len(entries) == 16
+    assert {(method, e["path"], e["operationId"]) for e in entries
+            for method in e["methods"]} == EXPECTED_PRODUCT_MANIFEST
+    reads = [e for e in entries if "GET" in e["methods"]]
+    assert len(reads) == 15 and all(e["methods"] == ["GET"] for e in reads)
+    assert {(method, e["path"], e["operationId"]) for e in reads
+            for method in e["methods"]} == EXPECTED_GET_MANIFEST
+    assert sum("service" in e["principalKinds"] for e in reads) == 11
+    assert sum("service" not in e["principalKinds"] for e in reads) == 4
+    assert {e["operationId"] for e in reads if e["principalKinds"] == ["partner"]} == USER_ONLY_GET_IDS
+    assert all(e["principalKinds"] == (["partner"] if e["operationId"] in USER_ONLY_GET_IDS
+                                      else ["partner", "service"]) for e in reads)
+    writes = [e for e in entries if "POST" in e["methods"]]
+    assert len(writes) == 1
+    create = writes[0]
+    assert (create["methods"], create["path"], create["operationId"]) == (["POST"], "/contracts", "createContract")
+    assert create["principalKinds"] == ["partner", "service"]
+    assert create["scopes"] == ["contracts:create"]
+    assert create["owner"] == create["resourceType"] == "contracts" and create["action"] == "create"
+    assert create["tenantRequired"] is True and create["securityScheme"] == "ProductOAuth"
+    assert create["resourceStage"] == "create-newborn" and create["fields"] == []
+    assert "databaseAuthorityKinds" not in create
+
+
 @dataclass(frozen=True)
 class Verified:
     client_id: str = "synthetic-client"
@@ -179,9 +240,9 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state["domain"], [])
 
     async def test_405_preserves_framework_allow_without_executing_handler(self):
-        response = await self.request("POST")
+        response = await self.request("DELETE")
         self.problem(response, 405)
-        self.assertEqual(set(response.headers["allow"].replace(" ", "").split(",")), {"GET"})
+        self.assertEqual(response.headers["allow"], "GET")
         self.assertEqual(self.state["sessions"], 0)
         self.assertEqual(self.state["domain"], [])
 
@@ -242,9 +303,9 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         OpenAPIV31SpecValidator(schema).validate()
         entries = policy_registry(self.app)
         registry = export_runtime_registry(self.app)
-        self.assertEqual(len(entries), 15)
-        self.assertEqual(len({v["operationId"] for v in registry["operations"]}), 15)
-        for entry in entries:
+        assert_product_manifest(schema, registry)
+        assert_product_policy_manifest(entries)
+        for entry in (e for e in entries if "GET" in e["methods"]):
             with self.subTest(path=entry["path"]):
                 operation = schema["paths"][entry["path"]]["get"]
                 scopes = set(entry["scopes"])
@@ -263,6 +324,25 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
                     self.problem(await self.request(path=path), 403)
         self.assertEqual(self.state["domain"], [])
 
+    async def test_create_contract_metadata_is_separate_from_get_transport_fixtures(self):
+        # Metadata only: the legacy read verifier has no CREATE preflight/authority.
+        schema = curated_openapi(self.app)
+        assert_product_manifest(schema, export_runtime_registry(self.app))
+        assert_product_policy_manifest(policy_registry(self.app))
+        operation = schema["paths"]["/contracts"]["post"]
+        self.assertEqual(operation["operationId"], "createContract")
+        self.assertEqual(operation["security"], [{"ProductOAuth": ["contracts:create"]},
+                                                 {"ProductServiceOAuth": ["contracts:create"]}])
+        self.assertEqual(operation["x-access-policy"]["resourceStage"], "create-newborn")
+        self.assertEqual(operation["x-elsy-resource-policy"], "contracts:create")
+        self.assertEqual(operation["x-elsy-readiness"], "candidate")
+        self.assertEqual(operation["requestBody"], {"required": True, "content": {"application/json": {
+            "schema": {"$ref": "#/components/schemas/ContractCreateBody"}}}})
+        self.assertEqual(set(operation["responses"]),
+                         {"200", "201", "401", "403", "409", "413", "415", "422", "429", "500", "503"})
+        self.assertEqual(self.state["sessions"], 0)
+        self.assertEqual(self.state["domain"], [])
+
     async def test_all_json_handlers_have_typed_success_media_and_correlated_headers(self):
         # Only transport/projection fixtures: no SQL or monitoring aggregation claim.
         class DocumentDB:
@@ -279,7 +359,7 @@ class ProductHTTPProfile(unittest.IsolatedAsyncioTestCase):
         schema = curated_openapi(self.app)
         checked = []
         with patch.object(product.monitoring, "detail", AsyncMock(return_value=sample)):
-            for entry in policy_registry(self.app):
+            for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
                 if entry["operationId"] == "downloadDocumentVersion":
                     continue
                 path = entry["path"].replace("{objectId}", "point").replace("{equipmentId}", str(FILE))

@@ -114,11 +114,12 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
     async def test_formal_oas_local_refs_formats_and_examples(self):
         local_schema_gate(self.schema)
         for path in self.schema["paths"].values():
-            for response in path["get"]["responses"].values():
-                response = self.dereference(response)
-                for media in response["content"].values():
-                    if "example" in media:
-                        self.validate_value(media["example"], media["schema"])
+            for operation in path.values():
+                for response in operation["responses"].values():
+                    response = self.dereference(response)
+                    for media in response["content"].values():
+                        if "example" in media:
+                            self.validate_value(media["example"], media["schema"])
         for header in self.schema["components"]["headers"].values():
             for example in header.get("examples", {}).values():
                 self.validate_value(example["value"], header["schema"])
@@ -148,7 +149,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_actual_positive_12_handlers_match_response_headers_and_schemas(self):
         async with self.transport_projection():
-            for entry in policy_registry(self.app):
+            for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
                 with self.subTest(operation=entry["operationId"]):
                     response = await self.request(path=self.operation_path(entry))
                     self.assertEqual(response.status_code, 200, response.text)
@@ -161,7 +162,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn("ETag", operation["responses"]["200"]["headers"])
 
     async def test_actual_negative_12_handlers_match_problem_contract_and_have_no_domain_effect(self):
-        for entry in policy_registry(self.app):
+        for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
             operation = self.schema["paths"][entry["path"]]["get"]
             for status in (401, 403, 422, 503):
                 with self.subTest(operation=entry["operationId"], status=status):
@@ -192,7 +193,7 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         async with self.transport_projection():
             for status in (400, 404, 500):
                 self.state["failure"] = RuntimeError("SECRET internal state") if status == 500 else HTTPException(status, "SECRET detail")
-                for entry in policy_registry(self.app):
+                for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
                     with self.subTest(operation=entry["operationId"], status=status):
                         response = await self.request(path=self.operation_path(entry))
                         self.assertEqual(response.status_code, status, response.text)
@@ -201,11 +202,20 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
     async def test_405_profile_and_injected_429_are_application_only_not_new_operations(self):
         profile = self.schema["x-elsy-http-profile"]
         self.assertEqual(profile["scope"], "product-child-application")
-        for entry in policy_registry(self.app):
-            response = await self.request("POST", path=self.operation_path(entry))
+        known = profile["knownPaths"]
+        self.assertEqual(known["methods"], ["GET"])
+        self.assertEqual(known["methodOverrides"], {"/contracts": {"methods": ["GET", "POST"],
+            "unsupportedMethodResponse": {"$ref": "#/components/responses/ProductContractsMethodNotAllowed"}}})
+        for entry in (e for e in policy_registry(self.app) if "GET" in e["methods"]):
+            response = await self.request("DELETE", path=self.operation_path(entry))
             self.assertEqual(response.status_code, 405, response.text)
-            self.assert_response_contract(response, profile["knownPaths"]["unsupportedMethodResponse"])
-            self.assertNotIn("post", self.schema["paths"][entry["path"]])
+            self.assertEqual(response.headers["allow"], "GET, POST" if entry["path"] == "/contracts" else "GET")
+            contract = known["methodOverrides"].get(entry["path"], known)["unsupportedMethodResponse"]
+            self.assert_response_contract(response, contract)
+            if entry["path"] == "/contracts":
+                self.assertEqual(self.schema["paths"][entry["path"]]["post"]["operationId"], "createContract")
+            else:
+                self.assertNotIn("post", self.schema["paths"][entry["path"]])
         self.assertEqual(self.state["domain"], [])
         async def rate_limited(token, db):
             raise HTTPException(429, "SECRET limiter", headers={"Retry-After": "17"})
@@ -218,21 +228,51 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
         self.assertIn("outside", profile["edgeErrors"])
         self.assertNotIn("default", self.schema["paths"]["/objects"]["get"]["responses"])
 
+    async def test_allow_path_consts_and_contracts_description_remain_strict(self):
+        description = self.schema["paths"]["/contracts"]["get"]["description"]
+        self.assertIn("Known-path unsupported methods use 405 method_not_allowed with "
+                      "Allow: GET, POST. Cache-Control: no-store", description)
+        self.assertNotIn("Allow: GET.", description)
+        header = self.schema["components"]["headers"]["ProductAllow"]
+        self.assertEqual(header, {
+            "description": "Methods permitted on a matched application path (RFC 9110 section 15.5.6).",
+            "required": True, "schema": {"type": "string", "const": "GET"}, "example": "GET"})
+        alias = self.schema["components"]["headers"]["ProductContractsAllow"]
+        self.assertEqual(alias["schema"], {"type": "string", "const": "GET, POST"})
+        self.assertIs(alias["required"], True)
+        self.assertEqual(alias["example"], "GET, POST")
+        self.validate_value("GET", header["schema"])
+        self.validate_value("GET, POST", alias["schema"])
+        for value, schema in (("GET, POST", header["schema"]), ("GET", alias["schema"])):
+            with self.assertRaises(ValidationError):
+                self.validate_value(value, schema)
+        for value in ("", "POST", "HEAD", "GET,POST", "GET, POST, DELETE"):
+            for schema in (header["schema"], alias["schema"]):
+                with self.assertRaises(ValidationError):
+                    self.validate_value(value, schema)
+        self.assertEqual(self.schema["components"]["responses"]["ProductContractsMethodNotAllowed"]["headers"]["Allow"],
+                         {"$ref": "#/components/headers/ProductContractsAllow"})
+        self.assertEqual(self.schema["components"]["responses"]["ProductMethodNotAllowed"]["headers"]["Allow"],
+                         {"$ref": "#/components/headers/ProductAllow"})
+
     async def test_registry_policy_security_and_readiness_unchanged(self):
         registry = product.export_runtime_registry(self.app)
         self.assertEqual(registry["kind"], "policy-runtime-registry")
         self.assertEqual(registry["sourceRevision"], "offline-http-profile")
         self.assertEqual(self.schema["x-elsy-runtime-registry"], registry)
-        self.assertEqual(len(registry["operations"]), 15)
-        for entry in policy_registry(self.app):
-            operation = self.schema["paths"][entry["path"]]["get"]
-            self.assertEqual(operation["operationId"], entry["operationId"])
-            expected = [{"ProductOAuth": sorted(entry["scopes"])}]
-            if "service" in entry["principalKinds"]:
-                expected.append({"ProductServiceOAuth": sorted(entry["scopes"])})
-            self.assertEqual(operation["security"], expected)
-            self.assertEqual(operation["x-elsy-readiness"], "candidate")
-            self.assertEqual(operation["x-elsy-owner"], entry["owner"])
+        fixtures.assert_product_manifest(self.schema, registry)
+        entries = policy_registry(self.app)
+        fixtures.assert_product_policy_manifest(entries)
+        for entry in entries:
+            for method in entry["methods"]:
+                operation = self.schema["paths"][entry["path"]][method.lower()]
+                self.assertEqual(operation["operationId"], entry["operationId"])
+                expected = [{"ProductOAuth": sorted(entry["scopes"])}]
+                if "service" in entry["principalKinds"]:
+                    expected.append({"ProductServiceOAuth": sorted(entry["scopes"])})
+                self.assertEqual(operation["security"], expected)
+                self.assertEqual(operation["x-elsy-readiness"], "candidate")
+                self.assertEqual(operation["x-elsy-owner"], entry["owner"])
 
 
 if __name__ == "__main__":

@@ -573,7 +573,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                    'resource), 422 invalid_request, 429 rate_limited for the opt-in quota or '
                    'internal_error for generic injected HTTP429, 500 internal_error, 503 '
                    'api_unavailable. Known-path unsupported methods use 405 method_not_allowed with '
-                   'Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a '
+                   'Allow: GET, POST. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a '
                    'Bearer challenge. Quota 429 supplies Retry-After; generic 429/503 supplies it '
                    'only when available. Proxy errors and errors after streaming headers are '
                    'outside this Problem contract.'

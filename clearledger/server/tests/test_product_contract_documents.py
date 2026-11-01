@@ -610,7 +610,8 @@ async def test_cursor_literal_null_invalid(env):
 async def test_schema_has_fourteen_routes_and_user_only_document_relation(env):
     schema = curated_openapi(env.product)
     registry = export_runtime_registry(env.product)
-    assert len(registry["operations"]) == 15
+    from tests.test_product_http_profile import assert_product_manifest
+    assert_product_manifest(schema, registry)
     operation = schema["paths"]["/contracts/{contractId}/documents"]["get"]
     assert operation["operationId"] == "listContractDocuments"
     assert operation["security"] == [{"ProductOAuth": SCOPES}]
