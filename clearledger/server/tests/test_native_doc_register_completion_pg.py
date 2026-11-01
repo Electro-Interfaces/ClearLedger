@@ -399,8 +399,8 @@ async def test_native_error_precedence_and_manual_counter_unchanged(world, error
 async def test_native_selected_constraints_and_canonical_user_refs_are_real(world):
     w = world
     async with w.factory() as db:
-        # Bind the native core namespace and compare catalog identities, not
-        # search_path-dependent pg_get_constraintdef output or raw PG "char".
+        # Сравниваем OID и номера колонок схемы core: текст определения
+        # зависит от search_path, а внутренний PG "char" — от кодека.
         relations = (await db.execute(text(
             "SELECT c.oid, c.relname FROM pg_catalog.pg_class c "
             "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
