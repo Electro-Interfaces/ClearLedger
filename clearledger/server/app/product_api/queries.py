@@ -90,13 +90,18 @@ class Query:
                     *self.contract_domain(), Contract.counterparty_id == model.id,
                 ).correlate(model).exists())
         elif resource == "documents":
+            from app.services.doc_site_authority import partner_document_boundary
+            site, current_user = await partner_document_boundary(self.db, f, self.context, "read")
+            conditions.append(site)
             if f.user is None:
                 conditions.append(false())
             else:
                 from app.services.doc_access import _readable_doc_clause
-                conditions.append(await _readable_doc_clause(self.db, f.company_id, f.user))
+                conditions.append(await _readable_doc_clause(self.db, f.company_id, current_user))
             if f.objects.mode is not ScopeMode.ALL:
-                conditions.append(scope_clause(model.object_id, f.objects))
+                # Site's actual linked ObjectId is checked by both current
+                # issuer and raw membership in the Site boundary above.
+                conditions.append(or_(model.site_id.is_not(None), scope_clause(model.object_id, f.objects)))
             if f.organization_id is not None:
                 conditions.append(model.organization_id == f.organization_id)
         return conditions

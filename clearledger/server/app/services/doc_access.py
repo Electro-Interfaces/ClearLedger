@@ -133,129 +133,133 @@ async def _action_policy_allows(db: AsyncSession, cid: uuid.UUID,
 async def _can_doc(db: AsyncSession, cid: uuid.UUID, d: DocCard,
                    user: User, permission: str,
                    *, record_break_glass_use: bool = True) -> bool:
-    if (d.retention_state == "destruction_authorized"
-            and permission in {"download", "print", "send", "export"}):
-        return False
-    if (d.retention_state in {"primary_purged", "destroyed"}
-            and permission in _CONTENT_PERMISSIONS - {"read", "archive"}):
-        return False
-    rows = await _access_rows(db, cid, d)
-    subjects = await _subject_ids(db, cid, user)
-    if user.is_superadmin:
-        if permission == "archive":
+    with db.no_autoflush:
+        from app.services.doc_site_authority import document_site_allowed
+        if not await document_site_allowed(db, cid, d, user, permission):
             return False
-        if d.confidentiality != "strict":
-            return True
-        return await _active_break_glass(
-            db, cid, d, user, permission,
-            record_use=record_break_glass_use,
-        )
-    if permission != "read" and permission != "manage_acl":
-        if not await _can_doc(
-                db, cid, d, user, "read",
-                record_break_glass_use=record_break_glass_use):
+        if (d.retention_state == "destruction_authorized"
+                and permission in {"download", "print", "send", "export"}):
             return False
-    if _denied(rows, subjects, permission):
-        return False
-
-    if permission == "read":
-        inherited = {"read", "edit"}
-        if _visible(d, user) or any(
-                _matches_subject(row, subjects)
-                and inherited.intersection(row.permissions or []) for row in rows):
-            return True
-        assigned = await db.scalar(select(or_(
-            select(DocApproval.id).where(
-                DocApproval.doc_id == d.id,
-                DocApproval.assignee_id == user.id,
-            ).exists(),
-            select(DocAcquaint.id).where(
-                DocAcquaint.doc_id == d.id,
-                DocAcquaint.user_id == user.id,
-            ).exists(),
-        )))
-        if assigned:
-            return True
-        principals = await doc_approvals.active_principals_for(db, cid, user.id)
-        if (d.signatory_id in principals
-                and d.status in ("draft", "registered")):
-            return True
-        if not principals:
+        if (d.retention_state in {"primary_purged", "destroyed"}
+                and permission in _CONTENT_PERMISSIONS - {"read", "archive"}):
             return False
-        deputy_assignment = await db.scalar(select(DocApproval.id).where(
-            DocApproval.doc_id == d.id,
-            DocApproval.assignee_id.in_(principals),
-            DocApproval.round == d.approval_round,
-            DocApproval.status == "pending",
-        ).limit(1))
-        return deputy_assignment is not None
-
-    granted = any(
-        _matches_subject(row, subjects)
-        and permission in (row.permissions or []) for row in rows)
-    membership = await db.get(UserCompany, (user.id, cid))
-    if permission == "edit":
-        return granted or user.id in {d.author_id, d.responsible_id} or bool(
-            d.confidentiality != "private"
-            and membership and membership.role == "admin")
-    if permission == "approve":
-        assignees = (await db.execute(select(DocApproval.assignee_id).where(
-            DocApproval.doc_id == d.id,
-            DocApproval.status == "pending",
-        ))).scalars().all()
-        for assignee_id in {item for item in assignees if item}:
-            is_assignee = user.id == assignee_id
-            is_deputy = user.id in await doc_approvals.active_deputy_for(
-                db, cid, assignee_id)
-            if ((is_assignee or is_deputy)
-                    and await _action_policy_allows(
-                        db, cid, rows, "approve", assignee_id)):
+        rows = await _access_rows(db, cid, d)
+        subjects = await _subject_ids(db, cid, user)
+        if user.is_superadmin:
+            if permission == "archive":
+                return False
+            if d.confidentiality != "strict":
                 return True
-        return False
-    if permission == "sign":
-        deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
-                    if d.signatory_id else [])
-        if bool(
-            (user.id == d.signatory_id or user.id in deputies)
-            and await _action_policy_allows(
-                db, cid, rows, "sign", d.signatory_id)
-        ):
-            return True
-        sign_rows = list((await db.execute(select(DocApproval).where(
-            DocApproval.doc_id == d.id,
-            DocApproval.round == d.approval_round,
-            DocApproval.status == "pending",
-        ))).scalars().all())
-        for approval in sign_rows:
-            if doc_approvals.step_kind(approval) != "sign":
-                continue
-            is_assignee = user.id == approval.assignee_id
-            is_deputy = bool(
-                approval.assignee_id
-                and user.id in await doc_approvals.active_deputy_for(
-                    db, cid, approval.assignee_id)
+            return await _active_break_glass(
+                db, cid, d, user, permission,
+                record_use=record_break_glass_use,
             )
-            if ((is_assignee or is_deputy)
-                    and await _action_policy_allows(
-                        db, cid, rows, "sign", approval.assignee_id)):
-                return True
-        return False
-    if permission == "manage_acl":
-        return granted or user.id in {d.author_id, d.responsible_id} or bool(
-            membership and membership.role == "admin")
-    if permission == "archive":
-        return granted or bool(membership and membership.role == "admin")
-    if permission in {"download", "print", "send", "export"}:
-        if granted:
-            return True
-        if d.confidentiality == "strict":
+        if permission != "read" and permission != "manage_acl":
+            if not await _can_doc(
+                    db, cid, d, user, "read",
+                    record_break_glass_use=record_break_glass_use):
+                return False
+        if _denied(rows, subjects, permission):
             return False
-        fallback = "read" if permission in {"download", "print"} else "edit"
-        return await _can_doc(
-            db, cid, d, user, fallback,
-            record_break_glass_use=record_break_glass_use,
-        )
-    return granted
+
+        if permission == "read":
+            inherited = {"read", "edit"}
+            if _visible(d, user) or any(
+                    _matches_subject(row, subjects)
+                    and inherited.intersection(row.permissions or []) for row in rows):
+                return True
+            assigned = await db.scalar(select(or_(
+                select(DocApproval.id).where(
+                    DocApproval.doc_id == d.id,
+                    DocApproval.assignee_id == user.id,
+                ).exists(),
+                select(DocAcquaint.id).where(
+                    DocAcquaint.doc_id == d.id,
+                    DocAcquaint.user_id == user.id,
+                ).exists(),
+            )))
+            if assigned:
+                return True
+            principals = await doc_approvals.active_principals_for(db, cid, user.id)
+            if (d.signatory_id in principals
+                    and d.status in ("draft", "registered")):
+                return True
+            if not principals:
+                return False
+            deputy_assignment = await db.scalar(select(DocApproval.id).where(
+                DocApproval.doc_id == d.id,
+                DocApproval.assignee_id.in_(principals),
+                DocApproval.round == d.approval_round,
+                DocApproval.status == "pending",
+            ).limit(1))
+            return deputy_assignment is not None
+
+        granted = any(
+            _matches_subject(row, subjects)
+            and permission in (row.permissions or []) for row in rows)
+        membership = await db.get(UserCompany, (user.id, cid))
+        if permission == "edit":
+            return granted or user.id in {d.author_id, d.responsible_id} or bool(
+                d.confidentiality != "private"
+                and membership and membership.role == "admin")
+        if permission == "approve":
+            assignees = (await db.execute(select(DocApproval.assignee_id).where(
+                DocApproval.doc_id == d.id,
+                DocApproval.status == "pending",
+            ))).scalars().all()
+            for assignee_id in {item for item in assignees if item}:
+                is_assignee = user.id == assignee_id
+                is_deputy = user.id in await doc_approvals.active_deputy_for(
+                    db, cid, assignee_id)
+                if ((is_assignee or is_deputy)
+                        and await _action_policy_allows(
+                            db, cid, rows, "approve", assignee_id)):
+                    return True
+            return False
+        if permission == "sign":
+            deputies = (await doc_approvals.active_deputy_for(db, cid, d.signatory_id)
+                        if d.signatory_id else [])
+            if bool(
+                (user.id == d.signatory_id or user.id in deputies)
+                and await _action_policy_allows(
+                    db, cid, rows, "sign", d.signatory_id)
+            ):
+                return True
+            sign_rows = list((await db.execute(select(DocApproval).where(
+                DocApproval.doc_id == d.id,
+                DocApproval.round == d.approval_round,
+                DocApproval.status == "pending",
+            ))).scalars().all())
+            for approval in sign_rows:
+                if doc_approvals.step_kind(approval) != "sign":
+                    continue
+                is_assignee = user.id == approval.assignee_id
+                is_deputy = bool(
+                    approval.assignee_id
+                    and user.id in await doc_approvals.active_deputy_for(
+                        db, cid, approval.assignee_id)
+                )
+                if ((is_assignee or is_deputy)
+                        and await _action_policy_allows(
+                            db, cid, rows, "sign", approval.assignee_id)):
+                    return True
+            return False
+        if permission == "manage_acl":
+            return granted or user.id in {d.author_id, d.responsible_id} or bool(
+                membership and membership.role == "admin")
+        if permission == "archive":
+            return granted or bool(membership and membership.role == "admin")
+        if permission in {"download", "print", "send", "export"}:
+            if granted:
+                return True
+            if d.confidentiality == "strict":
+                return False
+            fallback = "read" if permission in {"download", "print"} else "edit"
+            return await _can_doc(
+                db, cid, d, user, fallback,
+                record_break_glass_use=record_break_glass_use,
+            )
+        return granted
 
 
 async def _assert_doc_permission(db: AsyncSession, cid: uuid.UUID, d: DocCard,
@@ -377,124 +381,133 @@ async def _available_actions(db: AsyncSession, cid: uuid.UUID, d: DocCard,
 
 async def _readable_docs(db: AsyncSession, cid: uuid.UUID, rows: list[DocCard],
                          user: User) -> list[DocCard]:
-    if user.is_superadmin:
-        return [row for row in rows if row.confidentiality != "strict"]
-    result: list[DocCard] = []
-    for row in rows:
-        if await _can_doc(db, cid, row, user, "read"):
-            result.append(row)
-    return result
+    with db.no_autoflush:
+        from app.services.doc_site_authority import document_site_allowed
+        rows = [row for row in rows
+                if await document_site_allowed(db, cid, row, user, "read")]
+        if user.is_superadmin:
+            return [row for row in rows if row.confidentiality != "strict"]
+        result: list[DocCard] = []
+        for row in rows:
+            if await _can_doc(db, cid, row, user, "read"):
+                result.append(row)
+        return result
 
 
 async def _readable_doc_clause(
     db: AsyncSession, cid: uuid.UUID, user: User,
 ) -> Any:
-    if user.is_superadmin:
-        return DocCard.confidentiality != "strict"
-    subjects = await _subject_ids(db, cid, user)
-    subject_filters = [
-        and_(DocAccessGrant.subject_type == subject_type,
-             DocAccessGrant.subject_id == subject_id)
-        for subject_type, subject_id in subjects.items() if subject_id
-    ]
-    inherited = {"read", "edit"}
-    principals = await doc_approvals.active_principals_for(db, cid, user.id)
-    clauses = [
-        DocCard.confidentiality == "company",
-        DocCard.author_id == user.id,
-        DocCard.responsible_id == user.id,
-        DocCard.signatory_id == user.id,
-        select(DocApproval.id).where(
-            DocApproval.company_id == cid,
-            DocApproval.doc_id == DocCard.id,
-            DocApproval.assignee_id == user.id,
-        ).correlate(DocCard).exists(),
-        select(DocAcquaint.id).where(
-            DocAcquaint.company_id == cid,
-            DocAcquaint.doc_id == DocCard.id,
-            DocAcquaint.user_id == user.id,
-        ).correlate(DocCard).exists(),
-    ]
-    if principals:
-        clauses.append(and_(
-            DocCard.signatory_id.in_(principals),
-            DocCard.status.in_(("draft", "registered")),
-        ))
-        clauses.append(select(DocApproval.id).where(
-            DocApproval.company_id == cid,
-            DocApproval.doc_id == DocCard.id,
-            DocApproval.assignee_id.in_(principals),
-            DocApproval.round == DocCard.approval_round,
-            DocApproval.status == "pending",
-        ).correlate(DocCard).exists())
-    if subject_filters:
-        clauses.append(select(DocAccessGrant.id).where(
-            DocAccessGrant.company_id == cid,
-            or_(*subject_filters),
-            or_(*[
-                DocAccessGrant.permissions.contains([permission])
-                for permission in inherited
-            ]),
-            or_(
-                and_(DocAccessGrant.scope_type == "doc",
-                     DocAccessGrant.scope_id == DocCard.id),
-                and_(DocAccessGrant.scope_type == "kind",
-                     DocAccessGrant.scope_id == DocCard.kind_id,
-                     DocCard.inherit_kind_acl.is_(True)),
-            ),
-        ).correlate(DocCard).exists())
-        denied = select(DocAccessGrant.id).where(
-            DocAccessGrant.company_id == cid,
-            or_(*subject_filters),
-            DocAccessGrant.denied_permissions.contains(["read"]),
-            or_(
-                and_(DocAccessGrant.scope_type == "doc",
-                     DocAccessGrant.scope_id == DocCard.id),
-                and_(DocAccessGrant.scope_type == "kind",
-                     DocAccessGrant.scope_id == DocCard.kind_id,
-                     DocCard.inherit_kind_acl.is_(True)),
-            ),
-        ).correlate(DocCard).exists()
-        return and_(or_(*clauses), ~denied)
-    return or_(*clauses)
+    with db.no_autoflush:
+        from app.services.doc_site_authority import document_site_filter
+        site = await document_site_filter(db, cid, user.id, "read")
+        if user.is_superadmin:
+            return and_(site, DocCard.confidentiality != "strict")
+        subjects = await _subject_ids(db, cid, user)
+        subject_filters = [
+            and_(DocAccessGrant.subject_type == subject_type,
+                 DocAccessGrant.subject_id == subject_id)
+            for subject_type, subject_id in subjects.items() if subject_id
+        ]
+        inherited = {"read", "edit"}
+        principals = await doc_approvals.active_principals_for(db, cid, user.id)
+        clauses = [
+            DocCard.confidentiality == "company",
+            DocCard.author_id == user.id,
+            DocCard.responsible_id == user.id,
+            DocCard.signatory_id == user.id,
+            select(DocApproval.id).where(
+                DocApproval.company_id == cid,
+                DocApproval.doc_id == DocCard.id,
+                DocApproval.assignee_id == user.id,
+            ).correlate(DocCard).exists(),
+            select(DocAcquaint.id).where(
+                DocAcquaint.company_id == cid,
+                DocAcquaint.doc_id == DocCard.id,
+                DocAcquaint.user_id == user.id,
+            ).correlate(DocCard).exists(),
+        ]
+        if principals:
+            clauses.append(and_(
+                DocCard.signatory_id.in_(principals),
+                DocCard.status.in_(("draft", "registered")),
+            ))
+            clauses.append(select(DocApproval.id).where(
+                DocApproval.company_id == cid,
+                DocApproval.doc_id == DocCard.id,
+                DocApproval.assignee_id.in_(principals),
+                DocApproval.round == DocCard.approval_round,
+                DocApproval.status == "pending",
+            ).correlate(DocCard).exists())
+        if subject_filters:
+            clauses.append(select(DocAccessGrant.id).where(
+                DocAccessGrant.company_id == cid,
+                or_(*subject_filters),
+                or_(*[
+                    DocAccessGrant.permissions.contains([permission])
+                    for permission in inherited
+                ]),
+                or_(
+                    and_(DocAccessGrant.scope_type == "doc",
+                         DocAccessGrant.scope_id == DocCard.id),
+                    and_(DocAccessGrant.scope_type == "kind",
+                         DocAccessGrant.scope_id == DocCard.kind_id,
+                         DocCard.inherit_kind_acl.is_(True)),
+                ),
+            ).correlate(DocCard).exists())
+            denied = select(DocAccessGrant.id).where(
+                DocAccessGrant.company_id == cid,
+                or_(*subject_filters),
+                DocAccessGrant.denied_permissions.contains(["read"]),
+                or_(
+                    and_(DocAccessGrant.scope_type == "doc",
+                         DocAccessGrant.scope_id == DocCard.id),
+                    and_(DocAccessGrant.scope_type == "kind",
+                         DocAccessGrant.scope_id == DocCard.kind_id,
+                         DocCard.inherit_kind_acl.is_(True)),
+                ),
+            ).correlate(DocCard).exists()
+            return and_(site, or_(*clauses), ~denied)
+        return and_(site, or_(*clauses))
 
 
 async def _archiveable_doc_clause(
     db: AsyncSession, cid: uuid.UUID, user: User,
 ) -> Any:
-    if user.is_superadmin:
-        return false()
-    readable = await _readable_doc_clause(db, cid, user)
-    subjects = await _subject_ids(db, cid, user)
-    subject_filters = [
-        and_(DocAccessGrant.subject_type == subject_type,
-             DocAccessGrant.subject_id == subject_id)
-        for subject_type, subject_id in subjects.items() if subject_id
-    ]
-    scope = or_(
-        and_(DocAccessGrant.scope_type == "doc",
-             DocAccessGrant.scope_id == DocCard.id),
-        and_(DocAccessGrant.scope_type == "kind",
-             DocAccessGrant.scope_id == DocCard.kind_id,
-             DocCard.inherit_kind_acl.is_(True)),
-    )
-    denied = select(DocAccessGrant.id).where(
-        DocAccessGrant.company_id == cid,
-        or_(*subject_filters),
-        DocAccessGrant.denied_permissions.contains(["archive"]),
-        scope,
-    ).correlate(DocCard).exists()
-    membership = await db.get(UserCompany, (user.id, cid))
-    if membership is not None and membership.role == "admin":
-        allowed = true()
-    else:
-        allowed = select(DocAccessGrant.id).where(
+    with db.no_autoflush:
+        if user.is_superadmin:
+            return false()
+        readable = await _readable_doc_clause(db, cid, user)
+        subjects = await _subject_ids(db, cid, user)
+        subject_filters = [
+            and_(DocAccessGrant.subject_type == subject_type,
+                 DocAccessGrant.subject_id == subject_id)
+            for subject_type, subject_id in subjects.items() if subject_id
+        ]
+        scope = or_(
+            and_(DocAccessGrant.scope_type == "doc",
+                 DocAccessGrant.scope_id == DocCard.id),
+            and_(DocAccessGrant.scope_type == "kind",
+                 DocAccessGrant.scope_id == DocCard.kind_id,
+                 DocCard.inherit_kind_acl.is_(True)),
+        )
+        denied = select(DocAccessGrant.id).where(
             DocAccessGrant.company_id == cid,
             or_(*subject_filters),
-            DocAccessGrant.permissions.contains(["archive"]),
+            DocAccessGrant.denied_permissions.contains(["archive"]),
             scope,
         ).correlate(DocCard).exists()
-    return and_(readable, allowed, ~denied)
+        membership = await db.get(UserCompany, (user.id, cid))
+        if membership is not None and membership.role == "admin":
+            allowed = true()
+        else:
+            allowed = select(DocAccessGrant.id).where(
+                DocAccessGrant.company_id == cid,
+                or_(*subject_filters),
+                DocAccessGrant.permissions.contains(["archive"]),
+                scope,
+            ).correlate(DocCard).exists()
+        from app.services.doc_site_authority import document_site_filter
+        return and_(await document_site_filter(db, cid, user.id, "archive"), readable, allowed, ~denied)
 
 
 async def _docs_members(db: AsyncSession, cid: uuid.UUID,
@@ -534,70 +547,76 @@ async def authorize_docs_file_download(db: AsyncSession, user: User,
     сюда не попадают — у них нет строки в `doc_versions`, и проверка их не
     касается.
     """
-    rows = (await db.execute(select(DocVersion).where(
-        DocVersion.file_id == file_id))).scalars().all()
-    if rows:
-        docs = (await db.execute(select(DocCard).where(
-            DocCard.id.in_({row.doc_id for row in rows})))).scalars().all()
-        by_id = {doc.id: doc for doc in docs}
-        for version in rows:
-            doc = by_id.get(version.doc_id)
-            if doc is None:
-                continue
-            if (version.tombstoned_at is None
-                    and version.archive_purged_at is None):
-                if await _can_doc(db, doc.company_id, doc, user, "download"):
-                    return
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    with db.no_autoflush:
+        from app.services.doc_site_authority import require_document_schema
+        await require_document_schema(db)
+        rows = (await db.execute(select(DocVersion).where(
+            DocVersion.file_id == file_id))).scalars().all()
+        if rows:
+            docs = (await db.execute(select(DocCard).where(
+                DocCard.id.in_({row.doc_id for row in rows})))).scalars().all()
+            by_id = {doc.id: doc for doc in docs}
+            for version in rows:
+                doc = by_id.get(version.doc_id)
+                if doc is None:
+                    continue
+                if (version.tombstoned_at is None
+                        and version.archive_purged_at is None):
+                    if await _can_doc(db, doc.company_id, doc, user, "download"):
+                        return
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
 
-    inbox = (await db.execute(select(DocInboxItem).where(
-        DocInboxItem.file_id == file_id))).scalars().all()
-    if not inbox:
-        return
-    for item in inbox:
-        if item.doc_id:
-            doc = await db.get(DocCard, item.doc_id)
-            if doc is not None and await _can_doc(
-                    db, item.company_id, doc, user, "download"):
-                return
-        elif await _can_process_inbox(db, item.company_id, user):
+        inbox = (await db.execute(select(DocInboxItem).where(
+            DocInboxItem.file_id == file_id))).scalars().all()
+        if not inbox:
             return
-    raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+        for item in inbox:
+            if item.doc_id:
+                doc = await db.get(DocCard, item.doc_id)
+                if doc is not None and await _can_doc(
+                        db, item.company_id, doc, user, "download"):
+                    return
+            elif await _can_process_inbox(db, item.company_id, user):
+                return
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
 
 
 async def authorize_docs_file_egress(db: AsyncSession, user: User,
                                      file_ids: list[uuid.UUID]) -> list[DocCard]:
-    if not file_ids:
-        return []
-    rows = list((await db.execute(select(DocVersion).where(
-        DocVersion.file_id.in_(file_ids),
-    ))).scalars().all())
-    if not rows:
-        return []
-    docs = list((await db.execute(select(DocCard).where(
-        DocCard.id.in_({row.doc_id for row in rows}),
-    ).order_by(DocCard.id).with_for_update())).scalars().all())
-    by_id = {doc.id: doc for doc in docs}
-    authorized_docs: dict[uuid.UUID, DocCard] = {}
-    for file_id in set(file_ids):
-        related = [row for row in rows if row.file_id == file_id]
-        if not related:
-            continue
-        allowed = False
-        for version in related:
-            doc = by_id.get(version.doc_id)
-            if (doc is None or version.tombstoned_at is not None
-                    or version.archive_purged_at is not None
-                    or doc.retention_state in {
-                        "destruction_authorized", "primary_purged", "destroyed"}):
+    with db.no_autoflush:
+        if not file_ids:
+            return []
+        from app.services.doc_site_authority import require_document_schema
+        await require_document_schema(db)
+        rows = list((await db.execute(select(DocVersion).where(
+            DocVersion.file_id.in_(file_ids),
+        ))).scalars().all())
+        if not rows:
+            return []
+        docs = list((await db.execute(select(DocCard).where(
+            DocCard.id.in_({row.doc_id for row in rows}),
+        ).order_by(DocCard.id).with_for_update())).scalars().all())
+        by_id = {doc.id: doc for doc in docs}
+        authorized_docs: dict[uuid.UUID, DocCard] = {}
+        for file_id in set(file_ids):
+            related = [row for row in rows if row.file_id == file_id]
+            if not related:
                 continue
-            if await _can_doc(db, doc.company_id, doc, user, "send"):
-                allowed = True
-                authorized_docs[doc.id] = doc
-                break
-        if not allowed:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
-    return [authorized_docs[key] for key in sorted(authorized_docs)]
+            allowed = False
+            for version in related:
+                doc = by_id.get(version.doc_id)
+                if (doc is None or version.tombstoned_at is not None
+                        or version.archive_purged_at is not None
+                        or doc.retention_state in {
+                            "destruction_authorized", "primary_purged", "destroyed"}):
+                    continue
+                if await _can_doc(db, doc.company_id, doc, user, "send"):
+                    allowed = True
+                    authorized_docs[doc.id] = doc
+                    break
+            if not allowed:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
+        return [authorized_docs[key] for key in sorted(authorized_docs)]
 
 
 async def assert_fresh_doc_edit(db: AsyncSession, cid: uuid.UUID,

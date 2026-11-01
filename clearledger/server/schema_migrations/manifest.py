@@ -14,6 +14,7 @@ PULSE_ID = "0003_pulse_view_role_grants"
 CONTRACT_CREATE_ID = "0004_partner_contract_create"
 CONTRACT_CYCLE_RECEIPTS_ID = "0005_partner_contract_cycle_receipts"
 SITE_AUTHORITY_ID = "0006_site_authority"
+DOC_SITE_BUSINESS_ID = "0007_doc_site_business"
 FILES = ("revisions/0001_product_api_budgets.sql", "revisions/journal_v1.sql",
     "revisions/0001_contract.json", "revisions/catalog_v1.py")
 CALENDAR_FILES = ("revisions/0002_calendar_protocol_sequence.sql", "revisions/journal_v1.sql",
@@ -26,10 +27,13 @@ CONTRACT_CYCLE_RECEIPTS_FILES = ("revisions/0005_partner_contract_cycle_receipts
     "revisions/0005_partner_contract_cycle_receipts_contract.json", "revisions/catalog_partner_contract_cycle_receipts_v1.py")
 SITE_AUTHORITY_FILES = ("revisions/0006_site_authority.sql", "revisions/journal_v1.sql",
     "revisions/0006_site_authority_contract.json", "revisions/catalog_site_authority_v1.py")
+DOC_SITE_BUSINESS_FILES = ("revisions/0007_doc_site_business.sql", "revisions/journal_v1.sql",
+    "revisions/0007_doc_site_business_contract.json", "revisions/catalog_doc_site_business_v1.py")
 ALLOWLIST = ((ID, FILES, None), (CALENDAR_ID, CALENDAR_FILES, ID), (PULSE_ID, PULSE_FILES, CALENDAR_ID),
     (CONTRACT_CREATE_ID, CONTRACT_CREATE_FILES, PULSE_ID),
     (CONTRACT_CYCLE_RECEIPTS_ID, CONTRACT_CYCLE_RECEIPTS_FILES, CONTRACT_CREATE_ID),
-    (SITE_AUTHORITY_ID, SITE_AUTHORITY_FILES, CONTRACT_CYCLE_RECEIPTS_ID))
+    (SITE_AUTHORITY_ID, SITE_AUTHORITY_FILES, CONTRACT_CYCLE_RECEIPTS_ID),
+    (DOC_SITE_BUSINESS_ID, DOC_SITE_BUSINESS_FILES, SITE_AUTHORITY_ID))
 V1_ARTIFACT = "301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1"
 
 
@@ -70,15 +74,16 @@ class Package:
         return {ID: FILES[2], CALENDAR_ID: CALENDAR_FILES[2], PULSE_ID: PULSE_FILES[2],
             CONTRACT_CREATE_ID: CONTRACT_CREATE_FILES[2],
             CONTRACT_CYCLE_RECEIPTS_ID: CONTRACT_CYCLE_RECEIPTS_FILES[2],
-            SITE_AUTHORITY_ID: SITE_AUTHORITY_FILES[2]}[self.entry["id"]]
+            SITE_AUTHORITY_ID: SITE_AUTHORITY_FILES[2],
+            DOC_SITE_BUSINESS_ID: DOC_SITE_BUSINESS_FILES[2]}[self.entry["id"]]
 
 
 def load(root=ROOT, *, revision=ID):
     try:
         registry = decode((root / "manifest.json").read_bytes())
         if (set(registry) != {"format", "revisions"} or registry["format"] != 1
-                or len(registry["revisions"]) not in (1, 2, 3, 4, 5, 6)
-                or revision not in {ID, CALENDAR_ID, PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID}):
+                or len(registry["revisions"]) not in (1, 2, 3, 4, 5, 6, 7)
+                or revision not in {ID, CALENDAR_ID, PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID}):
             raise MigrationError(2, "manifest")
         expected_keys = {"id", "ordinal", "parent", "namespace", "runner_format", "source_commit", "files", "artifact_sha256"}
         packages = []
@@ -107,6 +112,11 @@ def load(root=ROOT, *, revision=ID):
             contract = decode(payloads[files[2]])
             if contract["format"] != 1 or contract["namespace"] != "core":
                 raise MigrationError(2, "contract")
+            if wanted == DOC_SITE_BUSINESS_ID and (
+                    contract["revision"] != wanted
+                    or contract["inherited_site"]["revision"] != wanted
+                    or contract["inherited6_artifact_sha256"] != packages[-1].entry["artifact_sha256"]):
+                raise MigrationError(2, "contract")
             packages.append(Package(entry, contract, payloads[files[0]].decode(), payloads[files[1]].decode(),
                                     packages[position - 1] if position else None))
         return next(package for package in packages if package.entry["id"] == revision)
@@ -118,4 +128,4 @@ def load(root=ROOT, *, revision=ID):
 
 def load_known_head(root=ROOT):
     """Strictly frozen source head, independent of the database's applied prefix."""
-    return load(root, revision=SITE_AUTHORITY_ID)
+    return load(root, revision=DOC_SITE_BUSINESS_ID)

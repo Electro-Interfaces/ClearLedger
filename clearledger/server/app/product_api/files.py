@@ -64,9 +64,15 @@ async def content(query, doc_id, version_id, upload_dir):
     if shared:
         raise HTTPException(404, "Not found")
     from app.services.doc_access import _can_doc, authorize_docs_file_download
-    if not await _can_doc(query.db, query.facts.company_id, doc, query.facts.user, "download"):
+    from app.services.doc_site_authority import partner_document_boundary
+    site, current_user = await partner_document_boundary(query.db, query.facts, query.context, "download")
+    from app.models import DocCard
+    if not await query.db.scalar(select(DocCard.id).where(
+            DocCard.company_id == query.facts.company_id, DocCard.id == doc.id, site)):
         raise HTTPException(404, "Not found")
-    await authorize_docs_file_download(query.db, query.facts.user, source.id)
+    if not await _can_doc(query.db, query.facts.company_id, doc, current_user, "download"):
+        raise HTTPException(404, "Not found")
+    await authorize_docs_file_download(query.db, current_user, source.id)
     descriptor = _open_beneath(upload_dir, source.storage_path)
     handle = os.fdopen(descriptor, "rb")
 

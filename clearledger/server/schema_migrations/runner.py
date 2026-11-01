@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlsplit
 from schema_migrations import catalog, journal
 from schema_migrations.errors import MigrationError
 from schema_migrations.manifest import (
-    CALENDAR_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, ID, PULSE_ID, load,
+    CALENDAR_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID, ID, PULSE_ID, load,
 )
 
 LOCK = (434532, 1)
@@ -72,9 +72,18 @@ async def identity(conn, config):
 
 async def state(conn, config, package):
     await identity(conn, config)
+    if package.entry["id"] == DOC_SITE_BUSINESS_ID:
+        from schema_migrations.manifest import load_known_head
+        count = await require_applied_prefix(conn, config, load_known_head(), required_revision=SITE_AUTHORITY_ID)
+        if count >= 7:
+            return None, None, True, True
+        await catalog.prepare_doc_site_business(conn, package.contract, config.user)
+        return None, None, True, False
     if package.entry["id"] == SITE_AUTHORITY_ID:
         from schema_migrations.manifest import load_known_head
         count = await require_applied_prefix(conn, config, load_known_head(), required_revision=CONTRACT_CYCLE_RECEIPTS_ID)
+        if count >= 7:
+            return None, None, True, True
         tables = await catalog.inspect_site_authority(conn, package.contract, config.user, applied=count >= 6, preparing=True)
         return tables, None, True, count >= 6
     if package.entry["id"] == CONTRACT_CYCLE_RECEIPTS_ID:
@@ -139,7 +148,7 @@ async def require_applied_prefix(conn, config, known_head, *, required_revision=
     return await _verified_prefix(conn, known_head, config.user, required_revision=required_revision)
 
 
-async def require_site_prefix(conn):
+async def require_site_prefix(conn, *, required_revision=SITE_AUTHORITY_ID):
     """Actual borrowed application connection; no settings flag/DSN/DDL/locks.
 
     New ORM columns require6 even with the old managed-budget flag disabled.
@@ -155,7 +164,16 @@ async def require_site_prefix(conn):
             or not 160000 <= row['version'] < 170000 or row['replication_role'] != 'origin'):
         raise MigrationError(4, 'site_namespace')
     from schema_migrations.manifest import load_known_head
-    return await _verified_prefix(conn, load_known_head(), row['owner'], required_revision=SITE_AUTHORITY_ID)
+    return await _verified_prefix(conn, load_known_head(), row['owner'], required_revision=required_revision)
+
+
+async def require_doc_site_prefix(conn):
+    """Current binary minimum7 on the actual borrowed connection, before ORM.
+
+    Minimum and applied prefix are independent. Recorded7 requires the exact
+    cumulative catalogue even for an explicitly requested older minimum.
+    """
+    return await require_site_prefix(conn, required_revision=DOC_SITE_BUSINESS_ID)
 
 
 async def _verified_prefix(conn, known_head, owner, *, required_revision):
@@ -173,11 +191,11 @@ async def _verified_prefix(conn, known_head, owner, *, required_revision):
         raise MigrationError(4, "unapplied")
     rows = await conn.fetch("""SELECT revision, ordinal, parent_revision, artifact_sha256,
         contract_sha256, predecessor_sha256, action, applied_by, app_commit, runner_format
-        FROM core.core_schema_versions ORDER BY ordinal LIMIT 7""")
-    if not rows or len(rows) > 6:
+        FROM core.core_schema_versions ORDER BY ordinal LIMIT 8""")
+    if not rows or len(rows) > 7:
         raise MigrationError(4, "history")
     journal.validate_history(rows, packages[len(rows)], owner)
-    if any(rows[n]['action'] != 'created' for n in (3, 4, 5) if len(rows) > n):
+    if any(rows[n]['action'] != 'created' for n in (3, 4, 5, 6) if len(rows) > n):
         raise MigrationError(4, 'history')
     if required[0] > len(rows):
         raise MigrationError(4, "unapplied")
@@ -195,7 +213,12 @@ async def _verified_prefix(conn, known_head, owner, *, required_revision):
     # relation/function0004 — дрейф, без неявного adoption.
     await catalog.inspect_contract_create(conn, packages[4].contract, owner, applied=len(rows) >= 4)
     await catalog.inspect_contract_cycle_receipts(conn, packages[5].contract, owner, applied=len(rows) >= 5)
-    await catalog.inspect_site_authority(conn, packages[6].contract, owner, applied=len(rows) >= 6)
+    if len(rows) >= 7:
+        # Full honest cumulative6+7 verifier owns the successor catalogue.
+        await catalog.inspect_doc_site_business(conn, packages[7].contract, owner)
+    else:
+        await catalog.unrecorded_doc_site_business(conn, packages[7].contract)
+        await catalog.inspect_site_authority(conn, packages[6].contract, owner, applied=len(rows) >= 6)
     return len(rows)
 
 
@@ -204,6 +227,21 @@ async def _apply_owned(connection, config, package, legacy_sent_before):
     parent, budget, ledger, complete = await state(connection, config, package)
     if complete:
         return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+    if package.entry["id"] == DOC_SITE_BUSINESS_ID:
+        inherited = package.contract["inherited_site"]
+        names = sorted(set(inherited["prerequisites"]) | set(inherited["altered_tables"])
+                       | set(inherited["tables"]) | set(package.contract["native_tables"]))
+        await connection.execute('LOCK TABLE ' + ', '.join('core.' + n for n in names)
+                                 + ' IN SHARE ROW EXCLUSIVE MODE')
+        # Full ORIGINAL6 plus absence of any unrecorded7 delta under owner lock.
+        _, _, _, complete = await state(connection, config, package)
+        if complete:
+            return {"ok": True, "action": "verified", "revision": package.entry["id"]}
+        await connection.execute(package.sql)
+        await catalog.inspect_doc_site_business(connection, package.contract, config.user)
+        await journal.append_applied(connection, package, config.user, "created")
+        await journal.read_verified_history(connection, package, config.user, True)
+        return {"ok": True, "action": "created", "revision": package.entry["id"]}
     if package.entry["id"] == SITE_AUTHORITY_ID:
         parents = sorted(package.contract['prerequisites'])
         names = sorted(set(parents) | set(package.contract['altered_tables']))
@@ -296,7 +334,7 @@ async def execute(config, mode, *, revision=ID, legacy_sent_before=None):
     if mode not in {"check", "apply"}:
         raise MigrationError(2, "mode")
     config.validate()
-    if package.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID) and mode == 'apply':
+    if package.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID) and mode == 'apply':
         # Делегировать до открытия connection. Sequence владеет единственным
         # owner connection/transaction для всех недостающих ancestors и0004.
         return await execute_sequence(config, target_revision=package.entry['id'],
@@ -412,7 +450,7 @@ def preflight_bootstrap_source():
 
 def _sequence_source(target_revision, fresh_prerequisites, legacy_sent_before, upgrade_prerequisites=None, predecessor_source=None):
     from schema_migrations.manifest import load_known_head
-    if target_revision not in (PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID) or fresh_prerequisites not in (None,'core_prerequisites_v1'):
+    if target_revision not in (PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID) or fresh_prerequisites not in (None,'core_prerequisites_v1'):
         raise MigrationError(2,'explicit_target')
     load_known_head()  # Integrity всего known source; explicit3 по-прежнему target3.
     head=load(revision=target_revision)
@@ -436,21 +474,28 @@ async def _sequence_catalogue(conn, config, head, source, verifier, fresh, partn
     await identity(conn,config)
     await verifier.prerequisites(conn,config.user)
     packages=_packages(head)
-    if head.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+    if head.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
         # Bootstrap десяти таблиц не является native four-domain baseline.
         # Без native prerequisites отказ до bootstrap/ancestor DDL.
         await catalog.contract_create_prerequisites(conn,packages[4].contract,config.user)
-    if head.entry['id'] in (CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+    if head.entry['id'] in (CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
         await catalog.contract_cycle_receipts_prerequisites(conn,packages[5].contract,config.user)
         # Refuse reserved names even before the first ancestor/bootstrap DDL.
         # Applied occupancy is verified below after reading the known journal.
-    if head.entry['id'] == SITE_AUTHORITY_ID:
-        await catalog.site_authority_prerequisites(conn,head.contract,config.user)
+    if head.entry['id'] in (SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
+        await catalog.site_authority_prerequisites(conn,packages[6].contract,config.user)
+    if head.entry['id'] == DOC_SITE_BUSINESS_ID:
+        from schema_migrations.revisions.catalog_doc_site_business_v1 import native_prerequisites
+        # Presence/types first, before any ancestor DDL; applied columns are
+        # checked after the verified journal chooses the cumulative branch.
+        await native_prerequisites(conn,head.contract,config.user,applied=False)
     if await verifier.empty(conn):
         if not fresh:
             raise MigrationError(4,'bootstrap_unapplied')
-        if head.entry['id'] == SITE_AUTHORITY_ID:
-            await catalog.inspect_site_authority(conn,head.contract,config.user,applied=False,preparing=True)
+        if head.entry['id'] in (SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
+            await catalog.inspect_site_authority(conn,packages[6].contract,config.user,applied=False,preparing=True)
+        if head.entry['id'] == DOC_SITE_BUSINESS_ID:
+            await catalog.prepare_doc_site_business(conn,head.contract,config.user)
         return 0,True,None,False
     foundation=packages[1]
     ledger=await catalog.verify_journal(conn,foundation.contract,config.user)
@@ -458,19 +503,21 @@ async def _sequence_catalogue(conn, config, head, source, verifier, fresh, partn
     if ledger is not None:
         rows=await conn.fetch('''SELECT revision,ordinal,parent_revision,artifact_sha256,
             contract_sha256,predecessor_sha256,action,applied_by,app_commit,runner_format
-            FROM core.core_schema_versions ORDER BY ordinal LIMIT 7''')
-        if len(rows)>6:
+            FROM core.core_schema_versions ORDER BY ordinal LIMIT 8''')
+        if len(rows)>7:
             raise MigrationError(4,'history')
         if rows:
             from schema_migrations.manifest import load_known_head
             await require_applied_prefix(conn,config,load_known_head(),required_revision=ID)
             count=len(rows)
-    if head.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+    if head.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
         await catalog.inspect_contract_create(conn,packages[4].contract,config.user,applied=count>=4)
-    if head.entry['id'] in (CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+    if head.entry['id'] in (CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
         await catalog.inspect_contract_cycle_receipts(conn,packages[5].contract,config.user,applied=count>=5)
-    if head.entry['id'] == SITE_AUTHORITY_ID:
-        await catalog.inspect_site_authority(conn,head.contract,config.user,applied=count>=6,preparing=True)
+    if head.entry['id'] in (SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID) and count < 7:
+        await catalog.inspect_site_authority(conn,packages[6].contract,config.user,applied=count>=6,preparing=True)
+    if head.entry['id'] == DOC_SITE_BUSINESS_ID and count < 7:
+        await catalog.prepare_doc_site_business(conn,head.contract,config.user)
     if partner is not None and count<3:
         if count!=0:
             raise MigrationError(4,'partner_upgrade_history')
@@ -484,7 +531,7 @@ async def _sequence_catalogue(conn, config, head, source, verifier, fresh, partn
     parent=await catalog.inspect_prerequisites(conn,foundation.contract,config.user)
     budget=await catalog.verify_budget(conn,foundation.contract,config.user,parent)
     await catalog.verify_unoccupied_names(conn,budget,ledger)
-    if head.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+    if head.entry['id'] in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
         # Revision4 проверяет реальные native parents, не снимок всей бизнес-схемы
         # десяти bootstrap relations. У ancestors свои проверки.
         profile='contract_create_prerequisites_v1'
@@ -530,7 +577,7 @@ async def execute_sequence(config, *, target_revision, fresh_prerequisites=None,
                         actions.append(await _apply_owned(connection,config,package,legacy_sent_before))
                 from schema_migrations.manifest import load_known_head
                 await require_applied_prefix(connection,config,load_known_head(),required_revision=target_revision)
-                if target_revision in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+                if target_revision in (CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
                     await catalog.contract_create_prerequisites(connection,_packages(head)[4].contract,config.user)
                     after='contract_create_prerequisites_v1'
                 else:
@@ -571,7 +618,7 @@ def main(argv=None, environ=None):
         parser.add_argument("--database")
         parser.add_argument("--user")
         parser.add_argument("--namespace")
-        parser.add_argument("--revision", choices=(ID, CALENDAR_ID, PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID), default=ID)
+        parser.add_argument("--revision", choices=(ID, CALENDAR_ID, PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID), default=ID)
         parser.add_argument("--legacy-sent-before", type=int)
         parser.add_argument("--fresh-prerequisites", choices=("core_prerequisites_v1",))
         parser.add_argument('--upgrade-prerequisites', choices=('core_partner_prerequisites_v1',))
@@ -581,10 +628,10 @@ def main(argv=None, environ=None):
         if any((args.fresh_prerequisites,args.upgrade_prerequisites,args.predecessor_source)) and args.mode != 'bootstrap':
             raise MigrationError(2, 'arguments')
         if args.mode == 'bootstrap':
-            if args.revision not in (PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID):
+            if args.revision not in (PULSE_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID):
                 raise MigrationError(2, 'explicit_target')
             _sequence_source(args.revision, args.fresh_prerequisites, args.legacy_sent_before, args.upgrade_prerequisites, args.predecessor_source)
-        if args.legacy_sent_before is not None and args.mode != 'bootstrap' and (args.revision not in (CALENDAR_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID) or args.mode != "apply"):
+        if args.legacy_sent_before is not None and args.mode != 'bootstrap' and (args.revision not in (CALENDAR_ID, CONTRACT_CREATE_ID, CONTRACT_CYCLE_RECEIPTS_ID, SITE_AUTHORITY_ID, DOC_SITE_BUSINESS_ID) or args.mode != "apply"):
             raise MigrationError(2, "arguments")
         if args.mode == "plan":
             if any((args.dsn_env, args.database, args.user, args.namespace, args.legacy_sent_before)):

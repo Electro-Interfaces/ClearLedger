@@ -1349,6 +1349,18 @@ class Contract(Base):
     __table_args__ = (
         Index("uq_contract_creation", "company_id", "creation_key", unique=True,
               postgresql_where=text("creation_key IS NOT NULL")),
+        CheckConstraint(
+            "CASE WHEN validity_kind IS NULL OR validity_kind = 'unknown' THEN true WHEN validity_kind "
+            "= 'openEnded' THEN valid_until IS NULL WHEN validity_kind = 'until' THEN CASE WHEN date ~ "
+            "'^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' AND substring(date,1,4) <> '0000' AN"
+            "D valid_until ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' AND substring(valid_"
+            "until,1,4) <> '0000' THEN CASE WHEN substring(date,9,2)::integer <= EXTRACT(DAY FROM (pg_c"
+            "atalog.make_date(substring(date,1,4)::integer,substring(date,6,2)::integer,1) + interval '"
+            "1 month - 1 day')) AND substring(valid_until,9,2)::integer <= EXTRACT(DAY FROM (pg_catalog"
+            '.make_date(substring(valid_until,1,4)::integer,substring(valid_until,6,2)::integer,1) + in'
+            "terval '1 month - 1 day')) THEN valid_until::date >= date::date ELSE false END ELSE false "
+            'END ELSE false END',
+            name="ck_contract_validity"),
     )
 
     # Намерение создать паспорт, отдельно от его юридических реквизитов.
@@ -1372,6 +1384,8 @@ class Contract(Base):
     # СрокДействия из карточки 1С (ISO-дата строкой). Пока его не грузили, «просроченные договоры»
     # считались эвристикой «заключён больше года назад» — 22 из 55 ложных.
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # NULL is historical unknown; dates and old imports remain untouched.
+    validity_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # UUID со ссылкой, как во всём остальном слое. Раньше здесь стояла строка без
     # внешнего ключа — единственное место ядра, где ось «контрагент» была не ссылкой:
     # целостность никто не проверял, и каждый запрос писал `c.counterparty_id::text`.
@@ -9340,6 +9354,7 @@ class OpsContractTerm(Base):
     # NULL при scope_type='location' — разворот по всем ContractLocation договора.
     location_id: Mapped[str | None] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=True, index=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # monthly | quarterly | annual | one_time
     periodicity: Mapped[str] = mapped_column(String(16), nullable=False, default="monthly")
     amount_gross: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
@@ -9382,7 +9397,13 @@ class OpsContractTerm(Base):
         # NULL в location_id означает «весь охват договора», и штатным Index такой
         # ключ не выразить (NULL != NULL) — та же причина, что у StationDispensePeriod.
         Index("uq_ops_term", "contract_id", "cost_item",
-              text("coalesce(location_id,'')"), "valid_from", unique=True),
+              text("coalesce(location_id,'')"), "valid_from", unique=True,
+              postgresql_where=text("site_id IS NULL")),
+        Index("uq_ops_term_site", "company_id", "contract_id", "cost_item", "site_id",
+              "valid_from", unique=True, postgresql_where=text("site_id IS NOT NULL")),
+        CheckConstraint("site_id IS NULL OR (scope_type = 'site' AND location_id IS NULL)",
+                        name="ck_ops_term_site"),
+        # Core tenant FK is owned by explicit7 SQL/catalogue, not public create_all.
         Index("ix_ops_term_company", "company_id", "cost_item", "valid_from"),
         Index("ix_ops_term_owner", "company_id", "owner_user_id"),
     )
@@ -12853,6 +12874,7 @@ class DocCard(Base):
     object_id: Mapped[str | None] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"),
         nullable=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"),
         nullable=True)
@@ -12911,6 +12933,10 @@ class DocCard(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
+        CheckConstraint("site_id IS NULL OR (object_id IS NULL AND organization_id IS NOT NULL)",
+                        name="ck_doc_cards_site"),
+        # Core context FK/unique are owned by explicit7 SQL/catalogue. Legacy
+        # public create_all never provisions the excluded Site authority tables.
         # У каждого юрлица свой журнал. NULL сводим к одному значению, чтобы у
         # карточек без юрлица номер тоже оставался уникальным.
         Index("uq_doc_cards_reg_number", "company_id",

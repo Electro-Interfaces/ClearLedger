@@ -90,6 +90,21 @@
       "parent": "0005_partner_contract_cycle_receipts",
       "runner_format": 1,
       "source_commit": "0db9a97e2f6b86f2307cfa5abefb1a32982d37ec"
+    },
+    {
+      "artifact_sha256": "e4a5617c770751f019d1d618c8e9edce9de6e0ebae8ed5c0aed2b7b7b991a499",
+      "files": {
+        "revisions/0007_doc_site_business.sql": "ee867c0fd4f790b508ca64749de5a048072978d46873e4d16f39c5665f1dd3bc",
+        "revisions/0007_doc_site_business_contract.json": "3ce780a4c37529e5d96c7e9d74c9a1cff5fee5797aba93beff23d1e5f537e9a6",
+        "revisions/catalog_doc_site_business_v1.py": "59238456571df0d1c86850aaff01ad2df49a5a61f76d3c10ee917c29fe860826",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0007_doc_site_business",
+      "namespace": "core",
+      "ordinal": 7,
+      "parent": "0006_site_authority",
+      "runner_format": 1,
+      "source_commit": "46566816f59e0d65f61b5426842d6a496e8fc13c"
     }
   ]
 }

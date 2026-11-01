@@ -2242,13 +2242,13 @@ def preflight_startup_sources() -> None:
 
 
 async def _require_site_schema(connection) -> None:
-    """Borrowed actual connection, read-only schema6 admission before new ORM."""
-    from schema_migrations.runner import require_site_prefix
+    """Borrowed actual connection, read-only schema7 admission before new ORM."""
+    from schema_migrations.runner import require_doc_site_prefix
     await connection.execute(text("SELECT pg_catalog.current_schema()"))
     raw = await connection.get_raw_connection()
     if not raw.driver_connection.is_in_transaction():
         raise RuntimeError("Site authority requires a caller transaction")
-    await require_site_prefix(raw.driver_connection)
+    await require_doc_site_prefix(raw.driver_connection)
 
 
 async def require_startup_schema() -> None:

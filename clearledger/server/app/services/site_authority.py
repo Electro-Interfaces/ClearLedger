@@ -19,13 +19,13 @@ from app.models_site_authority import SITE_ACTIONS, SiteAuthorityContext, SiteUs
 
 
 def require_schema(db: Session) -> None:
-    """Before any new ORM query: full six-artifact history/catalogue, no repair.
+    """Before any new ORM query: full current seven-artifact catalogue, no repair.
 
     Called in AsyncSession.run_sync's actual greenlet; raw driver belongs to the
     same transaction. No cached admission, second connection or credential input.
     """
     from fastapi import HTTPException
-    from schema_migrations.runner import require_site_prefix
+    from schema_migrations.runner import require_doc_site_prefix
     try:
         with db.no_autoflush:
             connection = db.connection()
@@ -33,7 +33,7 @@ def require_schema(db: Session) -> None:
             driver = connection.connection.driver_connection
             if not driver.is_in_transaction():
                 raise RuntimeError("Site authority requires the caller transaction")
-            await_only(require_site_prefix(driver))
+            await_only(require_doc_site_prefix(driver))
     except Exception:
         raise HTTPException(503, "Site authority schema is not ready") from None
 

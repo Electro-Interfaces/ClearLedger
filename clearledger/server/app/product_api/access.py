@@ -1,5 +1,5 @@
 """Bridge from the M10 verifier to product policies; no token parsing/issuance."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import MappingProxyType
 from collections.abc import Mapping
@@ -23,6 +23,9 @@ class Facts:
     objects: ResourceScope
     organization_id: uuid.UUID | None
     grants: Mapping
+    # Request-local original credential for canonical Site revalidation only.
+    # Never serialized, cached, exported or treated as a verified authority.
+    _site_bearer: str | None = field(default=None, repr=False, compare=False)
 
 
 def scope_of(value) -> ResourceScope:
@@ -140,7 +143,7 @@ async def resolve(request: Request) -> AccessContext:
         permissions = tuple(ResourcePermission(resource, action, grants[resource], ResourceScope.all())
                             for resource in RESOURCES for action in ("read", "download"))
         context = AccessContext(principal, str(cid), POLICY_VERSION, token.scopes, permissions, valid=True)
-        request.state.product_facts = Facts(cid, user, objects, own_org, grants)
+        request.state.product_facts = Facts(cid, user, objects, own_org, grants, bearer)
     # Release the identity connection before checking out the independent quota
     # transaction. Every request still performs the current live ACL above.
     await budget.enforce(settings.budget_policy(), settings.sessions,

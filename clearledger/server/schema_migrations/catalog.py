@@ -78,3 +78,18 @@ async def inspect_site_authority(conn, contract, owner, *, applied, preparing=Fa
 async def site_authority_prerequisites(conn, contract, owner):
     from schema_migrations.revisions.catalog_site_authority_v1 import prerequisites
     return await prerequisites(conn, contract, owner)
+
+
+async def inspect_doc_site_business(conn, contract, owner):
+    from schema_migrations.revisions.catalog_doc_site_business_v1 import inspect
+    return await inspect(conn, contract, owner)
+
+
+async def prepare_doc_site_business(conn, contract, owner):
+    from schema_migrations.revisions.catalog_doc_site_business_v1 import prepare
+    return await prepare(conn, contract, owner)
+
+
+async def unrecorded_doc_site_business(conn, contract):
+    from schema_migrations.revisions.catalog_doc_site_business_v1 import unrecorded
+    return await unrecorded(conn, contract)
