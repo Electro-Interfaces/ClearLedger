@@ -105,6 +105,10 @@ from app.services.native_reference_locks import (
 from app.services.reference_validation import (
     _CONTRACT_REQ_FIELDS, _check_type_code, _parse_uuid, _req_val, _validate_contract_parties,
 )
+from app.services.native_party_locks import (
+    assert_native_party_clean, assert_native_party_member, prepare_native_party_write,
+    require_native_party_write,
+)
 router = APIRouter(prefix="/references", tags=["НСИ (Справочники)"])
 
 
@@ -289,11 +293,22 @@ async def create_counterparty(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_member(body.company_id, current_user, db)
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
+    with db.no_autoflush:
+        cid = await assert_company_member(body.company_id, current_user, db)
+        if str(body.lifecycleStatus) == "verified":
+            await _assert_can_verify_counterparty(
+                db, current_user, cid, inn=body.inn, kpp=body.kpp, name=body.name)
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="counterparty", organization_selector=incoming_organization)
+    current_user = prepared.actor
+    cid = await assert_native_party_member(db, prepared, body.company_id)
     if str(body.lifecycleStatus) == "verified":
         await _assert_can_verify_counterparty(
             db, current_user, cid, inn=body.inn, kpp=body.kpp, name=body.name)
     await _assert_unique_counterparty(db, cid, body.inn, body.kpp)
+    require_native_party_write(db, prepared)
     cp = Counterparty(
         company_id=cid,
         inn=body.inn,
@@ -306,7 +321,9 @@ async def create_counterparty(
         **{snake: getattr(body, camel) for camel, snake in _CP_EXTRA_FIELDS.items()},
     )
     db.add(cp)
+    require_native_party_write(db, prepared)
     await db.flush()
+    require_native_party_write(db, prepared)
     return _counterparty_resp(cp)
 
 
@@ -317,7 +334,16 @@ async def update_counterparty(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
     uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        cp = await get_owned(Counterparty, uid, current_user, db)
+        cid = cp.company_id
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="counterparty", party_id=uid,
+        organization_selector=incoming_organization)
+    current_user = prepared.actor
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
     # PATCH может менять только ИНН или только КПП. После общего барьера читаем
     # свежую пару, иначе два конкурентных изменения проверяли бы старую пару.
@@ -339,6 +365,7 @@ async def update_counterparty(
             name=cp.name if body.name is None else body.name,
         )
 
+    require_native_party_write(db, prepared)
     if body.inn is not None:
         cp.inn = body.inn
     if "kpp" in body.model_fields_set:
@@ -359,8 +386,10 @@ async def update_counterparty(
             setattr(cp, snake, val)
 
     mark_reference_changes(cp, before)
+    require_native_party_write(db, prepared)
     await db.flush()
     await db.refresh(cp)   # дозагрузить onupdate-поля (updated_at) в async-контексте
+    require_native_party_write(db, prepared)
     return _counterparty_resp(cp)
 
 
@@ -370,19 +399,30 @@ async def delete_counterparty(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
     uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        cp = await get_owned(Counterparty, uid, current_user, db)
+        cid = cp.company_id
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="counterparty", party_id=uid,
+        organization_selector=incoming_organization)
+    current_user = prepared.actor
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
     from app.services.counterparty_usage import counterparty_usage
     await db.execute(select(Counterparty.id).where(Counterparty.id == uid).with_for_update())
     message = "Нельзя удалить контрагента: есть связанные договоры, контакты или другие записи. Сначала удалите или переназначьте связи."
     if await counterparty_usage(db, cp):
         raise HTTPException(409, message)
+    require_native_party_write(db, prepared)
     try:
-        async with db.begin_nested():
-            await db.delete(cp)
-            await db.flush()
+        await db.delete(cp)
+        require_native_party_write(db, prepared)
+        await db.flush()
     except IntegrityError as exc:
         raise HTTPException(409, message) from exc
+    require_native_party_write(db, prepared)
 
 
 # ---------------------------------------------------------------------------
@@ -424,16 +464,31 @@ async def create_counterparty_contact(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        cp = await get_owned(Counterparty, uid, current_user, db)
+        cid = cp.company_id
+        if body.role not in CONTACT_ROLES:
+            raise HTTPException(400, f"Неизвестная роль контакта: {body.role}")
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="contact", party_id=uid,
+        organization_selector=incoming_organization)
+    current_user = prepared.actor
+    cp = await get_owned(Counterparty, uid, current_user, db)
     if body.role not in CONTACT_ROLES:
         raise HTTPException(400, f"Неизвестная роль контакта: {body.role}")
+    require_native_party_write(db, prepared)
     c = CounterpartyContact(
         company_id=cp.company_id, counterparty_id=cp.id, name=body.name.strip(),
         position=body.position, role=body.role, phone=body.phone,
         email=body.email, notes=body.notes,
     )
     db.add(c)
+    require_native_party_write(db, prepared)
     await db.flush()
+    require_native_party_write(db, prepared)
     return _contact_resp(c)
 
 
@@ -448,7 +503,26 @@ async def update_counterparty_contact(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        cp = await get_owned(Counterparty, uid, current_user, db)
+        cid = cp.company_id
+        contact_uid = _parse_uuid(contact_id)
+        c = (await db.execute(select(CounterpartyContact).where(
+            CounterpartyContact.id == contact_uid,
+            CounterpartyContact.counterparty_id == cp.id))).scalar_one_or_none()
+        if c is None:
+            raise HTTPException(404, "Контакт не найден")
+        if body.role not in CONTACT_ROLES:
+            raise HTTPException(400, f"Неизвестная роль контакта: {body.role}")
+        contact_pointer = (c.company_id, c.counterparty_id)
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="contact", party_id=uid, contact_id=contact_uid,
+        organization_selector=incoming_organization, contact_pointer=contact_pointer)
+    current_user = prepared.actor
+    cp = await get_owned(Counterparty, uid, current_user, db)
     c = (await db.execute(select(CounterpartyContact).where(
         CounterpartyContact.id == _parse_uuid(contact_id),
         CounterpartyContact.counterparty_id == cp.id))).scalar_one_or_none()
@@ -456,9 +530,12 @@ async def update_counterparty_contact(
         raise HTTPException(404, "Контакт не найден")
     if body.role not in CONTACT_ROLES:
         raise HTTPException(400, f"Неизвестная роль контакта: {body.role}")
+    require_native_party_write(db, prepared)
     c.name, c.position, c.role = body.name.strip(), body.position, body.role
     c.phone, c.email, c.notes = body.phone, body.email, body.notes
+    require_native_party_write(db, prepared)
     await db.flush()
+    require_native_party_write(db, prepared)
     return _contact_resp(c)
 
 
@@ -470,13 +547,32 @@ async def delete_counterparty_contact(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cp = await get_owned(Counterparty, _parse_uuid(item_id), current_user, db)
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        cp = await get_owned(Counterparty, uid, current_user, db)
+        cid = cp.company_id
+        contact_uid = _parse_uuid(contact_id)
+        c = (await db.execute(select(CounterpartyContact).where(
+            CounterpartyContact.id == contact_uid,
+            CounterpartyContact.counterparty_id == cp.id))).scalar_one_or_none()
+        if c is None:
+            raise HTTPException(404, "Контакт не найден")
+        contact_pointer = (c.company_id, c.counterparty_id)
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="contact", party_id=uid, contact_id=contact_uid,
+        organization_selector=incoming_organization, contact_pointer=contact_pointer)
+    current_user = prepared.actor
+    cp = await get_owned(Counterparty, uid, current_user, db)
     c = (await db.execute(select(CounterpartyContact).where(
         CounterpartyContact.id == _parse_uuid(contact_id),
         CounterpartyContact.counterparty_id == cp.id))).scalar_one_or_none()
     if c is None:
         raise HTTPException(404, "Контакт не найден")
+    require_native_party_write(db, prepared)
     await db.delete(c)
+    require_native_party_write(db, prepared)
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +665,15 @@ async def create_organization(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await assert_company_member(body.company_id, current_user, db)
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
+    with db.no_autoflush:
+        cid = await assert_company_member(body.company_id, current_user, db)
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="organization", organization_selector=incoming_organization)
+    current_user = prepared.actor
+    cid = await assert_native_party_member(db, prepared, body.company_id)
+    require_native_party_write(db, prepared)
     org = Organization(
         company_id=cid,
         inn=body.inn,
@@ -579,7 +683,9 @@ async def create_organization(
         **{snake: getattr(body, camel) for camel, snake in _ORG_EXTRA_FIELDS.items()},
     )
     db.add(org)
+    require_native_party_write(db, prepared)
     await db.flush()
+    require_native_party_write(db, prepared)
     return _org_resp(org)
 
 
@@ -590,9 +696,19 @@ async def update_organization(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    incoming_organization = current_organization()
+    assert_native_party_clean(db)
     uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        org = await get_owned(Organization, uid, current_user, db)
+        cid = org.company_id
+    prepared = await prepare_native_party_write(
+        db, current_user, cid, entity="organization", party_id=uid,
+        organization_selector=incoming_organization)
+    current_user = prepared.actor
     org = await get_owned(Organization, uid, current_user, db)  # 404 для чужой/несуществующей
 
+    require_native_party_write(db, prepared)
     if body.inn is not None:
         org.inn = body.inn
     if body.kpp is not None:
@@ -606,8 +722,10 @@ async def update_organization(
         if val is not None:
             setattr(org, snake, val)
 
+    require_native_party_write(db, prepared)
     await db.flush()
     await db.refresh(org)   # дозагрузить onupdate-поля (updated_at) в async-контексте
+    require_native_party_write(db, prepared)
     return _org_resp(org)
 
 
