@@ -1,6 +1,6 @@
 {
   "authored_tests": {
-    "PG_definitions": 16,
+    "PG_definitions": 17,
     "collected_cases": "NOT COLLECTED",
     "definitions": [
       {
@@ -9,7 +9,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "b5a68bad063c58778625953fb0a9f0efe1642392abc25a4200e8b14402aa6a5c",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 71,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -27,7 +27,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "63232e8e762e46a0d13613fd64f2f74f1b64db37661ed42d35e0b536d3db14ab",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 83,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -45,7 +45,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "7b2e575d6af4e7e1b2d32db30693302fd1cf33b213213802485eb20a75acb91c",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 111,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -63,7 +63,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "5d2bba814a536969a4ea917332fe88091413d1431632a9f0d4b1fa36ea12a2f8",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 138,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -81,7 +81,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "97af658b3102109b6c680e968888940007104ef90150f30122ca90416855e277",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 155,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -99,7 +99,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "255b56d96cd4162cf20120ee1ec0393a9986d36c0725e60b9a79044026144e9b",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 165,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -117,7 +117,7 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
         "source": {
           "ast_sha256": "3a3caeb175330bde2b32d1ecd8e5c672ddc99a3f94e70debcfd8e4961327f907",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 178,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
           "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -135,10 +135,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "1b19b8fa628e6a8410bed3d8261900b9d39109a5245d263a606f4d7acb4aaaac",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 177,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "65eb82f9dbe6683d90141a54129dcd1a280525e702e174501dea8231d129e65a",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 156,
@@ -153,10 +153,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "82e7c003f6d817341fae856c01efd52051d2f9c8f2dbe0912a8f95b14f277d35",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 200,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "44bbc65b63029f477ca5957f2b33eab1b56a160452dd9f73d2cea835d38ff8e8",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 180,
@@ -185,10 +185,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "047cc95d162fca6b29ddf56b972532ec6d6c8133542b0308e4c4ce1c062799a3",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 220,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "f8a37f69b230538e4b53c522db88b1139f157c536f35dc93da2b8e2a04fcc1d9",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 204,
@@ -235,10 +235,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "b94e583862578f4df7537cfc13d081d8dabbb4bffb69a221f44f84422e4e8a94",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 241,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "0d24f1e8f13e534645355a3bd3d85021487ba805adffed6e97a9ebec3d5bd235",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 227,
@@ -265,10 +265,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "42e0b7ae665fc249d47c4bd7d2dd281feb6b56b54727b509ff0791c911a94b40",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 257,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "85cfb269a2cc6a7481ef87f764b6dcf3b424f778774d18d7ebe8429103190544",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 245,
@@ -292,10 +292,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "42291f0133ec50f38dc60aac4602407ce1d56cd5281db7e64351a2a804502511",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 275,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "ba9898bad6debbdf378b45bc5fc1a795cd7ce56da97b8cdc3ba0a307e965e80b",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 261,
@@ -320,10 +320,10 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "4bcbd446be7c40e90e7deefac39573383339e3a6f906291b8978a8a64590efcf",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 301,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "378bdc4306bbe29f2d7bb45608e288a8738dc523d130fadd9cf816eebfb0130a",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 279,
@@ -336,15 +336,11 @@
         "oracle_source": "real test body at pinned span; no test function was called",
         "parameters": [
           {
-            "literal_row_count": 11,
+            "literal_row_count": 10,
             "literal_rows": [
               [
                 "typed",
                 "native_tv"
-              ],
-              [
-                "typed",
-                "member"
               ],
               [
                 "typed",
@@ -388,18 +384,36 @@
         ],
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
-          "ast_sha256": "8c0f7cdf05af1416a6e631e5b57f0d001a694b4cac2697112a884be89cf5a665",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 354,
+          "ast_sha256": "089ab9efa9458a4f31f743708d3086352828ee5bc1e778322cb93e742883e39d",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 353,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
-          "raw_span_sha256": "84d8fba9a4d3606dc13eff2c60c80c88c84600e769d8b4e8865a3b8ecf6ac5a5",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "66dd1f8a7c7a20fab590b51e58776bbf4f70fe293e0b83087e5bfb7bb9f9626f",
           "repository": "Electro-Interfaces/ClearLedger",
           "start": 309,
           "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
         "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+      },
+      {
+        "oracle_source": "actual original composer/issuer/callback; observed real ClientKey wait then409/no own callback/flush/DML; fresh whole HTTP request with saved proof, genuine issued cap/missing Member spec and204/fresh-reader Docs+Family=True; NOTRUN",
+        "parameters": [],
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "source": {
+          "ast_sha256": "393c2f6a79d4540b9301cefc80398a440aed8908b25837f00792c877dece7efe",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 450,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "b239fd60363e1891dd6638b4c20a942bc46bcb8e1d5f1516f7a3f74e581c42b0",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 356,
+          "symbol": "test_logout_member_disappearance_after_discovery_requires_whole_retry"
+        },
+        "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
+        "symbol": "test_logout_member_disappearance_after_discovery_requires_whole_retry"
       },
       {
         "oracle_source": "real test body at pinned span; no test function was called",
@@ -425,13 +439,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "42bd14e20d576d356b4bed06914876a067a4f82fb426a698c0c0c85c91d4832a",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 380,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 476,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "b50c7bc39c85983cd707ce74e859be4ab7c56023dd7fd9d5e94c696e2c71fb18",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 359,
+          "start": 455,
           "symbol": "test_logout_dirty_expired_entry_rejects_without_sql_flush_or_expire"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -443,13 +457,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "215d226a3b40bcc227530c64735aeb0c9979a126cbabccafd653bace104fa4a1",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 413,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 509,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "347cf30f384c4acfa3782f730e5c9eaa54dfa82ecc415c0b5977c6a193000e52",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 383,
+          "start": 479,
           "symbol": "test_logout_actual_lock_order_and_original_capability"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -471,13 +485,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "b071f577be7cd8e4b07925fa507d08a56c5c23fb06eda61a6f3ff980d1ee81fb",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 448,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 544,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "4794747a639776f842b3127312858e2b165c761fea7904dcca32a290fcddb5a8",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 417,
+          "start": 513,
           "symbol": "test_logout_rollback_after_callback_flush_restores_both_rows"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -499,13 +513,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "0e4e97e4d59c578468403848971625afd659ceb28a24239f623c63ac0c301812",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 484,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 580,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "8ba2a2c93331be474c8e652814e6996ed478118cc64300d5008069e176eef939",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 452,
+          "start": 548,
           "symbol": "test_logout_cancel_before_commit_restores_both_rows_and_releases_locks"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -517,13 +531,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "8644f0ae2db59adeca37ff9e702e50ab1521b254b4ab92c295910287c0f873e1",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 505,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 601,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "e6826023eee775742f25c769978c514e7a8d3e6e20df82387afde9a0bb150e70",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 487,
+          "start": 583,
           "symbol": "test_logout_failed_commit_has_no_success_response"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -545,13 +559,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "c087a49e0f1cbb0fc769f0b521c8e74601c6e7048f4048b7a71210018ac72db9",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 539,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 635,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "986fd2e4da529dc67da6264de453973a55e986af83c3ca880e228747c7c93f40",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 510,
+          "start": 606,
           "symbol": "test_logout_cascade_missing_and_already_deleted_noop"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -574,13 +588,13 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "17a3e54e2df1d1bb5291acccea6e7cf80cb8beb1b410ae13e28a611d1e1e87f1",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 585,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 681,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "e3660759887cb1682240e3b3bbc150a3677c6e2d43e341ee4578dd6c32738556",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 543,
+          "start": 639,
           "symbol": "test_logout_does_not_cross_family_for_same_grant_or_other_company"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
@@ -592,28 +606,34 @@
         "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
         "source": {
           "ast_sha256": "8ec00e26b1fcbc97ebb926f5022cc1574eeb3d73f693a75c07ede4a3448f0281",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-          "end": 603,
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 699,
           "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
           "raw_span_sha256": "ed6be25cb1106a52f8c6b756ef0535103a58301f1f0d2f6590f04fb0b4d97dd4",
           "repository": "Electro-Interfaces/ClearLedger",
-          "start": 588,
+          "start": 684,
           "symbol": "test_existing17_retain_source_contracts_and_public_outcomes"
         },
         "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
         "symbol": "test_existing17_retain_source_contracts_and_public_outcomes"
       }
     ],
-    "meaningful_oracles": "real HTTP-issued browser/machine grant, real issuer/plan/caps/verifier, actual Connection PID/pg_blocking_pids/pg_locks, physical FK catalogue and CASCADE, fresh observer root for both flush rollback/cancel/precommit durability, cross-family and existing17 public compatibility",
+    "meaningful_oracles": "real HTTP-issued browser/machine grant, real issuer/plan/caps/verifier, actual Connection PID/pg_blocking_pids/pg_locks, physical FK catalogue and CASCADE, fresh observer root for both flush rollback/cancel/precommit durability, cross-family and existing17 public compatibility; DPL-S1-R01 request-only SQL/flush/callback observation excludes the Member mutator and verifies both409/noDML and fresh-root204 with missing Member",
     "positive_substitutions": "none: observer wrappers invoke originals; injection only controlled failure/pause; actual caps never fabricated",
     "shared_helpers_and_flags": "reuse unchanged docs env/session and partner registration/actual waiter helpers; both existing RUN_DOCS_PORTAL_TESTS and RUN_PARTNER_IDENTITY_TESTS; module guard is not admission",
     "source_definitions": 7,
     "tests_executed": 0,
-    "wait_world_safety": "native/parent change on early typed Client wait only; Family wait changes Family expiry or Token.revoked; Docs wait changes only Docs expiry/revoked. No blocker tries to mutate an already-held upstream authority row."
+    "wait_world_safety": "native/parent change on early typed Client wait only; Family wait changes Family expiry or Token.revoked; Docs wait changes only Docs expiry/revoked. No blocker tries to mutate an already-held upstream authority row. Member disappearance is a separate409 drift case followed by a new whole HTTP request with stable pre-discovery absence and204; the original10 eligibility cases remain."
   },
   "authority": {
     "ROOT_technical_gate": "msg_a8e9f5b34d09 replying to msg_c0e540deec1e, relayed by live coordinator blocking ask msg_19c1edb3d376",
+    "correction_authority": "sole owner live dispatch; same ROOT msg_a8e9f5b34d09 exact6+DPL-S1 and user authorization relay msg_5397173e27b5; fixes new authored oracle, does not weaken runtime/UUID/policy guards",
+    "correction_only_permitted_writes": [
+      "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+      "clearledger/docs/api/DOCS_PORTAL_LOGOUT_SCOPED_LOCKS_20261101.md",
+      "clearledger/docs/api/DOCS_PORTAL_LOGOUT_SCOPED_LOCKS_20261101.json"
+    ],
     "gate_status": "RATIFIED_EXACT6_DPL_S1",
     "identity_seam": "NONE",
     "literal_allowset": [
@@ -1727,7 +1747,7 @@
       },
       "source": {
         "ast_sha256": "8dd700eaa560771a2890ca0837ee2e8c419bccdaad8bbdde2d3643726a7d4250",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 1145,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -1767,7 +1787,7 @@
       },
       "source": {
         "ast_sha256": "9a24d316c20290bc90a329fe3d2652ee8072028798182ac680b34e94a6881448",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 363,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -1807,7 +1827,7 @@
       },
       "source": {
         "ast_sha256": "1524bb5ebec7869c2ac8c742c830da0fd234e9433fcc70f7ed7809c76ef78107",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 235,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -1847,7 +1867,7 @@
       },
       "source": {
         "ast_sha256": "86fdeba221d4968b5ed9c049630703aff94ba1f828a05440ce2ef25d008badba",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 202,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -1887,7 +1907,7 @@
       },
       "source": {
         "ast_sha256": "3d80e091fce1dfbd10fec98006522ff13181ff6a719a4a900485b99bfa0ff213",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 194,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -1927,7 +1947,7 @@
       },
       "source": {
         "ast_sha256": "29b605e7083c0a2eaa1188a96a8c3fed73af9888a1326ba49943dc4c79dbcb7d",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 1104,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -1967,7 +1987,7 @@
       },
       "source": {
         "ast_sha256": "b83ebc8f9da51577d3ebceb5ee7e8bd3bd07c042f6642bd362447893c4852ad7",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 149,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2007,7 +2027,7 @@
       },
       "source": {
         "ast_sha256": "a13616725b2fed83b969875b2f9f4913095e6888dbedaab063667a0091d66e0d",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 157,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2047,7 +2067,7 @@
       },
       "source": {
         "ast_sha256": "8fe53fb297112853ce73ca204cac1e47f47bccd816e1566d4a90c9c2ec0bbaca",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 183,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2087,7 +2107,7 @@
       },
       "source": {
         "ast_sha256": "95eb275ad222abff1ceec38efc6e30ef29809095122270968ad7c4a52e9ede36",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 174,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2127,7 +2147,7 @@
       },
       "source": {
         "ast_sha256": "26e6db2c84bf2f0d6de6f5d70e86a3fecff0e22a4dc0a536c4c5d318aa53a6a1",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 373,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2167,7 +2187,7 @@
       },
       "source": {
         "ast_sha256": "fdd0f58ed887398692f83d3eba178b939a6a04bfeffd65c93d4c1bbc25eb9ade",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 1095,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2320,12 +2340,13 @@
       "wire": "204 empty, unchanged cookie deletion and NoStore/nosniff/no-referrer; handled legacy error precedence/body/status preserved; no redirect/WWW introduced"
     }
   },
-  "dispatch_id": "ctx_c4074a3320af",
+  "correction_base": "b412881ff3831e894764c007ce2f299892bcb884",
+  "dispatch_id": "ctx_7a97f183c759",
   "empty_graph_exception_proof": {
     "bounded_catch": "try body contains only sole protocol/native/actor-free composer call; only InvalidClientError is caught, not OAuth2Error/all exceptions; normal DB/ScopedLock/HTTP errors propagate",
     "exact_call": {
       "ast_sha256": "5b32a00f0cd7feef8557b7b2b5b8a1682b3fe3e4102f6a0811b6846b733bd5c7",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 201,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2337,7 +2358,7 @@
     "no_auth_error_suppression": "No Authlib protocol/client-auth/Code/Refresh/machine methods are invoked in this composition discovery call",
     "result": "re-read actual Docs existence under no_autoflush; absent no-op, surviving original row/binding→whole-root409 before any callback/DML",
     "sole_raise": {
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 692,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2348,7 +2369,7 @@
     },
     "source": {
       "ast_sha256": "1895a0abe791d25c375ec98bc60bb5d1f4f4cab58d2a705dc4c4df5457c8e38a",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 718,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -2399,8 +2420,8 @@
     "root_message": "msg_428ad8a783cc high",
     "status": "ROOT_REPORTED_INHERITED_PREREQUISITE_OPEN"
   },
-  "final_commit_relation": "docs-only child of source_commit; hash emitted in completion receipt after freeze",
-  "format": "docs-portal-logout-scoped-locks-source-v1",
+  "final_commit_relation": "docs-only child of correction source_commit; exact final hash emitted in worker_done after freeze",
+  "format": "docs-portal-logout-scoped-locks-source-v2",
   "frozen_proposal": {
     "json": {
       "path": "/srv/projects/preview/docs-portal-logout-scope-20261101/proposal.json",
@@ -2597,7 +2618,7 @@
   },
   "markdown": {
     "path": "clearledger/docs/api/DOCS_PORTAL_LOGOUT_SCOPED_LOCKS_20261101.md",
-    "raw_sha256": "c35562ab81b7397ea3ffa7d4218f18eec8f96231ef87b8c9df9153d034718dd9"
+    "raw_sha256": "39d1b9c24bb36d4a34fc69281cbbebb8ab377f2c695e324b4c1f15cb051a0770"
   },
   "original_program": {
     "completion_asserted": false,
@@ -2814,6 +2835,7 @@
     "semantic_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
     "source": "actual current bytes read for this final author document; earlier frozen proposal raw remains independently attributed"
   },
+  "original_source_commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
   "other_existing_docs_defs_preserved": [
     {
       "AST_equal": true,
@@ -2831,7 +2853,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "b71d91c58e05313d27500b8d7f4ebe2566cd3270a4059bb25b2f1636a3ed32ac",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 28,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2858,7 +2880,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "dd0c877f17b6db75e1aa67f2be1dcb86b678db5da096815f8ba916f986696813",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 33,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2885,7 +2907,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "fe59711e5c5c072302c7ea5b1c2c593f8ccdb98617fc0f64842dd91fd49ab3dc",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 45,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2912,7 +2934,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "9b4cb320bea385140667d43c0f3c8b7e18dc7ec80f97601f8872763ac09a630b",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 62,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2939,7 +2961,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "bdf037f2fa66b1556bf1208e240bcede0b6a7c3308b25582fc4d8e6cb7189ba0",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 68,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2966,7 +2988,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "11e6d0ce4dc802cbeb185122dd8d12cc7be917af8e455ab7972280094d8606e4",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 72,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -2993,7 +3015,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "9dd635decf0fc497ddb56dff84e7d4708b932c3681c42326bf58911590e0e10e",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 80,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3020,7 +3042,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "933b954a94a5b587c765ec0dbbb059308e4dd56fcdcefa34e2c0cb4561086fa8",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 87,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3047,7 +3069,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "41e34916edc6f9d5dd87bd533bfc1ea5d84ca613c232ba96eac1784c6235014f",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 112,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3074,7 +3096,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "19b9a36d7c804dbe3ed977468b5f48aad06c3cc68e87b6e85ae80f02d8cf4bb6",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 132,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3101,7 +3123,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "fbcd667f6c2c14395e3b2754ac44f1be54a50de41f464e44ec68f69ad06cdc64",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 140,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3128,7 +3150,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "7fb2c79117c1cec4c6d50b392234177ce45da09d8c2a1cd9228b9f49acf29b3c",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 224,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3155,7 +3177,7 @@
       "path": "clearledger/server/app/services/docs_portal.py",
       "source": {
         "ast_sha256": "1a1679c22950a9d12a050828efb83fe150aee7b1da653d9adfdcf145e2272725",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 242,
         "path": "clearledger/server/app/services/docs_portal.py",
         "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3182,7 +3204,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "aca0e0406eae6f1f4005274fdd2ddb8919e750b939607394b5514fa8a3c57077",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 44,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3209,7 +3231,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "18b0b952377511041f92049444ac175cca01fec83b4088790e7dcb1f56d46c1b",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 52,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3236,7 +3258,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "5d18592a8ea2d5a16a0ebc6c76d79c4c1a5d04d4a46960acabe638eb62c82548",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 57,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3263,7 +3285,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "4e1c66c0640432f7a46d8613fd80fe73ce192febf6dc79e31c408d82c7047267",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 70,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3290,7 +3312,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "b9e98e850c17bf62b8a0569b407eac19b5fe956cd38dd989821c538c7f6fc379",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 84,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3317,7 +3339,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "25c0c1870c42485fe68303437f9be952a2b93d063b16a0916ae5925d46484d8a",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 90,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3344,7 +3366,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "343b5c17df0f28e74f9ad308561f574261f11a156134d311a1c21ee561bba26e",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 112,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3371,7 +3393,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "cff68e586b6eb70137d2a09748dba8f017433ef8773d9ccb8424861005d2591e",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 118,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3398,7 +3420,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "317a7d71e89ac9fbf478d1c05f1f6ddea6881bb33ce88ecdd826235dc06aa248",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 125,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3425,7 +3447,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "3d04e05bbc0f322a0f495cd36443543d718a471a150fc0bad2365d3db4d87b92",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 151,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3452,7 +3474,7 @@
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "source": {
         "ast_sha256": "57231786fc6a2274e99165d220c5460874ef2a6ca77c52634d31758673845c86",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 160,
         "path": "clearledger/server/app/routers/docs_portal_router.py",
         "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3470,7 +3492,7 @@
         "details": "get_verified_partner_token→verify_partner_access_token→verify_access canonical MVCC reads",
         "evidence": {
           "ast_sha256": "d0c74d0d72131900db466ba2c3720ecc521940347bfb4700ad1ab98e48f193b7",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 1206,
           "path": "clearledger/server/app/services/partner_identity.py",
           "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -3485,7 +3507,7 @@
         "details": "MVCC only, before Token lock",
         "evidence": {
           "ast_sha256": "fe59711e5c5c072302c7ea5b1c2c593f8ccdb98617fc0f64842dd91fd49ab3dc",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 45,
           "path": "clearledger/server/app/services/docs_portal.py",
           "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3500,7 +3522,7 @@
         "details": "actual PartnerToken.id==verified.token_id FOR UPDATE/populate_existing",
         "evidence": {
           "ast_sha256": "19b9a36d7c804dbe3ed977468b5f48aad06c3cc68e87b6e85ae80f02d8cf4bb6",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 132,
           "path": "clearledger/server/app/services/docs_portal.py",
           "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3515,7 +3537,7 @@
         "details": "DELETE by token_id then INSERT hash+same held token; Docs row/unique waits possible; only declared new child FK points Token held by same root",
         "evidence": {
           "ast_sha256": "7a12faa166787a8aece090b0a0f91885098defd9cb40d148970fe70848408663",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 17,
           "path": "clearledger/server/app/models_docs_portal.py",
           "raw_file_sha256": "57bce6f84b8992503e2069bc3b6f7a91be830adc1312269e7742309a19087c64",
@@ -3530,7 +3552,7 @@
         "details": "Docs→Token→Family→live_grant→Grant/Client/Installation/CA/Company/App/User/Member/Role/resources/client_config; only fresh/select MVCC, no new row/advisory lock/DML/subject insert",
         "evidence": {
           "ast_sha256": "41e34916edc6f9d5dd87bd533bfc1ea5d84ca613c232ba96eac1784c6235014f",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 112,
           "path": "clearledger/server/app/services/docs_portal.py",
           "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -3545,7 +3567,7 @@
         "details": "original producer transport unchanged",
         "evidence": {
           "ast_sha256": "b9e98e850c17bf62b8a0569b407eac19b5fe956cd38dd989821c538c7f6fc379",
-          "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
           "end": 84,
           "path": "clearledger/server/app/routers/docs_portal_router.py",
           "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -3594,7 +3616,7 @@
       },
       "source": {
         "ast_sha256": "babffd869487681577361145bb2fed6f9d34da74a7e84bfcfb0e64063b156f57",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 80,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3635,7 +3657,7 @@
       },
       "source": {
         "ast_sha256": "ecae87c5e9f16b287b94710e8afebb665784a9522fa98305e6a734586d182fd0",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 90,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3676,7 +3698,7 @@
       },
       "source": {
         "ast_sha256": "d99a543f3e3b2c5935c53842837712a596242fb540c161709e05c394ba985fab",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 108,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3717,7 +3739,7 @@
       },
       "source": {
         "ast_sha256": "191517e884f64724b52b58240a72d14bd41903c5ef284e9d0df3712ce43ecfe8",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 121,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3758,7 +3780,7 @@
       },
       "source": {
         "ast_sha256": "0aa0fba2a41483db29ac285ee7c34b95aefdc190c37df0205aa7135a2374d1f5",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 203,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3799,7 +3821,7 @@
       },
       "source": {
         "ast_sha256": "79819f21a5df17c66dd4f017246cb6a5f9cb4c0d15edd6d3ebac06ae862c6ac7",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 224,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3840,7 +3862,7 @@
       },
       "source": {
         "ast_sha256": "eb33e31712ac4bc3a8940925cf198bdbc05f599ef23711b893c4a2da59a68616",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 243,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3881,7 +3903,7 @@
       },
       "source": {
         "ast_sha256": "39a21684593bda9fad770cccc244aba5f3fe5f826f7fd4b2a0455f14c02075e7",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 258,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -3922,7 +3944,7 @@
       },
       "source": {
         "ast_sha256": "a73573447f15f9843a47020eeafeb04cd3c0f638d68dd5e3190dadb4d8facdf3",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 133,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -3963,7 +3985,7 @@
       },
       "source": {
         "ast_sha256": "94ae42b6e06ea61e0a88478390c0e9d0670700139b9f4c7531afeb58d2e8560f",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 307,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4004,7 +4026,7 @@
       },
       "source": {
         "ast_sha256": "759e25b36da56bec7c4fa9abf58f80d87e0b08848b65aefaab62df7e0475b941",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 364,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4045,7 +4067,7 @@
       },
       "source": {
         "ast_sha256": "6c9fea08b4d9eec59484d9fa80098a43dfa004ad02f980a21d47de6942117250",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 390,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4086,7 +4108,7 @@
       },
       "source": {
         "ast_sha256": "3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 204,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4127,7 +4149,7 @@
       },
       "source": {
         "ast_sha256": "3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 204,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4168,7 +4190,7 @@
       },
       "source": {
         "ast_sha256": "3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 204,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4209,7 +4231,7 @@
       },
       "source": {
         "ast_sha256": "3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 204,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4250,7 +4272,7 @@
       },
       "source": {
         "ast_sha256": "a1fcf03561c44c6bef7ce5c9b6f8138cb3faecaad8b8504f218fc7789bc4bd2e",
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 247,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4280,7 +4302,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 5341,
         "path": "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.json",
         "raw_file_sha256": "8868ce1c0304069d4c9c55556eef851a59629efb9ce51c6a0bd9d903e3fe28a6",
@@ -4306,7 +4328,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 212,
         "path": "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.md",
         "raw_file_sha256": "9a3013b627035295dfe582d8002c623d3765c3c62021a6079b91097a14818d2a",
@@ -4332,7 +4354,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 258,
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "raw_file_sha256": "ced1958f0f2cfe85c39af4984bb55663c3139c844925622af5f869575ad3f2ff",
@@ -4358,7 +4380,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 390,
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
@@ -4384,7 +4406,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 1206,
         "path": "clearledger/server/app/services/partner_identity.py",
         "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4410,7 +4432,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 393,
         "path": "clearledger/server/tests/test_partner_writer_scoped_locks.py",
         "raw_file_sha256": "b2ca00492ddf2f669306fba5eb1e931df0b081b4f1f4be457dcfdc3784f1ccf2",
@@ -4436,7 +4458,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 1205,
         "path": "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
         "raw_file_sha256": "756372a2bab417a81bb6fc30bdaf4e85e2ce6b68f8dc5d621624bb6575163819",
@@ -4461,7 +4483,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 416,
         "path": "clearledger/server/app/services/contract_write_locks.py",
         "raw_file_sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
@@ -4486,7 +4508,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 180,
         "path": "clearledger/server/app/models_partner.py",
         "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -4511,7 +4533,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 17,
         "path": "clearledger/server/app/models_docs_portal.py",
         "raw_file_sha256": "57bce6f84b8992503e2069bc3b6f7a91be830adc1312269e7742309a19087c64",
@@ -4536,7 +4558,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 14447,
         "path": "clearledger/server/app/models.py",
         "raw_file_sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
@@ -4561,7 +4583,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 5606,
         "path": "clearledger/server/app/database.py",
         "raw_file_sha256": "c2c028fc528b7260c69de441e41a564595d07c23c74e4433f02fc9f04db005af",
@@ -4586,7 +4608,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 730,
         "path": "clearledger/server/app/auth.py",
         "raw_file_sha256": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889",
@@ -4611,7 +4633,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 185,
         "path": "clearledger/server/tests/conftest.py",
         "raw_file_sha256": "32ea55b426d111d8615e0f85ac7561a55ec802ee98a2b59a336405205ab1f57b",
@@ -4636,7 +4658,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 49,
         "path": "clearledger/server/tests/partner_test_safety.py",
         "raw_file_sha256": "43de791a8f0b418f03d4cdc155c2d8cc2d923757134f88b91870a539609eafb1",
@@ -4661,7 +4683,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 255,
         "path": "clearledger/server/tests/test_docs_portal.py",
         "raw_file_sha256": "a56f0eda9bf6ab89f24fefd4c73a61c3ff3a33e2257df64971432a5c2f22c6ff",
@@ -4686,7 +4708,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 138,
         "path": "clearledger/server/tests/test_docs_portal_browser.py",
         "raw_file_sha256": "6b52236afd7fb367b75e88fed6439d12f75b190bd2fbe99d8506ae430e50df58",
@@ -4711,7 +4733,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 635,
         "path": "clearledger/server/tests/test_partner_main_composition.py",
         "raw_file_sha256": "ee887de322fa62aee1af01304ee4b8d6c33b1c2940c7b8f22bd9eca0a93d7f32",
@@ -4736,7 +4758,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 267,
         "path": "clearledger/server/tests/partner_main_composition_approved.py",
         "raw_file_sha256": "23fa037557b16ab2ffcf672a7759fa89ff1adf2e11d4afbb5644fc534fea5bd8",
@@ -4761,7 +4783,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 424,
         "path": "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
         "raw_file_sha256": "5fbd458cfb1b07c86f4e835e8699aba3608c01cf7d86fe713ad9bdf3d6dca777",
@@ -4786,7 +4808,7 @@
       },
       "byte_equal": true,
       "source": {
-        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
         "end": 167,
         "path": "clearledger/server/tests/partner_contract_schema_v4_approval.py",
         "raw_file_sha256": "e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920",
@@ -4808,10 +4830,1038 @@
     "Meaningful tests authored only, existing fixtures/runner/config/assertions unchanged; stdlib AST/JSON/hash/memory-compile without exec and git diff --check only after code phase if ratified.",
     "Fresh MDJSON and complete original_program M00–M19+11 semantic-identical; historical findings untouched, every runtime gate remains explicit UNKNOWN/NOTRUN."
   ],
-  "source_commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+  "source_commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+  "source_correction": {
+    "actual_parent_read": {
+      "completion_asserted": false,
+      "cross_cutting_requirements": 11,
+      "original_program_semantic_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+      "parent_modified": false,
+      "path": "/srv/projects/preview/contract-create-workflow-20261101/report.json",
+      "provenance": "actual raw bytes re-read by this correction worker; independent of mutable parent report attributes and historical source pin",
+      "raw_file_sha256": "324a459fa5bf191d488c45425a72c7c6f760de6e2e981eb9b12be7b1eda203d0",
+      "sections": 20,
+      "semantic_equal": true
+    },
+    "all_original_helpers": [
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "da81c57dff1d796f83988d3097e20acc3b3c587fc77f8e93a757267e1892137b",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 50,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "7cdf2984f1b1d261569f9ab8b8ccf44907fd4223d582e68ab316cfecb5b5bd44",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 49,
+          "symbol": "proof"
+        },
+        "before": {
+          "ast_sha256": "da81c57dff1d796f83988d3097e20acc3b3c587fc77f8e93a757267e1892137b",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 50,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "7cdf2984f1b1d261569f9ab8b8ccf44907fd4223d582e68ab316cfecb5b5bd44",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 49,
+          "symbol": "proof"
+        },
+        "symbol": "proof"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "2f80055e130d6ac27e34393629d89a9c1e09b9c1ba580d21539c62cc6e6c9dcf",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 57,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "6b6e25cd7f6f9c42dd5a073372991792aefd483e2b513c64b2cca7ae4aecbbd6",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 53,
+          "symbol": "private"
+        },
+        "before": {
+          "ast_sha256": "2f80055e130d6ac27e34393629d89a9c1e09b9c1ba580d21539c62cc6e6c9dcf",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 57,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "6b6e25cd7f6f9c42dd5a073372991792aefd483e2b513c64b2cca7ae4aecbbd6",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 53,
+          "symbol": "private"
+        },
+        "symbol": "private"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "c0a03a77141e2358d0896af9d947cd19f9ae1a8cc1d70d00b650ee70c8bf8a26",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 65,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "f6f97d0e4a9c8091d17da4b5e960f6fec2588d4803de32eafc7e8faeb11313ae",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 60,
+          "symbol": "closed_wire"
+        },
+        "before": {
+          "ast_sha256": "c0a03a77141e2358d0896af9d947cd19f9ae1a8cc1d70d00b650ee70c8bf8a26",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 65,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "f6f97d0e4a9c8091d17da4b5e960f6fec2588d4803de32eafc7e8faeb11313ae",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 60,
+          "symbol": "closed_wire"
+        },
+        "symbol": "closed_wire"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "3c48d74e882b6d974fd64d729c23f465fa4d58b4e698146805a8061272c99ad7",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 77,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "6e5127bc2a2dd4a16c759dd5af1aec43ac91c40920afd4c09348cc4a31ec5885",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 68,
+          "symbol": "browser"
+        },
+        "before": {
+          "ast_sha256": "3c48d74e882b6d974fd64d729c23f465fa4d58b4e698146805a8061272c99ad7",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 77,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "6e5127bc2a2dd4a16c759dd5af1aec43ac91c40920afd4c09348cc4a31ec5885",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 68,
+          "symbol": "browser"
+        },
+        "symbol": "browser"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "b9bc5d63ca8d7a73c4ccd3da5bc2cbc68d125031575f41b5a2cf090b0b26744d",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 88,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "18e53df46ff34a46acb46e53f380f3c6691de23e05cc8d5ba19efbbcf5c37bbb",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 80,
+          "symbol": "state"
+        },
+        "before": {
+          "ast_sha256": "b9bc5d63ca8d7a73c4ccd3da5bc2cbc68d125031575f41b5a2cf090b0b26744d",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 88,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "18e53df46ff34a46acb46e53f380f3c6691de23e05cc8d5ba19efbbcf5c37bbb",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 80,
+          "symbol": "state"
+        },
+        "symbol": "state"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "77a8cfc5ef21755ca965c53630a50b4b8e1e59720e3f0dcd45cce7d5391e09fb",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 93,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "9ae1063a247bee34ffe2de59c37dc307960670e12401d0b1795bf883bb1a987d",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 91,
+          "symbol": "verify"
+        },
+        "before": {
+          "ast_sha256": "77a8cfc5ef21755ca965c53630a50b4b8e1e59720e3f0dcd45cce7d5391e09fb",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 93,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "9ae1063a247bee34ffe2de59c37dc307960670e12401d0b1795bf883bb1a987d",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 91,
+          "symbol": "verify"
+        },
+        "symbol": "verify"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "4d5c3e60d6f7d19aa56836238ad11af22875871467c444b81c26c623e3e0dae2",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 115,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "f49ccec2abb2f8aefb21276fca9d9a625c14ef98a4f6e1134da7bfdfcfc764c8",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 96,
+          "symbol": "issue"
+        },
+        "before": {
+          "ast_sha256": "4d5c3e60d6f7d19aa56836238ad11af22875871467c444b81c26c623e3e0dae2",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 115,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "f49ccec2abb2f8aefb21276fca9d9a625c14ef98a4f6e1134da7bfdfcfc764c8",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 96,
+          "symbol": "issue"
+        },
+        "symbol": "issue"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "9361d7ef98e71218edc07f3bbdfde672f1e494ee0f5f8e35332fd2dccdb6962b",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 127,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "fec338d6bcb08b4e7ad9d8ef6a3b8a8546be2293a9c6035e548dbb2931351b9d",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 119,
+          "symbol": "sql_log"
+        },
+        "before": {
+          "ast_sha256": "9361d7ef98e71218edc07f3bbdfde672f1e494ee0f5f8e35332fd2dccdb6962b",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 127,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "fec338d6bcb08b4e7ad9d8ef6a3b8a8546be2293a9c6035e548dbb2931351b9d",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 119,
+          "symbol": "sql_log"
+        },
+        "symbol": "sql_log"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "d695d3d82d39f16bbde21ba6a039d603f7804ecf6111b8586f3867020de81d7e",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 138,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "2ad40227c4286a29678a48a60f1e05c9566d549827cb0e09fab85f2f9dc9d008",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 130,
+          "symbol": "row_owner"
+        },
+        "before": {
+          "ast_sha256": "d695d3d82d39f16bbde21ba6a039d603f7804ecf6111b8586f3867020de81d7e",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 138,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "2ad40227c4286a29678a48a60f1e05c9566d549827cb0e09fab85f2f9dc9d008",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 130,
+          "symbol": "row_owner"
+        },
+        "symbol": "row_owner"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "ecfc85917b1316239fba9f56b884d7f791fb4a1fa884359ac05f81294ae5216a",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 153,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "2fa73ab36025677b4b55e3cfc21f467d9c14696220c477e2e7ee795540cf5e89",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 142,
+          "symbol": "row_signal"
+        },
+        "before": {
+          "ast_sha256": "ecfc85917b1316239fba9f56b884d7f791fb4a1fa884359ac05f81294ae5216a",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 153,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "2fa73ab36025677b4b55e3cfc21f467d9c14696220c477e2e7ee795540cf5e89",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 142,
+          "symbol": "row_signal"
+        },
+        "symbol": "row_signal"
+      }
+    ],
+    "changed_definition": {
+      "after": {
+        "ast_sha256": "089ab9efa9458a4f31f743708d3086352828ee5bc1e778322cb93e742883e39d",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+        "end": 353,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+        "raw_span_sha256": "66dd1f8a7c7a20fab590b51e58776bbf4f70fe293e0b83087e5bfb7bb9f9626f",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 309,
+        "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+      },
+      "before": {
+        "ast_sha256": "8c0f7cdf05af1416a6e631e5b57f0d001a694b4cac2697112a884be89cf5a665",
+        "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+        "end": 354,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+        "raw_span_sha256": "84d8fba9a4d3606dc13eff2c60c80c88c84600e769d8b4e8865a3b8ecf6ac5a5",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 309,
+        "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+      },
+      "body_changed": true,
+      "change": "Remove only member parameter and unreachable member DELETE branch; retain all other10 cases and all old assertions",
+      "decorator_after": {
+        "ast_sha256": "d83628188dc74b236b2b3ee6ea1f12f4931b0a95dff4d3fa993e006fad1ea6c9",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+        "end": 308,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+        "raw_span_sha256": "019e7a71453e74c8dd43497723bf2a3b8e01d294b8b9db160c9f99732d2d6da9",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 304,
+        "symbol": null
+      },
+      "decorator_before": {
+        "ast_sha256": "90d786580870947caa69ebb3c7a73940f360a4715ca2f70f99e41a015370e36a",
+        "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+        "end": 308,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+        "raw_span_sha256": "f3569c933684dab0f4c91189221555384d49e279a4f43b379b284fbf0fcd0626",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 304,
+        "symbol": null
+      },
+      "decorator_changed": true,
+      "only_removed_parameter": [
+        "typed",
+        "member"
+      ],
+      "remaining_literal_parameters": 10,
+      "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+    },
+    "current_counts": {
+      "PG_definitions": 17,
+      "collected_cases": "NOT COLLECTED",
+      "original_helpers_AST_unchanged": 10,
+      "other_original_PG_definitions_AST_unchanged": 15,
+      "source_definitions": 7,
+      "tests_executed": 0
+    },
+    "evidence_policy": "Original immutable baseline/proposal evidence retains original commits; current source inventories repinned to correction source commit; old P2/source/report provenance retained separately; no all16 PG AST-equal claim",
+    "finding_id": "DPL-S1-R01",
+    "historical_author_files": [
+      {
+        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "end": 242,
+        "path": "clearledger/server/app/services/docs_portal.py",
+        "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
+        "raw_span_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 1,
+        "symbol": null
+      },
+      {
+        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "end": 160,
+        "path": "clearledger/server/app/routers/docs_portal_router.py",
+        "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
+        "raw_span_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 1,
+        "symbol": null
+      },
+      {
+        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "end": 178,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
+        "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
+        "raw_span_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 1,
+        "symbol": null
+      },
+      {
+        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "end": 603,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+        "raw_span_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 1,
+        "symbol": null
+      }
+    ],
+    "historical_author_reports": [
+      {
+        "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+        "path": "clearledger/docs/api/DOCS_PORTAL_LOGOUT_SCOPED_LOCKS_20261101.md",
+        "raw_file_sha256": "c35562ab81b7397ea3ffa7d4218f18eec8f96231ef87b8c9df9153d034718dd9",
+        "repository": "Electro-Interfaces/ClearLedger"
+      },
+      {
+        "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+        "path": "clearledger/docs/api/DOCS_PORTAL_LOGOUT_SCOPED_LOCKS_20261101.json",
+        "raw_file_sha256": "083ac5e76afeed140604da5fa32c85da04ae6a13213295ca0184b5d7536d7602",
+        "repository": "Electro-Interfaces/ClearLedger"
+      }
+    ],
+    "kind": "SOURCE_TEST_ORACLE",
+    "new_definition": {
+      "oracle_source": "actual original composer/issuer/callback; observed real ClientKey wait then409/no own callback/flush/DML; fresh whole HTTP request with saved proof, genuine issued cap/missing Member spec and204/fresh-reader Docs+Family=True; NOTRUN",
+      "parameters": [],
+      "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+      "source": {
+        "ast_sha256": "393c2f6a79d4540b9301cefc80398a440aed8908b25837f00792c877dece7efe",
+        "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+        "end": 450,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+        "raw_span_sha256": "b239fd60363e1891dd6638b4c20a942bc46bcb8e1d5f1516f7a3f74e581c42b0",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 356,
+        "symbol": "test_logout_member_disappearance_after_discovery_requires_whole_retry"
+      },
+      "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
+      "symbol": "test_logout_member_disappearance_after_discovery_requires_whole_retry"
+    },
+    "next": "Fresh independent targeted recheck in another reviewer dispatch; coherent external ROOT UUID fix and new combined freeze/admission/READ COMMITTED/receipt required before any future runtime",
+    "old_incorrect_definition": {
+      "oracle_source": "real test body at pinned span; no test function was called",
+      "parameters": [
+        {
+          "literal_row_count": 11,
+          "literal_rows": [
+            [
+              "typed",
+              "native_tv"
+            ],
+            [
+              "typed",
+              "member"
+            ],
+            [
+              "typed",
+              "role"
+            ],
+            [
+              "typed",
+              "grant"
+            ],
+            [
+              "typed",
+              "client"
+            ],
+            [
+              "typed",
+              "installation"
+            ],
+            [
+              "typed",
+              "ca"
+            ],
+            [
+              "family",
+              "family_expired"
+            ],
+            [
+              "family",
+              "token_revoked"
+            ],
+            [
+              "docs",
+              "docs_expired"
+            ],
+            [
+              "docs",
+              "docs_revoked"
+            ]
+          ],
+          "names": "wait,change"
+        }
+      ],
+      "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+      "source": {
+        "ast_sha256": "8c0f7cdf05af1416a6e631e5b57f0d001a694b4cac2697112a884be89cf5a665",
+        "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+        "end": 354,
+        "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+        "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+        "raw_span_sha256": "84d8fba9a4d3606dc13eff2c60c80c88c84600e769d8b4e8865a3b8ecf6ac5a5",
+        "repository": "Electro-Interfaces/ClearLedger",
+        "start": 309,
+        "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+      },
+      "status": "AUTHORED / NOTRUN INCLUDING COLLECTION",
+      "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+    },
+    "oracle": {
+      "first_request": "real browser grant/cookie; actual original composer/cap and EXCLUSIVE ClientKey blocker; actual Connection PID/pg_blocking_pids/pg_locks wait; delete original UserCompany/commit;409 original detail, private headers, no delete-cookie, request-only callback0/flush0/DML0; fresh reader Docs=False Family=False Token/Grant unchanged and Member absent separately",
+      "new_live_native_admin_gate": false,
+      "new_production_retry_or_second_acquire": false,
+      "old_root_continued": false,
+      "positive_authority_substituted": false,
+      "second_whole_request": "saved identical raw cookie/proof; stable missing Member before new discovery; new root and one genuine new capability, actual writer/current checkpoint/original callback, missing Member spec; Family then Docs UPDATE/two flushes on this new root;204/delete-cookie, fresh-reader Docs=True Family=True, Member remains absent"
+    },
+    "original_author": {
+      "dispatch_id": "ctx_c4074a3320af",
+      "final_commit": "b412881ff3831e894764c007ce2f299892bcb884",
+      "source_commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "task_id": "task_bd855cac8ecb"
+    },
+    "other_15_PG_definitions": [
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "1b19b8fa628e6a8410bed3d8261900b9d39109a5245d263a606f4d7acb4aaaac",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 177,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "65eb82f9dbe6683d90141a54129dcd1a280525e702e174501dea8231d129e65a",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 156,
+          "symbol": "test_logout_success_persists_only_bound_docs_and_family_before_response"
+        },
+        "before": {
+          "ast_sha256": "1b19b8fa628e6a8410bed3d8261900b9d39109a5245d263a606f4d7acb4aaaac",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 177,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "65eb82f9dbe6683d90141a54129dcd1a280525e702e174501dea8231d129e65a",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 156,
+          "symbol": "test_logout_success_persists_only_bound_docs_and_family_before_response"
+        },
+        "symbol": "test_logout_success_persists_only_bound_docs_and_family_before_response"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "82e7c003f6d817341fae856c01efd52051d2f9c8f2dbe0912a8f95b14f277d35",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 200,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "44bbc65b63029f477ca5957f2b33eab1b56a160452dd9f73d2cea835d38ff8e8",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 180,
+          "symbol": "test_logout_unknown_cookie_is_noop_and_missing_cookie_is403"
+        },
+        "before": {
+          "ast_sha256": "82e7c003f6d817341fae856c01efd52051d2f9c8f2dbe0912a8f95b14f277d35",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 200,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "44bbc65b63029f477ca5957f2b33eab1b56a160452dd9f73d2cea835d38ff8e8",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 180,
+          "symbol": "test_logout_unknown_cookie_is_noop_and_missing_cookie_is403"
+        },
+        "symbol": "test_logout_unknown_cookie_is_noop_and_missing_cookie_is403"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "047cc95d162fca6b29ddf56b972532ec6d6c8133542b0308e4c4ce1c062799a3",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 220,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "f8a37f69b230538e4b53c522db88b1139f157c536f35dc93da2b8e2a04fcc1d9",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 204,
+          "symbol": "test_logout_repeated_and_already_revoked_keep_cleanup_semantics"
+        },
+        "before": {
+          "ast_sha256": "047cc95d162fca6b29ddf56b972532ec6d6c8133542b0308e4c4ce1c062799a3",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 220,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "f8a37f69b230538e4b53c522db88b1139f157c536f35dc93da2b8e2a04fcc1d9",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 204,
+          "symbol": "test_logout_repeated_and_already_revoked_keep_cleanup_semantics"
+        },
+        "symbol": "test_logout_repeated_and_already_revoked_keep_cleanup_semantics"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "b94e583862578f4df7537cfc13d081d8dabbb4bffb69a221f44f84422e4e8a94",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 241,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "0d24f1e8f13e534645355a3bd3d85021487ba805adffed6e97a9ebec3d5bd235",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 227,
+          "symbol": "test_logout_origin_csrf_and_query_errors_preserve_precedence"
+        },
+        "before": {
+          "ast_sha256": "b94e583862578f4df7537cfc13d081d8dabbb4bffb69a221f44f84422e4e8a94",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 241,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "0d24f1e8f13e534645355a3bd3d85021487ba805adffed6e97a9ebec3d5bd235",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 227,
+          "symbol": "test_logout_origin_csrf_and_query_errors_preserve_precedence"
+        },
+        "symbol": "test_logout_origin_csrf_and_query_errors_preserve_precedence"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "42e0b7ae665fc249d47c4bd7d2dd281feb6b56b54727b509ff0791c911a94b40",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 257,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "85cfb269a2cc6a7481ef87f764b6dcf3b424f778774d18d7ebe8429103190544",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 245,
+          "symbol": "test_logout_uses_cookie_graph_not_foreign_actor_company_or_body"
+        },
+        "before": {
+          "ast_sha256": "42e0b7ae665fc249d47c4bd7d2dd281feb6b56b54727b509ff0791c911a94b40",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 257,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "85cfb269a2cc6a7481ef87f764b6dcf3b424f778774d18d7ebe8429103190544",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 245,
+          "symbol": "test_logout_uses_cookie_graph_not_foreign_actor_company_or_body"
+        },
+        "symbol": "test_logout_uses_cookie_graph_not_foreign_actor_company_or_body"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "42291f0133ec50f38dc60aac4602407ce1d56cd5281db7e64351a2a804502511",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 275,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "ba9898bad6debbdf378b45bc5fc1a795cd7ce56da97b8cdc3ba0a307e965e80b",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 261,
+          "symbol": "test_logout_wrong_csrf_for_another_session_cannot_revoke_either"
+        },
+        "before": {
+          "ast_sha256": "42291f0133ec50f38dc60aac4602407ce1d56cd5281db7e64351a2a804502511",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 275,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "ba9898bad6debbdf378b45bc5fc1a795cd7ce56da97b8cdc3ba0a307e965e80b",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 261,
+          "symbol": "test_logout_wrong_csrf_for_another_session_cannot_revoke_either"
+        },
+        "symbol": "test_logout_wrong_csrf_for_another_session_cannot_revoke_either"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "4bcbd446be7c40e90e7deefac39573383339e3a6f906291b8978a8a64590efcf",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 301,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "378bdc4306bbe29f2d7bb45608e288a8738dc523d130fadd9cf816eebfb0130a",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 279,
+          "symbol": "test_logout_original_docs_token_binding_drift_rolls_back"
+        },
+        "before": {
+          "ast_sha256": "4bcbd446be7c40e90e7deefac39573383339e3a6f906291b8978a8a64590efcf",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 301,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "378bdc4306bbe29f2d7bb45608e288a8738dc523d130fadd9cf816eebfb0130a",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 279,
+          "symbol": "test_logout_original_docs_token_binding_drift_rolls_back"
+        },
+        "symbol": "test_logout_original_docs_token_binding_drift_rolls_back"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "42bd14e20d576d356b4bed06914876a067a4f82fb426a698c0c0c85c91d4832a",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 476,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "b50c7bc39c85983cd707ce74e859be4ab7c56023dd7fd9d5e94c696e2c71fb18",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 455,
+          "symbol": "test_logout_dirty_expired_entry_rejects_without_sql_flush_or_expire"
+        },
+        "before": {
+          "ast_sha256": "42bd14e20d576d356b4bed06914876a067a4f82fb426a698c0c0c85c91d4832a",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 380,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "b50c7bc39c85983cd707ce74e859be4ab7c56023dd7fd9d5e94c696e2c71fb18",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 359,
+          "symbol": "test_logout_dirty_expired_entry_rejects_without_sql_flush_or_expire"
+        },
+        "symbol": "test_logout_dirty_expired_entry_rejects_without_sql_flush_or_expire"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "215d226a3b40bcc227530c64735aeb0c9979a126cbabccafd653bace104fa4a1",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 509,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "347cf30f384c4acfa3782f730e5c9eaa54dfa82ecc415c0b5977c6a193000e52",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 479,
+          "symbol": "test_logout_actual_lock_order_and_original_capability"
+        },
+        "before": {
+          "ast_sha256": "215d226a3b40bcc227530c64735aeb0c9979a126cbabccafd653bace104fa4a1",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 413,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "347cf30f384c4acfa3782f730e5c9eaa54dfa82ecc415c0b5977c6a193000e52",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 383,
+          "symbol": "test_logout_actual_lock_order_and_original_capability"
+        },
+        "symbol": "test_logout_actual_lock_order_and_original_capability"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "b071f577be7cd8e4b07925fa507d08a56c5c23fb06eda61a6f3ff980d1ee81fb",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 544,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "4794747a639776f842b3127312858e2b165c761fea7904dcca32a290fcddb5a8",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 513,
+          "symbol": "test_logout_rollback_after_callback_flush_restores_both_rows"
+        },
+        "before": {
+          "ast_sha256": "b071f577be7cd8e4b07925fa507d08a56c5c23fb06eda61a6f3ff980d1ee81fb",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 448,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "4794747a639776f842b3127312858e2b165c761fea7904dcca32a290fcddb5a8",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 417,
+          "symbol": "test_logout_rollback_after_callback_flush_restores_both_rows"
+        },
+        "symbol": "test_logout_rollback_after_callback_flush_restores_both_rows"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "0e4e97e4d59c578468403848971625afd659ceb28a24239f623c63ac0c301812",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 580,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "8ba2a2c93331be474c8e652814e6996ed478118cc64300d5008069e176eef939",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 548,
+          "symbol": "test_logout_cancel_before_commit_restores_both_rows_and_releases_locks"
+        },
+        "before": {
+          "ast_sha256": "0e4e97e4d59c578468403848971625afd659ceb28a24239f623c63ac0c301812",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 484,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "8ba2a2c93331be474c8e652814e6996ed478118cc64300d5008069e176eef939",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 452,
+          "symbol": "test_logout_cancel_before_commit_restores_both_rows_and_releases_locks"
+        },
+        "symbol": "test_logout_cancel_before_commit_restores_both_rows_and_releases_locks"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "8644f0ae2db59adeca37ff9e702e50ab1521b254b4ab92c295910287c0f873e1",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 601,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "e6826023eee775742f25c769978c514e7a8d3e6e20df82387afde9a0bb150e70",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 583,
+          "symbol": "test_logout_failed_commit_has_no_success_response"
+        },
+        "before": {
+          "ast_sha256": "8644f0ae2db59adeca37ff9e702e50ab1521b254b4ab92c295910287c0f873e1",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 505,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "e6826023eee775742f25c769978c514e7a8d3e6e20df82387afde9a0bb150e70",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 487,
+          "symbol": "test_logout_failed_commit_has_no_success_response"
+        },
+        "symbol": "test_logout_failed_commit_has_no_success_response"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "c087a49e0f1cbb0fc769f0b521c8e74601c6e7048f4048b7a71210018ac72db9",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 635,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "986fd2e4da529dc67da6264de453973a55e986af83c3ca880e228747c7c93f40",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 606,
+          "symbol": "test_logout_cascade_missing_and_already_deleted_noop"
+        },
+        "before": {
+          "ast_sha256": "c087a49e0f1cbb0fc769f0b521c8e74601c6e7048f4048b7a71210018ac72db9",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 539,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "986fd2e4da529dc67da6264de453973a55e986af83c3ca880e228747c7c93f40",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 510,
+          "symbol": "test_logout_cascade_missing_and_already_deleted_noop"
+        },
+        "symbol": "test_logout_cascade_missing_and_already_deleted_noop"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "17a3e54e2df1d1bb5291acccea6e7cf80cb8beb1b410ae13e28a611d1e1e87f1",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 681,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "e3660759887cb1682240e3b3bbc150a3677c6e2d43e341ee4578dd6c32738556",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 639,
+          "symbol": "test_logout_does_not_cross_family_for_same_grant_or_other_company"
+        },
+        "before": {
+          "ast_sha256": "17a3e54e2df1d1bb5291acccea6e7cf80cb8beb1b410ae13e28a611d1e1e87f1",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 585,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "e3660759887cb1682240e3b3bbc150a3677c6e2d43e341ee4578dd6c32738556",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 543,
+          "symbol": "test_logout_does_not_cross_family_for_same_grant_or_other_company"
+        },
+        "symbol": "test_logout_does_not_cross_family_for_same_grant_or_other_company"
+      },
+      {
+        "AST_equal": true,
+        "after": {
+          "ast_sha256": "8ec00e26b1fcbc97ebb926f5022cc1574eeb3d73f693a75c07ede4a3448f0281",
+          "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+          "end": 699,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+          "raw_span_sha256": "ed6be25cb1106a52f8c6b756ef0535103a58301f1f0d2f6590f04fb0b4d97dd4",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 684,
+          "symbol": "test_existing17_retain_source_contracts_and_public_outcomes"
+        },
+        "before": {
+          "ast_sha256": "8ec00e26b1fcbc97ebb926f5022cc1574eeb3d73f693a75c07ede4a3448f0281",
+          "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+          "end": 603,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+          "raw_span_sha256": "ed6be25cb1106a52f8c6b756ef0535103a58301f1f0d2f6590f04fb0b4d97dd4",
+          "repository": "Electro-Interfaces/ClearLedger",
+          "start": 588,
+          "symbol": "test_existing17_retain_source_contracts_and_public_outcomes"
+        },
+        "symbol": "test_existing17_retain_source_contracts_and_public_outcomes"
+      }
+    ],
+    "prediction_not_receipt": "At READ COMMITTED, frozen nonmissing Member disappears after actual ClientKey wait; original row FOR SHARE mismatch calls _writer_drift/whole-root rollback409 before callback/DML; source prediction after external coherent UUID boundary fix, no executed FAIL/HTTP receipt",
+    "protected_bytes": {
+      "PG_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+      "all_other_source_unchanged": true,
+      "production_router_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
+      "production_service_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
+      "protected17_and_canonical12_unchanged": true,
+      "protected21_unchanged": true,
+      "sourceunit_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9"
+    },
+    "review_history": {
+      "findings": [
+        {
+          "after": "The new definition calls closed_wire(response) and expects Docs/Family revoked=True for every parameter, including typed/member.",
+          "baseline": "No such authored definition exists in immutable base; the existing composer already treats disappearance of a remembered nonmissing row as pointer/absence drift.",
+          "classification": "SOURCE_TEST_ORACLE",
+          "consequence": "A required authored positive scenario contradicts the frozen composer contract and cannot validate cleanup semantics; reaching it after external prerequisite resolution produces a source-predicted denial rather than the asserted success.",
+          "evidence": [
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 309,
+              "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+              "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+              "raw_span_sha256": "a7f7db224c31688cd49a31c2db6c6a9734789d509bbfaecdd82622dc4df25d7d",
+              "start": 304,
+              "symbol": "parametrize typed/member"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 354,
+              "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+              "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+              "raw_span_sha256": "84d8fba9a4d3606dc13eff2c60c80c88c84600e769d8b4e8865a3b8ecf6ac5a5",
+              "start": 309,
+              "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 346,
+              "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+              "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+              "raw_span_sha256": "cd4c3757292409486486ebf9d8994f9fd136075c966bf5d32a716bc95bc29a53",
+              "start": 321,
+              "symbol": "observed wait then DELETE original UserCompany and commit"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 354,
+              "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+              "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+              "raw_span_sha256": "913b4e9fb0f7d355b041c9c377257aacfe10358ab6625489d96ee3b4cd27f7c5",
+              "start": 352,
+              "symbol": "unconditional closed_wire + true revoked flags"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 564,
+              "path": "clearledger/server/app/services/partner_identity.py",
+              "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
+              "raw_span_sha256": "8fd8409f243f26d4195d10565cb16cfc070d519056b8b5084ebdb003c385b83c",
+              "start": 548,
+              "symbol": "_prepare_partner_write.person"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 530,
+              "path": "clearledger/server/app/services/partner_identity.py",
+              "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
+              "raw_span_sha256": "d437332424c9150b5a6d8c76e6624b6e0db40ad131d699c3dd5a765425e59f19",
+              "start": 512,
+              "symbol": "_prepare_partner_write.remember/get"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 701,
+              "path": "clearledger/server/app/services/partner_identity.py",
+              "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
+              "raw_span_sha256": "3d3e078ed2de3be0fc59955bffc6ee01a07215a38c3e06a8bbe15835157405e9",
+              "start": 689,
+              "symbol": "one acquire then original missing comparison"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 416,
+              "path": "clearledger/server/app/services/partner_identity.py",
+              "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
+              "raw_span_sha256": "db21190c51cae8c64cbbce03a72ae603594d8f07b31e81b77ac5274bb4d734f5",
+              "start": 413,
+              "symbol": "_writer_drift"
+            },
+            {
+              "commit": "b412881ff3831e894764c007ce2f299892bcb884",
+              "end": 110,
+              "path": "clearledger/server/app/routers/docs_portal_router.py",
+              "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
+              "raw_span_sha256": "08adafb59ca8848d8ccbd96d492230064ede9c8489eff24cacbd32a4ea63554b",
+              "start": 93,
+              "symbol": "close_session decorator and body"
+            }
+          ],
+          "id": "DPL-S1-R01",
+          "introduced_by": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+          "line_end": 354,
+          "line_start": 337,
+          "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
+          "prerequisites": "Required future READ COMMITTED runtime and coherent ROOT UUID fix; neither admitted/executed by this reviewer.",
+          "requested_change": "Separate original-row disappearance into a 409/no-cookie/no-own-DML fresh-reader oracle; test stable eligibility cleanup by removing membership before discovery or changing eligibility without replacing/deleting original authority rows. Keep composer/auth/UUID expectations intact and align MD/JSON oracle wording.",
+          "review_target": "b412881ff3831e894764c007ce2f299892bcb884",
+          "runtime_observation": false,
+          "severity": "P2",
+          "source_chain": [
+            "person() get(UserCompany) records missing=False before acquire",
+            "observer proves the actual typed wait, then blocker DELETEs UserCompany and commits",
+            "composer SELECT FOR SHARE returns no original Member under the required READ COMMITTED profile",
+            "(row is None) != spec.missing calls _writer_drift: rollback whole root and HTTP409",
+            "router re-raises409; no callback or Docs/Family DML has happened"
+          ],
+          "symbol": "test_logout_native_and_partner_revocation_after_wait_still_allows_cleanup",
+          "title": "Deleting the originally discovered Member after the typed wait cannot satisfy the unconditional 204 oracle",
+          "trigger": "After the actual logout request has completed no_autoflush discovery and is observed waiting on ClientKey, change=member deletes the existing UserCompany and commits in the blocker root."
+        }
+      ],
+      "json": {
+        "final_freeze": true,
+        "path": "/srv/projects/preview/docs-portal-logout-review-20261101/review.json",
+        "raw_sha256": "7f81be4f5163bf4bcacd5965025dfed98e603fe53d633176dd9307e25f35b80d"
+      },
+      "markdown": {
+        "path": "/srv/projects/preview/docs-portal-logout-review-20261101/review.md",
+        "raw_sha256": "110c196190469f0f0aa377852e3d918f563a50848eaa5adc76f128be07ea7918"
+      },
+      "production_defect_newly_asserted": false,
+      "verdict": "CHANGES_REQUESTED_SOURCE",
+      "worker_done": "msg_c20cf0b0d931"
+    },
+    "severity": "P2",
+    "status": "AUTHORED_FIX_RECHECK_PENDING"
+  },
   "source_files": [
     {
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 242,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -4821,7 +5871,7 @@
       "symbol": null
     },
     {
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 160,
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -4831,7 +5881,7 @@
       "symbol": null
     },
     {
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 178,
       "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py",
       "raw_file_sha256": "b8af44116515cd2b36c1592306674f3a13b0720a0a71dfe54b948a169b770dd9",
@@ -4841,11 +5891,11 @@
       "symbol": null
     },
     {
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
-      "end": 603,
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
+      "end": 699,
       "path": "clearledger/server/tests/test_docs_portal_logout_scoped_locks_pg.py",
-      "raw_file_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
-      "raw_span_sha256": "422d5005d39c1575b1d490caa0e1b9885719baf23517820f02b4576798f68442",
+      "raw_file_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
+      "raw_span_sha256": "3d0a87334f262bd610897146cc72577bde4695acbb11533ec8940f4ac7b0df9b",
       "repository": "Electro-Interfaces/ClearLedger",
       "start": 1,
       "symbol": null
@@ -4854,7 +5904,7 @@
   "source_symbols": {
     "docs_model": {
       "ast_sha256": "7a12faa166787a8aece090b0a0f91885098defd9cb40d148970fe70848408663",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 17,
       "path": "clearledger/server/app/models_docs_portal.py",
       "raw_file_sha256": "57bce6f84b8992503e2069bc3b6f7a91be830adc1312269e7742309a19087c64",
@@ -4865,7 +5915,7 @@
     },
     "identity.PartnerAuthorizationServer": {
       "ast_sha256": "50c6ae6bbfbb7c01e7aba46d302c8b554737bb492bce0f5d54f22f43dfca31e5",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 1085,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4876,7 +5926,7 @@
     },
     "identity.RevokeEndpoint": {
       "ast_sha256": "e74438d74f01d4bbc5f3e8380f2184039f004a2825af704fcee9a473b9f10d9c",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 984,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4887,7 +5937,7 @@
     },
     "identity._PartnerRow": {
       "ast_sha256": "ab103a01bd3485cfda593227bde5f4f5327cda81f90154f9458690601abbd123",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 410,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4898,7 +5948,7 @@
     },
     "identity._PartnerWrite": {
       "ast_sha256": "d516154d1840b1f2889bb961807ad2f9d248f96a94185e637c39c2fe197bc402",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 490,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4909,7 +5959,7 @@
     },
     "identity._prepare_partner_write": {
       "ast_sha256": "1895a0abe791d25c375ec98bc60bb5d1f4f4cab58d2a705dc4c4df5457c8e38a",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 718,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4920,7 +5970,7 @@
     },
     "identity._writer_drift": {
       "ast_sha256": "aed88c9b653049bab276891820c6283869321b3a192ec3600be1c09e6ad6e6f2",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 416,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4931,7 +5981,7 @@
     },
     "identity.eligible_scopes": {
       "ast_sha256": "1524bb5ebec7869c2ac8c742c830da0fd234e9433fcc70f7ed7809c76ef78107",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 235,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4942,7 +5992,7 @@
     },
     "identity.get_verified_partner_token": {
       "ast_sha256": "d0c74d0d72131900db466ba2c3720ecc521940347bfb4700ad1ab98e48f193b7",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 1206,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4953,7 +6003,7 @@
     },
     "identity.live_grant": {
       "ast_sha256": "9a24d316c20290bc90a329fe3d2652ee8072028798182ac680b34e94a6881448",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 363,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4964,7 +6014,7 @@
     },
     "identity.resource_scopes": {
       "ast_sha256": "b75cddcd5492e0d36d487fda24684462f7cbbdc37a924ef3e4724fe744622152",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 306,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4975,7 +6025,7 @@
     },
     "identity.revoke_callback": {
       "ast_sha256": "0eed5b1246c4ace89c847dd165eb4f6e6f6451a6dd9372b05ae1eddb25570530",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 984,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4985,7 +6035,7 @@
       "symbol": "RevokeEndpoint.revoke_token"
     },
     "identity.row_order": {
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 392,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -4996,7 +6046,7 @@
     },
     "identity.server_checkpoint": {
       "ast_sha256": "00441fbe7e81bd45da74b142ebf04b5b324e0bde041bba1f9f9946cd036dde79",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 1019,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -5007,7 +6057,7 @@
     },
     "identity.verify_access": {
       "ast_sha256": "8dd700eaa560771a2890ca0837ee2e8c419bccdaad8bbdde2d3643726a7d4250",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 1145,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -5018,7 +6068,7 @@
     },
     "identity.verify_partner_access_token": {
       "ast_sha256": "f0fb0e5d751f114eb9fd2596c2c97dadf1e4332a0fbba4a8fdf74dec98ae7452",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 1196,
       "path": "clearledger/server/app/services/partner_identity.py",
       "raw_file_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
@@ -5029,7 +6079,7 @@
     },
     "locks.LockPlan": {
       "ast_sha256": "110ddc631756bdb0b8ac6e13b364a214eecf9954e4f98b9604985e2608c51ab6",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 178,
       "path": "clearledger/server/app/services/contract_write_locks.py",
       "raw_file_sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
@@ -5040,7 +6090,7 @@
     },
     "locks.acquire_scoped_locks": {
       "ast_sha256": "7332fe2897522bca9674b0bc392e5026898ed23b06f3b1eaeb5159c32066e29a",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 380,
       "path": "clearledger/server/app/services/contract_write_locks.py",
       "raw_file_sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
@@ -5051,7 +6101,7 @@
     },
     "locks.require_scoped_locks": {
       "ast_sha256": "6b74f8a3bc8a40be59ae2c0a0a70b054086d009eca3faecf612eabd2f7a0152c",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 416,
       "path": "clearledger/server/app/services/contract_write_locks.py",
       "raw_file_sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
@@ -5062,7 +6112,7 @@
     },
     "model.PartnerClient": {
       "ast_sha256": "8b659cb53d95d4cf76616f31c3c7e967ecc7f461ae8ba4ad0aca2efd895f698d",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 29,
       "path": "clearledger/server/app/models_partner.py",
       "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -5073,7 +6123,7 @@
     },
     "model.PartnerCredential": {
       "ast_sha256": "ead7533f6f1762a13b2665a011d8ad501735a7e7e70aaef3563b23054b65d52a",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 38,
       "path": "clearledger/server/app/models_partner.py",
       "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -5084,7 +6134,7 @@
     },
     "model.PartnerGrant": {
       "ast_sha256": "f98547ed9effbb6074155fe0274ace0ba00585f7af317a9d753adb9081197caa",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 101,
       "path": "clearledger/server/app/models_partner.py",
       "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -5095,7 +6145,7 @@
     },
     "model.PartnerInstallation": {
       "ast_sha256": "b74a537fec04adae47290cb62cc3236755be14f7c63ace05614729850da02e27",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 50,
       "path": "clearledger/server/app/models_partner.py",
       "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -5106,7 +6156,7 @@
     },
     "model.PartnerToken": {
       "ast_sha256": "4f1bff3e65427f559eba80347c10036a635b1287c0d7a57613ed91a4f502a1cb",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 180,
       "path": "clearledger/server/app/models_partner.py",
       "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -5117,7 +6167,7 @@
     },
     "model.PartnerTokenFamily": {
       "ast_sha256": "522ae6d2906f1cbdbd87e2c08cd4cd8ba106a4429b9102dd132fefb761cc10bc",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 165,
       "path": "clearledger/server/app/models_partner.py",
       "raw_file_sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
@@ -5128,7 +6178,7 @@
     },
     "portal.check_csrf": {
       "ast_sha256": "933b954a94a5b587c765ec0dbbb059308e4dd56fcdcefa34e2c0cb4561086fa8",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 87,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5139,7 +6189,7 @@
     },
     "portal.client_config": {
       "ast_sha256": "fe59711e5c5c072302c7ea5b1c2c593f8ccdb98617fc0f64842dd91fd49ab3dc",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 45,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5150,7 +6200,7 @@
     },
     "portal.close_session": {
       "ast_sha256": "5b32a00f0cd7feef8557b7b2b5b8a1682b3fe3e4102f6a0811b6846b733bd5c7",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 201,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5161,7 +6211,7 @@
     },
     "portal.create_session": {
       "ast_sha256": "19b9a36d7c804dbe3ed977468b5f48aad06c3cc68e87b6e85ae80f02d8cf4bb6",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 132,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5172,7 +6222,7 @@
     },
     "portal.enabled": {
       "ast_sha256": "b71d91c58e05313d27500b8d7f4ebe2566cd3270a4059bb25b2f1636a3ed32ac",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 28,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5183,7 +6233,7 @@
     },
     "portal.issuer": {
       "ast_sha256": "dd0c877f17b6db75e1aa67f2be1dcb86b678db5da096815f8ba916f986696813",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 33,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5194,7 +6244,7 @@
     },
     "portal.live_session": {
       "ast_sha256": "41e34916edc6f9d5dd87bd533bfc1ea5d84ca613c232ba96eac1784c6235014f",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 112,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5205,7 +6255,7 @@
     },
     "portal.mutation_origin": {
       "ast_sha256": "bdf037f2fa66b1556bf1208e240bcede0b6a7c3308b25582fc4d8e6cb7189ba0",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 68,
       "path": "clearledger/server/app/services/docs_portal.py",
       "raw_file_sha256": "7f21ec81152c705657385391528eb70d0115763d5e4afafe1d91a55cf710aab0",
@@ -5216,7 +6266,7 @@
     },
     "router.DocsRoute": {
       "ast_sha256": "aca0e0406eae6f1f4005274fdd2ddb8919e750b939607394b5514fa8a3c57077",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 44,
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -5227,7 +6277,7 @@
     },
     "router.close_session": {
       "ast_sha256": "12799dd0352bb37daaf5fd6073860e8822aa638b987ea8284f0f73b937e7f93e",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 106,
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -5238,7 +6288,7 @@
     },
     "router.create_session": {
       "ast_sha256": "b9e98e850c17bf62b8a0569b407eac19b5fe956cd38dd989821c538c7f6fc379",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 84,
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -5249,7 +6299,7 @@
     },
     "router.docs_session": {
       "ast_sha256": "18b0b952377511041f92049444ac175cca01fec83b4088790e7dcb1f56d46c1b",
-      "commit": "40fc1c4ffa5cf4f04b1f4bffea53f5b7656ca6d8",
+      "commit": "e70480363fc54e56c5997af6fc83aa66bca11cfd",
       "end": 52,
       "path": "clearledger/server/app/routers/docs_portal_router.py",
       "raw_file_sha256": "f15d0c91c752e5841c4f0c5115859e5b61d39f593423ec590026dbd3670ab651",
@@ -5259,8 +6309,8 @@
       "symbol": "docs_session"
     }
   },
-  "status": "AUTHORED_SOURCE_INDEPENDENT_REVIEW_PENDING",
-  "task_id": "task_bd855cac8ecb",
+  "status": "AUTHORED_FIX_RECHECK_PENDING",
+  "task_id": "task_adaffdacb539",
   "typed_and_row_protocol": {
     "after_waits": "Writer checkpoint after full composer and again after final Docs row wait. Validate Docs original binding and exact discovered Token→Family; if pointer changes/disappears in held graph, existing _writer_drift whole-root409, never follow new family. Changes in enabled/approved/tv/scopes are current values but intentionally not a cleanup eligibility denial. No authority is carried to another root/session.",
     "discovery": "Under db.no_autoflush, fresh Docs row by digest(raw). If absent return no mutation. Copy immutable cookie_hash/token_id scalars before any composer/wait. Invoke existing _prepare_partner_write exactly once, token_id frozen, mutation=revoke, no client/grant selectors from request and no native/admin/VerifiedPartnerToken. Preserve all original graph pointers and absence predicates frozen inside composer; inspect writer rows for the exact Token/Family binding before final action.",
@@ -5387,15 +6437,18 @@
   ],
   "verification": {
     "all_other_existing_Docs_defs_AST_equal": true,
+    "all_other_source_unchanged_from_b412": true,
     "canonical12_AST_equal_original_e518_and_bf741": true,
+    "correction_final_delta_exact3": "source PG test plus docs-only child MD/JSON; final child verified separately",
+    "correction_source_commit_exact1": true,
     "final_allowset_exact6": "must be independently checked on docs-only child",
-    "git_diff_check": "no diagnostics before source commit; final docs-only composition rechecked outside frozen report",
-    "independent_SOURCE": "PENDING",
+    "git_diff_check": "no diagnostics on correction source; final docs-only composition rechecked outside frozen report",
+    "independent_SOURCE": "AUTHORED_FIX_RECHECK_PENDING; prior CHANGES_REQUESTED_SOURCE retained; fresh independent targeted recheck required",
     "kind": "stdlib source inspection only; no test/source function calls",
+    "original_source_commit_exact4": true,
     "protected_17_AST_equal": true,
     "protected_raw_equal": true,
     "runtime": "NOTRUN / UNPROVEN",
-    "source_commit_exact4": true,
     "syntax": [
       {
         "AST_parsed": true,
@@ -5419,5 +6472,5 @@
       }
     ]
   },
-  "workspace": "/home/mag/orca/workspaces/ledger-app/docs-portal-logout-author-20261101"
+  "workspace": "/home/mag/orca/workspaces/ledger-app/docs-portal-logout-oracle-fix-20261101-2"
 }
