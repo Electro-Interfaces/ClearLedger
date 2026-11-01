@@ -65,6 +65,9 @@ def _permits(scope, identifier):
 
 class CreateOperation:
     """Private whole-graph snapshot extension of the ONE identity composer."""
+    # Fixed parent order, independent of body/profile/identity discovery order.
+    parent_models = (Counterparty, Organization, ServiceLocation, Contract)
+
     def __init__(self, async_db, bearer, body, verified):
         self.async_db, self.bearer, self.body, self.verified = async_db, bearer, body, verified
         self.installation_id = verified.installation_id
@@ -270,17 +273,30 @@ class CreateOperation:
             capability=self.writer.capability, expected=self.verified)
         self.policy(db, current)
 
+    def lock_parents(self):
+        """Original frozen parents, after identity prefix and before ANY Member.
+
+        Include canonical reference descriptors as well as requested/profile/
+        replay parents. Keep their original tenant/pointer predicates and take
+        each row once; neither this stage nor later locking discovers parents.
+        """
+        db, writer = self.writer.db, self.writer
+        for model in self.parent_models:
+            canonical = {spec.identity[0]: spec for spec in self.ordered if spec.model is model}
+            ids = {rid for kind, rid in self.guards if kind is model} | canonical.keys()
+            for rid in sorted(ids):
+                spec = canonical.get(rid)
+                statement = (spec.statement().with_only_columns(model.id) if spec is not None else
+                    select(model.id).where(model.id == rid, model.company_id == self.company_id))
+                db.execute(statement.with_for_update(read=True)).all()
+                writer.checkpoint()
+
     def lock(self):
         db, writer = self.writer.db, self.writer
         db.execute(select(Profile.id).where(Profile.id == self.profile_id,
             Profile.installation_id == self.installation_id, Profile.company_id == self.company_id,
             Profile.client_id == self.client_id).with_for_update(read=True)).all()
         writer.checkpoint()
-        for model in (Counterparty, Organization, ServiceLocation, Contract):
-            for rid in sorted(rid for kind, rid in self.guards if kind is model):
-                db.execute(select(model.id).where(model.id == rid, model.company_id == self.company_id)
-                           .with_for_update(read=True)).all()
-                writer.checkpoint()
         for code in sorted(self.types):
             db.execute(text("SELECT code FROM core.contract_types WHERE code=:code FOR SHARE"), {"code": code}).all()
             writer.checkpoint()

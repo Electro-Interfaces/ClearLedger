@@ -195,3 +195,53 @@ async def issuer_world(partner_contract_issuer_factory, monkeypatch):
             w.user_grant = verified.grant_id
         w.body = make_body(w)
         yield w
+
+
+async def native_org_admin(w):
+    """Separate actual SQL admin/JWT; never a fabricated current_user override."""
+    async with w.factory() as db:
+        admin = User(id=uuid4(), company_id=w.company, name="Synthetic native Org admin",
+            email=uuid4().hex+"@issuer.invalid", password_hash="synthetic", is_superadmin=False,
+            last_seen_at=identity.now())
+        db.add(admin)
+        await db.flush()
+        db.add(UserCompany(user_id=admin.id, company_id=w.company, role="admin", modules=None))
+        await db.commit()
+        w.owned["users"] = (*w.owned["users"], admin.id)
+        return token_for(admin, expires_at=identity.now()+timedelta(minutes=20))
+
+
+async def native_org_delete(w, db, native, signals, *, finish):
+    """Original HTTP handler + JWT/permission dependencies, actual delete/flush.
+
+    Only get_db is overridden to the caller's real Session. Dependency teardown
+    owns the flush and explicit commit/rollback, as the production DB dependency
+    does; it exposes a pre-completion gate for the two real transaction orders.
+    No native handler, permission, FK, Session SQL or auth result is replaced.
+    """
+    from app.routers import references_router
+    assert finish in {"commit", "rollback"}
+    app = FastAPI()
+    app.include_router(references_router.router, prefix="/api")
+    async def actual_session():
+        try:
+            yield db
+            signals["pid"] = await db.scalar(text("SELECT pg_backend_pid()"))
+            signals["attempted"].set()
+            await db.flush()
+            signals["flushed"].set()
+            await signals["release"].wait()
+            if finish == "commit":
+                await db.commit()
+            else:
+                await db.rollback()
+        except BaseException:
+            await db.rollback()
+            raise
+    app.dependency_overrides[get_db] = actual_session
+    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=True),
+                           base_url="https://issuer.synthetic.invalid") as http:
+        response = await http.delete("/api/references/organizations/"+str(w.org),
+            headers={"Authorization": "Bearer "+native})
+        assert response.status_code == 204, response.text
+        return response
