@@ -1,0 +1,362 @@
+{
+  "status": "F1_REPAIRED_SOURCE_ONLY_FRESH_FULL_REVIEW_REQUIRED",
+  "base": "4a4ba3bc041b69ccb4064a7865873eadd6f0f00f",
+  "source_commit": "cd32cd7edf1860f095a94b0a688cbfad27108334",
+  "source_tree": "3f46b319325ea4afa0ab1a40ea6351931e7c9c86",
+  "codegate": "msg_4b02011dc305",
+  "structural_enable_ratification": "msg_cc8cade6fd88",
+  "v2": {
+    "reference": "/srv/projects/preview/partner-contract-options-activation-contract-v2-20261101/",
+    "markdown_sha256": "d0e51ad8e1979afa4f1215e52511c91c87ab4dc21cbeec7f21ae619ddd891ec0",
+    "json_sha256": "4a0140f0e3b1df3ad970b214d8570e6fa73dff51c5fa34debf66bcde17735eb1"
+  },
+  "operation": {
+    "method": "PUT",
+    "path": "/api/developer/installations/{installation_id}/contract-create-profile/activation",
+    "visibility": "internal native administration; include_in_schema=false",
+    "purpose": "contract-profile-activation",
+    "private_exact_type": "ActivationOperation",
+    "authentication": "original ordinary Core bearer and current company administrator",
+    "closed_gate": "partner_contract_create_admin_enabled",
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedGeneration",
+        "userEnabled",
+        "serviceEnabled"
+      ],
+      "properties": {
+        "expectedGeneration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807,
+          "strict": true
+        },
+        "userEnabled": {
+          "type": "boolean",
+          "strict": true
+        },
+        "serviceEnabled": {
+          "type": "boolean",
+          "strict": true
+        }
+      },
+      "no_null_coercion_extra_subclass_or_forged_construct": true
+    },
+    "response": {
+      "status": 200,
+      "existing_model": "ContractCreateProfileReadback",
+      "unchanged_fields": [
+        "profileId",
+        "installationId",
+        "clientId",
+        "companyId",
+        "policyGeneration",
+        "userEnabled",
+        "serviceEnabled",
+        "revoked",
+        "userIds",
+        "machineGrantIds",
+        "organizationIds",
+        "counterpartyIds",
+        "locationIds",
+        "typeCodes"
+      ]
+    }
+  },
+  "structural_enable": {
+    "meaning": "configured current profile; does not establish live OAuth or external CREATE eligibility",
+    "user_kind": "at least one existing configured User and current same-company Member with nonempty legal selection",
+    "machine_kind": "at least one configured exact company/client/installation/kind=machine/userNULL grant and client_secret_basic client",
+    "nonempty": [
+      "profile organizations intersect own_organization_id for user",
+      "profile counterparties intersect canonical resource scope",
+      "profile locations intersect objects scope and installation locations and Member.object_scope for user",
+      "at least one profile type active in current catalog"
+    ],
+    "member_object_scope": {
+      "null": "unrestricted",
+      "empty_array": "empty for every role"
+    },
+    "does_not_require": [
+      "live_grant",
+      "approved grant",
+      "active App",
+      "enabled client or CompanyApp",
+      "preissued user OAuth grant",
+      "eligible_scopes"
+    ],
+    "full_graph_required": true,
+    "unrelated_inactive_grant_or_type_is_not_new_veto": true,
+    "revoked_enable": "409",
+    "false_false": "legal selection may be empty; current auth, structural integrity and CAS remain required",
+    "new_readiness_response_fields": [],
+    "raw_canonical_integrity": {
+      "before_single_original_b": true,
+      "installation_locations": "all unfiltered raw PartnerInstallationLocation.location_id values",
+      "resource_items": "all unfiltered raw typed target IDs using original RESOURCE_MODELS mapping",
+      "resource_kinds": [
+        "objects",
+        "equipment",
+        "counterparties",
+        "contracts",
+        "documents"
+      ],
+      "required": "actual same-company model.id exists for every target and corresponding frozen descriptor is present; complete parent union then freezes",
+      "regardless_of": [
+        "all_locations true or false",
+        "resource scope ALL or EMPTY or SET",
+        "enable flags or false/false"
+      ],
+      "missing_foreign_or_incomplete_descriptor": {
+        "status": 409,
+        "private_generic_detail": "Activation profile graph is invalid"
+      },
+      "foreign_owner_graph_follow_or_lock": false,
+      "native_ids_preserved_literally": true,
+      "unrequested_native_whitespace_only_location_id_allowed": true,
+      "trim_or_normalize": false,
+      "new_oauth_readiness_or_unrelated_inactive_veto": false
+    }
+  },
+  "transaction": {
+    "b_entrances": 1,
+    "late_keys_or_second_b": false,
+    "session_root_connection_capability": "original actual instances throughout",
+    "freeze_before_b": [
+      "validate every unfiltered raw canonical installation-location and typed resource target against actual same-company parents before forming complete union",
+      "profile and whole principal/ref/type sets",
+      "all users and home companies",
+      "actual role owners",
+      "full canonical Member rows including organization_id and own_organization_id",
+      "all canonical and profile parents",
+      "installation resource/location sets",
+      "credentials",
+      "full row JSON scopes and current type activity"
+    ],
+    "exclusive_keys": [
+      "InstallationKey",
+      "CreateProfileKey"
+    ],
+    "physical_stage": [
+      "Company/App/PartnerClient/User/CompanyRole",
+      "complete Counterparty/Organization/ServiceLocation union in fixed model/id order",
+      "Member/rest",
+      "Profile EXCLUSIVE",
+      "Type SHARE",
+      "children SHARE"
+    ],
+    "member_boundary_even_when_empty": true,
+    "checkpoint": "after every wait, after actual flush, before coherent readback; original public native auth/admin plus closed gate",
+    "mutation": [
+      "profile.policy_generation += 1",
+      "profile.user_enabled = userEnabled",
+      "profile.service_enabled = serviceEnabled",
+      "one AuditEvent"
+    ],
+    "same_flags": "valid CAS still increments generation and adds audit",
+    "audit_action": "partner.contract_profile.activation",
+    "audit_details": [
+      "profileId",
+      "generation",
+      "userEnabled",
+      "serviceEnabled"
+    ],
+    "child_dml": 0,
+    "contract_intent_counter_grant_consent_scope_issuance_dml": 0,
+    "completion": "HTTP owner commits; internal sync service leaves root completion to actual caller",
+    "exceptions_and_cancel": "whole-root rollback and propagate",
+    "lost_commit_ack": "UNKNOWN; fresh current-auth GET readback; no blind retry or assertion of rollback success",
+    "disable_or_rollback": "new CAS at current generation; never restore an old generation"
+  },
+  "errors": {
+    "401_403": "original native identity or company administrator denial",
+    "404": "missing installation or profile",
+    "409": "stale generation, overflow, drift, revoked enable, structural or nonempty legal selection denial; raw canonical missing/foreign target or incomplete descriptors return generic Activation profile graph is invalid before B",
+    "422": "strict request denial or unchanged discovery helper invalid ref/grant binding denial",
+    "503": "closed admin gate or original OAuth/Core gate disabled"
+  },
+  "preserved": {
+    "profile_module_sha256": "6fdc93816c6ba7af22b97dc6c1e8e1bc91f1563cec1c0672e82e17a11c23abef",
+    "profile_composition": "unchanged ProfileOperation(installation_id,None); explicit private composition of discovery/snapshot/recheck/readback",
+    "whole_inverse_ast": [
+      "partner_identity.py",
+      "partner_admin_router.py",
+      "schemas_partner.py"
+    ],
+    "dpl_historical_literals": [
+      19,
+      17,
+      12
+    ],
+    "gorg_http_literals": "unchanged",
+    "old_read_replace_create_paths": "unchanged under complete inverse AST",
+    "defaults_and_replace_flags": false,
+    "options": "PLANONLY",
+    "runtime_sdk_manifest_models_ddl_config": "unchanged",
+    "repair_original_20_essential_bytes_equal": true,
+    "repair_original_91_definition_bodies_unchanged_from_first_review": true,
+    "dpl_repair_change": "only ACTIVATION_SOURCE.service_sha",
+    "unit_8_37_and_all_existing_pg_helper_bodies": "raw byte-identical"
+  },
+  "test_definitions": {
+    "strict_source": {
+      "definitions": 8,
+      "literal_variants": 37,
+      "status": "NOTRUN"
+    },
+    "postgresql": {
+      "definitions": 19,
+      "literal_variants": 102,
+      "status": "NOTRUN"
+    },
+    "collection_imports": "NOTRUN",
+    "contexts": [
+      "own-claims ordinary Core bearer",
+      "real Authlib-issued bearer before and after actual App/grant revocation",
+      "real get_db AsyncSession and caller completion",
+      "original B and exact actual root/Connection/capability",
+      "actual PostgreSQL PIDs, pg_locks and pg_blocking_pids",
+      "physical parent union and zero-Member boundary",
+      "fresh independent full child SQL rows and business counts",
+      "negative after-wait and after-flush SQL authority changes",
+      "concurrent enable/replace/revoke CAS",
+      "atomic audit, cancel, root rollback and unknown ACK"
+    ],
+    "positive_auth_or_sql_proof_mocks": false,
+    "root_runtime_admission_required": true,
+    "initial_postgresql": {
+      "definitions": 16,
+      "literal_variants": 62,
+      "status": "NOTRUN"
+    },
+    "total": {
+      "definitions": 27,
+      "literal_variants": 139,
+      "status": "NOTRUN"
+    },
+    "repair_added": {
+      "canonical_only_foreign_installation_location": {
+        "variants": 4,
+        "all_locations": [
+          true,
+          false
+        ],
+        "flags": [
+          [
+            true,
+            true
+          ],
+          [
+            false,
+            false
+          ]
+        ]
+      },
+      "each_foreign_typed_resource_item": {
+        "variants": 30,
+        "kinds": [
+          "objects",
+          "equipment",
+          "counterparties",
+          "contracts",
+          "documents"
+        ],
+        "modes": [
+          "ALL",
+          "EMPTY",
+          "SET"
+        ],
+        "flags": [
+          [
+            true,
+            true
+          ],
+          [
+            false,
+            false
+          ]
+        ]
+      },
+      "local_extras_literal_whitespace_only_id_and_complete_parent_union": {
+        "variants": 6,
+        "all_locations": [
+          true,
+          false
+        ],
+        "modes": [
+          "ALL",
+          "EMPTY",
+          "SET"
+        ]
+      },
+      "negative_assertions": [
+        "real current native auth path delegated without positive stand-in",
+        "original B observer delegates original; expected calls=0",
+        "generic private 409 before B",
+        "no foreign graph follow or locks or DML",
+        "fresh independent SQL unchanged flags/generation/audit/profile children/canonical children/business rows in both tenants"
+      ],
+      "native_fk_check_constraints_satisfied": true,
+      "constraint_disabling_or_ddl": false
+    },
+    "existing_oauth_counterexample": "unchanged actual Authlib canonical PASS then App/grant off then activation SUCCESS then same verifier and external POST DENIED definition; NOTRUN"
+  },
+  "evidence_limits": {
+    "author_tools": "FS/Git and independently authored stdlib AST/JSON/hash/in-memory compile without exec",
+    "source_review": "first independent FULL review CHANGES_REQUESTED_SOURCE preserved; repair SOURCE_ONLY; fresh independent FULL review after both docs owned by coordinator",
+    "runtime": "UNKNOWN",
+    "pytest_tests_collection_project_imports_sql_http": 0,
+    "push_pr_merge_release_actual_activation": 0,
+    "no_prior_acceptance_inheritance": [
+      "old95",
+      "SQL122",
+      "HTTPobserver2"
+    ],
+    "root_exact_current_pr_gate_required_after_full_review_before_push": true
+  },
+  "original_program": {
+    "reference": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "counts": [
+      20,
+      11
+    ],
+    "complete": false
+  },
+  "source_history": {
+    "initial_code_commit": "638f940eefcebb35bcce9fff239522b0d7737f4b",
+    "initial_code_tree": "c5f09ce663cbf697e670b68aa8a41b045833f5cc",
+    "initial_docs_commit": "0e397ece235dd50adf3157005e9747095b606021",
+    "initial_docs_tree": "c793de6b9423f715eaad83a3a7dd40dca60cf60a",
+    "initial_service_sha256": "c1a7fb76be8b4f044eab0dada99662be7af0d9624526d91233ab5f83c6643ce5",
+    "initial_docs_sha256": {
+      "clearledger/docs/PARTNER_CONTRACT_ACTIVATION.md": "72b8623796eb45a3db2d7ed26f0094cea52a5d990de2b35e0f39d81e99015a4f",
+      "clearledger/docs/api/PARTNER_CONTRACT_ACTIVATION.json": "54a3a7dbdda10f68db9c1b86d7efacf0bc98688fefef47983eccb8ecdb0a9183"
+    },
+    "first_full_review": {
+      "verdict": "CHANGES_REQUESTED_SOURCE",
+      "directory": "/srv/projects/preview/partner-contract-activation-review-20261101/",
+      "review_md_sha256": "ff549ced9cfc407e521f0c8576e71e8f9f4fe0d04902c6109edf0d90198e17f8",
+      "review_json_sha256": "264ce0dc7c6fb26f752a086b4faa1b014640a51d3ab2c4a71b022a99a4c5c456",
+      "finding": "ACTIVATION-SOURCE-01",
+      "priority": "P1",
+      "immutable_reports_unchanged": true,
+      "external_oauth_create_bypass_demonstrated": false
+    },
+    "repair_code_direct_parent": "0e397ece235dd50adf3157005e9747095b606021",
+    "repair_service_sha256": "6b97c9e6c5420af95587b85947c26295b95d82941ada2bc1c6f5912e648ad9a5",
+    "repair_scope": [
+      "clearledger/server/app/services/partner_contract_activation.py",
+      "clearledger/server/tests/test_partner_contract_activation_pg.py",
+      "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py (only ACTIVATION_SOURCE.service_sha)",
+      "clearledger/docs/PARTNER_CONTRACT_ACTIVATION.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_ACTIVATION.json"
+    ],
+    "finding_resolution": "SOURCE_ONLY; fresh independent FULL review and ROOT runtime admission still required",
+    "source_pass_self_claimed": false,
+    "final_9_file_manifest": "/srv/projects/preview/partner-contract-activation-fix-author-20261101/report.json",
+    "docs_direct_child_changes_exactly_two_docs": true
+  }
+}
