@@ -1,0 +1,235 @@
+{
+  "acceptance": {
+    "status": "ACCEPTED_SCOPED_SOURCE_AND_RECORDED_RAW",
+    "acceptedAt": "2026-11-01T08:52:37.600362+00:00",
+    "sut": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+    "cases": 70,
+    "definitions": 27,
+    "phases": 210,
+    "separateWorlds": 4,
+    "sumSeriesSecondsIncludingBootstrap": 481.56029359344393,
+    "review": {
+      "REVIEW.md": "bf302a19f7e24a06050657f82cfb7fdab0c10fcb6fc23321d65a10af6e88ffa7",
+      "REVIEW.json": "8a68b3694aee2bc26dc2d2c902eaac8bc056738977fbf33a184699417f639524"
+    },
+    "reviewPath": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/http-post70-root-raw-review-20261101",
+    "dispatch": "ctx_2c0a7ba2b740",
+    "task": "task_c6bb9e381dc2",
+    "findings": [],
+    "limitations": [
+      "Собственного runtime PASS нет: reviewer не импортировал/вызывал app, tests, helper или сторонние библиотеки; collection/pytest, SQL/PG/Docker/network/SSH/Node/browser/install/exporter/SDK/build не выполнялись, pull/commit/push и subagents отсутствуют.",
+      "70 PASS относятся к записанным Root-наблюдениям четырёх отдельных миров; 481.56029359344393s включает bootstrap и не равно единому запуску70, полному CI или wall-time всего parent.",
+      "Parent68040 EXIT0/reaped — явное наблюдение Root tool, сохранённое receipt; reviewer не получал новый kernel wait status. Exit/reap дочерних процессов проверены по execution и исходнику subprocess.run/lifecycle.",
+      "Числовая publicsafe identity проверена во всех мирах; source пишет её до Python create/start, runner повторяет live query до app imports, factory/bootstrap используют тот же target; mtimes поддерживают порядок, но не являются криптографической аттестацией.",
+      "clearledger — обычный владелец одноразовой БД; пять false role flags не доказывают production least-privilege ACL.",
+      "341 registry моделей и physical341→347/803FK/3212RI относятся к fullnative bootstrap в synthetic PG16.15, без lifespan/seed; не доказаны app.main HTTP/global middleware/ingress/livePilot или рабочая БД.",
+      "Шесть protocol-only случаев используют fake downstream только для synthetic206 streaming/headers/context и nonHTTP passthrough; не доказывают auth, SQL, реальную загрузку файла, Range/resume/checksum.",
+      "ASGI scope/receive/send и spec_version2.3/2.4 синтетические; actual task cancellation — настоящий asyncio cancel внутри этой композиции; receive-disconnect — внедрённое ASGI http.disconnect, не сетевой TCP/proxy/client disconnect.",
+      "Четыре postwrite faults делегируют настоящему consumer перед отказом; manual CancelledError отдельно от двух actual-task cancel. Все возможные моменты отмены/FK waits/scheduler interleavings не покрыты.",
+      "Close-failure внедрён после реального write затем denial/rollback, без успешного closed marker; отдельный cleanup настоящий. Отказ driver close после успешного commit здесь не моделируется.",
+      "Unknown commit — настоящий commit затем синтетический ConnectionError/lost ACK, новый root/replay/current profile deny; не реальная сетевая потеря подтверждения или crash recovery.",
+      "Нет real SMTP/уведомлений, внешнего провайдера OAuth, browser/public-client token exchange или production secret lifecycle; RSA/JWT и confidential Authlib user+machine flows локальные и синтетические.",
+      "Хеши564 SUT и115 driver files точны; before/after checks подтверждены public controller/runner и нормальным завершением, текущие байты независимо сверены. Полная TCB image/interpreter/venv/transitive packages не аттестована.",
+      "Python audit denied=[]/connects — наблюдение, не доказательство отсутствия SQL/полной syscall confinement; C libpq может не вызывать Python socket audit. Foreign projection сравнивает только Id/Image/Running/StartedAt в записанные моменты.",
+      "one-B observer проверяет один acquire и обязательное подмножество keys, полное замыкание и canonical rechecks следуют из текущего исходника; это не замена общей приёмке FK/foreign/waits/parity и конкурентных writer schedules.",
+      "NativeG1 own89/Case/G3/Profile acceptance, later48 fixture/testdocs, options/activation, SDK/exporter/formal whole-suite validators/current fullCI/full parent app.main/ingress/livePilot исключены. Наличие nativeG1 production в564 source не означает selected acceptance.",
+      "Historical initial17/fault6/47da third20FAIL, old40+separate10 и corrective2 не суммируются с текущими70. M00–M19+11 и completion=false сохранены."
+    ],
+    "originalProgram": {
+      "reference": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+      "computedSemanticSHA256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+      "completionChanged": false,
+      "sections": 20,
+      "crossCutting": 11,
+      "completion_asserted": false
+    },
+    "noOverallCompletion": true
+  },
+  "rootObservation": {
+    "status": "ROOT_OBSERVED_HTTP70_PASS_PENDING_INDEPENDENT_SOURCE_RAW",
+    "at": "2026-11-01T08:35:25.151139+00:00",
+    "source": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+    "hostParent": "68040 EXIT0/reaped Roottoolobserved",
+    "controller": ".artifacts/run-http-post70-117ee3d0-root-20261101.py",
+    "controllerSHA256": "f05b1c0c846a5fc3ad2d182bbbba24cfb1f4de24a03186fc6508c8eb53df7153",
+    "journal": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/http-post70-serial-117ee3d0-20261101.json",
+    "journalSHA256": "af55514861094f02e4387ee7e45b7120bbd1f14260cfd79265d88bd8a5211a7b",
+    "cases": 70,
+    "defs": 27,
+    "phases": 210,
+    "series": [
+      {
+        "source": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/http-post70-slice_0_20_117ee3d0-fullnative-pg-20261101-04e811cd1776",
+        "bounds": [
+          0,
+          20
+        ],
+        "cases": 20,
+        "definitions": [
+          "tests.test_partner_contract_http_create.test_actual_enabled_budget_separate_commit_and_429_prebody",
+          "tests.test_partner_contract_http_create.test_actual_http_authlib_create_replay_empty_read_scope_and_five_parts",
+          "tests.test_partner_contract_http_create.test_actual_http_metadata_prebody_errors_get405_and_create",
+          "tests.test_partner_contract_http_create.test_actual_stream_byte_boundary_inclusive_false_content_length",
+          "tests.test_partner_contract_http_create.test_actual_user_and_machine_create_ignore_unrequested_whitespace_object_grant",
+          "tests.test_partner_contract_http_create.test_cancel_actual_http_task_after_five_parts_rolls_back_before_close"
+        ],
+        "phases": 60,
+        "seconds": 209.95584209356457,
+        "hostChildExit": 0,
+        "hostChildReaped": true,
+        "cleanup": "PG/pools0/0; normal2ownedremoved; foreignsafeprojectionequal",
+        "hashes": {
+          "execution.json": "039a30148b1473e5c5e50844970f5941c05ff9645097ece5b55623bfd6165650",
+          "evidence/result.json": "ebb42abb33efe47b6cf7a64cc454c819937d19637d8c46dc86fe6c4f506616c8",
+          "evidence/progress.jsonl": "38de6030974085933221bf096973308a3f77e013f25b253552872e41d9847f30",
+          "evidence/slice-collection.json": "91426f3ebbf5a3e2a74cd40acdfad9828a124953aebdbc0dcc40015c4c748fec",
+          "source-manifest.json": "a9f0645d4b59f2054a08847d3218567f10e5bb29f81c5606890baa4dafa35ed4",
+          "role-identity-before-imports.json": "23bcf4281ccac02475529187b179d5072530da4dff9bfbb726627120860d6572",
+          "evidence/full-native-bootstrap.json": "4a6351bf3e5724c2aefedef368c76f052b9911671a11cb3851c634d5af2248e0"
+        }
+      },
+      {
+        "source": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/http-post70-slice_20_40_117ee3d0-fullnative-pg-20261101-8b4142545414",
+        "bounds": [
+          20,
+          40
+        ],
+        "cases": 20,
+        "definitions": [
+          "tests.test_partner_contract_http_create.test_chunked_unicode_and_oversized_chunk_stops_before_next_receive",
+          "tests.test_partner_contract_http_create.test_conflict_after_full_create_is_nonleaky_and_denial_wins",
+          "tests.test_partner_contract_http_create.test_current_reauth_after_quota_refuses_revoked_grant_without_body",
+          "tests.test_partner_contract_http_create.test_disabled_api_503_is_prebody_without_any_session",
+          "tests.test_partner_contract_http_create.test_exact_profile_flag_and_principal_for_each_actual_kind",
+          "tests.test_partner_contract_http_create.test_failed_actual_session_close_has_no_success_marker",
+          "tests.test_partner_contract_http_create.test_full_body_reference_policy_still_belongs_to_actual_issuer",
+          "tests.test_partner_contract_http_create.test_generic_429_is_not_budget_exhaustion",
+          "tests.test_partner_contract_http_create.test_media_and_gzip_denied_before_stream",
+          "tests.test_partner_contract_http_create.test_metadata_wrapper_nonhttp_passthrough",
+          "tests.test_partner_contract_http_create.test_metadata_wrapper_preserves_stream_messages_scope_receive_and_context"
+        ],
+        "phases": 60,
+        "seconds": 89.82994062267244,
+        "hostChildExit": 0,
+        "hostChildReaped": true,
+        "cleanup": "PG/pools0/0; normal2ownedremoved; foreignsafeprojectionequal",
+        "hashes": {
+          "execution.json": "7592f2355fc6cc5c8488cf65cff6114c0ad95671e8adf0c2d510cc144ae4c333",
+          "evidence/result.json": "706982cd39501aab91284416afa713cc110b0e3cbfc31229496299b8a6b27f2f",
+          "evidence/progress.jsonl": "7a1f9d5a597c2e5a167df9641dfcabd3159639d3bfb9cf290434707a538bed72",
+          "evidence/slice-collection.json": "4e82ce8c4dbf9f7f8fe75b21ba0daf096f15080f957a142ad3d0eb253c7e1347",
+          "source-manifest.json": "a9f0645d4b59f2054a08847d3218567f10e5bb29f81c5606890baa4dafa35ed4",
+          "role-identity-before-imports.json": "b0d7ab71b1cf3722621df0fd1f266a1e679fa523496c68461e3e04a2c4f3c075",
+          "evidence/full-native-bootstrap.json": "4a6351bf3e5724c2aefedef368c76f052b9911671a11cb3851c634d5af2248e0"
+        }
+      },
+      {
+        "source": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/http-post70-slice_40_60_117ee3d0-fullnative-pg-20261101-692ef3adbb56",
+        "bounds": [
+          40,
+          60
+        ],
+        "cases": 20,
+        "definitions": [
+          "tests.test_partner_contract_http_create.test_metadata_wrapper_preserves_stream_messages_scope_receive_and_context",
+          "tests.test_partner_contract_http_create.test_prebody_actual_auth_profile_denial_reads_zero_business_zero",
+          "tests.test_partner_contract_http_create.test_receive_disconnect_rolls_back_actual_request_root",
+          "tests.test_partner_contract_http_create.test_request_bound_preflight_cannot_be_copied_or_reused",
+          "tests.test_partner_contract_http_create.test_required_nullable_valid_until_and_no_extras",
+          "tests.test_partner_contract_http_create.test_same_actual_session_root_connection_complete_one_b_and_lifetime",
+          "tests.test_partner_contract_http_create.test_same_key_cannot_transfer_original_grant_or_actor",
+          "tests.test_partner_contract_http_create.test_schema_exact_post_canonical_body_and_protected_public_projection",
+          "tests.test_partner_contract_http_create.test_strict_invalid_body_and_duplicate_json_are_private_atomic"
+        ],
+        "phases": 60,
+        "seconds": 93.48291166964918,
+        "hostChildExit": 0,
+        "hostChildReaped": true,
+        "cleanup": "PG/pools0/0; normal2ownedremoved; foreignsafeprojectionequal",
+        "hashes": {
+          "execution.json": "c6d954bdcb3e3dd187c1617e790cb7c08b4440dd9f8ea6679b7ec9856fab7f59",
+          "evidence/result.json": "19577564edbe1211a5bd4fa4d0e93138d27be66937c0462b317eadf03893a571",
+          "evidence/progress.jsonl": "614326bfc88e6170fa621d94149a47135432e93d1375dacae4f89d133a91549c",
+          "evidence/slice-collection.json": "94645d6f24c578a01410e9e4313667c0ce1f129abad98ba3f2a5bf79a222688d",
+          "source-manifest.json": "a9f0645d4b59f2054a08847d3218567f10e5bb29f81c5606890baa4dafa35ed4",
+          "role-identity-before-imports.json": "faf0a36a2b21cbdaf2cbd05995340178cd329ec5e7852f2785ac900917a3e089",
+          "evidence/full-native-bootstrap.json": "57007918605edb6f4c67a68a5df9248ffe0aec0ad80599d4e69d1edcd002107c"
+        }
+      },
+      {
+        "source": "117ee3d0f8d85f8c974e0b0fc948a63371508473",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/http-post70-slice_60_70_117ee3d0-fullnative-pg-20261101-5e3aa5ed2a60",
+        "bounds": [
+          60,
+          70
+        ],
+        "cases": 10,
+        "definitions": [
+          "tests.test_partner_contract_http_create.test_strict_invalid_body_and_duplicate_json_are_private_atomic",
+          "tests.test_partner_contract_http_create.test_unknown_commit_new_root_same_key_current_auth_replays",
+          "tests.test_partner_contract_http_create.test_whole_root_rollback_after_actual_five_parts"
+        ],
+        "phases": 30,
+        "seconds": 88.29159920755774,
+        "hostChildExit": 0,
+        "hostChildReaped": true,
+        "cleanup": "PG/pools0/0; normal2ownedremoved; foreignsafeprojectionequal",
+        "hashes": {
+          "execution.json": "d87ca679433e1aa493b2103f2ad315f43d141fb69e824e244efd3a035af986c5",
+          "evidence/result.json": "eb9a6620e778fb97d067db042eebba68e983ee462c8c0b6b47a86a1c231f7450",
+          "evidence/progress.jsonl": "f9da45a2caf32610ec8a1a91943fbe721ecbea1db7f972045847beff4379fda1",
+          "evidence/slice-collection.json": "225de7d57bac091118f8ae4b3c53ad4d847b55c8735f6970d32a3bb31e13c284",
+          "source-manifest.json": "a9f0645d4b59f2054a08847d3218567f10e5bb29f81c5606890baa4dafa35ed4",
+          "role-identity-before-imports.json": "ef18b72b67bbbdc531af24030ae3aecf29e0f8a8ade3dd4c574359d66520731b",
+          "evidence/full-native-bootstrap.json": "57007918605edb6f4c67a68a5df9248ffe0aec0ad80599d4e69d1edcd002107c"
+        }
+      }
+    ],
+    "sumSeriesSeconds": 481.56029359344393,
+    "sourceFiles": 564,
+    "roles": "All4 publicsafe role-identity-before-imports snapshots writtenbeforePythonstart andmatchedactualrole/DBowner beforeappimports; noDSN/secret output",
+    "scope": "ActualAuthlib user/machine, sameRoot realSQLconsumer and metadata/protocol-onlycases, no positiveauth/SQLsubstitution. Fullnative341347 andnormalcleanup. Fourseparateworlds notsingle70/fullCI/nativeG1complete/SDK/activation. Current48 differsonlyunselectedfixture/docs beyond117 appbytesunchanged."
+  },
+  "currentSource": "dabd22bf8a28acc90d34bd339105acdf740b44d8",
+  "currentSourceMeaning": "laterNativeFixtureOnlyNotAutomaticallyAcceptedHTTP",
+  "transport22": {
+    "sut": "48a4988a17e1fd680ad9ab3b8049c0fc06cdade4",
+    "cases": 22,
+    "subtests": 152,
+    "status": "ACTUAL_PASS_INDEPENDENT_REVIEW_PENDING",
+    "fakeAuthAndProjection": true
+  },
+  "nativeG1": {
+    "status": "V3_NOT_ACCEPTED_6_DIAGNOSTIC_PASS_1_CONSTRAINT_ORACLE_FAIL",
+    "source": "dabd22bf8a28acc90d34bd339105acdf740b44d8",
+    "hostSession": 16992,
+    "hostExit": 1,
+    "reaped": true,
+    "calls": 7,
+    "diagnosticPass": 6,
+    "callFailure": 1,
+    "setupErrors": 0,
+    "secondsIncludingBootstrap": 33.15995186008513,
+    "all7FixturePools0_0": true,
+    "allOwnedRemoved": true,
+    "oldSetupFailures": [
+      {
+        "source": "715df7c3",
+        "calls": 0,
+        "setupErrors": 7,
+        "cause": "slug51>50"
+      },
+      {
+        "source": "48a4988a",
+        "calls": 0,
+        "setupErrors": 7,
+        "cause": "pendingOrgBeforeDocCaseFK23503"
+      }
+    ]
+  },
+  "preview": "http://10.10.70.56:8000/api-platform-20261029/contracts-http.html",
+  "overallCompletion": false
+}
