@@ -68,6 +68,8 @@ async def resolve(request: Request) -> AccessContext:
     settings = request.app.state.product_settings
     bearer = request_bearer(request)
     from app.api_contracts.routing import ResourceStage
+    if request.scope["route"].binding.policy.resource_stage is ResourceStage.CREATE_OPTIONS:
+        return request.scope["elsy.product.options_context"]
     if request.scope["route"].binding.policy.resource_stage is ResourceStage.CREATE_NEWBORN:
         return request.scope["elsy.product.create_context"]
     policy = request.scope["route"].binding.policy
@@ -180,4 +182,21 @@ async def create_preflight(request: Request, db, bearer: str, *, bind: bool = Fa
         (), valid=True, create_preflight=descriptor)
     if bind:
         request.scope[CREATE_PREFLIGHT_KEY] = descriptor
+    return token, context
+
+
+async def options_preflight(request: Request, db, bearer: str, *, bind: bool = False):
+    """Canonical verifier only; distinct from newborn/write admission."""
+    from app.api_contracts.context import CREATE_OPTIONS_KEY, CreateOptionsPreflight
+    from .contract_create_options import require_coarse
+    # Do not let a READ fixture verifier manufacture positive CREATE options.
+    token = await configured_verifier(bearer, db)
+    await require_coarse(db, token)
+    principal = Principal(PrincipalKind.SERVICE if token.is_machine else PrincipalKind.PARTNER,
+        token.subject, token.client_id, str(token.installation_id), str(token.grant_id))
+    descriptor = CreateOptionsPreflight(request, str(token.company_id), principal, POLICY_VERSION) if bind else None
+    context = AccessContext(principal, str(token.company_id), POLICY_VERSION, token.scopes,
+        (), valid=True, create_options=descriptor)
+    if bind:
+        request.scope[CREATE_OPTIONS_KEY] = descriptor
     return token, context

@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.routing import Mount
 
 from .context import (
-    AccessContext, CreateNewbornPreflight, DatabaseAuthorityKind, PrincipalKind, ResourceScope, ScopeMode, _names,
+    AccessContext, CreateNewbornPreflight, CreateOptionsPreflight, DatabaseAuthorityKind, PrincipalKind, ResourceScope, ScopeMode, _names,
 )
 
 
@@ -29,6 +29,7 @@ _CONTEXT_KEY = "elsy.api_contracts.access_context"
 class ResourceStage(str, Enum):
     EXISTING = "existing"
     CREATE_NEWBORN = "create-newborn"
+    CREATE_OPTIONS = "create-options"
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,12 @@ class RoutePolicy:
                 or not self.accepted_kinds <= {PrincipalKind.PARTNER, PrincipalKind.SERVICE}
                 or self.accepted_database_authority_kinds or self.required_fields):
             raise PolicyConfigurationError("Explicit private newborn CREATE policy required")
+        if self.resource_stage is ResourceStage.CREATE_OPTIONS and (
+                (self.resource_type, self.action) != ("contracts", "create-options")
+                or self.required_scopes != {"contracts:create"} or not self.tenant_required
+                or self.accepted_kinds != {PrincipalKind.PARTNER, PrincipalKind.SERVICE}
+                or self.accepted_database_authority_kinds or self.required_fields):
+            raise PolicyConfigurationError("Explicit private CREATE_OPTIONS policy required")
         _names([self.owner, self.resource_type, self.action, self.policy_version])
         object.__setattr__(self, "accepted_kinds", frozenset(self.accepted_kinds))
         object.__setattr__(self, "required_scopes", _names(self.required_scopes))
@@ -139,6 +146,12 @@ def authorize(context: AccessContext, policy: RoutePolicy, request: Request | No
         if (request is None or type(descriptor) is not CreateNewbornPreflight
                 or not descriptor.matches(context, request)):
             raise HTTPException(403, "Current request CREATE preflight required")
+        return
+    if policy.resource_stage is ResourceStage.CREATE_OPTIONS:
+        descriptor = context.create_options
+        if (request is None or type(descriptor) is not CreateOptionsPreflight
+                or not descriptor.matches(context, request)):
+            raise HTTPException(403, "Current request CREATE_OPTIONS preflight required")
         return
     permission = context.permission(policy.resource_type, policy.action)
     if (permission.resources.mode in (ScopeMode.EMPTY, ScopeMode.UNINITIALIZED)
@@ -239,6 +252,9 @@ class PolicyRouter(APIRouter):
         if policy.resource_stage is ResourceStage.CREATE_NEWBORN:
             if selector is not None or request_lifetime is None or not callable(request_lifetime):
                 raise PolicyConfigurationError("Newborn CREATE requires lifetime and no resource selector")
+        elif policy.resource_stage is ResourceStage.CREATE_OPTIONS:
+            if selector is not None or request_lifetime is None or not callable(request_lifetime):
+                raise PolicyConfigurationError("CREATE_OPTIONS requires lifetime and no resource selector")
         elif request_lifetime is not None:
             raise PolicyConfigurationError("Request lifetime requires explicit newborn stage")
         binding = _Binding(policy, self.context_resolver, selector, tenant_selector, request_lifetime)

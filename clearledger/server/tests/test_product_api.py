@@ -422,6 +422,11 @@ async def test_schema_and_registry_match_actual_child_routes_without_public_docs
     assert registry["kind"] == "policy-runtime-registry" and registry["sourceRevision"] == "synthetic-candidate"
     from tests.test_product_http_profile import assert_product_manifest
     assert_product_manifest(schema, registry)
+    options = schema["paths"]["/contracts/create-options"]["get"]
+    assert options["operationId"] == "getContractCreateOptions"
+    assert options["x-access-policy"]["resourceStage"] == "create-options"
+    assert options["x-access-policy"]["scopes"] == ["contracts:create"]
+    assert "requestBody" not in options
     monitored = schema["paths"]["/objects/{objectId}/monitoring"]["get"]
     assert monitored["operationId"] == "getObjectMonitoring"
     assert monitored["security"] == [{"ProductOAuth": ["monitoring:read", "objects:read"]},
