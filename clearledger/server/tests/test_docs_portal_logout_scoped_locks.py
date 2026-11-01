@@ -359,7 +359,7 @@ def options_authority_baseline_bytes(path):
         source = source.replace(extended, original, 1)
     restored = source.encode("utf-8")
     assert hashlib.sha256(restored).hexdigest() == extension["baseline_raw"]
-    assert hashlib.sha256(ast.dump(ast.parse(restored), include_attributes=False).encode()).hexdigest() == extension["baseline_ast"]
+    assert hashlib.sha256(stable_ast_dump(ast.parse(restored)).encode()).hexdigest() == extension["baseline_ast"]
     assert extension["baseline_raw"] == ACCEPTED_HTTP_CREATE_EXTENSION["authority_extended_file"]
     return restored
 
@@ -369,6 +369,20 @@ def test_options_extraction_preserves_complete_preexisting_authority_before_old_
     assert hashlib.sha256(restored).hexdigest() == "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18"
     assert ACCEPTED_OPTIONS_EXTRACTION["baseline_ast"] == "a7f495d3d33c780107a5a417c001090048ebe147c1d9aeac26de656cd69da202"
     assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
+
+
+def test_options_ast_compatibility_ignores_only_empty_type_parameters():
+    node = ast.parse("def sample(value):\n    return value + 1\n").body[0]
+    original = digest_node(node)
+    # Model the newer AST field on Python 3.11 as well; never skip the negative.
+    if "type_params" not in node._fields:
+        node._fields = (*node._fields, "type_params")
+    node.type_params = []
+    assert digest_node(node) == original
+    node.type_params = [ast.Name(id="UnreviewedTypeParameter", ctx=ast.Load())]
+    assert digest_node(node) != original
+    assert "UnreviewedTypeParameter" in stable_ast_dump(node)
+
 
 def accepted_http_authority_baseline_digest(path):
     """Exact explicit overlay plus full inverse AST projection, no skip/repin."""

@@ -201,20 +201,63 @@ def test_descriptor_exact_request_method_operation_tenant_and_stage(mutation):
     assert failure.value.status_code == 403
 
 
-def test_offline_module_boundary_and_no_write_or_lock_calls():
-    module = ast.parse((ROOT / "app/product_api/contract_create_options.py").read_bytes())
+def _assert_offline_module_boundary_and_no_write_or_lock_calls(module):
     for node in module.body:
         if isinstance(node, ast.ImportFrom):
             assert not (node.module or "").startswith(("app.services", "app.auth", "app.config", "app.main", "app.models"))
+    load, = (node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "_load")
+    scope, = (node for node in load.body if isinstance(node, ast.With)
+        and len(node.items) == 1 and ast.unparse(node.items[0].context_expr) == "db.no_autoflush")
+    assignments = [node for node in scope.body if isinstance(node, ast.Assign)
+        and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "users"]
+    assert len(assignments) == 1
+    assignment = assignments[0]
+    expected_assignment = ast.parse("users = {r[3] for r in principals if r[3] is not None}").body[0]
+    assert ast.dump(assignment, include_attributes=False) == ast.dump(expected_assignment, include_attributes=False)
+    stores = [node for node in ast.walk(load) if isinstance(node, ast.Name)
+        and node.id == "users" and isinstance(node.ctx, (ast.Store, ast.Del))]
+    assert stores == assignment.targets
+    addition, = (node for node in scope.body if isinstance(node, ast.If)
+        and ast.unparse(node.test) == "current.user_id is not None")
+    expected_addition = ast.parse("if current.user_id is not None:\n    users.add(current.user_id)\n").body[0]
+    assert ast.dump(addition, include_attributes=False) == ast.dump(expected_addition, include_attributes=False)
+    allowed_set_add = addition.body[0].value
     names = {node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
-        for node in ast.walk(module) if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))}
+        for node in ast.walk(module) if isinstance(node, ast.Call) and node is not allowed_set_add
+        and isinstance(node.func, (ast.Name, ast.Attribute))}
     assert not names & {"commit", "add", "add_all", "flush", "begin_nested", "with_for_update", "prepare_create", "require_create", "acquire_scoped_locks"}
+
+
+def test_offline_module_boundary_and_no_write_or_lock_calls():
+    module = ast.parse((ROOT / "app/product_api/contract_create_options.py").read_bytes())
+    _assert_offline_module_boundary_and_no_write_or_lock_calls(module)
     lifetime = next(n for n in module.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "request_lifetime")
     source = ast.unparse(lifetime)
     assert source.index("execution_options=") < source.index("db.execute(") < source.index("bind=True")
     assert "REPEATABLE READ" in source and "postgresql_readonly" in source
     assert "asyncio.timeout(DEADLINE_SECONDS)" in source
     assert "budget.enforce" in source and "_rollback" in source
+
+
+@pytest.mark.parametrize("mutation", ["session_add", "session_add_all", "extra_users_add", "rebind_users", "replace_receiver"])
+def test_offline_write_guard_rejects_unreviewed_receivers_and_set_rebinding(mutation):
+    module = ast.parse((ROOT / "app/product_api/contract_create_options.py").read_bytes())
+    load = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "_load")
+    scope = next(node for node in load.body if isinstance(node, ast.With))
+    if mutation == "session_add":
+        scope.body.append(ast.parse("db.add(current)").body[0])
+    elif mutation == "session_add_all":
+        scope.body.append(ast.parse("db.add_all([current])").body[0])
+    elif mutation == "extra_users_add":
+        scope.body.append(ast.parse("users.add(current.user_id)").body[0])
+    elif mutation == "rebind_users":
+        scope.body.append(ast.parse("users = db").body[0])
+    else:
+        addition = next(node for node in scope.body if isinstance(node, ast.If)
+            and ast.unparse(node.test) == "current.user_id is not None")
+        addition.body[0].value.func.value = ast.Name(id="db", ctx=ast.Load())
+    with pytest.raises(AssertionError):
+        _assert_offline_module_boundary_and_no_write_or_lock_calls(module)
 
 
 def test_literal_route_precedes_dynamic_and_old_read_manifest_is_fixed15():
