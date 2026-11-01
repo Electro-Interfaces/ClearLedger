@@ -415,8 +415,9 @@ async def _locked_case_or_404(db: AsyncSession, cid: uuid.UUID, case_id) -> DocC
 
 
 async def _lock_case_catalog(db: AsyncSession, cid: uuid.UUID) -> None:
-    await db.execute(select(func.pg_advisory_xact_lock(
-        435_223, cid.int % (2 ** 31))))
+    from app.services.doc_case_locks import acquire_case_catalog
+
+    await acquire_case_catalog(db, (cid,), "X")
 
 
 def _assert_case_accepts_doc(case_row: DocCase, doc: DocCard,
@@ -474,9 +475,9 @@ def _set_storage_until(doc: DocCard, case_row: DocCase,
 
 async def _default_case_id(db: AsyncSession, cid: uuid.UUID,
                            value: str | None) -> uuid.UUID | None:
+    await _lock_case_catalog(db, cid)
     if not value:
         return None
-    await _lock_case_catalog(db, cid)
     case_row = await _case_or_404(db, cid, value)
     if case_row.status != "open":
         raise HTTPException(status.HTTP_409_CONFLICT,
@@ -878,6 +879,7 @@ async def create_kind(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    await _lock_case_catalog(db, cid)
     _validate_kind_number(payload.number_template, payload.number_scope)
     dup = (await db.execute(select(DocKind.id).where(
         DocKind.company_id == cid, DocKind.code == payload.code))).scalar_one_or_none()
@@ -910,6 +912,7 @@ async def update_kind(
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    await _lock_case_catalog(db, cid)
     _validate_kind_number(payload.number_template, payload.number_scope)
     k = await _kind_or_404(db, cid, kind_id)
     for field in ("name", "description", "family", "direction", "number_template",
@@ -936,6 +939,7 @@ async def create_starter_kinds(
     поэтому кнопку можно нажать дважды и ничего не задвоится."""
     cid = await assert_company_product(company_id, current_user, db, "docs")
     await _assert_admin(db, cid, current_user)
+    await _lock_case_catalog(db, cid)
     have = set((await db.execute(select(DocKind.code).where(
         DocKind.company_id == cid))).scalars().all())
     # Поручение по документу ставится обычным типом задачи, если он заведён.
@@ -973,6 +977,7 @@ async def contract_kinds(
     договору нельзя приложить ни одной бумаги. Переименовать вид админ может как обычно.
     """
     cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _lock_case_catalog(db, cid)
     have = {k.code: k for k in (await db.execute(select(DocKind).where(
         DocKind.company_id == cid, DocKind.code.in_([s["code"] for s in STARTER_KINDS_CONTRACT])))).scalars()}
     added = False
@@ -2324,6 +2329,9 @@ async def register_doc(
     документом навсегда — даже если документ потом отменят.
     """
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    from app.services.doc_case_locks import acquire_case_catalog
+
+    await acquire_case_catalog(db, (cid,), "S")
     d = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, d, current_user, "edit")
     d = (await db.execute(select(DocCard).where(
@@ -2931,6 +2939,9 @@ async def assign_doc_case(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    from app.services.doc_case_locks import acquire_case_catalog
+
+    await acquire_case_catalog(db, (cid,), "S")
     current = await _doc_or_404(db, cid, doc_id)
     await _assert_doc_permission(db, cid, current, current_user, "edit")
     d = await _locked_doc_or_404(db, cid, doc_id)
@@ -3720,6 +3731,10 @@ async def bulk_docs(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+    from app.services.doc_case_locks import acquire_case_catalog
+
+    if payload.action == "assign_case":
+        await acquire_case_catalog(db, (cid,), "S")
     doc_ids = list(dict.fromkeys(
         _uuid_or_400(value, "doc_ids") for value in payload.doc_ids))
     docs = (await db.execute(select(DocCard).where(

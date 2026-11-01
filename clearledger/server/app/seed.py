@@ -233,10 +233,14 @@ async def _seed_doc_kinds(db: AsyncSession) -> None:
     from datetime import datetime, timezone
 
     from app.models import DocCase, DocKind
+    from app.services.doc_case_locks import acquire_case_catalog
 
     year = datetime.now(timezone.utc).year
     by_code = {row["code"]: row["case"] for row in _DOC_KINDS_SEED}
     companies = (await db.execute(select(Company.id, Company.name))).all()
+    # Preserve this first SELECT/autoflush before catalog locks: pending Role/User
+    # writes from the startup root must finish before acquiring the complete set.
+    await acquire_case_catalog(db, (cid for cid, _ in companies), "X")
     for cid, cname in companies:
         cases = {c.index: c for c in (await db.execute(
             select(DocCase).where(DocCase.company_id == cid))).scalars().all()}
@@ -254,7 +258,8 @@ async def _seed_doc_kinds(db: AsyncSession) -> None:
             for row in _DOC_KINDS_SEED:
                 spec = dict(row)
                 case = cases.get(spec.pop("case"))
-                db.add(DocKind(company_id=cid, default_case_id=case.id if case else None,
+                db.add(DocKind(company_id=cid, default_case_id=(case.id if case is not None
+                                                and case.status == "open" else None),
                                requires_registration=True, is_active=True, **spec))
             logger.info("Виды документов заведены: %s (%d вида)", cname, len(_DOC_KINDS_SEED))
             continue
@@ -265,7 +270,7 @@ async def _seed_doc_kinds(db: AsyncSession) -> None:
         for kind in kinds:
             if kind.default_case_id is None and kind.code in by_code:
                 case = cases.get(by_code[kind.code])
-                if case is not None:
+                if case is not None and case.status == "open":
                     kind.default_case_id = case.id
 
 
