@@ -208,8 +208,22 @@
     "hostSession": 8328,
     "hostExit": 1,
     "reaped": true,
-    "examplesFix": "AUTHOR_ACTIVE_VALUES_ONLY",
-    "seconds": 36.847527774982154
+    "examplesFix": "AUTHOR_ACTIVE_COMMON_OPENAPI_NULL_PRESERVATION_EXACT4",
+    "seconds": 36.847527774982154,
+    "correctCause": "get_openapi exclude_none=True strips declaredexampleNone; Object.level is valid",
+    "rootInterpretationErratum": {
+      "status": "ROOT_INTERPRETATION_CORRECTION_PRESERVE_RAW",
+      "priorReceipt": "get-oas-transport-v3-real-example-failure-20261101.json",
+      "correctFacts": [
+        "Sourceall7Pageexamples include nextCursor=None; dto.Object.level is valid and defaulted",
+        "actualgeneratedschema/example missesnullablekeys becauseFastAPIget_openapi final jsonable_encoder exclude_none=True",
+        "RawrequirednextCursor failure isrealproducedSwaggerdefect; extraObjectlevel wasunfoundedRootinference",
+        "No productionliteralexamples/DTO/handlers changes authorized; corrected exact4 metadata preservation gate msg3dbaf307"
+      ],
+      "sourceOwner": "ctx_321ba93f28be",
+      "source": "b0aa31e2",
+      "noRuntimeInterpretationAltered": true
+    }
   },
   "nativeG1": {
     "status": "V3_NOT_ACCEPTED_6_DIAGNOSTIC_PASS_1_CONSTRAINT_ORACLE_FAIL",
@@ -241,8 +255,24 @@
     "v4": {
       "source": "681f1ea4a47f07630006ec61c0054c9b637b8941",
       "hostSession": 73769,
-      "status": "RUNNING",
-      "sourceOracle": "3b66e024c0850e51438f715f7c1d00938a43406b SOURCE_ACCEPTED"
+      "status": "ACTUAL7PASS_PENDING_RAW_NOT_FULL89",
+      "sourceOracle": "3b66e024c0850e51438f715f7c1d00938a43406b SOURCE_ACCEPTED",
+      "seconds": 33.48363432101905,
+      "hostExit": 0,
+      "reaped": true
+    },
+    "full89": {
+      "source": "681f1ea4a47f07630006ec61c0054c9b637b8941",
+      "status": "STOPPED_AFTER_SECOND_SLICE",
+      "first20Pass": true,
+      "second20": {
+        "diagnosticPass": 18,
+        "failures": 2,
+        "cause": "expectedDirectBlockerNotObserved_realGraphPending"
+      },
+      "remaining49": "NOTRUN",
+      "parent50941": "EXIT1_REAPED",
+      "graphDiagnostic2": "RUNNING_HOST99699"
     }
   },
   "preview": "http://10.10.70.56:8000/api-platform-20261029/contracts-http.html",
