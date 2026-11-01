@@ -11,6 +11,7 @@ from sqlalchemy import and_, column, false, func, or_, select, table
 from sqlalchemy.sql.sqltypes import Uuid
 
 from app.api_contracts import ScopeMode
+from app.db_types import uuid_storage_type
 from app.models import Contract, ContractLocation, Counterparty, DocCard, EzsEquipmentUnit, ServiceLocation
 from . import dto
 from .access import READ_SCOPES
@@ -25,7 +26,7 @@ CONTRACT_TYPES = table("contract_types", *(column(name) for name in
 
 
 def native_id(column, value):
-    if isinstance(column.type, Uuid):
+    if isinstance(uuid_storage_type(column.type), Uuid):
         try:
             return uuid.UUID(value)
         except (ValueError, TypeError, AttributeError):

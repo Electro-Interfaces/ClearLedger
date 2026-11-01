@@ -2,6 +2,7 @@
 from sqlalchemy import String, or_, select, text
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
+from app.db_types import uuid_storage_type
 from app.models import Counterparty, ServiceLocation
 
 
@@ -25,7 +26,7 @@ async def counterparty_usage(db, cp: Counterparty) -> list[str]:
         )]
         conditions = []
         for column in columns:
-            if isinstance(column.type, UUID):
+            if isinstance(uuid_storage_type(column.type), UUID):
                 conditions.append(column == cp.id)
             elif isinstance(column.type, String):
                 conditions.append(column.in_(keys))

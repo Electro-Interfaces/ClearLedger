@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.db_types import CanonicalUUID
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +42,7 @@ class Company(Base):
     __tablename__ = "companies"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
@@ -82,12 +83,12 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     # Компания по умолчанию (какую показать первой). Источник истины ПРАВ —
     # user_companies. Nullable: суперадмин может не иметь дефолтной компании.
     company_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -207,12 +208,12 @@ class UserCompany(Base):
     __tablename__ = "user_companies"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        CanonicalUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        CanonicalUUID(as_uuid=True),
         ForeignKey("companies.id", ondelete="CASCADE"),
         primary_key=True,
     )
@@ -228,7 +229,7 @@ class UserCompany(Base):
     # Назначенная именованная роль доступа (company_roles). Приоритетнее modules.
     # NULL = ad-hoc (см. modules) или admin (полный доступ).
     role_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("company_roles.id", ondelete="SET NULL"), nullable=True
+        CanonicalUUID(as_uuid=True), ForeignKey("company_roles.id", ondelete="SET NULL"), nullable=True
     )
     # Должность сотрудника в этой компании (per-company).
     position: Mapped[str | None] = mapped_column(String(150), nullable=True)
@@ -264,7 +265,7 @@ class UserCompany(Base):
     # и набор из нескольких потребует `= ANY(...)` во всех выборках. Заведём, когда
     # появится человек, ведущий два юрлица из трёх.
     own_organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+        CanonicalUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
     )
     # СКОУП ДАННЫХ: объекты пространства (`service_locations.id`), которые человек видит.
     # NULL = вся сеть компании; список = только эти объекты и всё, что к ним привязано
@@ -392,9 +393,9 @@ class Department(Base):
 class CompanyRole(Base):
     __tablename__ = "company_roles"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     # Набор модулей доступа. NULL = все модули (полный доступ).
@@ -1113,10 +1114,10 @@ class Counterparty(Base):
     __tablename__ = "counterparties"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
     # ИНН известен не у всех: физлица, госорганы, «Розничный покупатель». Пока колонка
     # была NOT NULL, отсутствие записывали подручными значениями — на стендах нашлись
@@ -1183,10 +1184,10 @@ class Organization(Base):
     __tablename__ = "organizations"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
     inn: Mapped[str] = mapped_column(String(20), nullable=False)
     kpp: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -1351,16 +1352,16 @@ class Contract(Base):
     )
 
     # Намерение создать паспорт, отдельно от его юридических реквизитов.
-    creation_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    creation_key: Mapped[uuid.UUID | None] = mapped_column(CanonicalUUID(as_uuid=True), nullable=True)
     creation_actor_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     creation_request_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
     number: Mapped[str] = mapped_column(String(100), nullable=False)
     date: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -1375,10 +1376,10 @@ class Contract(Base):
     # внешнего ключа — единственное место ядра, где ось «контрагент» была не ссылкой:
     # целостность никто не проверял, и каждый запрос писал `c.counterparty_id::text`.
     counterparty_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("counterparties.id"), nullable=False
+        CanonicalUUID(as_uuid=True), ForeignKey("counterparties.id"), nullable=False
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+        CanonicalUUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
     type: Mapped[str] = mapped_column(String(100), nullable=False)
     amount_limit: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
@@ -1416,7 +1417,7 @@ class Contract(Base):
     is_state_contract: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     igk: Mapped[str | None] = mapped_column(String(40), nullable=True)   # идентификатор госконтракта
     responsible_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     signer_our: Mapped[str | None] = mapped_column(String(200), nullable=True)
     signer_our_position: Mapped[str | None] = mapped_column(String(200), nullable=True)
     signer_cp: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -4899,10 +4900,10 @@ class OneCConnection(Base):
     __tablename__ = "onec_connections"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        CanonicalUUID(as_uuid=True),
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -8227,7 +8228,7 @@ class App(Base):
     """Каталог приложений экосистемы ElsyPlus."""
     __tablename__ = "eco_apps"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)   # 'ledger','support',…
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -8264,11 +8265,11 @@ class CompanyApp(Base):
     """Подключение приложения компании (серверная замена localStorage-демо)."""
     __tablename__ = "eco_company_apps"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     app_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("eco_apps.id", ondelete="CASCADE"), nullable=False)
+        CanonicalUUID(as_uuid=True), ForeignKey("eco_apps.id", ondelete="CASCADE"), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)            # per-company настройки приложения
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -14038,9 +14039,9 @@ class PartnerSpace(Base):
     __tablename__ = "eco_partner_spaces"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+        CanonicalUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        CanonicalUUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False, index=True)
     # `client` — их пространство, которое мы обслуживаем; `vendor` — наша служба
     # поддержки, если эта запись стоит в контуре заказчика.

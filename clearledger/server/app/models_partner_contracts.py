@@ -14,10 +14,10 @@ from sqlalchemy import (
     BigInteger, Boolean, CHAR, CheckConstraint, DateTime, ForeignKey,
     ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.db_types import CanonicalUUID as UUID
 
 
 class PartnerContractCreateProfile(Base):

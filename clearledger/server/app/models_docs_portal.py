@@ -2,9 +2,9 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
+from app.db_types import CanonicalUUID as UUID
 
 
 class DocsPortalSession(Base):

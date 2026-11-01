@@ -1,0 +1,205 @@
+{
+  "status": "ROOT_AUTHORED_SOURCE_PENDING_INDEPENDENT_REVIEW_RUNTIME_NOTRUN",
+  "baseSource": "996d9c917796ff1d471fc5d3121e9824ae488cae",
+  "sourceCodeOwner": "ROOT",
+  "sourceFiles": [
+    {
+      "path": "clearledger/server/app/models.py",
+      "bytes": 966820,
+      "sha256": "0a171c80ed0b990f4abf6e71c1fc5fdb57a5623a4a9ef1b264a1bf4c43b7859b",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/app/models_docs_portal.py",
+      "bytes": 972,
+      "sha256": "28b84b5229f2d95d17d9f2ff7b2959ebb9ac6cad038cc6327b26f6f7c0bbbdc2",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/app/models_partner.py",
+      "bytes": 11560,
+      "sha256": "2de59cd89fee2f6c468db14e24e99b07577ea0078b7263abdc7a3da43e74ec94",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/app/models_partner_contracts.py",
+      "bytes": 10436,
+      "sha256": "d38d57424373220d358f5411bb566c62a6dbd30212be9bc482d8f7358e4cf2de",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/app/product_api/queries.py",
+      "bytes": 15669,
+      "sha256": "3d9a1b141def031c48d47229fb0fc59191d901247597f581dbb9f8f06f1d8ad1",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/app/services/counterparty_usage.py",
+      "bytes": 2725,
+      "sha256": "6d50c33790c0ced4933d73b662e1a3e8c20c1056a30496aa8cf36ea1dc4ef5c9",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/app/db_types.py",
+      "bytes": 1962,
+      "sha256": "59a7aa9e1c4d93599fd399cfb94aa19eb8f97ffc621ebe6d5ca735ab8f409aba",
+      "testDefinitions": 0
+    },
+    {
+      "path": "clearledger/server/tests/test_db_uuid.py",
+      "bytes": 7489,
+      "sha256": "301c47c4f5896641ad13469c3581f116f7118b89250877c844e4efc9dfa62f45",
+      "testDefinitions": 8
+    },
+    {
+      "path": "clearledger/server/tests/test_db_uuid_pg.py",
+      "bytes": 3769,
+      "sha256": "1695da0e3655ae77a1d725de501f7cb76b5c9439af2baf1ee6e8476215b4574a",
+      "testDefinitions": 3
+    }
+  ],
+  "protectedFiles": [
+    {
+      "path": "clearledger/server/app/services/contract_write_locks.py",
+      "sha256": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54"
+    },
+    {
+      "path": "clearledger/server/app/services/onec/catalog_root_locks.py",
+      "sha256": "ef250f29154f6c32566b21b9c7c1d6cda1bd054b7196975c49e779339eeb3dea"
+    },
+    {
+      "path": "clearledger/server/app/services/onec/sync_service.py",
+      "sha256": "f816e1e9e3f11e929b4290f1b6deb5da9975b83061493f069ae08e18c9130345"
+    },
+    {
+      "path": "clearledger/server/app/services/native_reference_locks.py",
+      "sha256": "ed8f6dde159fdea69947018469bb0b3fff5df34bba7cc5876c5bc7d1e7a897bd"
+    },
+    {
+      "path": "clearledger/server/app/services/native_auth_locks.py",
+      "sha256": "a2bba3c428020d0507d4a0f9213953ee01f74573894612a9c30f42fd9a89c403"
+    },
+    {
+      "path": "clearledger/server/app/services/native_user_role_locks.py",
+      "sha256": "c4584f4c34f0412f28db999fed943ede90cd6028780e56afa5dd26ebe7baa363"
+    },
+    {
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724"
+    },
+    {
+      "path": "clearledger/server/tests/test_onec_catalog_root_locks_pg.py",
+      "sha256": "b4572ec736bc444bba2f55d283f78719405866714d7703b6d3836f35b6429526"
+    },
+    {
+      "path": "clearledger/server/tests/test_native_reference_locks_pg.py",
+      "sha256": "91d6244e84ef773831e53de6ff5c987d1169a0599292ec4d78d9b6cfd065aacc"
+    },
+    {
+      "path": "clearledger/server/tests/partner_contract_schema_v4_approval.py",
+      "sha256": "e056ac5abf886180e25855dd9f8f5f50a0efa6d106b7b849763e1336a7f97920"
+    },
+    {
+      "path": "clearledger/server/tests/partner_contract_schema_v4_fixture.py",
+      "sha256": "5fbd458cfb1b07c86f4e835e8699aba3608c01cf7d86fe713ad9bdf3d6dca777"
+    },
+    {
+      "path": "clearledger/server/tests/partner_contract_schema_v4_cases.py",
+      "sha256": "9a01b637de8f8740ae4852eba044b50d24973d5d4f6d0dc8a8a032f28501dde7"
+    }
+  ],
+  "coreMappingColumns": {
+    "Company": [
+      "id"
+    ],
+    "User": [
+      "id",
+      "company_id"
+    ],
+    "UserCompany": [
+      "user_id",
+      "company_id",
+      "role_id",
+      "own_organization_id"
+    ],
+    "CompanyRole": [
+      "id",
+      "company_id"
+    ],
+    "Counterparty": [
+      "id",
+      "company_id"
+    ],
+    "Organization": [
+      "id",
+      "company_id"
+    ],
+    "Contract": [
+      "creation_key",
+      "creation_actor_id",
+      "id",
+      "company_id",
+      "counterparty_id",
+      "organization_id",
+      "responsible_id"
+    ],
+    "OneCConnection": [
+      "id",
+      "company_id"
+    ],
+    "App": [
+      "id"
+    ],
+    "CompanyApp": [
+      "id",
+      "company_id",
+      "app_id"
+    ],
+    "PartnerSpace": [
+      "id",
+      "company_id"
+    ]
+  },
+  "coreMappedColumnCount": 28,
+  "additionalMappingModules": [
+    "models_partner.py UUID declarations only",
+    "models_partner_contracts.py UUID declarations only (dormant; no API or flags activation)",
+    "models_docs_portal.py token_id only"
+  ],
+  "boundary": "SQLAlchemy mapped result processing before identity-map identity; exact stdlib UUID or exact actual asyncpg UUID only; no untrusted field coercion",
+  "kernelAndDriverUnchanged": true,
+  "metadataCompatibility": "Only exact known CanonicalUUID unwrap to native impl; original PGUUID vs generic Uuid predicates and String/invalid-ID behavior preserved",
+  "sourceTests": {
+    "newUnitDefinitions": 8,
+    "plannedUnitCases": 14,
+    "newPGDefinitions": 3,
+    "newPGCases": 3,
+    "originalOneCDefinitions": 9,
+    "originalOneCCases": 21,
+    "allNotRunOnThisSource": true
+  },
+  "evidenceBeforeFix": {
+    "oneCPGSource": "e4c86ad071af8e168c5aba3fdef8672c9e9adf62",
+    "cases": 21,
+    "passed": 3,
+    "failed": 18,
+    "resultSHA256": "3fb2bc3b8608f319db205aa793d337a4fa2bb6c1cb81ab2c780436f77105eddd",
+    "actualORMDiagnosticSHA256": "5ea164aa3119922c8dc8ffc2ec9af2d4dc02d2d83ebb66d04d2ded863fa6bef7"
+  },
+  "unchangedOriginalScope": {
+    "M00_M19": 20,
+    "crossCuttingRequirements": 11,
+    "overallPercent": null,
+    "completionAsserted": false
+  },
+  "limits": [
+    "Source not runtimefixed",
+    "Physical DDL and mapped shape parity require actual new-profile checks",
+    "Current compiler/cache/python_type/as_uuidFalse tests authored not run",
+    "Raw text/direct driver results outside explicit mapped types remain OPEN",
+    "Selected28 Core columns and mapped partner/profile/docs only; no blind alias of all Core UUID columns",
+    "Original535/historical675 recorder composition and receipts immutable; ExternalType recorder not changed",
+    "No all affected native/auth/users/invite/identity/Store runtime acceptance",
+    "No application server/lifespan/seeds/production/merge/deploy/flags"
+  ]
+}
