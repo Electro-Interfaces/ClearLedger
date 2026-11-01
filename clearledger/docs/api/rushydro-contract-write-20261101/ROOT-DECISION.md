@@ -40,3 +40,13 @@ ServiceLocation и автоматической юридической клас�
 
 Ни один из этих пунктов не расширяет текущую волну на расчёт/закрытие/оплаты
 или все исторические API. Неизменные TARGET сохраняются как исходное предложение.
+
+## Уточнение ссылок исходного TARGET
+
+На том же Source08b три symbol:line указателя требуют поправки:
+- `clearledger/server/app/services/ops_terms.py` `create_term`: вместо 126 — строки 152–187.
+- `clearledger/server/app/routers/docs_router.py` `create_doc`: вместо 2199 — строки 2221–2312.
+- `clearledger/server/app/product_api/dto.py` `ContractCreateOptionsQuery`: вместо 872 — строки 877–881.
+
+Root сверил27исходныхфайлов и4входныхartifact SHA. Эти поправки
+не меняют предложение методов и не делают новые writers проверенными.

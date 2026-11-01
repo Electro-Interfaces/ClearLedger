@@ -3,7 +3,7 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: 61227d1bb7d3c4ab39ddef9a4b9cbc837a8a5f856a6cfed663697fe17518c5df
+// openapi-typescript 7.10.1; curated schema sha256: 017efa086840044fcd413c9afc2beb4aff166d46dc9d8228ca981e7a5e6d8e11
 export interface paths {
     "/contract-types": {
         parameters: {
@@ -261,6 +261,26 @@ export interface paths {
          * @description User or approved service principal with equipment:read and equipment resource grants. Only station level; powerKw is kW. Link IDs are independently authorized; null means absent or hidden. An authorized card does not grant access to linked resources. Disclosing objectId additionally requires objects:read and an independent object grant. Application refusals before streaming use application/problem+json: 400 invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, 403 access_denied, 404 not_found (absent or hidden resource), 422 invalid_request, 429 rate_limited for the opt-in quota or internal_error for generic injected HTTP429, 500 internal_error, 503 api_unavailable. Known-path unsupported methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; generic 429/503 supplies it only when available. Proxy errors and errors after streaming headers are outside this Problem contract.
          */
         get: operations["getEquipment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitoring/network-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read authorized operated network state
+         * @description Energy profile; current user or approved service, objects:read AND monitoring:read. Current catalog and exact native mismatch; no financial selection or ordering. Summary covers the full authorized operated region after onlyProblems, before page. Exact UTF-8 objectId order; pageSize 1..200, default 50. Live signed continuation binds current rights, filters, pageSize, scoped dataThrough and effective MSK point; changed binding/boundary requires restart (400), revoked access is checked first. No snapshot promise. asOf is ISO date 2000-01-01..today MSK; region has at most 20 nonempty exact tokens separated by | (1..200 characters); onlyProblems is true/false. Unknown query keys and nonempty GET bodies return 422. Authorized current-network candidates are capped at 10000 before owner/region; business read and local SQL timeout are 5 seconds, safe 503 on admission/timeout. These are engineering admission limits, not measured capacity or SLA. Current product Problem/Bearer/quota/no-store/X-Request-Id profile applies. Each item has only objectId/status/lastChargeAt/silentDays/mismatch; nullable fields are required. objectId is opaque Unicode, never UUID-parse or normalize. mismatch means working with no charge or more than seven silent MSK calendar days. All eight summary.byStatus keys are present, including underscore wire keys. The example is fictional, not a captured response; DX generation awaits Root checks.
+         */
+        get: operations["getNetworkState"];
         put?: never;
         post?: never;
         delete?: never;
@@ -972,6 +992,86 @@ export interface components {
              * @constant
              */
             timeZone?: "Europe/Moscow";
+        };
+        /** NetworkState */
+        NetworkState: {
+            context: components["schemas"]["NetworkStateContext"];
+            /** Items */
+            items: components["schemas"]["NetworkStateItem"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+            summary: components["schemas"]["NetworkStateSummary"];
+        };
+        /** NetworkStateContext */
+        NetworkStateContext: {
+            /**
+             * Asof
+             * Format: date-time
+             */
+            asOf: string;
+            /**
+             * Availability
+             * @enum {string}
+             */
+            availability: "observed" | "unknown";
+            /**
+             * Boundaryscope
+             * @constant
+             */
+            boundaryScope: "authorizedOperatedRegion";
+            /**
+             * Catalogmode
+             * @constant
+             */
+            catalogMode: "current";
+            /** Datalaghours */
+            dataLagHours: number | null;
+            /** Datathrough */
+            dataThrough: string | null;
+            /** Requesteddate */
+            requestedDate: string | null;
+        };
+        /** NetworkStateItem */
+        NetworkStateItem: {
+            /** Lastchargeat */
+            lastChargeAt: string | null;
+            /** Mismatch */
+            mismatch: boolean;
+            objectId: components["schemas"]["ObjectId"];
+            /** Silentdays */
+            silentDays: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "working" | "no_link" | "disabled" | "decommissioned" | "on_repair" | "maintenance" | "not_working" | "unknown";
+        };
+        /** NetworkStateStatusCounts */
+        NetworkStateStatusCounts: {
+            /** Decommissioned */
+            decommissioned: number;
+            /** Disabled */
+            disabled: number;
+            /** Maintenance */
+            maintenance: number;
+            /** No Link */
+            no_link: number;
+            /** Not Working */
+            not_working: number;
+            /** On Repair */
+            on_repair: number;
+            /** Unknown */
+            unknown: number;
+            /** Working */
+            working: number;
+        };
+        /** NetworkStateSummary */
+        NetworkStateSummary: {
+            byStatus: components["schemas"]["NetworkStateStatusCounts"];
+            /** Mismatch */
+            mismatch: number;
+            /** Stations */
+            stations: number;
         };
         /** Object */
         Object: {
@@ -3873,6 +3973,200 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Equipment"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            405: components["responses"]["ProductMethodNotAllowed"];
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Enabled shared PostgreSQL product quota exhausted (rate_limited), or generic injected application HTTP429 (internal_error). Quota is disabled by default. */
+            429: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getNetworkState: {
+        parameters: {
+            query?: {
+                /** @description ISO date, 2000-01-01..today MSK; current catalog. */
+                asOf?: string | null;
+                cursor?: string | null;
+                /** @description Exact native non-financial mismatch only. */
+                onlyProblems?: boolean;
+                pageSize?: number;
+                /** @description Up to 20 nonempty exact region tokens separated by |. */
+                region?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkState"];
                 };
             };
             /** @description Bad Request */
