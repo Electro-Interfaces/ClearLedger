@@ -66,19 +66,13 @@ def configured_sessions():
 
 async def resolve(request: Request) -> AccessContext:
     settings = request.app.state.product_settings
-    if settings.enabled() is not True:
-        raise HTTPException(503, "Partner API is disabled")
-    if request.query_params.get("access_token") is not None or request.query_params.get("token") is not None:
-        raise HTTPException(401, "Bearer credentials required")
-    authorization = request.headers.getlist("authorization")
-    if len(authorization) != 1:
-        raise HTTPException(401, "Bearer credentials required")
-    parts = authorization[0].split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(401, "Bearer credentials required")
+    bearer = request_bearer(request)
+    from app.api_contracts.routing import ResourceStage
+    if request.scope["route"].binding.policy.resource_stage is ResourceStage.CREATE_NEWBORN:
+        return request.scope["elsy.product.create_context"]
     policy = request.scope["route"].binding.policy
     async with settings.sessions() as db:
-        token = await settings.verifier(parts[1], db)
+        token = await settings.verifier(bearer, db)
         try:
             cid = uuid.UUID(str(token.company_id))
             for value in (token.app_id, token.installation_id, token.grant_id, token.token_id):
@@ -150,3 +144,39 @@ async def resolve(request: Request) -> AccessContext:
     await budget.enforce(settings.budget_policy(), settings.sessions,
                          budget.Key(cid, uuid.UUID(str(token.installation_id)), token.client_id))
     return context
+
+
+def request_bearer(request: Request) -> str:
+    settings = request.app.state.product_settings
+    if settings.enabled() is not True:
+        raise HTTPException(503, "Partner API is disabled")
+    if request.query_params.get("access_token") is not None or request.query_params.get("token") is not None:
+        raise HTTPException(401, "Bearer credentials required")
+    authorization = request.headers.getlist("authorization")
+    if len(authorization) != 1:
+        raise HTTPException(401, "Bearer credentials required")
+    parts = authorization[0].split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(401, "Bearer credentials required")
+    return parts[1]
+
+
+async def create_preflight(request: Request, db, bearer: str, *, bind: bool = False):
+    # Both read preflight and request-root reauth use the canonical live verifier.
+    # Only the request-root result is bound to the guard; neither is SQL proof.
+    from app.api_contracts.context import CREATE_PREFLIGHT_KEY, CreateNewbornPreflight
+    from app.services.partner_contract_authority import require_coarse_create
+    settings = request.app.state.product_settings
+    token = await settings.verifier(bearer, db)
+    await require_coarse_create(db, token)
+    kind = PrincipalKind.SERVICE if token.is_machine else PrincipalKind.PARTNER
+    principal = Principal(kind, token.subject, token.client_id,
+                          str(token.installation_id), str(token.grant_id))
+    grants = MappingProxyType({key: scope_of(token.resource_scopes.get(key)) for key in RESOURCES})
+    descriptor = CreateNewbornPreflight(request, str(token.company_id), principal, POLICY_VERSION) if bind else None
+    context = AccessContext(principal, str(token.company_id), POLICY_VERSION, token.scopes,
+        tuple(ResourcePermission(resource, "read", grants[resource], ResourceScope.all())
+              for resource in RESOURCES), valid=True, create_preflight=descriptor)
+    if bind:
+        request.scope[CREATE_PREFLIGHT_KEY] = descriptor
+    return token, context

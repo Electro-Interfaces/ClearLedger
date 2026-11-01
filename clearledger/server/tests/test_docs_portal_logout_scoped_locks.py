@@ -52,6 +52,16 @@ ACCEPTED_G_ORG_ORDER_EXTENSION = {
     "parents": ("Counterparty", "Organization", "ServiceLocation", "Contract"),
     "boundary": "after prefix; before ANY UserCompany; including empty Member set",
 }
+# Explicit HTTP/coarse extension; historical GORG and 19/17/12 pins stay intact.
+ACCEPTED_HTTP_CREATE_EXTENSION = {
+    "ratification": ("msg_dc2f907bf07e", "msg_85a4864d991c"),
+    "source_base": "cdb65361f3207f82283c88da8b431625a5b1804c",
+    "authority_baseline_file": "cb762a3d7341d84af400ad0378069a6387c09087d64827e0267ee9eb4c586586",
+    "authority_extended_file": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18",
+    "authority_baseline_ast": "b5c4c524e3acd1b347e00c8e78eb591ee7b97baea48e8cdcf5de60792c32765c",
+    "operation": ("POST", "/api/v1/contracts", "createContract"),
+}
+
 PROTECTED_17 = [('admin.register', 'app/routers/partner_admin_router.py', 'register', 'babffd869487681577361145bb2fed6f9d34da74a7e84bfcfb0e64063b156f57'), ('admin.client_status', 'app/routers/partner_admin_router.py', 'client_status', 'ecae87c5e9f16b287b94710e8afebb665784a9522fa98305e6a734586d182fd0'), ('admin.issue_credential', 'app/routers/partner_admin_router.py', 'issue_credential', 'd99a543f3e3b2c5935c53842837712a596242fb540c161709e05c394ba985fab'), ('admin.revoke_credential', 'app/routers/partner_admin_router.py', 'revoke_credential', '191517e884f64724b52b58240a72d14bd41903c5ef284e9d0df3712ce43ecfe8'), ('admin.approve_installation', 'app/routers/partner_admin_router.py', 'approve_installation', '0aa0fba2a41483db29ac285ee7c34b95aefdc190c37df0205aa7135a2374d1f5'), ('admin.revoke_installation', 'app/routers/partner_admin_router.py', 'revoke_installation', '79819f21a5df17c66dd4f017246cb6a5f9cb4c0d15edd6d3ebac06ae862c6ac7'), ('admin.machine_grant', 'app/routers/partner_admin_router.py', 'machine_grant', 'eb33e31712ac4bc3a8940925cf198bdbc05f599ef23711b893c4a2da59a68616'), ('admin.revoke_grant', 'app/routers/partner_admin_router.py', 'revoke_grant', '39a21684593bda9fad770cccc244aba5f3fe5f826f7fd4b2a0455f14c02075e7'), ('oauth.authorize', 'app/routers/partner_oauth_router.py', 'authorize', 'a73573447f15f9843a47020eeafeb04cd3c0f638d68dd5e3190dadb4d8facdf3'), ('consent.get_request', 'app/routers/partner_oauth_router.py', 'get_request', '94ae42b6e06ea61e0a88478390c0e9d0670700139b9f4c7531afeb58d2e8560f'), ('consent.approve', 'app/routers/partner_oauth_router.py', 'approve', '759e25b36da56bec7c4fa9abf58f80d87e0b08848b65aefaab62df7e0475b941'), ('consent.deny', 'app/routers/partner_oauth_router.py', 'deny', '6c9fea08b4d9eec59484d9fa80098a43dfa004ad02f980a21d47de6942117250'), ('oauth.token-code', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.token-refresh', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.token-machine', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.revoke', 'app/routers/partner_oauth_router.py', '_protocol_response', '3cae40a3659dd214aaf35232660f7b53983d7e4adeda5634ea2616361692f109'), ('oauth.userinfo', 'app/routers/partner_oauth_router.py', 'userinfo', 'a1fcf03561c44c6bef7ce5c9b6f8138cb3faecaad8b8504f218fc7789bc4bd2e')]
 
 
@@ -312,7 +322,7 @@ def test_accepted_org_order_extension_is_exact_and_preserves_scope_projection():
     assert order["extended_file"] != order["baseline_file"]
     assert hashlib.sha256(IDENTITY.read_bytes()).hexdigest() == order["extended_file"]
     authority = ROOT / "app/services/partner_contract_authority.py"
-    assert hashlib.sha256(authority.read_bytes()).hexdigest() == order["authority_extended_file"]
+    assert accepted_http_authority_baseline_digest(authority) == order["authority_extended_file"]
     composer = definition(IDENTITY, "_prepare_partner_write")
     boundary, = (n for n in ast.walk(composer) if isinstance(n, ast.If)
         and ast.unparse(n.test) == "create_writer is not None and stage_index == 0")
@@ -327,4 +337,47 @@ def test_accepted_org_order_extension_is_exact_and_preserves_scope_projection():
     parents, = (n for n in operation.body if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "parent_models")
     assert tuple(n.id for n in parents.value.elts) == order["parents"]
     assert digest_node(baseline_create_policy_projection(definition(IDENTITY, "eligible_scopes"))) == CANONICAL_12["eligible_scopes"]
+    assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
+
+
+def accepted_http_authority_baseline_digest(path):
+    """Exact explicit overlay plus full inverse AST projection, no skip/repin."""
+    extension = ACCEPTED_HTTP_CREATE_EXTENSION
+    assert extension["authority_baseline_file"] == ACCEPTED_G_ORG_ORDER_EXTENSION["authority_extended_file"]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == extension["authority_extended_file"]
+    projected = tree(path)
+    helper, = (n for n in projected.body if isinstance(n, ast.FunctionDef) and n.name == "_require_coarse_create")
+    operation, = (n for n in projected.body if isinstance(n, ast.ClassDef) and n.name == "CreateOperation")
+    policy, = (n for n in operation.body if isinstance(n, ast.FunctionDef) and n.name == "policy")
+    assert ast.unparse(policy.body[0]) == "refs, types = _require_coarse_create(db, current, self.expected_profile)"
+    assert ast.unparse(helper.body[-1]) == "return (refs, types)"
+
+    class RestoreProfile(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if node.id == "expected_profile":
+                return ast.copy_location(ast.Attribute(value=ast.Name(id="self", ctx=ast.Load()),
+                    attr="expected_profile", ctx=node.ctx), node)
+            return node
+
+    expanded = RestoreProfile().visit(ast.Module(body=deepcopy(helper.body[:-1]), type_ignores=[])).body
+    policy.body = expanded + policy.body[1:]
+    added = {"_require_coarse_create", "_load_coarse_create", "require_coarse_create"}
+    assert {n.name for n in projected.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in added} == added
+    projected.body = [n for n in projected.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) or n.name not in added]
+    # The complete original module is restored, including freeze/locks/checkpoint/
+    # SQL stamp/last-wait logic. A second allow policy cannot hide in this overlay.
+    assert digest_node(projected) == extension["authority_baseline_ast"]
+    return extension["authority_baseline_file"]
+
+
+def test_explicit_http_extension_keeps_original_gorg_and_full_issuer_semantics():
+    extension = ACCEPTED_HTTP_CREATE_EXTENSION
+    assert extension["ratification"] == ("msg_dc2f907bf07e", "msg_85a4864d991c")
+    assert extension["operation"] == ("POST", "/api/v1/contracts", "createContract")
+    assert extension["source_base"] == "cdb65361f3207f82283c88da8b431625a5b1804c"
+    authority = ROOT / "app/services/partner_contract_authority.py"
+    assert accepted_http_authority_baseline_digest(authority) == ACCEPTED_G_ORG_ORDER_EXTENSION["authority_extended_file"]
+    loader = definition(authority, "_load_coarse_create")
+    forbidden = {"add", "add_all", "flush", "commit", "rollback", "begin", "begin_nested", "with_for_update", "acquire_scoped_locks"}
+    assert not any(calls(loader, name) for name in forbidden)
     assert len(PROTECTED_BYTES) == 19 and len(PROTECTED_17) == 17 and len(CANONICAL_12) == 12
