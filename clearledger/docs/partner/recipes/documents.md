@@ -4,8 +4,9 @@
 [Ошибки](../errors.md) · [Каталоги](read-catalogs.md) · [Договоры](contracts.md) · [Мониторинг](monitoring.md)
 
 Candidate/default-off; source pin
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Здесь три из 15 GET, **все
+`9eb236a4d69f0452208857ac603fd1da515f52d8`. Здесь три метода чтения, **все
 user-only**. Вместе с documents relation договора это четыре user-only метода.
+Полный состав — в [канонической таблице 17 операций](../../PARTNER_QUICKSTART.md#current-source-contract-20261101).
 HTTP/schema/runtime **NOTRUN**, все данные вымышлены. HTTPS origin
 `https://sandbox.example.invalid`, GET без body.
 
@@ -16,7 +17,7 @@ ID token, docs-only token/cookie не заменяют это согласие. 
 document ACL. Доступ к связанному договору сам по себе документов не выдаёт.
 
 <!-- operation:listDocuments -->
-## 13. listDocuments: доступные карточки
+## listDocuments: доступные карточки
 
 Требуются `documents:read`, User, typed documents grant и current actor.
 Для ненулевых objectId/counterpartyId ниже предполагается независимая видимость
@@ -79,7 +80,7 @@ verifier может отклонить непригодный grant до это�
 <!-- /operation:listDocuments -->
 
 <!-- operation:getDocument -->
-## 14. getDocument: карточка и текущие версии
+## getDocument: карточка и текущие версии
 
 Те же `documents:read`, User, typed grant и document ACL. Query пустой; версии
 включены в detail, отдельного `GET /documents/{id}/versions` нет.
@@ -144,7 +145,7 @@ Metadata `mimeType` и `sizeBytes` не являются разрешением 
 <!-- /operation:getDocument -->
 
 <!-- operation:downloadDocumentVersion -->
-## 15. downloadDocumentVersion: содержимое конкретной версии
+## downloadDocumentVersion: содержимое конкретной версии
 
 Требуются **`documents:read` AND `documents.files:download`**, User, typed documents
 grant и native document/download/file ACL. Doc, version и source должны образовать
@@ -217,12 +218,12 @@ Content всегда `application/octet-stream`: metadata MIME не меняет
 
 ## Свидетельства исходников
 
-Commit `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`:
+Commit `9eb236a4d69f0452208857ac603fd1da515f52d8`:
 
-- `clearledger/server/app/product_api/app.py:203–237`: четыре user-only метода с contract relation, detail versions limit и binary route.
-- `clearledger/server/app/product_api/dto.py:214–237`: полный Document/Version/DocumentDetail DTO.
-- `clearledger/server/app/product_api/queries.py:87–101,238–278`: native ACL и redacted links.
-- `clearledger/server/app/product_api/files.py:38–84`: doc/version/source chain, shared bytes deny, download ACL и streaming headers.
-- `clearledger/server/app/product_api/access.py:98–151`: independent documents grant и current actor.
+- `clearledger/server/app/product_api/app.py:108–115,796–1010`: четыре user-only метода с contract relation, detail versions limit и binary route.
+- `clearledger/server/app/product_api/dto.py:40–116,174–175,708–809,815–869`: query, полные Document/Version/DocumentDetail, Page и Problem DTO.
+- `clearledger/server/app/product_api/queries.py:92–101,216–246,275–279`: native ACL, явные связи и redacted links.
+- `clearledger/server/app/product_api/files.py:39–84`: doc/version/source chain, shared bytes deny, download ACL и streaming headers.
+- `clearledger/server/app/product_api/access.py:67–148`: independent documents grant и current actor.
 
 Вернуться к [маршруту подключения](../onboarding.md) · [договорным связям](contracts.md).

@@ -5,7 +5,8 @@
 [Мониторинг](recipes/monitoring.md) · [Документы](recipes/documents.md)
 
 Candidate/default-off; source pin
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Все примеры fictional;
+`9eb236a4d69f0452208857ac603fd1da515f52d8`. Текущие операции и профили — в
+[единой таблице](../PARTNER_QUICKSTART.md#current-source-contract-20261101). Все примеры fictional;
 HTTP/schema/runtime **NOTRUN**. Статический контракт приложения не подтверждает
 поведение будущего ingress или запущенного пространства.
 
@@ -48,8 +49,11 @@ challenge не выводите из общей ошибки: 401/403 имеют
 | 401 `invalid_credentials` | Проверить тип токена; один управляемый refresh/новый вход, затем остановить цикл |
 | 403 `access_denied` | Сверить все AND scopes, отдельные typed grants, principal и текущие права с владельцем |
 | 404 `not_found` | Принять отсутствие доступной карточки/связи/файла; не пытаться различить чужие записи |
-| 405 `method_not_allowed` | Использовать GET; `Allow: GET` не открывает HEAD или write |
-| 422 `invalid_request` | Исправить query/path по текущей схеме: формат дат/ID, диапазоны, лишние поля |
+| 405 `method_not_allowed` | Сверить метод с Allow: `GET, POST` для коллекции `/api/v1/contracts`, `GET` для остальных известных путей |
+| 409 `conflict` | CREATE: тот же creationKey с другим содержимым либо конфликт идентичности; остановить автоматические повторы и сверить намерение |
+| 413 `request_too_large` | CREATE body превысил 16384 фактических байта; исправить тело |
+| 415 `unsupported_media_type` | CREATE требует application/json (допустим charset=utf-8), Content-Encoding только отсутствует либо identity |
+| 422 `invalid_request` | Исправить query/path или строгий CREATE body: даты/ID, диапазоны, лишние поля и дубли JSON-ключей |
 | 429 `rate_limited` | Product budget исчерпан; соблюдать Retry-After и ограничить собственную частоту |
 | 429 `internal_error` | Возможный generic injected HTTP429; обработать status, не считать отсутствие rate_limited успехом |
 | 500 `internal_error` | Ограниченный повтор только безопасного GET, затем поддержка |
@@ -58,6 +62,12 @@ challenge не выводите из общей ошибки: 401/403 имеют
 Ошибки валидируются не обязательно в порядке, ожидаемом клиентом: feature gate,
 identity/ACL и budget могут сработать раньше разбора параметров. Один запрос с
 несколькими дефектами не доказывает доступность остальных условий.
+
+405 с `Allow: GET, POST` относится к пути коллекции договоров, в metadata обеих
+операций `listContracts` и `createContract`. У detail, create-options и всех
+остальных известных путей — `Allow: GET`. HEAD и другие методы этим не открываются.
+Неизвестный путь даёт 404 **без Allow**. Allow не заменяет OAuth или разрешения.
+Это профиль product child application до streaming, не обещание поведения ingress.
 
 ## Другие boundaries имеют другие envelopes
 
@@ -127,11 +137,28 @@ uptime и p95 владелец должен согласовать отдель�
 5. Для файлов проверяйте status/media и закрывайте incomplete результат при
    обрыве. Range/resumable/ETag/checksum не опубликованы, новый GET не является
    гарантированным продолжением прежнего потока.
-6. Не переносите GET retry на token exchange, refresh/revoke, uploads или будущие
-   команды. Code одноразовый; повтор использованного refresh отзывает семейство.
+6. Для POST договора используйте отдельное правило ниже. Не переносите GET retry
+   на token exchange, refresh/revoke, uploads или другие команды. Code одноразовый;
+   повтор использованного refresh отзывает семейство.
 
-Внешнего product write contract с Idempotency-Key/If-Match/replay receipt нет.
-Внутренние locks/creationKey и legacy approve не являются обещанием partner API.
+### Неизвестный результат POST договора
+
+Внешний candidate POST `/api/v1/contracts` принимает body `creationKey`;
+Idempotency-Key и If-Match этим контрактом не объявлены. Fresh 201 возвращает
+`{contractId, replayed: false}`, авторизованный replay 200 — тот же ID с
+`replayed: true`, без READ grant или обещания Location. После потери ответа
+сохраните исходные тело и ключ. Допустим ограниченный новый запрос с тем же
+намерением и текущей авторизацией исходного grant/actor/CREATE-профиля и ссылок;
+не создавайте новый ключ из-за timeout. Внутренний автоматический повтор после
+неизвестного commit не обещан. 409 возвращается после полной текущей CREATE
+авторизации и не раскрывает чужую карточку; отзыв прав запрещает и replay.
+`contracts:read` не требуется и не заменяет `contracts:create`/CREATE-профиль.
+Подробный [рецепт](recipes/contracts.md#создание-договора) содержит body и ответы.
+
+Options 200 и `selectionVersion` не резервируют ссылки и не подтверждают admission
+для POST. После изменения профиля/токена/контекста или expiry cursor возможен
+400 `invalid_cursor`; для нового обхода опустите cursor. Timeout/переполнение
+closure options даёт общий 503 без частичного DTO; повтор не гарантирует успеха.
 Partner events/WS/SSE не опубликованы: автоматическое восстановление change feed
 также не определено. Это будущие возможности с отдельными контрактами.
 
@@ -149,7 +176,14 @@ authorization code, callback query, state/nonce/verifier, полный доку�
 
 ## Свидетельства исходников
 
-Commit для всех позиций: `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`.
+Текущие свидетельства на `9eb236a4d69f0452208857ac603fd1da515f52d8`:
+
+- `clearledger/server/app/product_api/app.py:_problem, http_problem, _describe_http_responses`: codes/headers, 405 по пути, application boundary.
+- `clearledger/server/app/product_api/contract_create_body.py:parse_contract_create_body, _check_media`: 413/415/422.
+- `clearledger/server/app/product_api/contract_create.py:request_lifetime, create` и `clearledger/server/app/services/partner_contract_commands.py:create_partner_contract`: 201/200, неизвестный commit и 409 после authority.
+- `clearledger/server/app/product_api/contract_create_options.py:request_lifetime, decode_cursor, options`: bounded snapshot и invalid cursor.
+
+Исторические свидетельства на `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`:
 
 - `clearledger/server/app/product_api/app.py:51–73,279–354`: Problem, header allowlist и curated metadata.
 - `clearledger/server/app/product_api/access.py:98–151` и `clearledger/server/app/product_api/budget.py:38–47,94–116`: порядок identity/ACL/budget, ключ и quota branch.

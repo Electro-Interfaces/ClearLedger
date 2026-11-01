@@ -4,9 +4,11 @@
 [Каталоги](recipes/read-catalogs.md) · [Договоры](recipes/contracts.md) ·
 [Мониторинг](recipes/monitoring.md) · [Документы](recipes/documents.md)
 
-Candidate, default-off; исторический source pin общего walkthrough
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Уточнение revoke и его отдельный
-source pin приведены ниже; остальные разделы повторно не аудировались.
+Candidate, default-off; текущие профили операций сверены с Source
+`9eb236a4d69f0452208857ac603fd1da515f52d8` и
+[единой таблицей 17 операций](../PARTNER_QUICKSTART.md#current-source-contract-20261101).
+Исторический walkthrough и отдельные уточнения revoke с их pins сохранены ниже;
+новая сверка не является повторной приёмкой OAuth/revoke.
 Все requests ниже вымышлены,
 HTTP/OAuth library/runtime **NOTRUN**. Они описывают подключение после отдельного
 допуска, не включают функции и не выдают учётные данные.
@@ -134,11 +136,20 @@ Pairwise `sub` стабилен в пределах client, не равен emai
 UserInfo, используйте `GET /api/oauth2/userinfo` с partner access Bearer и `openid`;
 проверяйте совпадение его `sub` с проверенным ID token. Machine UserInfo недоступен.
 
-Для `GET /api/v1/...` передавайте только `access_token` в единственном
+Для операций `/api/v1/...`, включая POST договора, передавайте только
+`access_token` в единственном
 `Authorization: Bearer ...`. Он выдан для product audience и имеет
 `token_use=partner_access`; ID token не является Bearer для бизнес-методов.
 Клиент не должен самостоятельно выводить право доступа из декодированного JWT:
 сервис проверяет актуальные grants и ограничения заново.
+
+Пример выше запрашивает только чтение. Для `getContractCreateOptions` и
+`createContract` отдельно согласуйте и запросите `contracts:create` у client,
+installation и grant. Нужен текущий CREATE-профиль с разрешённым пользователем;
+`contracts:read` не требуется и не даёт CREATE. Объекты, сторона, организация и
+активный typeCode проверяются по текущим ограничениям. Это не доступ ко всем
+внутренним операциям. Создание и replay не выдают READ; см.
+[рецепт](recipes/contracts.md#создание-договора).
 
 ## Refresh и revoke public client
 
@@ -229,8 +240,12 @@ Basic формирует OAuth-библиотека из client ID и secret п�
 }
 ```
 
-Этот профиль не получает identity, документы, файлы или docs session. Он может
-читать 11 user/service методов в пределах независимых resource grants; secret
+Этот профиль не получает identity, документы, файлы или docs session. Помимо
+11 user/service read GET, допускаются GET create-options и POST договора, если
+отдельно выданы `contracts:create` и действующий CREATE-профиль с разрешением
+service для именно этого approved machine grant confidential client. Read scopes
+в примере выше этих прав не дают. Все 13 user/service операций ограничены своими
+политиками и независимыми ресурсными разрешениями; secret
 хранится на сервере и не попадает в браузер, Swagger, URL или логи. После expiry
 получайте новый machine token только пока credential/grant действуют. Отзыв
 credential/grant/installation/client закрывает следующий API-вызов.
@@ -271,10 +286,12 @@ Accept: application/json
 `/api/developer/docs/openapi.server.json` описывает оба профиля, включая confidential
 client credentials с `grant_id`; используйте его для серверного SDK.
 `/api/developer/docs/openapi.json` — browser projection для Swagger, только public
-Code+PKCE. Оба содержат те же **15 GET** и предметные политики. Assets и UI также
+Code+PKCE. Оба Source-представления содержат те же **17 операций (16 GET + POST)**
+и предметные политики. Это не подтверждает свежесть опубликованной схемы. Assets и UI также
 защищены docs session. Docs cookie не открывает business API; в Swagger Authorize
-нужно отдельно согласовать business scopes. Try it out разрешён только для явно
-настроенной песочницы; server secret в browser spec не вводится.
+нужно отдельно согласовать business scopes. Try it out выполняет только GET явно
+настроенной песочницы; наличие POST в схеме не включает его browser execution.
+Server secret в browser spec не вводится.
 
 При завершении docs session портал передаёт `DELETE /api/developer/docs/session`
 с тем же cookie, точным Origin и `X-Docs-CSRF: <csrfToken>`; успешный ответ 204,
@@ -312,6 +329,11 @@ Form requests не принимают query, дубли и смешанную cl
 затем остановка; бесконечный refresh не восстанавливает отозванное разрешение.
 
 ## Свидетельства исходников
+
+Текущие изменения профилей на `9eb236a4d69f0452208857ac603fd1da515f52d8`:
+
+- `clearledger/server/app/product_api/app.py:528–586,1240–1330`: CREATE/options и server/browser OAuth projections.
+- `clearledger/server/app/services/partner_contract_authority.py:67–103,263–284`: CREATE scope, approved actor/profile и ресурсные пересечения без READ authority.
 
 Исторические свидетельства общего walkthrough (без повторного аудита):
 `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Номера строк в следующем списке

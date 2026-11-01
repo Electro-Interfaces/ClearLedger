@@ -5,12 +5,13 @@
 [Мониторинг](recipes/monitoring.md) · [Документы](recipes/documents.md)
 
 Candidate, default-off, source-only. Source pin:
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`; schema/HTTP/runtime **NOTRUN**.
+`9eb236a4d69f0452208857ac603fd1da515f52d8`; schema/HTTP/runtime **NOTRUN**.
 Ниже описан текущий wire DTO, не обещание полноты будущих отраслевых процессов.
+Состав и профили — в [единой таблице операций](../PARTNER_QUICKSTART.md#current-source-contract-20261101).
 
 ## Значения и IDs
 
-JSON product API использует camelCase. Все перечисленные поля DTO входят в
+JSON product API использует camelCase. Все перечисленные поля ответных DTO входят в
 ответ, в том числе nullable поля с явным `null`. **Nullable не означает optional.**
 `null` — неизвестное/недоступное значение, иногда redacted ссылка. Это не ноль,
 пустая строка, отрицательный результат проверки или доказательство отсутствия
@@ -38,8 +39,9 @@ UUID в recipes только вымышленные удобные пример�
 
 ## Коллекции, фильтры и время
 
-Корневые `/objects`, `/equipment`, `/counterparties`, `/contracts`, `/documents`
-принимают общий набор ниже. У `/contracts` дополнительно есть `typeCode`.
+GET коллекций `/objects`, `/equipment`, `/counterparties`, `/contracts`, `/documents`
+принимают общий набор ниже. У GET `/contracts` дополнительно есть `typeCode`.
+POST `/contracts` и GET create-options имеют отдельные контракты ниже.
 
 | Query | Формат и значение |
 |---|---|
@@ -75,7 +77,7 @@ Cursor привязан к resource, parent relation, компании, principa
 grant, scopes, resource policy и фильтрам. Смена отбора/размера/прав требует нового
 обхода; invalid cursor — явная ошибка 400, не конец данных.
 
-Пагинация live: между запросами нет общего read snapshot или snapshotId.
+Пагинация этих READ-коллекций live: между запросами нет общего read snapshot или snapshotId.
 `total` может меняться, чтение не является гарантированным историческим export.
 Для клиента полезны последовательный обход, собственный deadline и предел страниц,
 контроль повторяющегося cursor и dedup по resource ID. Эти клиентские ограничения
@@ -145,6 +147,48 @@ company/unassigned/другого режима без `locations` возвращ
 `nextCursor`: текущие subject/явные graph связи, документы фильтруются своим ACL
 до count/page. Чтение связи не выдаёт документы или право на bytes автоматически.
 
+## CREATE: вход, варианты и результат
+
+`ContractCreateBody` — отдельный строгий request DTO, не читаемый Contract.
+Все поля обязательны, кроме `comment`: `kind: "contract-card"`, UUID
+`creationKey`, непустые `number`/`type` до 100 символов, calendar `date`,
+непустой exact `typeCode` до 256 символов, UUID `organizationId`/`counterpartyId`,
+`coverage: {kind: "locations", locationIds: [...]}`, nullable `validUntil`.
+`locationIds` — 1..100 уникальных точных ObjectId. `validUntil` — строка до
+20 символов либо null, без гарантии ISO date; `comment` optional nullable до
+2000 символов. Пробельные-only number/type/typeCode не принимаются, но строки
+не trim и не case-fold. NUL и невалидный UTF-8 запрещены. Неизвестные поля,
+включая tenant override, и дубли JSON-ключей отклоняются. Wire media/byte cap — в
+[рецепте](recipes/contracts.md#создание-договора).
+
+`ContractCreateResult` содержит только обязательные `contractId` (UUID) и
+`replayed` (boolean): fresh 201/false, авторизованный replay 200/true.
+Это не Contract DTO, не READ grant и не обещание заголовка Location.
+
+GET `/contracts/create-options` принимает обязательный `resource` из
+`organization`, `counterparty`, `location`, `type`; `pageSize` 1..100, default 50;
+`cursor` optional nullable в схеме, строка 1..2048. Другие query запрещены.
+Для нового обхода cursor опускают; literal `cursor=null` не означает null.
+Ответ всегда содержит `resource`, `items` с единственным полем `value`,
+`selectionVersion` и **обязательный nullable `nextCursor`**. Это не обычная Page:
+`total`, labels и internal authority IDs не выдаются. Значения UUID канонические,
+location/type сохраняют исходную строковую идентичность без нормализации.
+`value`, `selectionVersion` и cursor клиент передаёт/хранит как непрозрачные
+значения без изменения; это не гарантия неизменности choices между запросами.
+
+Choices и полный профиль используют один read-only REPEATABLE READ snapshot t0
+в рамках запроса, после отдельного preflight и квоты. Это не snapshot всего
+многостраничного обхода. Cursor связан с полным текущим профилем, токеном,
+resource и pageSize, TTL до 300 секунд; changed/expired cursor даёт 400 после
+текущей авторизации, новый обход начинают без cursor. Общий deadline 10 секунд
+и ограничение closure возвращают 503 без частичного DTO. Это границы Source,
+не SLA. Отзыв до t0 учитывается, после t0 может не попасть в ответ; перед DTO
+повторяются canonical expiry/process-gate проверки, DB-чтения остаются на t0.
+`selectionVersion` не резервирует выбор, не является receipt или write admission
+и не входит в POST body. POST, включая replay, заново проверяет текущие authority,
+CREATE-профиль, исходный grant/actor и ссылки. Для обеих операций нужен
+`contracts:create`; `contracts:read` не требуется и не даёт CREATE authority.
+
 ## Document, version и файл
 
 | DTO | Поле | Тип и смысл |
@@ -197,7 +241,14 @@ Generated marker `string/binary` не означает текстовое дек
 
 ## Свидетельства исходников
 
-Все позиции закреплены commit `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`:
+Текущие CREATE DTO на `9eb236a4d69f0452208857ac603fd1da515f52d8`:
+
+- `clearledger/server/app/product_api/contract_create_body.py:ContractCreateBody, ContractCreateLocations, parse_contract_create_body`: strict body и лимиты.
+- `clearledger/server/app/product_api/dto.py:ContractCreateResult, ContractCreateOptionsQuery, ContractCreateOption, ContractCreateOptions`: required/optional и nullable.
+- `clearledger/server/app/product_api/contract_create_options.py:request_lifetime, options, _binding, decode_cursor`: t0, bounded response и cursor.
+
+Исторические свидетельства READ-словаря на
+`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9` (номера строк относятся к нему):
 
 - `clearledger/server/app/product_api/dto.py:11–255`: типы, обязательные nullable keys, query и DTO.
 - `clearledger/server/app/product_api/queries.py:18–23,103–235,238–279`: поиск, UTC, cursor, links и redaction.

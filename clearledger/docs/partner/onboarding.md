@@ -1,8 +1,10 @@
 # Первое подключение внешнего приложения
 
-Это текущая инструкция кандидата Product Read API: **15 GET, 11 user/service и
-четыре user-only**. Основа всех восьми страниц: Core
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. OAuth, Product API и docs portal
+Это инструкция кандидата Product API на Source
+`9eb236a4d69f0452208857ac603fd1da515f52d8`: **17 операций, 16 GET и один POST
+на 16 путях; 13 user/service и четыре delegated user-only**. Единая
+[таблица операций, scopes и профилей](../PARTNER_QUICKSTART.md#current-source-contract-20261101)
+находится в quickstart. OAuth, Product API и docs portal
 по умолчанию выключены независимо друг от друга. Подготовка этой инструкции
 ограничена исходниками (SOURCE ONLY): HTTP, схема работающего сервиса, сторонний
 OAuth-клиент, пилоты и эксплуатация **NOTRUN**, будущий runtime неизвестен.
@@ -62,8 +64,8 @@ scopes → grant**. Consent сотрудника не заменяет approval 
 |---|---|---|
 | Core login | Core-сессия сотрудника | Страница входа и согласия в Core; пароль вводится только там |
 | OIDC identity, `openid` | ID token, pairwise `sub`; `profile/email` по отдельным scopes | Вход в ваше приложение, не продуктовый Bearer |
-| Delegated Code + PKCE S256 | Partner access token от имени сотрудника | Все 15 GET при достаточных текущих правах |
-| Confidential client credentials + `grant_id` | Machine partner access token без User | Только 11 user/service GET; без identity, docs и файлов |
+| Delegated Code + PKCE S256 | Partner access token от имени сотрудника | Чтение и отдельный CREATE/options при достаточных текущих правах и CREATE-профиле |
+| Confidential client credentials + `grant_id` | Machine partner access token без User | 11 read GET и отдельные CREATE/options из 13 user/service операций; без identity, docs и файлов |
 | Public docs Code + PKCE | Отдельный `openid docs:read` grant и короткий docs cookie | Docs UI, browser/server OpenAPI и локальные assets |
 
 Core bearer, SSO handoff, ID token и docs cookie не являются взаимозаменяемыми
@@ -73,7 +75,7 @@ Core bearer, SSO handoff, ID token и docs cookie не являются взаи
 
 ## Scopes и ресурсы проверяются вместе
 
-Для чтения требуется пересечение scopes клиента, установки, grant и текущих прав
+Для операции требуется пересечение scopes клиента, установки, grant и текущих прав
 актора. `objects:read` разрешает действие, а typed `objects=SET{...}` ограничивает
 записи. `equipment`, `counterparties`, `contracts`, `documents` имеют самостоятельные
 typed grants: выдача объекта не выдаёт оборудование на нём или документы о нём.
@@ -92,29 +94,16 @@ typed grants: выдача объекта не выдаёт оборудован
 `contract.counterpartyId` или ссылки документа, нужно независимо видеть их цели.
 `null` может скрывать ссылку; не интерпретируйте его как доказательство отсутствия.
 
-## Полный перечень операций
+Для CREATE/options нужны `contracts:create` и текущий CREATE-профиль установки:
+разрешённый пользователь либо явно утверждённый machine grant confidential client,
+с соответствующим user/service разрешением профиля. Organization, counterparty,
+location и активный typeCode пересекаются с текущими ресурсными и пользовательскими
+ограничениями. `contracts:read` не требуется и не заменяет CREATE authority;
+успешное создание или replay не выдаёт READ. Порядок и DTO — в
+[рецепте создания](recipes/contracts.md#создание-договора).
 
-Пути ниже относительны `/api/v1`. Каждый метод имеет полный request, 200 и отказ
-в соответствующем recipe. User/service означает два допустимых вида principal,
-а не автоматическую выдачу прав.
-
-| № | GET path | Operation ID | Principal | Recipe |
-|---|---|---|---|---|
-| 1 | `/objects` | `listObjects` | user/service | [Каталоги](recipes/read-catalogs.md) |
-| 2 | `/objects/{objectId}` | `getObject` | user/service | [Каталоги](recipes/read-catalogs.md) |
-| 3 | `/equipment` | `listEquipment` | user/service | [Каталоги](recipes/read-catalogs.md) |
-| 4 | `/equipment/{equipmentId}` | `getEquipment` | user/service | [Каталоги](recipes/read-catalogs.md) |
-| 5 | `/counterparties` | `listCounterparties` | user/service | [Каталоги](recipes/read-catalogs.md) |
-| 6 | `/counterparties/{counterpartyId}` | `getCounterparty` | user/service | [Каталоги](recipes/read-catalogs.md) |
-| 7 | `/contracts` | `listContracts` | user/service | [Договоры](recipes/contracts.md) |
-| 8 | `/contracts/{contractId}` | `getContract` | user/service | [Договоры](recipes/contracts.md) |
-| 9 | `/contract-types` | `getContractTypeMetadata` | user/service | [Договоры](recipes/contracts.md) |
-| 10 | `/contracts/{contractId}/objects` | `listContractObjects` | user/service | [Договоры](recipes/contracts.md) |
-| 11 | `/objects/{objectId}/monitoring` | `getObjectMonitoring` | user/service | [Мониторинг](recipes/monitoring.md) |
-| 12 | `/contracts/{contractId}/documents` | `listContractDocuments` | user-only | [Договоры](recipes/contracts.md) |
-| 13 | `/documents` | `listDocuments` | user-only | [Документы](recipes/documents.md) |
-| 14 | `/documents/{docId}` | `getDocument` | user-only | [Документы](recipes/documents.md) |
-| 15 | `/documents/{docId}/versions/{versionId}/content` | `downloadDocumentVersion` | user-only | [Документы](recipes/documents.md) |
+User/service в общей таблице означает допустимые виды principal, а не
+автоматическую выдачу прав на все методы или внутренние операции Core.
 
 ## Первый обход
 
@@ -135,9 +124,11 @@ typed grants: выдача объекта не выдаёт оборудован
 
 Текущие чтения помогают построить разрешённую витрину. Они не заменяют полные
 процессы аренды, энергоснабжения и эксплуатации: нет финансовых DTO, тарифов,
-начислений, согласованных расчётов или SLA. Product API не публикует создание,
-изменение, согласование, загрузку документов, заявки, admin/write/events и
-partner WS/SSE/change feed. Уровни `site`, `EVSE`, `connector` относятся к будущему
+начислений, согласованных расчётов или SLA. Единственная candidate-команда —
+`POST /api/v1/contracts`; варианты для неё даёт advisory GET create-options.
+Изменение, согласование, загрузка документов, заявки, другие admin/write/events и
+partner WS/SSE/change feed не объявлены в этом контракте. Уровни `site`, `EVSE`,
+`connector` относятся к будущему
 расширению; сейчас доступны `servicePoint` и станционное оборудование `station`.
 
 Отдельные будущие пилоты, включение функций, проверка обычного сотрудника,
@@ -147,13 +138,16 @@ partner WS/SSE/change feed. Уровни `site`, `EVSE`, `connector` относ�
 ## Свидетельства исходников
 
 Блок нужен сопровождающему; для прохождения инструкции читать код не требуется.
-Все ссылки на source ниже закреплены полным commit
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`:
+Текущие свидетельства на `9eb236a4d69f0452208857ac603fd1da515f52d8`:
 
-- `clearledger/server/app/product_api/app.py:82–89,137–237`: 15 GET, accepted principal kinds и AND scopes.
-- `clearledger/server/app/product_api/access.py:98–151`: independent grants и current actor.
-- `clearledger/server/app/services/partner_identity.py:270–358`: typed resource scopes и live authorization chain.
-- `clearledger/server/app/config.py:60–78`: default-off OAuth/API/docs.
-- `clearledger/server/app/routers/partner_admin_router.py`: регистрация и approval принадлежат владельцу.
+- `clearledger/server/app/product_api/app.py:create_product_api, _policy, curated_openapi`: методы, principal kinds и AND scopes.
+- `clearledger/server/app/product_api/access.py:resolve, create_preflight, options_preflight`: independent grants и разные READ/CREATE boundaries.
+- `clearledger/server/app/services/partner_contract_authority.py:_require_coarse_create, select_create_domains`: текущий CREATE-профиль и пересечения ресурсов.
+- `clearledger/server/app/config.py:60–81`: независимые default-off gates, не состояние работающего сервиса.
+
+История: исходный walkthrough от 31.10.2026 на
+`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9` содержал 15 GET (11 user/service и
+четыре user-only). Его свидетельства и отдельные принятые серии не означают
+приёмку нынешних 17 операций. Канонические отчёты и их границы — в quickstart.
 
 Далее: [аутентификация](auth.md) · [словарь](data-dictionary.md) · [ошибки](errors.md).

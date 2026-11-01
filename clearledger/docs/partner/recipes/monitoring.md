@@ -4,11 +4,12 @@
 [Ошибки](../errors.md) · [Каталоги](read-catalogs.md) · [Договоры](contracts.md) · [Документы](documents.md)
 
 Candidate/default-off; source pin
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Один из 15 GET, user/service.
+`9eb236a4d69f0452208857ac603fd1da515f52d8`. Здесь один метод чтения user/service.
+Полный состав — в [канонической таблице 17 операций](../../PARTNER_QUICKSTART.md#current-source-contract-20261101).
 HTTP/schema/runtime **NOTRUN**; пример вымышленный и не является измерением.
 
 <!-- operation:getObjectMonitoring -->
-## 11. getObjectMonitoring
+## getObjectMonitoring
 
 Требуются **`objects:read` AND `monitoring:read`**, самостоятельный typed objects
 grant, current actor и компания профиля `energy`. Для сотрудника scope monitoring
@@ -125,12 +126,12 @@ Sessions и visits разные: несколько попыток могут о
 
 ## Свидетельства исходников
 
-Commit `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`:
+Commit `9eb236a4d69f0452208857ac603fd1da515f52d8`:
 
-- `clearledger/server/app/product_api/app.py:145–153`: scopes и boundary метода.
-- `clearledger/server/app/product_api/monitoring.py:16–40`: energy gate, разрешённый объект и object-scoped queries.
-- `clearledger/server/app/product_api/dto.py:123–169`: query и полный Monitoring DTO.
-- `clearledger/server/app/services/ops_monitor_context.py:21–35,51–101`: МСК, provenance, visits и энергия.
-- `clearledger/server/app/services/partner_identity.py:217–223`: eligible monitoring scopes.
+- `clearledger/server/app/product_api/app.py:108–115,261–334`: required scopes, principal kinds и вызов object-scoped метода.
+- `clearledger/server/app/product_api/monitoring.py:14–40`: energy gate, разрешённый объект и object-scoped queries.
+- `clearledger/server/app/product_api/dto.py:326–532`: query и полный Monitoring DTO.
+- `clearledger/server/app/services/ops_monitor_context.py:8–34,51–101`: МСК, provenance, visits и энергия.
+- `clearledger/server/app/services/partner_identity.py:206–235,340–354`: eligible monitoring scopes и текущие user/machine ограничения.
 
 Далее: [документы](documents.md) · [ограничения данных](../data-dictionary.md).

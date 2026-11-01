@@ -4,15 +4,16 @@
 [Ошибки](../errors.md) · [Договоры](contracts.md) · [Мониторинг](monitoring.md) · [Документы](documents.md)
 
 Candidate/default-off, source-only; pin
-`cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`. Здесь шесть из 15 GET,
-все user/service. HTTP/schema/runtime **NOTRUN**, данные вымышлены.
+`9eb236a4d69f0452208857ac603fd1da515f52d8`. Здесь шесть методов чтения,
+все user/service. Полный состав — в [канонической таблице 17 операций](../../PARTNER_QUICKSTART.md#current-source-contract-20261101).
+HTTP/schema/runtime **NOTRUN**, данные вымышлены.
 `<PARTNER_ACCESS_TOKEN_PLACEHOLDER>` заменяется partner access token из
 [выбранного flow](../auth.md), User либо machine, с нужными правами.
 В GET body отсутствует. `Host` относится к HTTPS origin
 `https://sandbox.example.invalid`; tokens не передаются в query.
 
 <!-- operation:listObjects -->
-## 1. listObjects: список точек
+## listObjects: список точек
 
 Требуются `objects:read`, independent typed objects grant и текущие ограничения
 актора. Пример получает записи, созданные за октябрь по UTC, с поиском по имени.
@@ -75,7 +76,7 @@ token вместо access token. После 200 сохранить точный 
 <!-- /operation:listObjects -->
 
 <!-- operation:getObject -->
-## 2. getObject: карточка точки
+## getObject: карточка точки
 
 Те же `objects:read`, typed objects grant и current actor. Query пустой; path ID
 берётся из list без нормализации.
@@ -128,7 +129,7 @@ X-Request-Id: 80000000-0000-4000-8000-000000000001
 <!-- /operation:getObject -->
 
 <!-- operation:listEquipment -->
-## 3. listEquipment: станционное оборудование
+## listEquipment: станционное оборудование
 
 Требуются `equipment:read` и самостоятельный typed equipment grant. Для ненулевого
 `objectId` в проекции дополнительно нужны `objects:read` и независимая видимость
@@ -190,7 +191,7 @@ WWW-Authenticate: Bearer realm="product-api"
 <!-- /operation:listEquipment -->
 
 <!-- operation:getEquipment -->
-## 4. getEquipment: карточка оборудования
+## getEquipment: карточка оборудования
 
 `equipment:read` и typed equipment grant; для видимой object ссылки также доступ
 к объекту. Query пустой.
@@ -242,7 +243,7 @@ X-Request-Id: 80000000-0000-4000-8000-000000000001
 <!-- /operation:getEquipment -->
 
 <!-- operation:listCounterparties -->
-## 5. listCounterparties: доступные контрагенты
+## listCounterparties: доступные контрагенты
 
 Требуются `counterparties:read`, independent counterparties grant и current
 actor. `q` — поиск по имени, не по ИНН/КПП. Группы не выдаются как контрагенты.
@@ -296,7 +297,7 @@ X-Request-Id: 80000000-0000-4000-8000-000000000001
 <!-- /operation:listCounterparties -->
 
 <!-- operation:getCounterparty -->
-## 6. getCounterparty: карточка контрагента
+## getCounterparty: карточка контрагента
 
 Те же `counterparties:read`, typed grant и текущие ограничения. Query пустой.
 
@@ -344,11 +345,11 @@ X-Request-Id: 80000000-0000-4000-8000-000000000001
 
 ## Свидетельства исходников
 
-Commit `cec2c9845431a0bc07e4b4f115eb21eed8d5caa9`:
+Commit `9eb236a4d69f0452208857ac603fd1da515f52d8`:
 
-- `clearledger/server/app/product_api/app.py:137–169`: шесть GET и их response models.
-- `clearledger/server/app/product_api/dto.py:172–199`: полные Object/Equipment/Counterparty DTO.
-- `clearledger/server/app/product_api/queries.py:18–21,64–101,138–163,238–264`: поиск, фильтры, current grants и redacted links.
-- `clearledger/server/app/product_api/access.py:98–151`: required scopes, accepted kinds и current actor.
+- `clearledger/server/app/product_api/app.py:159–259,336–524`: шесть GET и их response models.
+- `clearledger/server/app/product_api/dto.py:40–116,174–175,535–652,815–835`: query, полные Object/Equipment/Counterparty и Page DTO.
+- `clearledger/server/app/product_api/queries.py:19–22,71–174,239–265`: поиск, фильтры, cursor binding, current grants и redacted links.
+- `clearledger/server/app/product_api/app.py:108–115` и `clearledger/server/app/product_api/access.py:67–148`: required scopes, accepted kinds и current actor.
 
 Далее: [договоры и явные связи](contracts.md).
