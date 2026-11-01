@@ -58,6 +58,7 @@ SCOPE_DESCRIPTIONS = {
     "monitoring:read": "Чтение статуса и агрегатов зарядных визитов разрешённых объектов",
     "objects:read": "Чтение объектов компании", "equipment:read": "Чтение оборудования компании",
     "counterparties:read": "Чтение контрагентов компании", "contracts:read": "Чтение договоров компании",
+    "contracts:create": "Создание карточек договоров по отдельному профилю допуска",
     "documents:read": "Чтение карточек документов", "documents.files:download": "Скачивание файлов документов",
 }
 IDENTITY_SCOPES = frozenset({"openid", "profile", "email", "offline_access"})
@@ -227,7 +228,7 @@ def eligible_scopes(db: Session, user: User, company_id: uuid.UUID) -> set[str]:
     # Each domain keeps its finer resource/field policy in M03. Do not infer
     # domain rights from an unrelated product or a generic membership.
     domain_modules = {"objects:read": "equipment", "equipment:read": "equipment",
-        "counterparties:read": "references", "contracts:read": "references",
+        "counterparties:read": "references", "contracts:read": "references", "contracts:create": "references",
         "documents:read": "docs", "documents.files:download": "docs"}
     for scope, module in domain_modules.items():
         if modules is None or module in modules:
@@ -508,12 +509,18 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
     if db.new or db.dirty or db.deleted:
         raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
     profile_purpose = mutation in {"contract-profile-read", "contract-profile-write"}
+    create_purpose = mutation == "contract-create"
     if profile_purpose:
         from app.services.partner_contract_profiles import ProfileOperation
         if (type(contract_profile) is not ProfileOperation or actor is None or native is None
                 or contract_profile.installation_id != installation_id
                 or contract_profile.write != (mutation == "contract-profile-write")):
             raise ScopedLockError("Exact profile composition and actual native authority required")
+    elif create_purpose:
+        from app.services.partner_contract_authority import CreateOperation
+        if (type(contract_profile) is not CreateOperation or actor is not None or native is not None
+                or contract_profile.installation_id != installation_id):
+            raise ScopedLockError("Exact SQL CREATE composition required")
     elif contract_profile is not None:
         raise ScopedLockError("Profile state cannot change an existing identity flow")
     found, requests, installation_sets, credential_sets = {}, [], {}, {}
@@ -700,8 +707,8 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         company(admin_company)
         for model, ids in selections:
             references(model, company_id, ids, selected=True)
-        if profile_purpose:
-            # Profile-only extension closes ALL original parents before the
+        if profile_purpose or create_purpose:
+            # Profile/CREATE extension closes ALL original parents before the
             # one existing B entrance. No second preparation/issuer or policy.
             contract_profile.discover(db, company_id=company_id, client_id=client_id,
                 actor=actor, get=get, key=key, company=company)
@@ -711,31 +718,55 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         if not requests:
             raise InvalidClientError()
         plan = LockPlan(tuple(requests))
+        if create_purpose:
+            contract_profile.freeze(db, ordered, installation_sets, credential_sets)
     cap = acquire_scoped_locks(db, plan)
+    create_writer = None
+    if create_purpose:
+        create_writer = _PartnerWrite(db, cap, ordered, original_installation=installation_id)
+        create_writer.contract_profile = contract_profile
+        contract_profile.writer = create_writer
+        create_writer.checkpoint()
+        contract_profile.after_b(create_writer)
+    # CREATE has an explicit boundary even if its canonical Member set is
+    # empty. Other purposes retain the original single ordered row pass.
+    row_stages = (ordered,)
+    if create_writer is not None:
+        before_member = (Company, App, PartnerClient, User, CompanyRole)
+        row_stages = (
+            tuple(spec for spec in ordered if spec.model in before_member),
+            tuple(spec for spec in ordered if spec.model not in before_member
+                  and spec.model not in contract_profile.parent_models),
+        )
     with db.no_autoflush:
-        for spec in ordered:
-            # Authority SHARE, mutation UPDATE; never KEY SHARE.
-            row = db.scalar(spec.statement().with_for_update(read=not spec.update))
-            if (row is None) != spec.missing:
-                if spec.model is PartnerAuthorizationRequest:
-                    db.rollback()
-                    raise PartnerProblem(404, "AUTH_REQUEST_NOT_FOUND", "Запрос авторизации не найден")
-                _writer_drift(db)
-            if row is not None and spec.model is PartnerInstallation:
-                ca = db.get(CompanyApp, row.id)
-                client = db.get(PartnerClient, row.client_id)
-                if ca is None or client is None or ca.company_id != row.company_id or ca.app_id != client.app_id:
+        for stage_index, stage in enumerate(row_stages):
+            for spec in stage:
+                # Authority SHARE, mutation UPDATE; never KEY SHARE.
+                row = db.scalar(spec.statement().with_for_update(read=not spec.update))
+                if (row is None) != spec.missing:
+                    if spec.model is PartnerAuthorizationRequest:
+                        db.rollback()
+                        raise PartnerProblem(404, "AUTH_REQUEST_NOT_FOUND", "Запрос авторизации не найден")
                     _writer_drift(db)
-                if _installation_sets(db, row.id) != installation_sets[row.id]:
-                    _writer_drift(db)
-            if row is not None and spec.model is PartnerClient:
-                current_credentials = tuple(sorted(db.scalars(select(PartnerCredential.id).where(
-                    PartnerCredential.client_id == row.id)).all(), key=str))
-                if current_credentials != credential_sets[row.id]:
-                    _writer_drift(db)
-            if row is not None and spec.model is PartnerAuthorizationRequest:
-                request_deadline = row.expires_at if not row.finished else None
-    writer = _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)
+                if row is not None and spec.model is PartnerInstallation:
+                    ca = db.get(CompanyApp, row.id)
+                    client = db.get(PartnerClient, row.client_id)
+                    if ca is None or client is None or ca.company_id != row.company_id or ca.app_id != client.app_id:
+                        _writer_drift(db)
+                    if _installation_sets(db, row.id) != installation_sets[row.id]:
+                        _writer_drift(db)
+                if row is not None and spec.model is PartnerClient:
+                    current_credentials = tuple(sorted(db.scalars(select(PartnerCredential.id).where(
+                        PartnerCredential.client_id == row.id)).all(), key=str))
+                    if current_credentials != credential_sets[row.id]:
+                        _writer_drift(db)
+                if row is not None and spec.model is PartnerAuthorizationRequest:
+                    request_deadline = row.expires_at if not row.finished else None
+                if create_writer is not None:
+                    create_writer.checkpoint()
+            if create_writer is not None and stage_index == 0:
+                contract_profile.lock_parents()
+    writer = create_writer or _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)
     if profile_purpose:
         writer.contract_profile = contract_profile
     writer.checkpoint()
