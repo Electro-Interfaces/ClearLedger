@@ -302,7 +302,7 @@ async def test_logout_original_docs_token_binding_drift_rolls_back(env, change):
 
 
 @pytest.mark.parametrize("wait,change", [
-    ("typed", "native_tv"), ("typed", "member"), ("typed", "role"),
+    ("typed", "native_tv"), ("typed", "role"),
     ("typed", "grant"), ("typed", "client"), ("typed", "installation"), ("typed", "ca"),
     ("family", "family_expired"), ("family", "token_revoked"),
     ("docs", "docs_expired"), ("docs", "docs_revoked")])
@@ -334,7 +334,6 @@ async def test_logout_native_and_partner_revocation_after_wait_still_allows_clea
                 elif change == "docs_revoked":
                     (await owner.get(DocsPortalSession, identity.digest(data.raw))).revoked = True
                 elif change == "native_tv": (await owner.get(User, data.uid)).token_version += 1
-                elif change == "member": await owner.delete(await owner.get(UserCompany, (data.uid, data.cid)))
                 elif change == "role":
                     (await owner.get(CompanyRole, role_id)).modules = []
                 elif change == "grant": (await owner.get(PartnerGrant, data.gid)).approved = False
@@ -352,6 +351,103 @@ async def test_logout_native_and_partner_revocation_after_wait_still_allows_clea
         closed_wire(response)
     assert (await state(data))[:2] == (True, True)
     with pytest.raises(HTTPException): await verify(data.access)
+
+
+async def test_logout_member_disappearance_after_discovery_requires_whole_retry(env, monkeypatch):
+    """DPL-S1-R01: topology drift refuses this root; stable absence permits cleanup."""
+    data = await browser(env)
+    headers, before = proof(data.raw), await state(data)
+    attempts, targets = [], {}
+    original_close, original_acquire = portal.close_session, identity.acquire_scoped_locks
+    original_revoke = identity.RevokeEndpoint.revoke_token
+
+    def close(sync, raw):
+        attempt = {"sync": sync, "sql": [], "flushes": [], "caps": [], "callbacks": []}
+        attempts.append(attempt)
+        targets[sync] = attempt
+        return original_close(sync, raw)
+
+    def began(sync, transaction, connection):
+        if sync in targets:
+            targets[sync].update(root=transaction, connection=connection)
+
+    def statement(conn, cursor, sql, parameters, context, executemany):
+        for attempt in attempts:
+            if conn is attempt.get("connection"):
+                attempt["sql"].append(sql)
+
+    def flushing(sync, context, instances):
+        if sync in targets:
+            targets[sync]["flushes"].append(sync.get_transaction())
+
+    def acquire(sync, plan):
+        cap = original_acquire(sync, plan)
+        locks.require_scoped_locks(sync, cap, plan.requests)
+        if sync in targets:
+            targets[sync]["caps"].append(cap)
+        return cap
+
+    def revoke(endpoint, token, request):
+        if endpoint.server.db in targets:
+            targets[endpoint.server.db]["callbacks"].append(endpoint.server.writer)
+        return original_revoke(endpoint, token, request)
+
+    monkeypatch.setattr(portal, "close_session", close)
+    monkeypatch.setattr(identity, "acquire_scoped_locks", acquire)
+    monkeypatch.setattr(identity.RevokeEndpoint, "revoke_token", revoke)
+    event.listen(Session, "after_begin", began)
+    event.listen(Session, "before_flush", flushing)
+    event.listen(_test_engine.sync_engine, "before_cursor_execute", statement)
+    try:
+        async with _test_session_factory() as owner, _test_session_factory() as observer:
+            await row_owner(owner, data, "typed")
+            owner_pid = await pid(owner)
+            async with contender(lambda: env["client"].delete(URL, headers=headers)) as (task, info):
+                try:
+                    await observed_wait(observer, task, info["pid"], owner_pid, locks.ClientKey(data.client_id))
+                    member = await owner.get(UserCompany, (data.uid, data.cid))
+                    assert member is not None
+                    await owner.delete(member)
+                    await owner.commit()
+                    response = await task
+                finally:
+                    await owner.rollback()
+        assert response.status_code == 409
+        assert response.json() == {"detail": "Partner authority changed; retry the whole request"}
+        assert "set-cookie" not in response.headers
+        private(response)
+        assert len(attempts) == 1
+        refused = attempts[0]
+        assert len(refused["caps"]) == 1 and not refused["callbacks"] and not refused["flushes"]
+        assert any("user_companies" in sql and "FOR SHARE" in sql for sql in refused["sql"])
+        assert not any(sql.lstrip().upper().startswith(("UPDATE", "INSERT", "DELETE")) for sql in refused["sql"])
+        assert before[:2] == (False, False) and await state(data) == before
+        async with _test_session_factory() as fresh:
+            assert await fresh.get(UserCompany, (data.uid, data.cid)) is None
+
+        # A new whole HTTP request, using the saved raw cookie/proof. The first
+        # root is never resumed; original discovery now freezes missing Member.
+        closed_wire(await env["client"].delete(URL, headers=headers))
+        assert len(attempts) == 2
+        cleaned = attempts[1]
+        assert cleaned["root"] is not refused["root"]
+        assert len(cleaned["caps"]) == 1 and cleaned["caps"][0] is not refused["caps"][0]
+        assert len(cleaned["callbacks"]) == 1 and len(cleaned["flushes"]) == 2
+        writer, = cleaned["callbacks"]
+        assert writer.db is cleaned["sync"] and writer.capability is cleaned["caps"][0]
+        members = [spec for spec in writer.rows if spec.model is UserCompany and spec.identity == (data.uid, data.cid)]
+        assert len(members) == 1 and members[0].missing
+        assert all(root is cleaned["root"] for root in cleaned["flushes"])
+        writes = [sql for sql in cleaned["sql"] if sql.lstrip().upper().startswith(("UPDATE", "INSERT", "DELETE"))]
+        assert len(writes) == 2 and "partner_token_families" in writes[0] and "partner_docs_sessions" in writes[1]
+        after = await state(data)
+        assert after[:2] == (True, True) and after[2:] == before[2:]
+        async with _test_session_factory() as fresh:
+            assert await fresh.get(UserCompany, (data.uid, data.cid)) is None
+    finally:
+        event.remove(_test_engine.sync_engine, "before_cursor_execute", statement)
+        event.remove(Session, "before_flush", flushing)
+        event.remove(Session, "after_begin", began)
 
 
 @pytest.mark.parametrize("pending", ["new", "dirty", "deleted"])
