@@ -1,16 +1,84 @@
 # M12: wire types внешнего product API
 
-Текущий кандидат M06-R3 содержит **15 GET: 11 user/service и четыре user-only**.
-Единая [таблица путей, operationId, scopes и профилей](PARTNER_QUICKSTART.md#текущий-контракт--31102026)
-находится в quickstart. В неё входят metadata типа договора и обе связи договора
-с объектами и документами. История 12/13/14 операций сохранена в конце этого файла.
+## Текущий Source-контракт · 01.11.2026
+
+На исходниках `f196f8aa8113090540ca19bfc07a2dfb55a8b3d2` manifest содержит
+**17 операций: 16 GET и один POST на 16 путях**. Единая
+[таблица method, public path, operationId, scopes и principal profiles](PARTNER_QUICKSTART.md#current-source-contract-20261101)
+находится в quickstart. Прежние 11 read GET допускают user/service, четыре
+документных GET — только delegated user consent. GET `/contracts/create-options`
+и POST `/contracts` требуют `contracts:create` и текущего CREATE-профиля
+пользователя либо approved machine grant; `contracts:read` их не разрешает
+и для них не требуется. Resource grants проверяются отдельно от OAuth scopes.
+Source declarations и SDK manifest сверены статически; генерация, freshness,
+typecheck, тесты и runtime для этой редакции документа не выполнялись.
 
 `src/generated/partner-api.d.ts` содержит wire types `paths`, `components`,
 `operations`. Это определения HTTP-контракта; transport, хранение/refresh токенов,
 авторизация пользователя и повторы запросов реализуются клиентом отдельно.
-Текущие проверки source и SDK15 описаны в
-[отчёте M06-R3](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
-Свежесть полной опубликованной схемы и финального состава проверяется отдельно.
+Принятый [канонический отчёт 405/SDK](api/PARTNER_OPENAPI_405_SDK_ROOT_VERIFICATION_20261101.md)
+([точные pins и ограничения](api/PARTNER_OPENAPI_405_SDK_ROOT_VERIFICATION_20261101.json))
+фиксирует отдельный компонент: формальные 405 всех 17 операций и wire types
+на `f196f8aa`, сохранённые generate/freshness, шесть generator tests и компиляцию
+шести consumers. Отдельные schema/HTTP-проверки на `13790dc6` — 27 основных и
+177 подпроверок, DPL — 14 проверок/42 фазы. Рецензент сверил Source и сохранённый
+вывод без повторного исполнения; отдельного argv-receipt TSC в SDK bundle нет.
+READ positive fixtures используют fake verifier/domain/ACL, новые 405/404 —
+падающие verifier/session guards; реальных SQL/PG/OAuth, positive POST или
+передачи данных сетевым SDK они не подтверждают. Whole M09, final CI,
+публикация схемы, ingress и production не приняты этим отчётом.
+Readiness остаётся `candidate`; документация не включает feature gates
+и не проверяет состояние пространства.
+
+`getContractCreateOptions` описывает advisory choices для `organization`,
+`counterparty`, `location`, `type`: обязательный resource, `items[].value`,
+`selectionVersion`, обязательный nullable `nextCursor`; request cursor optional
+nullable. Полный профиль и данные читаются в одном read-only snapshot t0,
+cursor связан с профилем/токеном/страницей. Это не receipt, резервирование или
+admission. `createContract` заново проверяет текущие CREATE authority/profile
+и ссылки: 201 возвращает `{contractId, replayed: false}`, 200 при авторизованном
+replay — тот же ID и `replayed: true`. После неизвестного исхода commit нужны
+новый запрос, исходные тело/creationKey и текущая авторизация исходного
+grant/actor; тип результата не даёт READ. Точные body/status/cursor semantics
+и канонические HTTP/options отчёты — в quickstart по ссылке выше.
+
+### Шесть конкретных consumers
+
+Все файлы ниже перечислены в [tsconfig](../tools/partner-api-types/tsconfig.json).
+Таблица описывает назначение их исходников; успешная компиляция на текущем pin
+здесь не утверждается.
+
+| Файл | Что проверяет исходник примера |
+|---|---|
+| [consumer.ts](../tools/partner-api-types/consumer.ts) | Object/страницы/Problem; required nullable поля, numeric pageSize, запрет tenant override и POST `/objects`, binary download без JSON |
+| [contract-objects-consumer.ts](../tools/partner-api-types/contract-objects-consumer.ts) | Явная связь договора с объектами, path/query/page; обязательные contractId/nextCursor, запрет tenant override, body и POST связи |
+| [contract-documents-consumer.ts](../tools/partner-api-types/contract-documents-consumer.ts) | Связь с документами без file bytes; обязательные contractId/nextCursor, запрет tenant override, body и POST связи |
+| [contract-classification-consumer.ts](../tools/partner-api-types/contract-classification-consumer.ts) | Required nullable typeCode/validUntil, source strings и scoped metadata; required code, запрет enumeration/search/cursor, tenant override, body и classifier write |
+| [contract-create-consumer.ts](../tools/partner-api-types/contract-create-consumer.ts) | CREATE body с creationKey и required nullable validUntil, discriminator coverage; 201/200 result и 403 Problem, запрет tenant override и утечки читаемой карточки |
+| [contract-create-options-consumer.ts](../tools/partner-api-types/contract-create-options-consumer.ts) | Четыре resource, required resource/nextCursor, value/selectionVersion, 429 headers; запрет internal ID/body/POST и точные required 405 Allow для GET и коллекции GET/POST |
+
+### 405, заголовки и границы профиля
+
+Source [HTTP metadata](../server/app/product_api/app.py) объявляет typed **405
+Problem** (`application/problem+json`, `method_not_allowed`) и обязательный
+`Allow`: **`GET`** для известных путей, включая `/contracts/create-options`,
+**`GET, POST`** для `/contracts` у обеих операций `listContracts` и
+`createContract`. Шестой consumer содержит отрицательные проверки отсутствующего
+Allow, неверного набора методов и lowercase `get`. Правильный Allow описывает
+путь; он не выдаёт авторизацию на перечисленные методы.
+
+Application responses содержат `Cache-Control: no-store` и `X-Request-Id`
+(равен `requestId` в Problem); 401/403 — Bearer `WWW-Authenticate`.
+Quota 429 `rate_limited` несёт `Retry-After`; generic injected 429 использует
+`internal_error`, а Retry-After у generic 429/503 присутствует только когда задан.
+Binary 200 download имеет `Content-Disposition` и `X-Content-Type-Options:
+nosniff`. Это профиль product child application до начала streaming: ошибки
+ingress/proxy и ошибки после отправки заголовков находятся за его границей.
+Типы и корректные headers не доказывают текущие grants/permissions, доступ
+к файлу или авторизацию; TS не валидирует входной JSON и cursor integrity/TTL.
+
+Описания архитектуры и команды ниже сохранены как документация. Исторические
+результаты M12/M06-R3 относятся к своим pins, а не к текущим 17 операциям.
 
 ## Источник и offline граница
 
@@ -30,7 +98,8 @@ Environment очищается, процесс работает в пустой 
 Sessions/verifier передаются как функции, которые выбрасывают ошибку при вызове.
 Startup/lifespan, SQL/DDL, HTTP и скачивание remote schema не выполняются.
 
-Adapter дополнительно проверен **semantic parity**: отдельный hermetic процесс
+Историческая проверка M12 на базе `e94427bf` включала **semantic parity**:
+отдельный hermetic процесс
 с `--runtime-database` импортирует штатный `app.database` с явно synthetic URL
 на недоступный loopback port, synthetic config и пустым cwd. Engine создаётся
 обычным кодом, но `do_connect` и sockets запрещены; startup/create_all/main не
@@ -107,7 +176,7 @@ schema обнаруживается даже тогда, когда TS primitive
 именно сгенерированные типы, без второго HTTP transport в Core:
 
 ```ts
-import type { components, operations } from "./partner-api";
+import type { components, operations } from "../../src/generated/partner-api";
 
 type ObjectWire = components["schemas"]["Object"];
 type ObjectPage = operations["listObjects"]["responses"][200]["content"]["application/json"];
@@ -118,7 +187,7 @@ const label = (point: ObjectWire) => point.name;
 ```
 
 Compile fixture также проверяет required nullable fields, numeric pageSize,
-отсутствие companyId override, write operation и JSON у binary download через
+отсутствие companyId override, POST `/objects` и JSON у binary download через
 `@ts-expect-error`; ослабление этих контрактов ломает compile.
 Error responses типизируются через `application/problem+json`/Problem.
 Download 200 имеет только `application/octet-stream`; default generator
@@ -163,7 +232,7 @@ token store и refresh logic не добавляются в Core этим slice.
 по штатному OAuth flow; ID token не является API credential. Base URL внешнего
 клиента — реальный issuer `/api/v1`, не synthetic `.invalid` из offline export.
 
-## Результат и границы
+## Исторические результаты M12 и границы
 
 На исходниках базы e94427bf: generation twice byte-equal, drift negative control,
 export failure без overwrite, malformed type/ref/parameter failures, offline
@@ -183,7 +252,19 @@ root обязан заново выполнить generation/check/consumer/test
 runtime API, credentials и persisted grants при этом не меняются.
 
 
-## История контрактных срезов · 30.10.2026
+## История контрактных срезов
+
+Более поздний исторический [отчёт SDK17 от 01.11.2026](api/PARTNER_SDK17_ROOT_VERIFICATION_20261101.md)
+фиксирует exact3 на `6f3f2f87`: Source и сохранённые official generate/check.
+Шесть generator tests и TSC шести consumers там — наблюдения Root без отдельного
+полного RAW и без независимого повторного исполнения. Он предшествует 405/Allow
+и не заменяет отдельный канонический отчёт 405/SDK выше.
+
+M06-R3 от 31.10.2026 содержал **15 GET: 11 user/service и четыре user-only**.
+Принятые source/new103/regression84 с 152 subtests, SDK15 generation/freshness,
+6 generator checks и 4 consumers относятся к тому срезу;
+[канон M06-R3](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
+Эти результаты не перенесены на текущие 17 операций или шесть consumers.
 
 NEXT-R2 от30.10.2026 добавил `GET /api/v1/contracts/{contractId}/documents`
 (`listContractDocuments`): явные subject/graph связи с независимо доступными

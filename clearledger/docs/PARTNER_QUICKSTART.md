@@ -1,56 +1,124 @@
 # Подключение внешнего приложения: кандидат API
 
 [Руководство партнёра](partner/onboarding.md): регистрация приложения, авторизация,
-описание данных и рецепты для всех 15 операций чтения.
+описание данных и рецепты исторического среза 15 операций чтения от 31.10.2026.
+Текущий состав, включая создание договора, приведён ниже; прежнее руководство
+не подтверждает приёмку новых операций.
 
-M06-R3 добавляет required nullable `typeCode` и `validUntil` в Contract list/detail.
-Оба source-valued: код не является глобальным enum, срок хранится строкой до 20
-символов без гарантии ISO date; null не означает бессрочность. В `/contracts`
-поддерживается точный фильтр `typeCode` (1..256, без NUL, без trim/case folding).
-Для кода из доступного договора можно прочитать подпись через
-`GET /api/v1/contract-types?typeCode=...` (`getContractTypeMetadata`): нужны
-`contracts:read`, typed contract grant и все текущие user/service ограничения.
-Скрытый/неиспользуемый в доступных договорах код даёт 404; видимый unknown code
-даёт 200 с nullable metadata, inactive сохраняет историческую подпись. Всего 15 GET
-(11 user/service + 4 user-only). ROOT принял отдельные new103 и regression84/152
-subtests, SDK15 generation/freshness, 6 generator checks и 4 consumers;
-[границы и остаток M06](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
+<a id="current-source-contract-20261101"></a>
 
+## Текущий Source-контракт · 01.11.2026
 
-## Текущий контракт · 31.10.2026
+На исходниках `f196f8aa8113090540ca19bfc07a2dfb55a8b3d2` объявлены **17 операций:
+16 GET и один POST на 16 путях**. Прежние 11 GET допускают user/service, четыре
+документных GET требуют delegated user consent; GET вариантов создания и POST
+создания допускают user/approved service с отдельным текущим CREATE-профилем.
+В таблице «пользователь» означает principal `partner` / `ProductOAuth`,
+«сервис» — `service` / `ProductServiceOAuth`, а не обычный Core bearer.
+Независимые resource grants и текущие ограничения проверяются отдельно от scopes;
+scope сам по себе не даёт права на ресурс, запись или файл.
 
-15 GET: 11 доступны пользовательскому и сервисному приложению, четыре требуют
-пользовательского согласия. Для каждого ресурса нужны независимые grants; scopes
-сами по себе не дают доступа к записи или файлу. Флаги публикации остаются выключены.
+| Метод | Публичный путь | operationId | Обязательные scopes | Профиль |
+|---|---|---|---|---|
+| GET | `/api/v1/objects` | `listObjects` | `objects:read` | Пользователь / сервис |
+| GET | `/api/v1/objects/{objectId}` | `getObject` | `objects:read` | Пользователь / сервис |
+| GET | `/api/v1/objects/{objectId}/monitoring` | `getObjectMonitoring` | `monitoring:read` + `objects:read` | Пользователь / сервис |
+| GET | `/api/v1/equipment` | `listEquipment` | `equipment:read` | Пользователь / сервис |
+| GET | `/api/v1/equipment/{equipmentId}` | `getEquipment` | `equipment:read` | Пользователь / сервис |
+| GET | `/api/v1/counterparties` | `listCounterparties` | `counterparties:read` | Пользователь / сервис |
+| GET | `/api/v1/counterparties/{counterpartyId}` | `getCounterparty` | `counterparties:read` | Пользователь / сервис |
+| GET | `/api/v1/contracts` | `listContracts` | `contracts:read` | Пользователь / сервис |
+| GET | `/api/v1/contract-types` | `getContractTypeMetadata` | `contracts:read` | Пользователь / сервис |
+| GET | `/api/v1/contracts/{contractId}` | `getContract` | `contracts:read` | Пользователь / сервис |
+| GET | `/api/v1/contracts/{contractId}/objects` | `listContractObjects` | `contracts:read` + `objects:read` | Пользователь / сервис |
+| GET | `/api/v1/contracts/{contractId}/documents` | `listContractDocuments` | `contracts:read` + `documents:read` | Пользователь (delegated consent) |
+| GET | `/api/v1/documents` | `listDocuments` | `documents:read` | Пользователь (delegated consent) |
+| GET | `/api/v1/documents/{docId}` | `getDocument` | `documents:read` | Пользователь (delegated consent) |
+| GET | `/api/v1/documents/{docId}/versions/{versionId}/content` | `downloadDocumentVersion` | `documents.files:download` + `documents:read` | Пользователь (delegated consent) |
+| GET | `/api/v1/contracts/create-options` | `getContractCreateOptions` | `contracts:create` | Пользователь / сервис + текущий CREATE-профиль |
+| POST | `/api/v1/contracts` | `createContract` | `contracts:create` | Пользователь / сервис + текущий CREATE-профиль |
 
-| Путь GET | operationId | Обязательные scopes | Профиль |
-|---|---|---|---|
-| `/api/v1/objects` | `listObjects` | `objects:read` | Пользователь / сервис |
-| `/api/v1/objects/{objectId}` | `getObject` | `objects:read` | Пользователь / сервис |
-| `/api/v1/objects/{objectId}/monitoring` | `getObjectMonitoring` | `monitoring:read` + `objects:read` | Пользователь / сервис |
-| `/api/v1/equipment` | `listEquipment` | `equipment:read` | Пользователь / сервис |
-| `/api/v1/equipment/{equipmentId}` | `getEquipment` | `equipment:read` | Пользователь / сервис |
-| `/api/v1/counterparties` | `listCounterparties` | `counterparties:read` | Пользователь / сервис |
-| `/api/v1/counterparties/{counterpartyId}` | `getCounterparty` | `counterparties:read` | Пользователь / сервис |
-| `/api/v1/contracts` | `listContracts` | `contracts:read` | Пользователь / сервис |
-| `/api/v1/contract-types` | `getContractTypeMetadata` | `contracts:read` | Пользователь / сервис |
-| `/api/v1/contracts/{contractId}` | `getContract` | `contracts:read` | Пользователь / сервис |
-| `/api/v1/contracts/{contractId}/objects` | `listContractObjects` | `contracts:read` + `objects:read` | Пользователь / сервис |
-| `/api/v1/contracts/{contractId}/documents` | `listContractDocuments` | `contracts:read` + `documents:read` | Пользователь |
-| `/api/v1/documents` | `listDocuments` | `documents:read` | Пользователь |
-| `/api/v1/documents/{docId}` | `getDocument` | `documents:read` | Пользователь |
-| `/api/v1/documents/{docId}/versions/{versionId}/content` | `downloadDocumentVersion` | `documents.files:download` + `documents:read` | Пользователь |
+Основание таблицы — [регистрации и RoutePolicy](../server/app/product_api/app.py),
+[проверки scopes/principal](../server/app/product_api/access.py) и
+[CREATE authority](../server/app/services/partner_contract_authority.py).
+Регистрации имеют readiness `candidate`; наличие их в Source не включает
+OAuth/API/docs feature gates и не подтверждает публикацию или состояние живого
+пространства. Для этой редакции выполнена только статическая сверка документации,
+без generation, typecheck, тестов или runtime-приёмки.
+Назначение [шести typed consumers и 405/Allow](PARTNER_SDK_TYPES.md#шесть-конкретных-consumers)
+описано в SDK-документе.
 
 Серверная и браузерная схемы описывают эти же операции. Отличается профиль
 авторизации: confidential client_credentials описан только в серверной схеме;
 Swagger в браузере использует пользовательский Code+PKCE. Фактически опубликованные
 файлы и свежесть полного состава проверяются отдельно при подготовке внешнего доступа.
 
-Срез 30.10.2026: код подготовлен в интеграционной ветке, рабочее РусГидро этим
-документом не обновляется. OAuth, API и документация по умолчанию выключены.
+Историческая заметка 30.10.2026: код подготовлен в интеграционной ветке;
+OAuth, API и документация по умолчанию выключены в том срезе исходников.
+Текущее состояние рабочего пространства здесь не проверялось.
 Адреса `*.example.invalid` и идентификаторы ниже вымышлены. Перед пилотом владелец
 пространства выдаёт адрес отдельной песочницы, учётную запись, client ID и явные
 разрешения установки. Прямой доступ к БД не нужен.
+
+### Варианты и создание договора
+
+`contracts:create` требует действующего CREATE-профиля установки: разрешённого
+пользователя либо явно утверждённого machine grant confidential client и
+соответствующего user/service разрешения профиля. `contracts:read` не требуется
+для CREATE/options и не заменяет CREATE authority. Разрешённые organization,
+counterparty, location и активный typeCode пересекаются с текущими ресурсными
+и пользовательскими ограничениями.
+
+`GET /api/v1/contracts/create-options?resource=type&pageSize=50` возвращает
+допустимые варианты для одного из обязательных `resource`: `organization`,
+`counterparty`, `location`, `type`. Query: `pageSize` 1..100 (default 50),
+необязательный nullable `cursor` длиной 1..2048; неизвестные поля запрещены.
+Ответ: `resource`, `items[].value` (точные строки без labels/internal IDs),
+`selectionVersion` и обязательный nullable `nextCursor`. UUID канонические,
+opaque location/type values сохраняются без нормализации. Пустой допустимый
+набор — 200. Cursor непрозрачен, связан со всем текущим профилем, токеном,
+resource и размером страницы; TTL не более 300 секунд. После актуальной
+авторизации изменённый/просроченный cursor даёт 400 `invalid_cursor`;
+для нового обхода его нужно опустить.
+
+Вся проверка профиля и выборки GET используют один read-only REPEATABLE READ
+snapshot t0 после отдельного preflight и проверки квоты. Отзыв до t0 учитывается,
+отзыв после t0 может не попасть в ответ; перед DTO повторяется canonical verifier
+с проверкой expiry/process gates, но DB-чтение остаётся на t0. Timeout или
+переполнение closure даёт общий 503 без частичного ответа. Это advisory choices:
+`selectionVersion` не является receipt, резервированием или write admission.
+POST заново проверяет текущую authority, профиль и ссылки, включая replay.
+
+`POST /api/v1/contracts` принимает строгий JSON `ContractCreateBody`, максимум
+16384 фактических байта потока. Обязательны `kind: "contract-card"`, UUID
+`creationKey`, `number`, календарная `date` (`YYYY-MM-DD`), `type`, точный
+`typeCode`, UUID `organizationId`/`counterpartyId`, `coverage` с
+`kind: "locations"` и 1..100 уникальными `locationIds`, nullable `validUntil`;
+`comment` необязателен и nullable. Лимиты полей — в
+[каноническом body](../server/app/product_api/contract_create_body.py).
+Пример нового результата — **201**
+`{"contractId":"00000000-0000-4000-8000-000000000004","replayed":false}`;
+авторизованный повтор сохранённого намерения — **200**
+`{"contractId":"00000000-0000-4000-8000-000000000004","replayed":true}`. Результат не выдаёт READ
+и не обещает `Location`. После потери ответа сохранить исходные тело и
+`creationKey`, повторить новым запросом с текущей авторизацией исходного
+grant/actor/profile и ссылок. Тот же ключ с другим содержимым либо конфликт
+идентичности даёт общий 409 после полной текущей CREATE-авторизации;
+отзыв прав запрещает и replay. Карточка, связи, intent и аудит атомарны.
+
+Принятые tracked отчёты фиксируют отдельные прошлые составы и пределы:
+[HTTP CREATE](api/CONTRACT_CREATE_HTTP_ROOT_VERIFICATION_20261101.md) — HTTP70
+на своём pin, [CREATE-options](api/PARTNER_CREATE_OPTIONS_ROOT_VERIFICATION_20261101.md)
+— targeted PG75 и прежний offline109. Они не являются приёмкой всего
+текущего API/SDK, ingress или production.
+Отдельно принят [компонент 405/SDK](api/PARTNER_OPENAPI_405_SDK_ROOT_VERIFICATION_20261101.md)
+([pins и ограничения](api/PARTNER_OPENAPI_405_SDK_ROOT_VERIFICATION_20261101.json)):
+формальные 405 и согласованные wire types, сохранённые generation/check,
+6 generator tests и компиляция 6 consumers; targeted HTTP/schema 27/177 и
+отдельный DPL14/42. Это Source и записанные результаты на указанных в отчёте
+pins, без нового исполнения автором этой документации. READ fixtures используют
+fake verifier/domain/ACL, новые 405/404 — падающие verifier/session guards;
+SQL/PG/OAuth, positive POST, весь M09, final CI и ingress этим не принимаются.
 
 ## Что получает разработчик
 
@@ -153,7 +221,7 @@ ID компании передавать в query для расширения д
 
 | Приложение | Начальные действия | Ограничение текущего среза |
 |---|---|---|
-| Договоры аренды и энергоснабжения | GET `/counterparties`, `/contracts`, карточки по ID; user GET `/documents` и разрешённые версии | Запись и изменение договоров внешним API ещё не реализованы |
+| Договоры аренды и энергоснабжения | GET `/counterparties`, `/contracts`, карточки по ID; user GET `/documents` и разрешённые версии | Создание — отдельный candidate POST с CREATE-профилем и `contracts:create`; PATCH не объявлен |
 | Эксплуатация станций | GET `/objects`, `/equipment`, `/objects/{objectId}/monitoring?days=90` | Мониторинг требует оба `objects:read monitoring:read`, typed object grant и актуальные права; заявки и финансы не входят |
 | Документы | User GET `/documents`, `/documents/{docId}`; `versions` содержит разрешённые версии, `versionsTruncated` отмечает ограничение | Для содержимого дополнительно нужен `documents.files:download`; машинное чтение закрыто |
 
@@ -179,6 +247,7 @@ Product API возвращает Problem Details (`application/problem+json`) с
 | 401 | Токен непригоден либо доступ отозван; обновить по разрешённому flow или начать вход заново |
 | 403 | Нет нужного scope/ресурсного профиля; повтор тем же токеном права не добавляет |
 | 404 | Объект отсутствует либо недоступен; не отличать по этому ответу чужие записи |
+| 405 | Проверить метод; обязательный Allow равен `GET, POST` на `/api/v1/contracts`, `GET` на остальных известных путях |
 | 422 | Исправить параметры по схеме; неизвестные поля не игнорируются |
 | 429 | Соблюсти Retry-After, ограничить собственную частоту запросов |
 | 503 | API/конфигурация недоступны; ограниченный retry с backoff, без обхода на legacy endpoint |
@@ -193,13 +262,27 @@ docs session: `/api/developer/docs/openapi.server.json`. В нём отдель�
 пользовательский Code+PKCE и confidential client_credentials с обязательным
 прикладным `grant_id`. Файл `/api/developer/docs/openapi.json` служит Swagger
 в браузере и предлагает только пользовательский Code+PKCE; секрет серверного
-приложения в браузер не вводится. Оба текущих представления относятся к одним 15
+приложения в браузер не вводится. Оба Source-представления относятся к одним 17
 операциям и тем же политикам доступа.
 
 
 ## История контрактных срезов
 
-Срезы ниже сохранены для истории. Их counts и результаты не заменяют текущую таблицу15.
+Срезы ниже сохранены для истории. Их counts и результаты не заменяют текущую
+таблицу 17 операций и не подтверждают свежесть SDK для нынешней редакции.
+
+M06-R3 от 31.10.2026 добавил required nullable `typeCode` и `validUntil` в Contract
+list/detail. Оба source-valued: код не является глобальным enum, срок хранится
+строкой до 20 символов без гарантии ISO date; null не означает бессрочность.
+В `/contracts` поддерживается точный фильтр `typeCode` (1..256, без NUL, без
+trim/case folding). Для кода из доступного договора можно прочитать подпись через
+`GET /api/v1/contract-types?typeCode=...` (`getContractTypeMetadata`): нужны
+`contracts:read`, typed contract grant и текущие user/service ограничения.
+Скрытый/неиспользуемый в доступных договорах код даёт 404; видимый unknown code
+даёт 200 с nullable metadata, inactive сохраняет историческую подпись.
+На том срезе было 15 GET (11 user/service + 4 user-only). ROOT принял отдельные
+new103 и regression84/152 subtests, SDK15 generation/freshness, 6 generator checks
+и 4 consumers; [границы и остаток M06](api/CONTRACT_CLASSIFICATION_READ_20261031.md).
 
 NEXT-R2 от30.10.2026 добавил `GET /api/v1/contracts/{contractId}/documents`
 (`listContractDocuments`): явные subject/graph связи с независимо доступными
