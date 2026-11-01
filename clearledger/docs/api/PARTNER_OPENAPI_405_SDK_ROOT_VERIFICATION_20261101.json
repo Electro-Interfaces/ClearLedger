@@ -1,0 +1,155 @@
+{
+  "status": "ACCEPTED_TARGETED_OPENAPI_405_AND_SDK_SOURCE_RECORDED_EVIDENCE",
+  "metadataSource": "11ea93093e51d52a1ef0f86c636939c2e2060da3",
+  "sdkSource": "f196f8aa8113090540ca19bfc07a2dfb55a8b3d2",
+  "runtimeTestSource": "13790dc626376fd2324aa23c80eeb1df9da2dd62",
+  "repairSource": "3cb1ede3f4c4f2125ae64902400f86ff2361d802",
+  "schemaSHA256": "61227d1bb7d3c4ab39ddef9a4b9cbc837a8a5f856a6cfed663697fe17518c5df",
+  "generatedSHA256": "0465817b576e3d81562cafe08034765bbec4d701abd5ae7bf7a68271df4da0fb",
+  "consumerSHA256": "9c1d4ee8b843831a235e2fac0663345fee0f01a47da2ea72761590d6b69a1470",
+  "operations": 17,
+  "formal405Refs": 17,
+  "recordedRuns": {
+    "unittestPrimary": 27,
+    "unittestSubtests": 177,
+    "DPLCases": 14,
+    "DPLPhaseReports": 42,
+    "generatorTests": 6,
+    "typedConsumers": 6,
+    "createOptionsConsumerNegativeControls": 14,
+    "allPassed": true,
+    "sourceSnapshotFiles": 575,
+    "SDKParentSourceManifestFiles": 539,
+    "SDKDependenciesFiles": 2014,
+    "runtimeTestSeconds": 21.477682750672102,
+    "runtimeHostSeconds": 22.611177965067327,
+    "blockedDependencyProbesStillDenied": 1,
+    "unexpectedDenied": 0
+  },
+  "independentReview": {
+    "SDKVerdict": "PASS_SOURCE_RAW",
+    "M09Verdict": "PASS_M09_TARGETED_COMPONENT_RAW",
+    "reportSHA256": {
+      "REVIEW.md": "a5768386556300e21fd57caf6f239dcc1ef6373dde6ce261d7f1a7be63918380",
+      "REVIEW.json": "9fd735339e5c5ee7aad01d153a013b256ebdf31c36d677a83aed1f94298ac9c2",
+      "M09_REVIEW.md": "cd2a4029e0339adbab8fda75a99d13258af0c34c90e2406ebc44e6e4532c3e88",
+      "M09_REVIEW.json": "9c28cf2d98c479d6f35cc54aea39bba90855a5131293a0f59ca6d1ff081d6b9c"
+    },
+    "rawArtifactPinsReverified": 23,
+    "independentRerun": false
+  },
+  "rawPins": {
+    "sdk": {
+      "check.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "check.stdout": {
+        "bytes": 52,
+        "sha256": "8417e090289f47d72c1815a6eb5bad928620c5432b6951d3fae7f124d1536ce6"
+      },
+      "export.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "export.stdout": {
+        "bytes": 319382,
+        "sha256": "61227d1bb7d3c4ab39ddef9a4b9cbc837a8a5f856a6cfed663697fe17518c5df"
+      },
+      "generate-check-six-export-result.json": {
+        "bytes": 1482,
+        "sha256": "c0f72f0e7a19f5b17dbcd09008a5ca86b1fb58a50efb48891d578f594841a611"
+      },
+      "generate.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "generate.stdout": {
+        "bytes": 122,
+        "sha256": "30956b518588bb3dd63cdd12d3f574f45b9573a97cbd0b69df07db47fd5e4e77"
+      },
+      "generation-six.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "generation-six.stdout": {
+        "bytes": 1662,
+        "sha256": "a901675190dd4f674b8aa040454f3e8541a8466b8c0dedcc63af77c1c37c2257"
+      },
+      "node-modules-manifest.json": {
+        "bytes": 244566,
+        "sha256": "750ddb30ab8e916bf4c9308bedb65514f19ed407629158e9d74ba6a9eb9c1075"
+      },
+      "partner-api17.d.ts": {
+        "bytes": 222216,
+        "sha256": "0465817b576e3d81562cafe08034765bbec4d701abd5ae7bf7a68271df4da0fb"
+      },
+      "source-manifest.json": {
+        "bytes": 66520,
+        "sha256": "2047f8898d42c4077240b9c13735807f2ed39077368f22040dd24d431a3451d9"
+      },
+      "tsc-six-result.json": {
+        "bytes": 451,
+        "sha256": "efc330e6f7bcf578dad4e5446529dce48528b94e0625f241a6a3e6639f422d08"
+      },
+      "tsc-six.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "tsc-six.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "schemaAndASGI": {
+      "runner.py": {
+        "bytes": 5800,
+        "sha256": "c216fad6d0a3f6f1b4172a435c2fe3070504d6e5154eb6ea9fdca1b08417ab05"
+      },
+      "source-manifest.json": {
+        "bytes": 60642,
+        "sha256": "e42178cce7d424653459e7cf8fcf02b8c89efcb141d359763d7b47fb9c51d86e"
+      },
+      "host-execution-start.json": {
+        "bytes": 816,
+        "sha256": "9e2d6fdfbea8ee98702a2d86179204ef034a430977091edc1a323f010e4dd4cb"
+      },
+      "host-execution-result.json": {
+        "bytes": 323,
+        "sha256": "280aeb1cd0b6c7038908a2c8f2a13d86d7eaf995094b42170be76fbd918342e6"
+      },
+      "host.stdout": {
+        "bytes": 214,
+        "sha256": "db96b5ca29c27735ecad9a8e078304aeb3a46860aef6b10fb7d81bbcfd8494dd"
+      },
+      "host.stderr": {
+        "bytes": 15229,
+        "sha256": "c4b5c126570c05c0652eb0a0ba23d5a96794961b96276d7ae7d5cf7370151e11"
+      },
+      "evidence/result.json": {
+        "bytes": 100786,
+        "sha256": "66c21029ef8bbe0e26e44af96e4a7b5ef67fd46eb987227317c01af2ae5d5b7f"
+      },
+      "evidence/unittest.stdout": {
+        "bytes": 5354,
+        "sha256": "9ae8ba2eec73f14b95ec441b313d63623a0d7d8ccb5cfa573f89b6501d2be628"
+      }
+    }
+  },
+  "limits": [
+    "Targeted metadata and in-process ASGI fixture checks; not whole M09 or final composition CI.",
+    "Inherited READ positive fixtures use fake verifier/domain/ACL; new 405/404 tests use failing verifier/session guards.",
+    "Root imported auth/config/database modules but did not execute real SQL/PG/OAuth in these fixtures; no app.main or conftest imports.",
+    "Known-path 405 cases send DELETE, not every unsupported HTTP method.",
+    "All generated types are compile-only, not a network SDK or runtime JSON/UUID/ACL validation.",
+    "Captured generate/check/six generator tests/export/tsc passed; reviewer verified Source and recorded evidence without rerunning.",
+    "SDK manifest is parent11ea: updated consumer is separately pinned; tsc argv is a Root tool observation, not a separate command receipt in the SDK bundle.",
+    "The one urllib3 IPv6 capability probe was denied before bind; 33 stderr lines are asyncio slow-task warnings.",
+    "Initial missing-plugin harness collected no tests; initial metadata run had25PASS/2FAIL. Both remain historical, not renamed or summed with this pass.",
+    "All20 programme sections and11 cross-cutting requirements remain unproven; no production flags/merge/deployment."
+  ],
+  "completionAsserted": false,
+  "fullCurrentCI": false,
+  "wholeM09Accepted": false,
+  "productionOrIngressAccepted": false
+}
