@@ -38,3 +38,24 @@ const internalId: Choices = { ...response, items: [{ value: "type", id: "private
 const requestBody: operations["getContractCreateOptions"]["requestBody"] = {};
 // @ts-expect-error операция выбора не объявляет POST
 const unsupportedPost: paths["/contracts/create-options"]["post"] = {};
+
+// Заголовок Allow у 405 зависит от пути, а не от вызывавшегося метода.
+export type ChoicesMethodHeaders = operations["getContractCreateOptions"]["responses"][405]["headers"];
+export type ContractsMethodHeaders = operations["createContract"]["responses"][405]["headers"];
+export type ContractsGetMethodHeaders = operations["listContracts"]["responses"][405]["headers"];
+export const choicesMethodHeaders: ChoicesMethodHeaders = {
+  Allow: "GET", "Cache-Control": "no-store", "X-Request-Id": "synthetic-request-id",
+};
+export const contractsMethodHeaders: ContractsMethodHeaders = {
+  Allow: "GET, POST", "Cache-Control": "no-store", "X-Request-Id": "synthetic-request-id",
+};
+export const contractsGetMethodHeaders: ContractsGetMethodHeaders = contractsMethodHeaders;
+// @ts-expect-error на пути выбора POST не разрешён
+const choicesPostAllowed: ChoicesMethodHeaders = { ...choicesMethodHeaders, Allow: "GET, POST" };
+// @ts-expect-error коллекция договоров объявляет оба метода в Allow
+const contractsGetOnly: ContractsMethodHeaders = { ...contractsMethodHeaders, Allow: "GET" };
+const { Allow: omittedAllow, ...withoutAllow } = choicesMethodHeaders;
+// @ts-expect-error заголовок Allow обязателен в ответе 405
+const missingAllow: ChoicesMethodHeaders = withoutAllow;
+// @ts-expect-error регистр значения Allow соответствует объявленным HTTP-методам
+const lowercaseAllow: ChoicesMethodHeaders = { ...choicesMethodHeaders, Allow: "get" };

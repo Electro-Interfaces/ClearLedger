@@ -3,7 +3,7 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: 89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853
+// openapi-typescript 7.10.1; curated schema sha256: 61227d1bb7d3c4ab39ddef9a4b9cbc837a8a5f856a6cfed663697fe17518c5df
 export interface paths {
     "/contract-types": {
         parameters: {
@@ -1443,6 +1443,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -1640,6 +1641,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductContractsMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -1797,6 +1799,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductContractsMethodNotAllowed"];
             /** @description Conflict */
             409: {
                 headers: {
@@ -2046,6 +2049,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -2237,6 +2241,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -2428,6 +2433,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -2616,6 +2622,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -2811,6 +2818,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -2997,6 +3005,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -3192,6 +3201,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -3378,6 +3388,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -3567,6 +3578,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -3762,6 +3774,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -3948,6 +3961,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -4143,6 +4157,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -4329,6 +4344,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -4520,6 +4536,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            405: components["responses"]["ProductMethodNotAllowed"];
             /** @description Unprocessable Content */
             422: {
                 headers: {
