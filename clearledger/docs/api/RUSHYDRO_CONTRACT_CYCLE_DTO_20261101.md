@@ -79,6 +79,12 @@ Parent profile **не добавлен в term wire**.
   только для vatPct/amountInclVat/signedAt/comment. Пустой PATCH, profile и
   organizationId отвергаются. Partial PATCH отдельно не доказывает final-state
   signed/date/validity/profile rules.
+  Узкий follow-up после `92ea2c42`: остальные девять полей имеют nonnullable
+  annotations и omission-only default factories; обе wire-схемы разрешают пропуск,
+  не обещая explicit null или default:null. Внутренний placeholder не является
+  wire-значением: PATCH сериализуется с `exclude_unset=True`. Сценарии 45/46
+  фиксируют optionality/nullability/default в обоих schema modes и отвергают null
+  для всех девяти полей; именованных сценариев по-прежнему ровно 50.
 - `validate_contract_term(term, finalCard=..., coverage=..., todayMSK=...)`:
   явные финальная карточка и coverage; проверяет profile/costItem/condition и точное
   вхождение контекста. Ни поиска Site→Location, ни ACL/owner inference.

@@ -334,10 +334,25 @@ def test_45_patch_presence_omitted_null_and_value():
     assert patch.changes.model_dump(mode="json", exclude_unset=True) == {"number": "NEW", "comment": None}
     merged = dto.merge_contract_card(card(comment="old", vatPct="20.00"), patch.changes, todayMSK=TODAY)
     assert merged.comment is None and merged.number == "NEW" and merged.vatPct == Decimal("20.00")
+    for mode in ("validation", "serialization"):
+        schema = dto.CardChangesV2.model_json_schema(mode=mode)
+        assert schema.get("required", []) == []
+        properties = schema["properties"]
+        assert set(properties) == {"number", "date", "counterpartyId", "basis", "kind", "currency", "paymentTermDays", "vatPct", "amountInclVat", "signed", "signedAt", "comment", "validity"}
+        for name in ("vatPct", "amountInclVat", "signedAt", "comment"):
+            assert {"type": "null"} in properties[name]["anyOf"]
 
 
 def test_46_patch_rejects_empty_immutable_null_and_extra():
-    reject(dto.CardChangesV2, [{}, {"profile": "Lease"}, {"organizationId": ORG}, {"number": None}, {"validity": None}, {"paymentTermDays": None}, {"legacy": True}])
+    reject(dto.CardChangesV2, [{}, {"profile": "Lease"}, {"organizationId": ORG}, {"number": None}, {"date": None}, {"counterpartyId": None}, {"basis": None}, {"kind": None}, {"currency": None}, {"paymentTermDays": None}, {"signed": None}, {"validity": None}, {"legacy": True}])
+    for mode in ("validation", "serialization"):
+        properties = dto.CardChangesV2.model_json_schema(mode=mode)["properties"]
+        for name in ("number", "date", "counterpartyId", "basis", "kind", "currency", "paymentTermDays", "signed", "validity"):
+            field_schema = properties[name]
+            assert "default" not in field_schema
+            assert "null" not in field_schema.get("type", [])
+            assert all(branch.get("type") != "null" for branch in field_schema.get("anyOf", []))
+            assert all(branch.get("type") != "null" for branch in field_schema.get("oneOf", []))
 
 
 def test_47_only_merged_card_proves_dependent_rules():

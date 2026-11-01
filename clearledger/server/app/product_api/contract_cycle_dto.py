@@ -303,24 +303,25 @@ TermV2 = Annotated[LeaseFixedTermV2 | PowerMeteredTermV2, Field(discriminator="c
 class CardChangesV2(ContractDTOv2):
     """Presence, including explicit null, is tracked in model_fields_set.
 
-    None defaults stand for omitted fields; only the four nullable business
-    fields may explicitly contain null. Profile and organizationId are absent
-    from this schema because they are immutable.
+    Factories supply internal omission placeholders for nonnullable fields,
+    without advertising a null default in either wire schema. Only the four
+    nullable business fields may explicitly contain null. Serialize patches
+    with exclude_unset=True. Profile and organizationId are immutable.
     """
 
-    number: NumberV2 | None = None
-    date: DateV2 | None = None
-    counterpartyId: UUIDV2 | None = None
-    basis: BasisV2 | None = None
-    kind: Literal["supplier"] | None = None
-    currency: Literal["RUB"] | None = None
-    paymentTermDays: PaymentDaysV2 | None = None
+    number: NumberV2 = Field(default_factory=lambda: None, validate_default=False)
+    date: DateV2 = Field(default_factory=lambda: None, validate_default=False)
+    counterpartyId: UUIDV2 = Field(default_factory=lambda: None, validate_default=False)
+    basis: BasisV2 = Field(default_factory=lambda: None, validate_default=False)
+    kind: Literal["supplier"] = Field(default_factory=lambda: None, validate_default=False)
+    currency: Literal["RUB"] = Field(default_factory=lambda: None, validate_default=False)
+    paymentTermDays: PaymentDaysV2 = Field(default_factory=lambda: None, validate_default=False)
     vatPct: RateV2 | None = None
     amountInclVat: bool | None = None
-    signed: bool | None = None
+    signed: bool = Field(default_factory=lambda: None, validate_default=False)
     signedAt: DateV2 | None = None
     comment: NoteV2 | None = None
-    validity: ValidityV2 | None = None
+    validity: ValidityV2 = Field(default_factory=lambda: None, validate_default=False)
 
     @model_validator(mode="after")
     def nonempty_and_required_nonnull(self) -> CardChangesV2:
