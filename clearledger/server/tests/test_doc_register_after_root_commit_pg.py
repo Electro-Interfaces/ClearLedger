@@ -63,38 +63,59 @@ async def native_register_data(audit_pg_factory, audit_pg_company, monkeypatch):
 
 
 @pytest.fixture
-def register_dispatch_spy(monkeypatch, audit_pg_factory):
+def register_dispatch_spy(monkeypatch, audit_pg_factory, native_register_data):
+    import json
+    from uuid import UUID
+
     calls, attempts, failures = [], [], []
     engine = audit_pg_factory.kw["bind"].sync_engine
+    expected_cid, expected_uid, _, expected_kind, expected_doc = native_register_data
 
-    def verify_and_record(cid, action, who=None, details=None):
+    def verify_and_record(cid, action, *, doc_notice_id):
+        assert cid == expected_cid
         assert action == "doc.register"
-        # Independent Session/connection, before recording callback invocation.
+        assert type(doc_notice_id) is UUID and doc_notice_id == expected_doc
+        # Независимое соединение читает точную карточку после фиксации корня.
         with Session(engine) as independent:
+            doc = independent.scalars(select(DocCard).where(
+                DocCard.company_id == cid, DocCard.id == doc_notice_id)).one()
+            assert doc.reg_number and doc.status == "registered" and doc.verify_token
+            assert doc.registered_by == expected_uid and doc.kind_id == expected_kind
+            kind = independent.scalars(select(DocKind).where(
+                DocKind.company_id == cid, DocKind.id == expected_kind)).one()
+            registered = independent.scalars(select(DocEvent).where(
+                DocEvent.doc_id == doc_notice_id, DocEvent.kind == "registered")).one()
+            assert registered.user_id == expected_uid
+            assert registered.to_value == doc.reg_number
+            reason = "Перенос тестового журнала" if doc.number_manual else None
+            assert registered.note == reason
+            # Snapshot журнала проверяется отдельно от ссылочного callback.
+            snapshot = {"title": doc.title[:200], "kind": kind.code,
+                        "manual": doc.number_manual, "manual_reason": reason}
             audit = independent.scalars(select(AuditEvent).where(
-                AuditEvent.company_id == cid, AuditEvent.action == action)).all()
-            assert any(row.details == details for row in audit)
-            outbox = independent.scalars(select(OutboxEvent).where(
-                OutboxEvent.company_id == cid, OutboxEvent.type == "doc.registered")).all()
-            assert outbox
-            for outgoing in outbox:
-                doc = independent.scalar(select(DocCard).where(
-                    DocCard.company_id == cid,
-                    DocCard.reg_number == outgoing.data["doc"]["regNumber"]))
-                assert str(doc.id) == outgoing.subject
-                assert doc.reg_number and doc.status == "registered" and doc.verify_token
-                assert doc.registered_by is not None
-                assert independent.scalars(select(DocEvent).where(
-                    DocEvent.doc_id == doc.id, DocEvent.kind == "registered")).first()
-        calls.append((cid, action, who, details))
+                AuditEvent.company_id == cid, AuditEvent.action == action,
+                AuditEvent.user_id == str(expected_uid))).one()
+            assert audit.details == " · ".join((
+                doc.reg_number, json.dumps(snapshot, ensure_ascii=False)))
+            outgoing = independent.scalars(select(OutboxEvent).where(
+                OutboxEvent.company_id == cid, OutboxEvent.type == "doc.registered",
+                OutboxEvent.subject == str(doc_notice_id))).one()
+            assert outgoing.data["doc"]["id"] == str(doc_notice_id)
+            assert outgoing.data["doc"]["regNumber"] == doc.reg_number
+            assert outgoing.data["doc"]["status"] == doc.status
+            assert outgoing.data["manual"] is doc.number_manual
+            assert outgoing.data["actor"]["id"] == str(expected_uid)
 
-    def record(cid, action, who=None, details=None):
-        attempts.append((cid, action, who, details))
+    def record(*args, **kwargs):
+        # Запись до привязки аргументов: G3 может поглотить даже TypeError.
+        attempt = (args, kwargs.copy())
+        attempts.append(attempt)
         try:
-            verify_and_record(cid, action, who, details)
+            verify_and_record(*args, **kwargs)
         except BaseException as error:
             failures.append(error)
             raise
+        calls.append(attempt)
 
     monkeypatch.setattr(notify, "dispatch_async", record)
     yield calls
@@ -132,6 +153,7 @@ async def test_native_register_atomic_success_and_repeat_409(
         result = await docs_router.register_doc(str(doc_id), docs_router.RegisterIn(
             company_id=str(cid), **args), db=db, current_user=actor)
         assert commits and len(register_dispatch_spy) == 1
+        assert register_dispatch_spy == [((cid, "doc.register"), {"doc_notice_id": doc_id})]
         assert result["reg_number"] == ("LEGACY-001" if manual else result["reg_number"])
         assert deferred._STATE not in db.sync_session.info
         after = await _counters(db, cid)
@@ -153,6 +175,7 @@ async def test_native_manual_collision_keeps_counter_and_no_second_notification(
     cid, uid, _, kind_id, doc_id = native_register_data
     await _register(audit_pg_factory, native_register_data,
                     reg_number="TAKEN-001", manual_reason="Перенос тестового журнала")
+    assert register_dispatch_spy == [((cid, "doc.register"), {"doc_notice_id": doc_id})]
     second = uuid4()
     async with audit_pg_factory() as db:
         db.add(DocCard(id=second, company_id=cid, kind_id=kind_id, kind_code="synthetic",
