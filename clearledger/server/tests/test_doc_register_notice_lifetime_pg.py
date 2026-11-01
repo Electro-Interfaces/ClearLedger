@@ -67,6 +67,7 @@ async def test_actual_register_root_visibility_and_reference_only_after_retireme
                     card = independent.get(DocCard, w.doc)
                     assert card.status == "registered" and card.reg_number and card.verify_token
                     assert card.case_id == w.case and card.retention_snapshot
+                    assert card.reg_date == w.reg_date
                     assert independent.scalar(select(AuditEvent.id).where(
                         AuditEvent.company_id == cid, AuditEvent.action == action))
                     assert independent.scalar(select(DocEvent.id).where(
@@ -80,7 +81,7 @@ async def test_actual_register_root_visibility_and_reference_only_after_retireme
         monkeypatch.setattr(notify, "dispatch_async", callback)
         actor = await db.get(User, w.admin if manual else w.author)
         payload = dict(reg_number="SYN-MANUAL", manual_reason="Synthetic private transfer") if manual else {}
-        result = await docs.register_doc(str(w.doc), docs.RegisterIn(company_id=str(w.cid), **payload), db, actor)
+        result = await docs.register_doc(str(w.doc), docs.RegisterIn(company_id=str(w.cid), reg_date=w.reg_date, **payload), db, actor)
         assert result["reg_number"] and calls == ["doc.register"]
         assert len(attempts) == 1 and not failures
         assert deferred._STATE not in db.sync_session.info

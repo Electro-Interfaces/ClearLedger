@@ -23,7 +23,8 @@ if not (_URL and _URL == os.environ.get("NATIVE_DOC_REGISTER_APPROVED_URL")
     raise RuntimeError("Reviewed pre-import isolation/full native disposable schema required")
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -40,6 +41,7 @@ from app.models import (
     NotificationRule, Organization, User, UserCompany, UserSubstitution,
 )
 from app.notify_catalog import action_label, category_for
+from app.routers import docs_router as docs
 from app.scope import (
     current_object_scope, current_organization, set_request_organization, set_request_scope,
 )
@@ -49,7 +51,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def notice_world(monkeypatch):
+async def notice_world(monkeypatch, caplog):
     """Нативные партии родителей; удалением БД/схемы владеет владелец прогона."""
     w = SimpleNamespace(**{name: uuid4() for name in (
         "cid", "other", "author", "first", "second", "admin", "sa", "foreign",
@@ -59,6 +61,10 @@ async def notice_world(monkeypatch):
     w.factory = async_sessionmaker(w.engine, expire_on_commit=False)
     w.scheduled, w.attempts, w.mail, w.errors, w.chat, w.push = [], [], [], [], [], []
     w.on_mail, w.allow_shared = None, False
+    # Один согласованный бизнес-день даже при переходе года между setup/register.
+    w.reg_date = datetime.now(docs._BUSINESS_TIMEZONE).date()
+    w.expected_notify_errors = []  # Только явно проверенные SQL/SMTP исключения.
+    caplog.set_level(logging.WARNING, logger=notify.logger.name)
     w.original_dispatch = notify.dispatch_async
     objects, organization = current_object_scope(), current_organization()
     monkeypatch.setattr(database, "async_session_factory", w.factory)
@@ -101,7 +107,7 @@ async def notice_world(monkeypatch):
                 db.add(Counterparty(id=w.cp, company_id=w.cid, name="Synthetic cp secret", aliases=[]))
                 await db.flush()
                 db.add(DocCase(id=w.case, company_id=w.cid, organization_id=w.org,
-                    year=datetime.now(timezone.utc).year, index="01-01", title="Synthetic case",
+                    year=w.reg_date.year, index="01-01", title="Synthetic case",
                     storage_years=5, retention_class="temporary", status="open"))
                 await db.flush()
                 db.add(DocKind(id=w.kind, company_id=w.cid, code="notice", name="Synthetic kind",
@@ -127,11 +133,34 @@ async def notice_world(monkeypatch):
         set_request_scope(objects)
         set_request_organization(organization)
         try:
+            # Внешний oracle охватывает candidate/source-read и весь recipient check:
+            # production log-only catch не должен превращать RuntimeError в отказ READ.
+            warnings = [record for phase in ("setup", "call", "teardown")
+                        for record in caplog.get_records(phase)
+                        if record.name == notify.logger.name and record.levelno >= logging.WARNING]
+            assert len(warnings) == len(w.expected_notify_errors) and all(
+                record.levelno == logging.WARNING
+                and record.msg == "Доставка уведомления о регистрации сорвалась: %s"
+                and isinstance(record.args, tuple) and len(record.args) == 1
+                and record.args[0] is error and record.exc_info is None
+                for record, error in zip(warnings, w.expected_notify_errors)
+            ), f"unexpected notify warnings/errors: {[(r.levelname, r.getMessage()) for r in warnings]!r}"
             assert not w.errors, f"transport oracle errors: {w.errors!r}; attempts={w.attempts!r}"
             assert w.allow_shared or (not w.chat and not w.push), "shared chat/push forbidden"
             assert w.engine.pool.checkedout() == 0, "recipient/business roots must all close"
         finally:
             await w.engine.dispose()
+
+
+async def test_registration_business_date_definition_at_utc_year_boundary():
+    # Фиксированные UTC-моменты определяют нативный день, без clock/policy подмен.
+    assert docs._BUSINESS_TIMEZONE.key == "Europe/Moscow"
+    before = datetime(2026, 12, 31, 20, 59, 59, tzinfo=timezone.utc)
+    boundary = datetime(2026, 12, 31, 21, 0, tzinfo=timezone.utc)
+    assert before.astimezone(docs._BUSINESS_TIMEZONE).date() == date(2026, 12, 31)
+    agreed_reg_date = boundary.astimezone(docs._BUSINESS_TIMEZONE).date()
+    assert agreed_reg_date == date(2027, 1, 1)
+    assert agreed_reg_date.year != boundary.year
 
 
 async def only_recipient(w, uid):
@@ -220,7 +249,9 @@ async def test_smtp_failure_isolated_per_recipient_with_external_error_ledger(no
     await notify.dispatch_doc_notice(w.cid, w.doc)
     assert len(w.attempts) == 2 and len(w.mail) == 1
     assert len(w.errors) == 1 and type(w.errors[0]) is RuntimeError
+    assert str(w.errors[0]) == "Synthetic one-recipient SMTP failure"
     assert w.mail == w.attempts[1:]
+    w.expected_notify_errors.extend(w.errors)
     w.errors.clear()
 
 
@@ -416,11 +447,13 @@ async def test_all_inherited_public_contexts_restored_on_every_path(notice_world
         raise asyncio.CancelledError()
     if path in ("transport_error", "cancel"):
         w.on_mail = fail if path == "transport_error" else cancel
-    sql_attempts = []
+    sql_attempts, sql_errors = [], []
     def sql_failure(conn, cursor, statement, parameters, context, executemany):
         if "doc_access_grants" in statement:
             sql_attempts.append(statement)
-            raise RuntimeError("Synthetic SQL observation failure")
+            error = RuntimeError("Synthetic SQL observation failure")
+            sql_errors.append(error)
+            raise error
     if path == "sql_error":
         event.listen(w.engine.sync_engine, "before_cursor_execute", sql_failure)
     try:
@@ -439,9 +472,14 @@ async def test_all_inherited_public_contexts_restored_on_every_path(notice_world
     if path in ("transport_error", "cancel"):
         assert len(w.errors) == 1
         assert isinstance(w.errors[0], RuntimeError if path == "transport_error" else asyncio.CancelledError)
-        w.errors.clear()  # Ожидаемая синтетическая ошибка явно проверена выше.
+        if path == "transport_error":
+            assert str(w.errors[0]) == "Synthetic SMTP error"
+            w.expected_notify_errors.extend(w.errors)
+        w.errors.clear()  # Cancellation не порождает warning; SQL/SMTP разрешены по identity.
     if path == "sql_error":
-        assert len(sql_attempts) == 1, "the native READ SQL failure must actually be reached"
+        assert len(sql_attempts) == len(sql_errors) == 1, "the native READ SQL failure must actually be reached"
+        assert type(sql_errors[0]) is RuntimeError and str(sql_errors[0]) == "Synthetic SQL observation failure"
+        w.expected_notify_errors.extend(sql_errors)
     assert len(w.mail) == int(path == "allow")
 
 
