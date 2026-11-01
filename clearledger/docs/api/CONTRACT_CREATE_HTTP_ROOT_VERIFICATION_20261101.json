@@ -331,5 +331,27 @@
     },
     "canonicalReport": "PARTNER_SDK16_ROOT_VERIFICATION_20261101.md/json"
   },
-  "activationCheckpoint": "PARTNER_ACTIVATION_ROOT_CHECKPOINT_20261101.md/json"
+  "activationCheckpoint": "PARTNER_ACTIVATION_ROOT_CHECKPOINT_20261101.md/json",
+  "humanNotice77": {
+    "source": "6e838319ff4e66802d111a7b81c9f2cdf4db1e3a",
+    "status": "ACCEPT_BOUNDED_SUPPLIED_COMPOSITION",
+    "cases": 77,
+    "definitions": 26,
+    "phases": 231,
+    "secondsIncludingBootstrap": 53.136557755060494,
+    "review": {
+      "REVIEW.md": "ab75688f11384887e7c4fbf5e10aa616333841bcb8672b9d1783db055900150e",
+      "REVIEW.json": "917d1a80828b5582a8ed1caa383b43133262e3d86e7fce6f2f8641ca34aefc94",
+      "proof.json": "68497fc916e12f08f086146fb6dc6ee29f0a9a5d2a479d01ad6045aa9f1a2052"
+    },
+    "canonical": "DOC_REGISTER_NOTICE_ROOT_VERIFICATION_20261101.md/json"
+  },
+  "g352": {
+    "source": "a011e947f4fea9b61f63558e4055968470fd734f",
+    "status": "ACTUAL52PASS_PENDING_INDEPENDENT_SOURCE_RAW",
+    "cases": 52,
+    "definitions": 30,
+    "phases": 156,
+    "secondsIncludingBootstrap": 34.00552360434085
+  }
 }
