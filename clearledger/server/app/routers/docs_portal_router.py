@@ -95,8 +95,12 @@ async def close_session(request: Request, db: AsyncSession = Depends(get_db)):
     no_overrides(request)
     raw = request.cookies.get(portal.COOKIE)
     portal.check_csrf(request, raw)
-    await db.run_sync(lambda sync: portal.close_session(sync, raw))
-    await db.commit()
+    try:
+        await db.run_sync(lambda sync: portal.close_session(sync, raw))
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
     response = Response(status_code=204)
     response.delete_cookie(portal.COOKIE, secure=True, httponly=True, samesite="strict", path=portal.PREFIX)
     return response
