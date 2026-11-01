@@ -2,9 +2,9 @@
 
 Нужны отдельная одобренная БД, изолированный conftest и согласованное решение
 общей UUID-зависимости. Здесь нет локальных casts, driver patches или skips.
-RefX-peer ниже проверяет только общий барьер будущего протокола, не вызывает
-и не заменяет существующий delete_organization. Полные FK/trigger и child-owner
-проверки будущего удаления остаются отдельной NOTRUN-приёмкой в JSON-контракте.
+RefX-peer проверяет только будущий барьер; отдельные BOTHORDERS определения
+вызывают actual legacy delete_organization и Source8 update_organization.
+Полные FK/trigger и child-owner проверки будущего удаления остаются NOTRUN.
 """
 import asyncio
 from contextlib import asynccontextmanager
@@ -14,17 +14,27 @@ from time import monotonic
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
+from pathlib import Path
+
+# До app-imports требуется явно одобренный совместный Source8/P1 состав.
+# Проверка не защищает от parent conftest: его изоляция обязательна отдельно.
+_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if (os.environ.get("NATIVE_MEMBER_SCOPE_SOURCE_COMPOSITION") != "approved-p1-source8"
+        or not (_SOURCE_ROOT / "app/services/native_party_locks.py").is_file()):
+    raise RuntimeError("NOTRUN: требуется одобренный совместный P1/Source8 source composition до app-imports")
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import Column, ForeignKeyConstraint, MetaData, Table, UniqueConstraint, event, select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.auth import native_claims_context
 from app.models import AuditEvent, Company, CompanyRole, Organization, PartnerSpace, ServiceLocation, User, UserCompany
 from app.routers import users_router
-from app.schemas import MemberScopeUpdate
+from app.routers import references_router as refs
+from app.schemas import MemberScopeUpdate, OrganizationUpdate
+from app.scope import set_request_organization, set_request_scope
 from app.services import contract_write_locks as locks
 from app.services import native_user_role_locks as native
 
@@ -537,3 +547,190 @@ async def test_direct_caller_actor_state_preserves_raw_identity_and_uses_fresh_d
         assert prepared.actor.company_id == HOME
         assert prepared.scope_organization_id == ORG
         await db.rollback()
+
+
+class CommitGateSession(AsyncSession):
+    """Пауза caller перед настоящим commit; SQL и завершение не подменяются."""
+    def __init__(self, *args, stage_flush=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.commit_entered = asyncio.Event()
+        self.commit_release = asyncio.Event()
+        self.stage_flush = stage_flush
+
+    async def commit(self):
+        # Для legacy DELETE останавливаем реальный commit после его flush-фазы.
+        # Это только инструмент наблюдения: выполняются actual delete и FK SET NULL.
+        if self.stage_flush:
+            await self.flush()
+        self.commit_entered.set()
+        await self.commit_release.wait()
+        return await super().commit()
+
+
+@asynccontextmanager
+async def held_actual_call(store, invoke, *, actor_id=A, caller_commit=False, stage_flush=False):
+    """Запустить actual route и удержать его живую транзакцию у commit-границы."""
+    ready, state = asyncio.Event(), {}
+    async def worker():
+        async with CommitGateSession(bind=store.engine, expire_on_commit=False, stage_flush=stage_flush) as db:
+            state.update(db=db, pid=await pid(db))
+            actor = await db.get(User, actor_id)
+            ready.set()
+            try:
+                set_request_organization(None)
+                set_request_scope(None)
+                with native_claims_context({"sub": str(actor_id), "tv": 0}, None):
+                    result = await invoke(db, actor)
+                    if caller_commit:
+                        await db.commit()
+                return result
+            finally:
+                await db.rollback()
+    task = asyncio.create_task(worker())
+    try:
+        await asyncio.wait_for(ready.wait(), 15)
+        await asyncio.wait_for(state["db"].commit_entered.wait(), 15)
+        assert not task.done(), "Actual caller должен держать незавершённый root"
+        yield task, state
+    finally:
+        if "db" in state:
+            state["db"].commit_release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@asynccontextmanager
+async def actual_contender(store, invoke, *, actor_id=A, caller_commit=False):
+    """Второй actual caller с собственной SQL-сессией и реальным commit."""
+    ready, state = asyncio.Event(), {}
+    async def worker():
+        async with store.factory() as db:
+            state["pid"] = await pid(db)
+            actor = await db.get(User, actor_id)
+            ready.set()
+            try:
+                set_request_organization(None)
+                set_request_scope(None)
+                with native_claims_context({"sub": str(actor_id), "tv": 0}, None):
+                    result = await invoke(db, actor)
+                    if caller_commit:
+                        await db.commit()
+                return result
+            finally:
+                await db.rollback()
+    task = asyncio.create_task(worker())
+    try:
+        await asyncio.wait_for(ready.wait(), 15)
+        yield task, state
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("old_ref", [True, False])
+async def test_actual_legacy_orgdelete_first_scope_waits_before_all_member_rows(store, old_ref):
+    if not old_ref:
+        async with store.factory() as setup:
+            (await setup.get(UserCompany, (U, C))).own_organization_id = None
+            await setup.commit()
+    # Legacy route не имеет B/RefX. Его caller flush/commit действительно удаляет Org.
+    async with held_actual_call(store, lambda db, actor: refs.delete_organization(str(ORG), db, actor),
+                                caller_commit=True, stage_flush=True) as (delete_task, deleting):
+        store.statements.clear()
+        async with store.factory() as observer:
+            async with actual_contender(store, lambda db, actor: invoke_scope(
+                    db, actor, own_organization_id=str(ORG))) as (scope_task, scoping):
+                await blocked(observer, scoping["pid"], deleting["pid"])
+                assert not any("user_companies" in sql and ("for update" in sql or "for share" in sql)
+                               for sql in store.statements)
+                deleting["db"].commit_release.set()
+                await asyncio.wait_for(delete_task, 15)
+                if old_ref:
+                    with pytest.raises(Exception) as error:
+                        await asyncio.wait_for(scope_task, 15)
+                    assert error.value.status_code == 409
+                else:
+                    response = await asyncio.wait_for(scope_task, 15)
+                    assert response.own_organization_id is None
+    async with store.factory() as verify:
+        assert await verify.get(Organization, ORG) is None
+        assert (await verify.get(UserCompany, (U, C))).own_organization_id is None
+        audits = (await verify.execute(select(AuditEvent))).scalars().all()
+        assert len(audits) == (0 if old_ref else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completion", ["commit", "rollback"])
+async def test_actual_scope_first_legacy_orgdelete_commit_waits_for_org_share(store, completion):
+    async with held_actual_call(store, lambda db, actor: invoke_scope(
+            db, actor, own_organization_id=str(ORG))) as (scope_task, scoping):
+        async with store.factory() as observer:
+            async with actual_contender(store, lambda db, actor: refs.delete_organization(str(ORG), db, actor),
+                                        caller_commit=True) as (delete_task, deleting):
+                await blocked(observer, deleting["pid"], scoping["pid"])
+                if completion == "rollback":
+                    scope_task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await scope_task
+                else:
+                    scoping["db"].commit_release.set()
+                    await asyncio.wait_for(scope_task, 15)
+                await asyncio.wait_for(delete_task, 15)
+    async with store.factory() as verify:
+        assert await verify.get(Organization, ORG) is None
+        assert (await verify.get(UserCompany, (U, C))).own_organization_id is None
+        audits = (await verify.execute(select(AuditEvent))).scalars().all()
+        assert len(audits) == int(completion == "commit")
+    # Notify может быть запланирован до rollback: прежняя гарантия audit не усилена.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["scope", "source8_writer"])
+@pytest.mark.parametrize("self_actor", [False, True])
+@pytest.mark.parametrize("completion", ["commit", "rollback"])
+async def test_actual_source8_orgwriter_and_scope_target_member_both_orders(store, first, self_actor, completion):
+    if self_actor:
+        async with store.factory() as setup:
+            (await setup.get(UserCompany, (U, C))).role = "admin"
+            await setup.commit()
+    scope_actor = U if self_actor else A
+    async def scope_call(db, actor):
+        return await users_router.set_member_scope(str(U), MemberScopeUpdate(
+            company_id="synthetic", own_organization_id=str(ORG)), db, actor)
+    async def writer_call(db, actor):
+        return await refs.update_organization(str(ORG), OrganizationUpdate(name="Synthetic changed"), db, actor)
+    if first == "scope":
+        held, contender = scope_call, writer_call
+        held_actor, contender_actor = scope_actor, U
+        held_caller_commit, contender_caller_commit = False, True
+    else:
+        held, contender = writer_call, scope_call
+        held_actor, contender_actor = U, scope_actor
+        held_caller_commit, contender_caller_commit = True, False
+    async with held_actual_call(store, held, actor_id=held_actor,
+                                caller_commit=held_caller_commit) as (first_task, holder):
+        store.statements.clear()
+        async with store.factory() as observer:
+            async with actual_contender(store, contender, actor_id=contender_actor,
+                                        caller_commit=contender_caller_commit) as (second_task, waiter):
+                # Writer actor == scope target: Member S/X конфликтует в полном B,
+                # раньше RefX/RefS и любых физических Member/Org строк contender.
+                await blocked(observer, waiter["pid"], holder["pid"], locks.MemberKey(C, U))
+                assert not any("for update" in sql or "for share" in sql for sql in store.statements)
+                if completion == "rollback":
+                    first_task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await first_task
+                else:
+                    holder["db"].commit_release.set()
+                    await asyncio.wait_for(first_task, 15)
+                await asyncio.wait_for(second_task, 15)
+    async with store.factory() as verify:
+        expected_name = "Synthetic" if first == "source8_writer" and completion == "rollback" else "Synthetic changed"
+        assert (await verify.get(Organization, ORG)).name == expected_name
+        assert (await verify.get(UserCompany, (U, C))).own_organization_id == ORG
+        expected_audits = 0 if first == "scope" and completion == "rollback" else 1
+        assert len((await verify.execute(select(AuditEvent))).scalars().all()) == expected_audits

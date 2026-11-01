@@ -28,8 +28,8 @@ AST/compile без исполнения, hash и scope проверки. Для 
 изолированный conftest, одобренная synthetic PG и общее UUID-решение;
 локальных casts, driver patches и искусственных skips нет.
 
-OrgDELETE **OPEN**, его код не изменён. RefX-peer проверяет только будущий
-барьер, не actual delete. Будущему delete нужны все Member referrers без
+OrgDELETE **OPEN**, его код не изменён. Kernel RefX-peer проверяет только
+будущий барьер. Будущему delete нужны все Member referrers без
 company filter, их companies/home Users, upfront Member X + RefX и полное
 postwait set comparison. Inflight/phantom closure этим P1 не доказана.
 Documents/TP/DocCase/archive sealed trigger/shared files/profile и softrefs
@@ -37,3 +37,9 @@ Documents/TP/DocCase/archive sealed trigger/shared files/profile и softrefs
 
 JSON рядом хранит подробный контракт, NOTRUN acceptance и полный исходный
 состав программы: 20 разделов и 11 сквозных условий, все OPEN.
+
+V3: actual legacy delete+caller commit и actual Source8 Orgwriter ↔ scope,
+BOTHORDERS, writerActor==scopeTarget/self и commit/rollback. CommitGateSession
+лишь задерживает настоящий commit; policy/helpers/SQL не подменены. До
+app-imports нужен approved P1/Source8 composition; отсутствие даёт ошибку,
+не skip/pass. Все определения NOTRUN; production-файлы V3 равны V2.

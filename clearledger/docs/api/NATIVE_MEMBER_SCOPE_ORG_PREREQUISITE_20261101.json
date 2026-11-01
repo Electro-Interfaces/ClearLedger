@@ -92,6 +92,11 @@
       "id": "RUNTIME-ISOLATION",
       "state": "OPEN",
       "fact": "Нужны изолированный conftest и одобренная отдельная synthetic PG; отсутствие prerequisites не считается skip/pass."
+    },
+    {
+      "id": "SOURCE8-PREIMPORT-COMPOSITION",
+      "state": "OPEN для runtime",
+      "requirement": "До app-imports NATIVE_MEMBER_SCOPE_SOURCE_COMPOSITION=approved-p1-source8 и наличие actual native_party_locks; владелец runtime отдельно подтверждает совместный состав Source8/P1. Отсутствие prerequisites -> RuntimeError, не skip/pass. Parent conftest изолируется отдельно. P1 не переносит и не подменяет production Source8."
     }
   ],
   "future_delete": {
@@ -122,7 +127,7 @@
       },
       {
         "id": "CP-SOURCE-PEER-BOTH-ORDERS",
-        "case": "После появления и согласования actual CP/Org composer проверить оба порядка actual producer vs composer Member actor S -> Org X с его полным initial B. Same actor/target Member S/X конфликтуют до physical rows. Здесь composer отсутствует, он не подменён unjoined SQL producer и его closure не заявлена."
+        "case": "Actual Source8 update_organization vs actual scope: BOTHORDERS определения теперь authored в PG модуле с writerActor==scopeTarget, self-case и commit/rollback. Требуется одобренный совместный composition до app-imports; все NOTRUN. Это не future OrgDELETE RefX implementation и не inflight/phantom closure."
       }
     ],
     "child_owners_OPEN": [
@@ -136,7 +141,7 @@
       "softrefs BankAccount/StoreDocumentProjection/raw tax/JSON/success snapshots",
       "Contact/LocationContact и CP source owner boundaries"
     ],
-    "peer_test_limit": "PG RefX-peer использует настоящий kernel только для барьера; он не является отсутствующим final OrgDELETE root и не доказывает inflight/phantom closure."
+    "peer_test_limit": "Kernel RefX-peer покрывает только будущий барьер. Отдельные определения вызывают actual byte-frozen legacy OrgDELETE и actual Source8 Orgwriter. Ни один из этих случаев не доказывает отсутствие прочих Org child races, полную физическую схему или future inflight/phantom closure."
   },
   "acceptance_backlog": [
     {
@@ -513,11 +518,61 @@
     },
     "pg": {
       "path": "clearledger/server/tests/test_native_member_scope_org_locks_pg.py",
-      "top_level_test_function_count": 18,
+      "top_level_test_function_count": 21,
       "parameterized_runtime_case_count": "NOT COLLECTED; не выводится из числа функций",
       "executed": 0,
       "collection": "NOTRUN"
     },
-    "pg_limits": "Только восемь синтетических ORM-column tables с релевантными FK; не полная схема/trigger closure. Настоящие helper/route/audit/response; substituted только background notify dispatch. RefX peer не OrgDELETE."
-  }
+    "pg_limits": "Восемь синтетических ORM-column tables с релевантными FK, не полная физическая схема/trigger closure. Настоящие helper/route/audit/response; заменён только background notify dispatch. CommitGateSession задерживает настоящее завершение; для legacy delete первая flush-фаза caller commit исполняется до паузы. Domain policy, SQL и lock helper не подменяются.",
+    "actual_caller_schedules": [
+      {
+        "id": "LEGACY-DELETE-FIRST",
+        "test": "test_actual_legacy_orgdelete_first_scope_waits_before_all_member_rows",
+        "calls": [
+          "references_router.delete_organization",
+          "настоящие caller flush+commit",
+          "users_router.set_member_scope"
+        ],
+        "orders": "delete первым; actual Org X/SET NULL, затем scope Org SHARE до любых Member rows",
+        "outcomes": "old ownOrg==deleted -> wholeRoot409 без audit/DML scope; old ownOrg None -> disappearing proposed CLEAR None, обычные audit/commit/response",
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "id": "SCOPE-FIRST-LEGACY-DELETE",
+        "test": "test_actual_scope_first_legacy_orgdelete_commit_waits_for_org_share",
+        "calls": [
+          "users_router.set_member_scope",
+          "references_router.delete_organization",
+          "настоящий caller commit"
+        ],
+        "orders": "scope держит Org SHARE/Member X; actual legacy delete callercommit ждёт Org, не RefX standin",
+        "completion": [
+          "scope commit -> delete SET NULL",
+          "scope cancellation/caller rollback -> delete завершается, audit scope не фиксируется"
+        ],
+        "audit_limit": "background notify до commit может уже быть запланирован, гарантия не изменяется",
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "id": "ACTUAL-SOURCE8-ORG-WRITER-BOTH-ORDERS",
+        "test": "test_actual_source8_orgwriter_and_scope_target_member_both_orders",
+        "calls": [
+          "references_router.update_organization с actual native_party_locks",
+          "users_router.set_member_scope"
+        ],
+        "actors": "writerActor==scopeTarget; отдельно scopeActor!=target и scopeActor==target/admin",
+        "orders": [
+          "scope первым: Member target X блокирует writer Member actor S в его initial B",
+          "Source8 writer первым: его Member actor S блокирует scope target X в initial B"
+        ],
+        "observation": "pg_blocking_pids + ungranted pg_locks на точном MemberKey, до любых FOR SHARE/UPDATE contender",
+        "completion": [
+          "реальный caller commit",
+          "cancellation/caller rollback"
+        ],
+        "status": "AUTHORED/NOTRUN; требует совместного Source8-состава"
+      }
+    ]
+  },
+  "production_invariants": "Оба production-файла в V3 побайтно совпадают с предыдущим source составом; V3 меняет только новые PG definitions и сопровождающие MD/JSON."
 }
