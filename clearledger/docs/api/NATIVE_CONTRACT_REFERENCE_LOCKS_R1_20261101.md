@@ -1,15 +1,17 @@
-# Native договоры: кандидат R1
+# Native договоры: SOURCE-кандидат R1
 
-SOURCE-only, runtime0. Кандидат HELD на отдельной зависимости OneC; unit/PG-тесты написаны, но не запускались и не собирались. CI, merge и выпуск не разрешены.
+Новый вариант исправляет три замечания независимого SOURCE-ревью. Он ещё не принят: все новые unit/PG-тесты AUTHORED/NOTRUN, imports/collection/runtime0. CI, merge и выпуск не разрешены.
 
-Охват: создание, PATCH, удаление, охват, привязка/отвязка точки, добавление/удаление связи и разрез договора. Трёхпозиционный `create_native_contract(db, body, current_user)` сохранён. Допуск обычного участника, суперадмина, visit и прежние object/org policy остаются у native helpers. Именованная роль здесь не читается, поэтому RoleKey и новая проверка чужой роли не добавлены.
+Охват: девять прежних roots договоров и трёхпозиционный `create_native_contract(db, body, current_user)`. Native member/superadmin/visit/object/org policy сохранена; именованная роль не читается, RoleKey не добавлен. Commit/rollback остаются у caller.
 
-Полный план Company/User/Member/RefComposite S и точных непустых TypeCatalog S готовится до блокировок. Затем идут старые барьеры CP → contract, свежие authority/reference rows и строка договора. Для точки readonly SHARE предшествует Contract UPDATE; идентификатор остаётся строкой, LocationSet не вызывается. Смена запланированного parent требует отмены всей транзакции и нового запроса. Slug повторно сверяется с запланированной компанией.
+Полный план до блокировок включает Company S, actor Member S, RefComposite S, точные непустые TypeCatalog S и actual old/proposed responsible/creator User S с их существующими домашними Company S. Чужой User не получает новую Member/Role policy. Отсутствующий валидный UUID получает логический User S без вымышленной компании и нового 404. Ошибочный UUID discovery пропускает; прежний _req_val выдаёт ошибку в прежней очереди.
 
-Replay и проверка совпадений остаются перед активностью вида. Hash, CardValues, null/пустые значения, false/zero, overrides и ответы сохранены; commit/rollback принадлежат caller. Claims=None разрешены в прямом native вызове; HTTP claims проверяются вновь без presence/commit.
+Порядок: B → CP → contract → Company → Users по числовому UUID → actor Member → стороны/readonly locations → Contract. Смена User/home или Contract pointers требует отмены всей root, без late keys. Это защищает конкретную условную SOURCE-цепочку remove_user User UPDATE → FK SET NULL Contract против PATCH Contract → responsible User FK. Runtime deadlock не воспроизведён; новая регрессия или уязвимость не заявляются.
 
-Открыт конкретный SOURCE-вопрос: OneC `sync_catalogs` обрабатывает организации до CP-барьера. Autoflush следующего чтения может удержать Org UPDATE и затем ждать CP; create/PATCH кандидата держат CP и ждут Org SHARE. Это обратный порядок в исходниках; runtime deadlock не воспроизведён. Отдельный upstream-владелец должен поставить Company S + RefComposite X на входе sync_catalogs до _start_log и любого DML. Общая приёмка ждёт совместный SOURCE-freeze и написанный сценарий actual OneC ↔ R1. Участие всех writers и каталогов отдельно остаётся UNKNOWN.
+После последнего child FOR UPDATE повторяются actual claims/visit и исходный get_owned перед удалением связи. Входной org-selector сохраняется до preflight и восстанавливается перед свежей policy: текущий own_org применяется прежним helper, легальный selector сохраняется при None/admin/superadmin.
 
-Проверены только AST, память compile и хеши. Вне девяти тел и нового импорта роутер совпадает; 3208 защищённых файлов и 411 прежних Python-файлов тестов неизменны. В старом native-файле сохранены 16 методов и 54 Assert AST: это не число исполненных сценариев.
+Replay/duplicate остаются перед active-type и req UUID при CREATE; PATCH сохраняет req-before-type. Hash, CardValues, null/empty/false/zero, inactive replay, overrides и ответы сохранены по SOURCE. Для точки SHARE предшествует Contract UPDATE; ID остаётся opaque, LocationSet не вызывается.
 
-Обычный pytest небезопасен: conftest импортирует приложение раньше guards тестов и содержит DROP схем. ROOT должен отдельно проверить изолированную композицию до любых импортов. Все 20 разделов и 11 условий общей программы остаются OPEN. Точные SOURCE-pins и матрица обратных зависимостей по каждому входу приведены в JSON рядом.
+Отдельная зависимость OneC: Company S + RefComposite X до log flush и Org/CP DML устраняет прежний Org→CP inverse в совместном составе. Собственная ветка OneC не меняет; приёмка ждёт нового совместного freeze/review. All authority/catalog/import/soft-reference writers остаются UNKNOWN; все20 разделов/11 условий OPEN.
+
+Проверки только AST, memory compile и hashes. 3208 защищённых файлов и 411 прежних Python-файлов тестов сохранены; native16 методов/54 Assert AST не означают исполненные сценарии. Conftest импортирует приложение раньше guards и содержит DROP схем: ROOT обязан проверить отдельную preimport-композицию до импорта/запуска. Точные pins и inverse-матрица рядом в JSON.

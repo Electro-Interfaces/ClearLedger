@@ -59,6 +59,23 @@ def test_home_company_can_be_absent_and_named_role_is_not_native_admission():
     assert not any(type(r.key) is locks.RoleKey for r in plan.requests)
 
 
+@pytest.mark.parametrize("value", [None, "", "bad", " ", "0", False])
+def test_reference_user_discovery_defers_invalid_input_to_original_req_value(value):
+    assert native.discover_native_reference_user(value) is None
+
+
+def test_reference_users_add_only_exact_user_and_actual_company_keys():
+    actor, company, ref, foreign = uuid4(), uuid4(), uuid4(), uuid4()
+    assert native.discover_native_reference_user(str(ref)) == ref
+    plan = native.native_reference_plan(actor, company, None,
+        reference_users=(ref,), reference_companies=(foreign,))
+    keys = {r.key for r in plan.requests}
+    assert keys == {locks.UserKey(actor), locks.UserKey(ref), locks.CompanyKey(company),
+                    locks.CompanyKey(foreign), locks.MemberKey(company, actor),
+                    locks.RefCompositeKey(company)}
+    assert all(r.mode is S for r in plan.requests)
+
+
 @pytest.mark.parametrize("bad", ["not-a-uuid", str(uuid4()), None])
 def test_actual_helper_rejects_unvalidated_actor_keys(bad):
     with pytest.raises(TypeError):

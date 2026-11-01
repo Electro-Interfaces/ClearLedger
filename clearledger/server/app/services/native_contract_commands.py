@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member
 from app.models import Contract, User
 from app.schemas import ContractCreate
+from app.scope import current_organization
 from app.services.contract_card_creation import (
     ContractCardValues, create_contract_card, find_contract_card_duplicates,
 )
@@ -30,6 +31,7 @@ from app.services.reference_validation import (
 async def create_native_contract(
     db: AsyncSession, body: ContractCreate, current_user: User,
 ) -> Contract:
+    incoming_organization = current_organization()
     assert_native_reference_clean(db)
     with db.no_autoflush:
         cid = await assert_company_member(body.company_id, current_user, db)
@@ -41,7 +43,8 @@ async def create_native_contract(
         sort_keys=True, separators=(",", ":"),
     ).encode()).hexdigest() if body.creationKey else None
     prepared = await prepare_native_reference_write(
-        db, current_user, cid, type_code=body.typeCode)
+        db, current_user, cid, type_code=body.typeCode,
+        responsible_id=body.responsibleId, organization_selector=incoming_organization)
     current_user = prepared.actor
     await assert_native_reference_member(db, prepared, body.company_id)
     await lock_native_reference_rows(db, prepared, parties=True,

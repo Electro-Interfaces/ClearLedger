@@ -34,7 +34,8 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from sqlalchemy import event, func, select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.auth import native_claims_context
 from app.models import (
@@ -42,8 +43,9 @@ from app.models import (
     ContractLocation, Counterparty, Organization, PartnerSpace, ServiceLocation, User, UserCompany,
 )
 from app.routers import references_router as router
+from app.routers import users_router
 from app.schemas import ContractCreate, ContractDimensionUpdate, ContractScopeUpdate, ContractUpdate
-from app.scope import set_request_organization, set_request_scope
+from app.scope import current_organization, set_request_organization, set_request_scope
 from app.services import contract_write_locks as locks
 from app.services import native_reference_locks as native
 from app.services import location_commands
@@ -72,6 +74,10 @@ async def world():
                      is_superadmin=False)
         outsider = User(id=uuid4(), company_id=other.id, email=f"o-{token}@native-r1.invalid",
                         name="Synthetic outsider", password_hash="synthetic-noncredential", is_superadmin=False)
+        admin = User(id=uuid4(), company_id=company.id, email=f"d-{token}@native-r1.invalid",
+                     name="Synthetic admin D", password_hash="synthetic-noncredential", is_superadmin=False)
+        refuser = User(id=uuid4(), company_id=company.id, email=f"r-{token}@native-r1.invalid",
+                       name="Synthetic reference R", password_hash="synthetic-noncredential", is_superadmin=False)
         role = CompanyRole(id=uuid4(), company_id=company.id, name=f"Synthetic role {token}")
         foreign_role = CompanyRole(id=uuid4(), company_id=other.id, name=f"Synthetic foreign role {token}")
         cp = Counterparty(id=uuid4(), company_id=company.id, name="Synthetic retained CP", aliases=[])
@@ -82,9 +88,11 @@ async def world():
                               name="Synthetic point", type="other", source_bindings=[])
         partner = PartnerSpace(id=uuid4(), company_id=company.id, role="vendor", code=f"p-{token}",
                                name="Synthetic visit provider", base_url="https://synthetic.invalid", is_active=True)
-        db.add_all([actor, outsider, role, foreign_role, cp, free_cp, org, free_org, loc, partner])
+        db.add_all([actor, outsider, admin, refuser, role, foreign_role, cp, free_cp, org, free_org, loc, partner])
         await db.flush()
         db.add(UserCompany(user_id=actor.id, company_id=company.id, role="user", role_id=role.id))
+        db.add_all([UserCompany(user_id=admin.id, company_id=company.id, role="admin"),
+                    UserCompany(user_id=refuser.id, company_id=company.id, role="user")])
         contract = Contract(id=uuid4(), company_id=company.id, counterparty_id=cp.id,
                             organization_id=org.id, number="Synthetic retained original", date="2026-01-02",
                             type="Synthetic", scope_type="unassigned")
@@ -105,7 +113,8 @@ async def world():
                    base_url="https://synthetic.invalid", is_active=True))
         await db.commit()
         w = SimpleNamespace(engine=engine, factory=factory, cid=company.id, foreign=other.id,
-            slug=company.slug, actor=actor, uid=actor.id, outsider=outsider, role=role.id,
+            slug=company.slug, actor=actor, uid=actor.id, outsider=outsider, admin=admin,
+            refuser=refuser, rid=refuser.id, role=role.id,
             foreign_role=foreign_role.id, cp=cp.id, free_cp=free_cp.id, org=org.id, free_org=free_org.id,
             loc=loc.id, partner=partner.id, contract=contract.id, linked=linked.id, link=link.id,
             app_code=app_code, active=active, inactive=inactive)
@@ -184,7 +193,7 @@ def assert_no_dml(statements):
     assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for sql in statements)
 
 
-async def blocked(observer, waiter, owner, key=None):
+async def blocked(observer, waiter, owner, key=None, *, mode=S):
     deadline = monotonic() + 10
     while monotonic() < deadline:
         blockers = await observer.scalar(text("SELECT pg_blocking_pids(:p)"), {"p": waiter})
@@ -194,7 +203,7 @@ async def blocked(observer, waiter, owner, key=None):
                 row = (await observer.execute(text("SELECT mode,granted FROM pg_locks WHERE pid=:p "
                     "AND locktype='advisory' AND classid=:n AND objid=:k AND objsubid=2"),
                     {"p": waiter, "n": ns, "k": value & 0xFFFFFFFF})).one_or_none()
-                if row != ("ShareLock", False):
+                if row != ("ShareLock" if mode is S else "ExclusiveLock", False):
                     await asyncio.sleep(.01)
                     continue
             return
@@ -852,4 +861,259 @@ async def test_require_uses_immutable_actor_identity_without_expired_attribute_i
         with pytest.raises(locks.ScopedLockError):
             native.require_native_reference_write(db, replace(prepared, actor_id=w.outsider.id))
         assert len(caller_sql(sql_log)) == before
+        await db.rollback()
+
+
+async def remove_reference_user(w, db):
+    """Настоящий native root; flush и завершение остаются у его caller."""
+    with native_claims_context({"sub": str(w.admin.id), "tv": 0}, None):
+        await users_router.remove_user(str(w.rid), str(w.cid), db, w.admin)
+    await db.flush()
+    contract = await db.get(Contract, w.contract, populate_existing=True)
+    return (contract.creation_actor_id, contract.responsible_id,
+            await db.get(User, w.rid, populate_existing=True))
+
+
+@pytest.mark.parametrize("release", ["commit", "rollback"])
+async def test_actual_r1_winner_guards_other_creator_responsible_before_remove_user(world, sql_log, release):
+    w = world
+    assert len({w.uid, w.admin.id, w.rid}) == 3
+    async with w.factory() as seed:
+        (await seed.get(Contract, w.contract)).creation_actor_id = w.rid
+        await seed.commit()
+    async with w.factory() as owner, w.factory() as observer:
+        owner_pid = await pid(owner, "owner")
+        response = await invoke(w, owner, "update", body={"responsibleId": str(w.rid)})
+        assert response.responsibleId == str(w.rid)
+        async with running(w, lambda db: remove_reference_user(w, db)) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, locks.UserKey(w.rid), mode=X)
+            statements = caller_sql(sql_log)
+            assert_no_dml(statements)
+            assert not any("FOR SHARE" in sql or "FOR UPDATE" in sql for sql in statements)
+            await (owner.commit() if release == "commit" else owner.rollback())
+            creator, responsible, removed = await asyncio.wait_for(task, 10)
+            assert creator is None and responsible is None and removed is None
+
+
+@pytest.mark.parametrize("release", ["commit", "rollback"])
+async def test_actual_remove_user_winner_blocks_r1_before_contract_then_fresh_abort_or_success(world, sql_log, release):
+    w = world
+    async with w.factory() as seed:
+        (await seed.get(Contract, w.contract)).creation_actor_id = w.rid
+        await seed.commit()
+    async with w.factory() as owner, w.factory() as observer:
+        owner_pid = await pid(owner, "owner")
+        creator, responsible, removed = await remove_reference_user(w, owner)
+        assert creator is None and responsible is None and removed is None
+        async with running(w, lambda db: invoke(w, db, "update", body={
+                "responsibleId": str(w.rid)})) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, locks.UserKey(w.rid))
+            statements = caller_sql(sql_log)
+            assert_no_dml(statements)
+            assert not any("FOR SHARE" in sql or "FOR UPDATE" in sql for sql in statements)
+            await (owner.commit() if release == "commit" else owner.rollback())
+            if release == "commit":
+                with pytest.raises(HTTPException) as failure:
+                    await asyncio.wait_for(task, 10)
+                assert failure.value.status_code == 409
+                assert_no_dml(caller_sql(sql_log))
+            else:
+                response = await asyncio.wait_for(task, 10)
+                assert response.responsibleId == str(w.rid)
+
+
+@pytest.mark.parametrize("field", ["responsible_id", "creation_actor_id"])
+async def test_old_reference_user_is_guarded_even_when_not_proposed(world, sql_log, field):
+    w = world
+    async with w.factory() as seed:
+        setattr(await seed.get(Contract, w.contract), field, w.rid)
+        await seed.commit()
+    async with w.factory() as owner, w.factory() as observer:
+        key = locks.UserKey(w.rid)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        owner_pid = await pid(owner, "owner")
+        async with running(w, lambda db: invoke(w, db, "update")) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, key)
+            assert_no_dml(caller_sql(sql_log))
+            assert not any("FOR SHARE" in sql or "FOR UPDATE" in sql for sql in caller_sql(sql_log))
+            await owner.rollback()
+            await asyncio.wait_for(task, 10)
+
+
+async def test_foreign_reference_user_has_no_member_role_admission_and_numeric_row_order(world, sql_log):
+    w = world
+    async with w.factory() as seed:
+        c = await seed.get(Contract, w.contract)
+        c.creation_actor_id = w.rid
+        await seed.commit()
+    async with w.factory() as db:
+        await pid(db, "waiter")
+        response = await invoke(w, db, "update", body={"responsibleId": str(w.outsider.id)})
+        assert response.responsibleId == str(w.outsider.id)
+        user_params = [parameters[0] for label, sql, parameters in sql_log
+                       if label == "waiter" and "FROM users" in sql and "FOR SHARE" in sql]
+        assert [str(uid) for uid in user_params] == [str(uid) for uid in sorted({w.uid, w.rid, w.outsider.id})]
+        statements = caller_sql(sql_log)
+        last_company = max(i for i, sql in enumerate(statements) if "FROM companies" in sql and "FOR SHARE" in sql)
+        first_user = min(i for i, sql in enumerate(statements) if "FROM users" in sql and "FOR SHARE" in sql)
+        assert last_company < first_user
+        last_user = max(i for i, sql in enumerate(statements) if "FROM users" in sql and "FOR SHARE" in sql)
+        first_ref = min(i for i, sql in enumerate(statements) if "FOR SHARE" in sql and (
+            "FROM counterparties" in sql or "FROM organizations" in sql))
+        assert last_user < first_ref
+        member_params = [parameters for label, sql, parameters in sql_log
+                         if label == "waiter" and "FROM user_companies" in sql]
+        assert all(str(w.outsider.id) not in str(parameters) for parameters in member_params)
+        await db.rollback()
+
+
+@pytest.mark.parametrize("axis", ["reference-home", "reference-user"])
+async def test_reference_user_and_actual_home_company_b_keys_precede_all_rows(world, sql_log, axis):
+    w = world
+    key = locks.CompanyKey(w.foreign) if axis == "reference-home" else locks.UserKey(w.outsider.id)
+    async with w.factory() as owner, w.factory() as observer:
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        owner_pid = await pid(owner, "owner")
+        async with running(w, lambda db: invoke(w, db, "update", body={
+                "responsibleId": str(w.outsider.id)})) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, key)
+            assert_no_dml(caller_sql(sql_log))
+            assert not any("FOR SHARE" in sql or "FOR UPDATE" in sql for sql in caller_sql(sql_log))
+            await owner.rollback()
+            response = await asyncio.wait_for(task, 10)
+            assert response.responsibleId == str(w.outsider.id)
+
+
+async def test_missing_reference_uuid_has_logical_guard_and_original_fk_outcome(world, sql_log):
+    w, missing = world, uuid4()
+    async with w.factory() as owner, w.factory() as observer:
+        key = locks.UserKey(missing)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        owner_pid = await pid(owner, "owner")
+        async with running(w, lambda db: invoke(w, db, "direct", body=payload(
+                w, responsibleId=str(missing)))) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, key)
+            assert_no_dml(caller_sql(sql_log))
+            await owner.rollback()
+            with pytest.raises(IntegrityError) as failure:
+                await asyncio.wait_for(task, 10)
+            assert getattr(failure.value.orig, "sqlstate", getattr(failure.value.orig, "pgcode", None)) == "23503"
+
+
+@pytest.mark.parametrize("change", ["home", "old-responsible", "creator"])
+async def test_reference_user_parent_or_contract_pointer_change_aborts_without_late_keys(world, sql_log, change):
+    w = world
+    async with w.factory() as owner, w.factory() as observer:
+        key = locks.RefCompositeKey(w.cid)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        owner_pid = await pid(owner, "owner")
+        async with running(w, lambda db: invoke(w, db, "update", body={
+                "responsibleId": str(w.rid)})) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, key)
+            if change == "home":
+                (await owner.get(User, w.rid)).company_id = w.foreign
+            else:
+                setattr(await owner.get(Contract, w.contract),
+                        "responsible_id" if change == "old-responsible" else "creation_actor_id", w.rid)
+            await owner.commit()
+            with pytest.raises(HTTPException) as failure:
+                await asyncio.wait_for(task, 10)
+            assert failure.value.status_code == 409
+            assert_no_dml(caller_sql(sql_log))
+
+
+async def test_child_link_wait_rechecks_actual_visit_before_delete(world, sql_log):
+    w = world
+    claims = {"sub": str(w.uid), "tv": 0, "scp": "visit", "cid": str(w.cid), "pvs": str(w.partner)}
+    async def call(db):
+        with native_claims_context(claims, w.cid):
+            return await invoke(w, db, "delete_link")
+    async with w.factory() as owner, w.factory() as observer:
+        await owner.execute(select(ContractLink).where(ContractLink.id == w.link).with_for_update())
+        owner_pid = await pid(owner, "owner")
+        async with running(w, call) as (details, task):
+            await blocked(observer, details["pid"], owner_pid)
+            assert any("FROM contract_links" in sql and "FOR UPDATE" in sql for sql in caller_sql(sql_log))
+            (await owner.get(PartnerSpace, w.partner)).is_active = False
+            await owner.commit()
+            with pytest.raises(HTTPException) as failure:
+                await asyncio.wait_for(task, 10)
+            assert failure.value.status_code == 401
+            assert_no_dml(caller_sql(sql_log))
+
+
+@pytest.mark.parametrize("incoming", ["none", "selector-b"])
+@pytest.mark.parametrize("transition", ["clear", "admin", "superadmin", "retain-own"])
+@pytest.mark.parametrize("root", ["direct", "scope", "update"])
+async def test_org_context_is_recomputed_from_incoming_selector_inside_operation_task(
+        world, sql_log, incoming, transition, root):
+    w = world
+    async with w.factory() as seed:
+        (await seed.get(UserCompany, (w.uid, w.cid))).own_organization_id = w.org
+        await seed.commit()
+    selector = None if incoming == "none" else w.free_org
+    async def call(db):
+        set_request_organization(selector)
+        result = await invoke(w, db, root)
+        effective = current_organization()
+        assert effective == (w.org if transition == "retain-own" and root != "update" else selector)
+        return result
+    async with w.factory() as owner, w.factory() as observer:
+        key = locks.MemberKey(w.cid, w.uid)
+        await locks.acquire_scoped_locks_async(owner, locks.LockPlan((locks.LockRequest(key, X),)))
+        owner_pid = await pid(owner, "owner")
+        async with running(w, call) as (details, task):
+            await blocked(observer, details["pid"], owner_pid, key)
+            member = await owner.get(UserCompany, (w.uid, w.cid))
+            if transition == "clear":
+                member.own_organization_id = None
+            elif transition == "admin":
+                member.role = "admin"
+            elif transition == "superadmin":
+                (await owner.get(User, w.uid)).is_superadmin = True
+            await owner.commit()
+            await asyncio.wait_for(task, 10)
+
+
+@pytest.mark.parametrize("root,expected", [("direct", 422), ("update", 400)])
+async def test_invalid_responsible_discovery_preserves_different_create_patch_error_order(world, sql_log, root, expected):
+    w = world
+    body = {"responsibleId": "invalid-synthetic", "typeCode": w.inactive}
+    async with w.factory() as db:
+        await pid(db, "waiter")
+        with pytest.raises(HTTPException) as failure:
+            await invoke(w, db, root, body=payload(w, **body) if root == "direct" else body)
+        assert failure.value.status_code == expected
+        assert_no_dml(caller_sql(sql_log))
+
+
+async def test_missing_historical_responsible_does_not_preempt_inactive_replay(world):
+    w = world
+    body = payload(w, typeCode=w.active, responsibleId=str(w.rid))
+    async with w.factory() as db:
+        first = await invoke(w, db, "create", body=body)
+        await db.commit()
+    async with w.factory() as peer:
+        await remove_reference_user(w, peer)
+        await peer.commit()
+    async with w.factory() as peer:
+        await peer.execute(text("UPDATE contract_types SET is_active=false WHERE code=:c"), {"c": w.active})
+        await peer.commit()
+    async with w.factory() as db:
+        replay = await invoke(w, db, "create", body=body)
+        assert replay.id == first.id and replay.responsibleId is None
+        await db.rollback()
+
+
+async def test_creation_hash_conflict_precedes_invalid_responsible_and_type(world):
+    w = world
+    body = payload(w)
+    async with w.factory() as db:
+        await invoke(w, db, "direct", body=body)
+        await db.commit()
+    async with w.factory() as db:
+        with pytest.raises(HTTPException) as failure:
+            await invoke(w, db, "direct", body={**body, "responsibleId": "invalid", "typeCode": w.inactive})
+        assert failure.value.status_code == 409
+        assert failure.value.detail == "Ключ создания договора уже использован с другими реквизитами"
         await db.rollback()
