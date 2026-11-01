@@ -480,6 +480,9 @@ class _PartnerWrite:
                     row = self.db.scalar(spec.statement())
                     if (row is None) != spec.missing:
                         _writer_drift(self.db)
+            profile = getattr(self, "contract_profile", None)
+            if profile is not None:
+                profile.recheck(self.db)
             claims = None
             if self.native:
                 self.actor, claims = self.native(self.db)
@@ -493,7 +496,8 @@ class _PartnerWrite:
 def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
                           grant_id=None, token_id=None, request_id=None, protocol=None,
                           actor=None, native=None, company_id=None, admin_company=None,
-                          mutation="", new_app=None, new_client=None, selections=()):
+                          mutation="", new_app=None, new_client=None, selections=(),
+                          contract_profile=None):
     """One private composition for all existing identity writers.
 
     Caller owns rows, ACL, root completion and exception handling. Discovery is
@@ -503,6 +507,15 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
     """
     if db.new or db.dirty or db.deleted:
         raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
+    profile_purpose = mutation in {"contract-profile-read", "contract-profile-write"}
+    if profile_purpose:
+        from app.services.partner_contract_profiles import ProfileOperation
+        if (type(contract_profile) is not ProfileOperation or actor is None or native is None
+                or contract_profile.installation_id != installation_id
+                or contract_profile.write != (mutation == "contract-profile-write")):
+            raise ScopedLockError("Exact profile composition and actual native authority required")
+    elif contract_profile is not None:
+        raise ScopedLockError("Profile state cannot change an existing identity flow")
     found, requests, installation_sets, credential_sets = {}, [], {}, {}
     request_deadline = None
     S, X = LockMode.SHARED, LockMode.EXCLUSIVE
@@ -552,7 +565,7 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         if cid is not None:
             key(MemberKey(cid, uid))
             member = get(UserCompany, (uid, cid))
-            if member and member.role_id is not None:
+            if member and member.role_id is not None and not profile_purpose:
                 key(RoleKey(cid, member.role_id))
                 # Even a malformed foreign Role is never locked outside tenant.
                 role = db.scalar(select(CompanyRole).where(
@@ -580,7 +593,7 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
     def installation(iid):
         if iid is None:
             return
-        key(InstallationKey(iid), X if mutation in {"approve_installation", "revoke_installation"} else S)
+        key(InstallationKey(iid), X if mutation in {"approve_installation", "revoke_installation", "contract-profile-write"} else S)
         ca = get(CompanyApp, iid, mutation == "approve_installation")
         row = get(PartnerInstallation, iid, mutation in {"approve_installation", "revoke_installation"})
         if ca:
@@ -590,13 +603,17 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
             # Existing sets are discovered before the plan, including absent
             # children. InstallationKey serializes their full replacement.
             installation_sets.setdefault(iid, _installation_sets(db, iid))
-            location_ids = db.scalars(select(PartnerInstallationLocation.location_id).where(
-                PartnerInstallationLocation.installation_id == iid)).all()
-            references(ServiceLocation, row.company_id, location_ids)
-            for kind, (model, column) in RESOURCE_MODELS.items():
-                refs = db.scalars(select(getattr(PartnerResourceItem, column)).where(
-                    PartnerResourceItem.installation_id == iid, PartnerResourceItem.kind == kind)).all()
-                references(model, row.company_id, refs)
+            if not profile_purpose:
+                # Existing identity flows keep their original resource row
+                # closure. Profile admin does not evaluate live read grants:
+                # its OWN old/new refs are locked after Profile in one order.
+                location_ids = db.scalars(select(PartnerInstallationLocation.location_id).where(
+                    PartnerInstallationLocation.installation_id == iid)).all()
+                references(ServiceLocation, row.company_id, location_ids)
+                for kind, (model, column) in RESOURCE_MODELS.items():
+                    refs = db.scalars(select(getattr(PartnerResourceItem, column)).where(
+                        PartnerResourceItem.installation_id == iid, PartnerResourceItem.kind == kind)).all()
+                    references(model, row.company_id, refs)
 
     def grant(gid):
         row = get(PartnerGrant, gid, mutation == "revoke_grant") if gid else None
@@ -683,6 +700,11 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
         company(admin_company)
         for model, ids in selections:
             references(model, company_id, ids, selected=True)
+        if profile_purpose:
+            # Profile-only extension closes ALL original parents before the
+            # one existing B entrance. No second preparation/issuer or policy.
+            contract_profile.discover(db, company_id=company_id, client_id=client_id,
+                actor=actor, get=get, key=key, company=company)
         ordered = tuple(sorted(found.values(), key=lambda r: (
             _ROW_ORDER.index(r.model) if r.model in _ROW_ORDER else len(_ROW_ORDER),
             r.model.__tablename__, tuple(map(str, r.identity)))))
@@ -714,6 +736,8 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
             if row is not None and spec.model is PartnerAuthorizationRequest:
                 request_deadline = row.expires_at if not row.finished else None
     writer = _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)
+    if profile_purpose:
+        writer.contract_profile = contract_profile
     writer.checkpoint()
     return writer
 
