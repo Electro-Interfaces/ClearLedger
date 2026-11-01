@@ -402,7 +402,7 @@ ACTIVATION_SOURCE = {
     "base": "4a4ba3bc041b69ccb4064a7865873eadd6f0f00f",
     "codegate": "msg_4b02011dc305",
     "purpose": "contract-profile-activation",
-    "service_sha": "c1a7fb76be8b4f044eab0dada99662be7af0d9624526d91233ab5f83c6643ce5",
+    "service_sha": "6b97c9e6c5420af95587b85947c26295b95d82941ada2bc1c6f5912e648ad9a5",
     "profile_sha": "6fdc93816c6ba7af22b97dc6c1e8e1bc91f1563cec1c0672e82e17a11c23abef",
     "schema_baseline_ast": "ad406ab6bb3ac94502a9680402b60659b8e3cfa7928850b9a4b0aede4291323a",
     "schema_sha": "2f9c10a92d960b25ff3bbd74a4990e583cadfaba118570236b325baf8ab02580",

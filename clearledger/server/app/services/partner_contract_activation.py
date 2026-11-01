@@ -104,21 +104,38 @@ class ActivationOperation:
             _error(409, "Activation profile graph is invalid")
 
     def freeze(self, db, ordered, installation_sets, credential_sets):
-        from app.services.partner_identity import _installation_sets
+        from app.services.partner_identity import RESOURCE_MODELS, _installation_sets
+        self.installation_sets = deepcopy(installation_sets)
+        if self.installation_id not in self.installation_sets:
+            self.installation_sets[self.installation_id] = deepcopy(_installation_sets(db, self.installation_id))
+        # Original references(selected=False) omits foreign/missing targets.
+        # Validate the UNFILTERED canonical sets, even for all_locations,
+        # ALL/EMPTY resources and false/false, before admitting the one B.
+        # Use the original typed mapping; preserve native IDs literally and
+        # never discover or lock a foreign target's owner/parent graph.
+        descriptors = {(spec.model, spec.identity) for spec in ordered if not spec.missing}
+        for locations, _scopes, items in self.installation_sets.values():
+            targets = [(ServiceLocation, set(locations))]
+            targets.extend((model, {row[index] for row in items if row[1] == kind})
+                for index, (kind, (model, _column)) in enumerate(RESOURCE_MODELS.items(), start=2))
+            for model, ids in targets:
+                if not ids:
+                    continue
+                actual = set(db.scalars(select(model.id).where(
+                    model.company_id == self.company_id, model.id.in_(ids))))
+                if actual != ids or any((model, (ident,)) not in descriptors for ident in ids):
+                    _error(409, "Activation profile graph is invalid")
         self.ordered = ordered
         if any(spec.missing and spec.model is not UserCompany for spec in ordered):
             _error(409, "Activation profile graph is invalid")
         self.identity_rows = tuple(_rows(db, spec.statement().with_only_columns(*spec.model.__table__.c))
                                    for spec in ordered)
-        self.installation_sets = deepcopy(installation_sets)
         self.credential_sets = deepcopy(credential_sets)
         # Union includes canonical read resources, not just profile selection.
         for spec in ordered:
             if spec.model in self.parent_models and not spec.missing:
                 self.parent(db, spec.model, spec.identity[0])
         # Discovery is complete here; no new key or parent is admitted after B.
-        if self.installation_id not in self.installation_sets:
-            self.installation_sets[self.installation_id] = deepcopy(_installation_sets(db, self.installation_id))
 
     def recheck(self, db):
         from app.services import partner_identity as identity

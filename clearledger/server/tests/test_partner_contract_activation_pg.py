@@ -21,9 +21,10 @@ from sqlalchemy.orm import Session
 from app.auth import token_for
 from app.database import get_db
 from app.models import (App, AuditEvent, Company, CompanyApp, CompanyRole, Contract,
-                        Counterparty, Organization, ServiceLocation, User, UserCompany)
+                        Counterparty, DocCard, DocKind, EzsEquipmentUnit,
+                        Organization, ServiceLocation, User, UserCompany)
 from app.models_partner import (PartnerClient, PartnerGrant, PartnerInstallation,
-                                PartnerResourceScope, PartnerResourceItem)
+                                PartnerInstallationLocation, PartnerResourceScope, PartnerResourceItem)
 from app.models_partner_contracts import (PartnerContractCreateProfile as Profile,
     PartnerContractCreatePrincipal as Principal, PartnerContractCreateRef as Ref,
     PartnerContractCreateType as Type, PartnerContractSuccessIntent as Intent)
@@ -670,3 +671,175 @@ async def test_full_graph_foreign_owner_corruption_is_denied_before_b(world, mon
     assert response.status_code in {409, 422}, response.text
     assert calls == []
     await assert_unchanged(w, before)
+
+
+async def canonical_targets(w, *, foreign):
+    """Existing native FK targets; no altered constraints or fake graph rows."""
+    suffix = uuid4().hex
+    async with w.factory() as db:
+        cid = w.company
+        if foreign:
+            cid = uuid4()
+            db.add(Company(id=cid, name="Other canonical tenant", slug="cf-"+suffix, profile_id="energy"))
+            await db.flush()
+        cp = Counterparty(id=uuid4(), company_id=cid, name="Canonical-only CP", aliases=[])
+        org = Organization(id=uuid4(), company_id=cid, name="Canonical-only Org", inn="", prefix="C")
+        # An unrequested whitespace-only ID is valid in native ServiceLocation
+        # (the stricter profile-ref rule does not apply to canonical extras).
+        location_id = ("  EXTRA:"+suffix[:16]+"  " if foreign else
+                       "".join(" \t\n\r"[int(digit, 16) % 4] for digit in suffix))
+        loc = ServiceLocation(id=location_id, company_id=cid,
+            code="ce-"+suffix, name="Canonical-only location", source_bindings=[])
+        kind = DocKind(id=uuid4(), company_id=cid, code="ce-"+suffix, name="Synthetic canonical kind")
+        equipment = EzsEquipmentUnit(id=uuid4(), company_id=cid, current_location_id=loc.id)
+        db.add_all([cp, org, loc, kind]); await db.flush()
+        contract = Contract(id=uuid4(), company_id=cid, number="Synthetic", date="2026-11-01",
+            counterparty_id=cp.id, organization_id=org.id, type="Synthetic")
+        document = DocCard(id=uuid4(), company_id=cid, kind_id=kind.id,
+            title="Synthetic canonical document", organization_id=org.id,
+            counterparty_id=cp.id, object_id=loc.id)
+        db.add_all([equipment, contract, document]); await db.commit()
+        return SimpleNamespace(company=cid, location=loc.id, cp=cp.id, org=org.id,
+            kind=kind.id, equipment=equipment.id, contract=contract.id, document=document.id,
+            items={"objects": ("object_id", loc.id), "counterparties": ("counterparty_id", cp.id),
+                   "equipment": ("equipment_id", equipment.id), "contracts": ("contract_id", contract.id),
+                   "documents": ("document_id", document.id)})
+
+
+async def canonical_state(w, targets):
+    """Fresh SQL over raw children and both tenants' actual parent/business rows."""
+    async with w.factory() as db:
+        statements = [select(*model.__table__.c).where(model.installation_id == w.iid)
+            for model in (PartnerInstallationLocation, PartnerResourceScope, PartnerResourceItem, PartnerGrant)]
+        statements.append(select(*PartnerInstallation.__table__.c).where(PartnerInstallation.id == w.iid))
+        statements.extend(select(*model.__table__.c).where(model.company_id.in_({w.company, targets.company}))
+            for model in (Counterparty, Organization, ServiceLocation, EzsEquipmentUnit, Contract, DocKind, DocCard, Intent))
+        return tuple(tuple(sorted(tuple(map(str, row)) for row in (await db.execute(statement)).all()))
+                     for statement in statements)
+
+
+async def assert_raw_canonical_denied_before_b(w, targets, monkeypatch, *, user, service):
+    before, raw_before = await state(w), await canonical_state(w, targets)
+    calls, actors, statements = [], [], []
+    original_b, original_auth = identity.acquire_scoped_locks, activation.profile_core_user
+    def observe_b(db, plan):
+        calls.append(plan)
+        return original_b(db, plan)  # Real original B if reached, never a success stand-in.
+    async def observe_auth(db, credentials):
+        actor = await original_auth(db, credentials)
+        actors.append(actor.id)
+        return actor
+    def observe_sql(conn, cursor, statement, params, context, many):
+        statements.append((statement, str(params)))
+    monkeypatch.setattr(identity, "acquire_scoped_locks", observe_b)
+    monkeypatch.setattr(activation, "profile_core_user", observe_auth)
+    engine = w.factory.kw["bind"].sync_engine
+    event.listen(engine, "before_cursor_execute", observe_sql)
+    try:
+        response = await put(w, user=user, service=service)
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_sql)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "Activation profile graph is invalid"
+    assert calls == [] and actors == [w.admin]
+    assert all("pg_advisory_xact_lock" not in sql and "FOR SHARE" not in sql and "FOR UPDATE" not in sql
+               for sql, params in statements)
+    # The unrelated foreign tenant is not an original client/home company.
+    # Target IDs may be used in tenant-filtered existence checks; their owner
+    # and dependent FK graph must never become discovery or lock inputs.
+    assert all(str(targets.company) not in params for sql, params in statements)
+    for ident in (targets.org, targets.kind):
+        assert all(str(ident) not in params for sql, params in statements)
+    assert all(not sql.lstrip().upper().startswith(("INSERT ", "UPDATE ", "DELETE "))
+               for sql, params in statements)
+    await assert_unchanged(w, before)
+    assert await canonical_state(w, targets) == raw_before
+
+
+@pytest.mark.parametrize("all_locations", [True, False])
+@pytest.mark.parametrize("user,service", [(True, True), (False, False)])
+async def test_canonical_only_foreign_installation_location_denied_before_b(world, monkeypatch, all_locations, user, service):
+    w = world
+    targets = await canonical_targets(w, foreign=True)
+    async with w.factory() as db:
+        (await db.get(PartnerInstallation, w.iid)).all_locations = all_locations
+        db.add_all([PartnerInstallationLocation(installation_id=w.iid, location_id=w.loc),
+                    PartnerInstallationLocation(installation_id=w.iid, location_id=targets.location)])
+        await db.commit()
+        # L keeps legal intersection nonempty even when all_locations=false;
+        # F is canonical-only, absent from both profile and object resource items.
+        assert await db.scalar(select(PartnerResourceItem.id).where(
+            PartnerResourceItem.installation_id == w.iid, PartnerResourceItem.object_id == targets.location)) is None
+        assert await db.scalar(select(Ref.id).where(Ref.location_id == targets.location)) is None
+    await assert_raw_canonical_denied_before_b(w, targets, monkeypatch, user=user, service=service)
+
+
+@pytest.mark.parametrize("kind", ["objects", "equipment", "counterparties", "contracts", "documents"])
+@pytest.mark.parametrize("mode", ["ALL", "EMPTY", "SET"])
+@pytest.mark.parametrize("user,service", [(True, True), (False, False)])
+async def test_each_foreign_typed_canonical_item_denied_in_every_mode_before_b(world, monkeypatch, kind, mode, user, service):
+    w = world
+    targets = await canonical_targets(w, foreign=True)
+    async with w.factory() as db:
+        scope = await db.get(PartnerResourceScope, (w.iid, kind))
+        if scope is None:
+            db.add(PartnerResourceScope(installation_id=w.iid, kind=kind, mode=mode))
+        else:
+            scope.mode = mode
+        await db.flush()
+        column, ident = targets.items[kind]
+        db.add(PartnerResourceItem(installation_id=w.iid, kind=kind, **{column: ident}))
+        await db.commit()
+    await assert_raw_canonical_denied_before_b(w, targets, monkeypatch, user=user, service=service)
+
+
+@pytest.mark.parametrize("all_locations", [True, False])
+@pytest.mark.parametrize("mode", ["ALL", "EMPTY", "SET"])
+async def test_local_canonical_extras_keep_literal_unrequested_opaque_ids_and_full_union(world, monkeypatch, all_locations, mode):
+    w, calls, sql = world, [], []
+    targets = await canonical_targets(w, foreign=False)
+    async with w.factory() as db:
+        (await db.get(PartnerInstallation, w.iid)).all_locations = all_locations
+        db.add_all([PartnerInstallationLocation(installation_id=w.iid, location_id=w.loc),
+                    PartnerInstallationLocation(installation_id=w.iid, location_id=targets.location)])
+        for kind, (column, ident) in targets.items.items():
+            scope = await db.get(PartnerResourceScope, (w.iid, kind))
+            if scope is None:
+                db.add(PartnerResourceScope(installation_id=w.iid, kind=kind, mode=mode))
+            else:
+                scope.mode = mode
+            await db.flush()
+            db.add(PartnerResourceItem(installation_id=w.iid, kind=kind, **{column: ident}))
+        # In SET, selected CP must still be legal alongside the unrequested CP.
+        db.add(PartnerResourceItem(installation_id=w.iid, kind="counterparties", counterparty_id=w.cp))
+        await db.commit()
+    before, raw_before = await state(w), await canonical_state(w, targets)
+    original = identity.acquire_scoped_locks
+    def observe_b(db, plan):
+        calls.append(plan)
+        return original(db, plan)
+    def observe_sql(conn, cursor, statement, params, context, many):
+        if "FOR SHARE" in statement or "FOR UPDATE" in statement:
+            sql.append((statement, str(params)))
+    monkeypatch.setattr(identity, "acquire_scoped_locks", observe_b)
+    engine = w.factory.kw["bind"].sync_engine
+    event.listen(engine, "before_cursor_execute", observe_sql)
+    enabled = mode != "EMPTY"
+    try:
+        response = await put(w, user=enabled, service=enabled)
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_sql)
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1 and response.json()["policyGeneration"] == 2
+    assert (response.json()["userEnabled"], response.json()["serviceEnabled"]) == (enabled, enabled)
+    assert len(targets.location) == 32 and targets.location.isspace()
+    assert targets.location not in response.json()["locationIds"]
+    member_index = next(i for i, (statement, params) in enumerate(sql) if "core.user_companies" in statement)
+    for table, ident in (("core.service_locations", targets.location), ("core.counterparties", targets.cp)):
+        literal = repr(ident) if isinstance(ident, str) else str(ident)
+        entries = [(i, params) for i, (statement, params) in enumerate(sql) if table in statement and literal in params]
+        assert len(entries) == 1 and entries[0][0] < member_index
+    after = await state(w)
+    assert after["children"] == before["children"] and after["counts"] == before["counts"]
+    assert len(after["audit"]) == len(before["audit"])+1
+    assert await canonical_state(w, targets) == raw_before
