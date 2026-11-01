@@ -18,6 +18,7 @@
     "contract-objects-consumer.ts",
     "contract-documents-consumer.ts",
     "contract-classification-consumer.ts",
-    "contract-create-consumer.ts"
+    "contract-create-consumer.ts",
+    "contract-create-options-consumer.ts"
   ]
 }

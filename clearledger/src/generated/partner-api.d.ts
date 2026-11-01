@@ -3,7 +3,7 @@
  * Do not make direct changes to the file.
  */
 
-// openapi-typescript 7.10.1; curated schema sha256: a888f5203eccdd26c921f6773212c22c6a55b372eacfd363b674efbf9cfedad4
+// openapi-typescript 7.10.1; curated schema sha256: 89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853
 export interface paths {
     "/contract-types": {
         parameters: {
@@ -101,6 +101,26 @@ export interface paths {
          * @description Only current explicit links to independently authorized service points. User or approved service principal needs contracts:read AND objects:read and both resource grants. Company/unassigned scope returns no explicit links; no implied legal coverage or historical interpretation. Only pageSize/cursor query parameters, no q/date/typeCode. Fixed ascending linked object created_at,id; live cursor pagination, not a snapshot. total is the visible count before cursor; keep pageSize and context fixed, pass nextCursor unchanged until null. Application refusals before streaming use application/problem+json: 400 invalid_cursor (bad or differently bound cursor), 401 invalid_credentials, 403 access_denied, 404 not_found (absent or hidden resource), 422 invalid_request, 429 rate_limited for the opt-in quota or internal_error for generic injected HTTP429, 500 internal_error, 503 api_unavailable. Known-path unsupported methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry a Bearer challenge. Quota 429 supplies Retry-After; generic 429/503 supplies it only when available. Proxy errors and errors after streaming headers are outside this Problem contract.
          */
         get: operations["listContractObjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/contracts/create-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List current advisory CREATE choices
+         * @description Canonical user or approved machine with contracts:create and a current CREATE profile. No contracts:read grant is required. Whole profile closure and all choices share one read-only REPEATABLE READ snapshot t0, after separate preflight and committed quota. Revocations committed before t0 deny; revocations after t0 may not appear. The same canonical verifier checks JWT expiry and process gates again before DTO, with database reads still at t0. POST rechecks current authority. resource is organization, counterparty, location or type; pageSize 1..100, default 50. Exact UTF8 values only, UUIDs canonical; no labels or internal authority. Opaque cursor <=2048, TTL <=300s, bound to the whole current profile, token and page context. Changed/stale/expired cursor: 400 invalid_cursor after current auth; omit cursor to restart. Legal empty selection returns 200. Timeout (global 10s) or closure overflow returns generic 503 api_unavailable, never partial data. 401 invalid_credentials, 403 access_denied, 422 invalid_request, quota 429 rate_limited; known-path unsupported methods use 405 method_not_allowed with Allow: GET. Cache-Control: no-store and X-Request-Id apply; 401/403 carry Bearer, quota 429 carries Retry-After. Selections are advisory, with no reservation, receipt or write admission.
+         */
+        get: operations["getContractCreateOptions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -417,6 +437,25 @@ export interface components {
             kind: "locations";
             /** Locationids */
             locationIds: string[];
+        };
+        /** ContractCreateOption */
+        ContractCreateOption: {
+            /** Value */
+            value: string;
+        };
+        /** ContractCreateOptions */
+        ContractCreateOptions: {
+            /** Items */
+            items: components["schemas"]["ContractCreateOption"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+            /**
+             * Resource
+             * @enum {string}
+             */
+            resource: "organization" | "counterparty" | "location" | "type";
+            /** Selectionversion */
+            selectionVersion: string;
         };
         /** ContractCreateResult */
         ContractCreateResult: {
@@ -2301,6 +2340,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContractObjects"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_cursor",
+                     *       "detail": "Cursor is invalid or belongs to another query",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 400,
+                     *       "title": "Bad Request",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_credentials",
+                     *       "detail": "Valid partner Bearer credentials are required",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 401,
+                     *       "title": "Unauthorized",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "WWW-Authenticate": components["headers"]["ProductBearerChallenge"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "access_denied",
+                     *       "detail": "Access is denied",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 403,
+                     *       "title": "Forbidden",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "not_found",
+                     *       "detail": "Resource was not found",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 404,
+                     *       "title": "Not Found",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "invalid_request",
+                     *       "detail": "Request parameters are invalid",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 422,
+                     *       "title": "Unprocessable Content",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Enabled shared PostgreSQL product quota exhausted (rate_limited), or generic injected application HTTP429 (internal_error). Quota is disabled by default. */
+            429: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal application error before response streaming starts. */
+            500: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "internal_error",
+                     *       "detail": "Request could not be completed",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 500,
+                     *       "title": "Internal Server Error",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "Retry-After": components["headers"]["ProductRetryAfter"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "api_unavailable",
+                     *       "detail": "Partner API is unavailable",
+                     *       "requestId": "00000000-0000-4000-8000-000000000001",
+                     *       "status": 503,
+                     *       "title": "Service Unavailable",
+                     *       "type": "about:blank"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getContractCreateOptions: {
+        parameters: {
+            query: {
+                cursor?: string | null;
+                pageSize?: number;
+                resource: "organization" | "counterparty" | "location" | "type";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fictional complete advisory response, not a captured runtime result. */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["ProductCacheControl"];
+                    "X-Request-Id": components["headers"]["ProductRequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractCreateOptions"];
                 };
             };
             /** @description Bad Request */
