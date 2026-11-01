@@ -535,7 +535,8 @@
         ],
         "orders": "delete первым; actual Org X/SET NULL, затем scope Org SHARE до любых Member rows",
         "outcomes": "old ownOrg==deleted -> wholeRoot409 без audit/DML scope; old ownOrg None -> disappearing proposed CLEAR None, обычные audit/commit/response",
-        "status": "AUTHORED/NOTRUN"
+        "status": "AUTHORED/NOTRUN",
+        "negative_oracle": "old_ref=True/409: trace очищен после actual legacy DELETE flush; до завершения контекста требуются ноль Scope INSERT/UPDATE/DELETE, notifications==[], pending new/dirty/deleted==(0,0,0), снятые до caller rollback. Committed audit0 проверяется дополнительно; rollback не подменяет no-DML доказательство."
       },
       {
         "id": "SCOPE-FIRST-LEGACY-DELETE",
@@ -574,5 +575,5 @@
       }
     ]
   },
-  "production_invariants": "Оба production-файла в V3 побайтно совпадают с предыдущим source составом; V3 меняет только новые PG definitions и сопровождающие MD/JSON."
+  "production_invariants": "Оба production-файла и unit в V4 побайтно совпадают с прежним production составом; V4 меняет только новый PG negative oracle и сопровождающие MD/JSON. 3 actual-caller определения и их 12 authored параметрических ветвей сохранены, все NOTRUN."
 }

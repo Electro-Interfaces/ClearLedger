@@ -43,3 +43,7 @@ BOTHORDERS, writerActor==scopeTarget/self и commit/rollback. CommitGateSession
 лишь задерживает настоящий commit; policy/helpers/SQL не подменены. До
 app-imports нужен approved P1/Source8 composition; отсутствие даёт ошибку,
 не skip/pass. Все определения NOTRUN; production-файлы V3 равны V2.
+
+V4 усиливает old-pointer409 oracle: после actual DELETE flush проверяются
+no Scope DML, notifications0 и ORM new/dirty/deleted0, снятые до rollback.
+Committed audit0 остаётся дополнительной проверкой; всё NOTRUN.

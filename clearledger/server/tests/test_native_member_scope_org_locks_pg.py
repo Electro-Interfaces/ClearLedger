@@ -617,6 +617,10 @@ async def actual_contender(store, invoke, *, actor_id=A, caller_commit=False):
                     if caller_commit:
                         await db.commit()
                 return result
+            except BaseException:
+                # Снимок до caller rollback не позволяет скрыть pending setter.
+                state["pending_before_rollback"] = (len(db.new), len(db.dirty), len(db.deleted))
+                raise
             finally:
                 await db.rollback()
     task = asyncio.create_task(worker())
@@ -652,6 +656,12 @@ async def test_actual_legacy_orgdelete_first_scope_waits_before_all_member_rows(
                     with pytest.raises(Exception) as error:
                         await asyncio.wait_for(scope_task, 15)
                     assert error.value.status_code == 409
+                    # Trace очищен после actual DELETE flush: caller rollback
+                    # не должен прятать ни Scope DML, ни pending setter/audit.
+                    assert not any(sql.lstrip().startswith(("insert ", "update ", "delete "))
+                                   for sql in store.statements)
+                    assert store.notifications == []
+                    assert scoping["pending_before_rollback"] == (0, 0, 0)
                 else:
                     response = await asyncio.wait_for(scope_task, 15)
                     assert response.own_organization_id is None
