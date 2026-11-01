@@ -277,5 +277,12 @@
   },
   "reviewerReleasedBeforeAck": true,
   "release": false,
-  "fullCI": false
+  "fullCI": false,
+  "separateG352Followup": {
+    "source": "a011e947f4fea9b61f63558e4055968470fd734f",
+    "status": "ACCEPT_G352_COMPONENT_SOURCE_RAW",
+    "cases": 52,
+    "canonical": "AUDIT_G3_ROOT_VERIFICATION_20261101.md/json",
+    "noCombined129": true
+  }
 }

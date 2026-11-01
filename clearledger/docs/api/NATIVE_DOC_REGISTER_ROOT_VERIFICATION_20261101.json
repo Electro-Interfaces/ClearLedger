@@ -432,5 +432,12 @@
   },
   "observationMeaning": "Immutable earlier observation retained; independent acceptance above supersedes pending status.",
   "currentFullCI": false,
-  "release": false
+  "release": false,
+  "separateG352CompatibilityFollowup": {
+    "source": "a011e947f4fea9b61f63558e4055968470fd734f",
+    "status": "ACCEPT_G352_COMPONENT_SOURCE_RAW",
+    "cases": 52,
+    "selected89Unchanged": true,
+    "fullCurrentCI": false
+  }
 }

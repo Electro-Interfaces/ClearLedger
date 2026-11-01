@@ -348,10 +348,16 @@
   },
   "g352": {
     "source": "a011e947f4fea9b61f63558e4055968470fd734f",
-    "status": "ACTUAL52PASS_PENDING_INDEPENDENT_SOURCE_RAW",
+    "status": "ACCEPT_G352_COMPONENT_SOURCE_RAW",
     "cases": 52,
     "definitions": 30,
     "phases": 156,
-    "secondsIncludingBootstrap": 34.00552360434085
+    "secondsIncludingBootstrap": 34.00552360434085,
+    "review": {
+      "REVIEW.md": "ed51a7dfaefe54531e2096fe9951f60e4bc36b7dcdd3b7af49c172934ea3ed4d",
+      "REVIEW.json": "70f80b9c9bdf33b82c234f3b065ed3cd1050532ae3e02f23d4e847a0549d0070",
+      "static-proof.json": "6befb09b834b3cfefb963d9b31806847982f2d3a96e8d66827151b10ca75f2b4"
+    },
+    "canonical": "AUDIT_G3_ROOT_VERIFICATION_20261101.md/json"
   }
 }
