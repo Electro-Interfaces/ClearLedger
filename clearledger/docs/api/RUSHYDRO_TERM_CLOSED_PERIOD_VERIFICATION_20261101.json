@@ -1,0 +1,33 @@
+{
+  "status": "PASS_ROOT_TERM_CLOSED_NATIVE34",
+  "sourceCommit": "9d5bc4fc0af8fbb7133e9548e5ee0a292a92f68a",
+  "authorCommit": "0e000ed11e24804a7dcaaff68715e240805b176b",
+  "functionalCases": 26,
+  "nativeCases": 8,
+  "cases": 34,
+  "testDefinitions": 2,
+  "passedPhases": 102,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "secondsIncludingBootstrap": 35.474162800237536,
+  "nativeModels": 341,
+  "nativeTables": 347,
+  "sqlEventsInCallPhases": 1112,
+  "sqlShapes": 603,
+  "noSQLObserverErrors": true,
+  "sameLoopPoolsClosed": true,
+  "clients": 0,
+  "locks": 0,
+  "ownedRemoved": true,
+  "foreignProjectionUnchanged": true,
+  "otherOwnerASTEqual": true,
+  "notCovered": [
+    "HTTP routes/auth",
+    "new contract cycle writers",
+    "new schema/receipts",
+    "legacy conftest suite",
+    "all final CI",
+    "deployment"
+  ]
+}
