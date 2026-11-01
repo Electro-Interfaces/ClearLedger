@@ -122,3 +122,11 @@ class ContractCreateProfileReadback(BaseModel):
     counterpartyIds: tuple[UUID, ...]
     locationIds: tuple[str, ...]
     typeCodes: tuple[str, ...]
+
+
+class ActivateContractCreateProfile(BaseModel):
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid", hide_input_in_errors=True)
+
+    expectedGeneration: _ProfileGeneration
+    userEnabled: bool
+    serviceEnabled: bool

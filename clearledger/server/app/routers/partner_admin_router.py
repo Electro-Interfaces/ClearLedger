@@ -280,3 +280,16 @@ async def read_contract_create_profile(
     db: AsyncSession = Depends(get_db), credentials=Depends(bearer_scheme),
 ):
     return await profile_admin_request(db, installation_id, credentials)
+
+
+from app.schemas_partner import ActivateContractCreateProfile
+from app.services.partner_contract_activation import activation_admin_request
+
+
+@router.put("/installations/{installation_id}/contract-create-profile/activation",
+            response_model=ContractCreateProfileReadback, include_in_schema=False)
+async def activate_contract_create_profile(
+    installation_id: uuid.UUID, body: ActivateContractCreateProfile,
+    db: AsyncSession = Depends(get_db), credentials=Depends(bearer_scheme),
+):
+    return await activation_admin_request(db, installation_id, credentials, body)
