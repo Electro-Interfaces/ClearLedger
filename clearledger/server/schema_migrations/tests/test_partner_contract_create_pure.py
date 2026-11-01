@@ -1,4 +1,4 @@
-"""Написаны, NOT RUN: offline0004 integrity и совместимость с head0006.
+"""Написаны, NOT RUN: offline0004 integrity и совместимость с head0007.
 
 Без driver/ORM/application imports. До запуска ROOT проверяет и замораживает
 новый source: прежние immutable acceptance helpers его не допускают.
@@ -27,11 +27,11 @@ def row(package):
 
 
 class PartnerContractCreatePure(unittest.TestCase):
-    def test_head6_default1_explicit3_4_5_6_and_frozen_artifact_ids(self):
+    def test_head7_default1_explicit3_4_5_6_7_and_frozen_artifact_ids(self):
         self.assertEqual(manifest.load().entry['id'], manifest.ID)
-        self.assertEqual(manifest.load_known_head().entry['id'], manifest.SITE_AUTHORITY_ID)
+        self.assertEqual(manifest.load_known_head().entry['id'], manifest.DOC_SITE_BUSINESS_ID)
         chain = runner._packages(manifest.load_known_head())
-        self.assertEqual(len(chain), 6)
+        self.assertEqual(len(chain), 7)
         self.assertEqual([chain[i].entry['artifact_sha256'] for i in (1, 2, 3, 4, 5)], [
             '301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1',
             '203ee350a47fb3e12d2e2fb6d292fc0e1a19b4cd3cd348b507551cf233cae2f0',
@@ -39,8 +39,10 @@ class PartnerContractCreatePure(unittest.TestCase):
             '58ff7a0cf33f7fb55fa080e4efe60c1a4aece67588cf1bfe8b44bc75e92c7e31',
             '99d6c539f5a5e4962926e6d8978db3a5487bab0d5fb20531b31cd95daf59d42d'])
         self.assertEqual(chain[6].entry['artifact_sha256'], '94f830704cee4366dfe9565370aac00de74143691e99b9b8f797d48ff51f4b7d')
+        self.assertEqual(chain[7].entry['artifact_sha256'], 'e4a5617c770751f019d1d618c8e9edce9de6e0ebae8ed5c0aed2b7b7b991a499')
         for ordinal, target in ((3, manifest.PULSE_ID), (4, manifest.CONTRACT_CREATE_ID),
-                (5, manifest.CONTRACT_CYCLE_RECEIPTS_ID), (6, manifest.SITE_AUTHORITY_ID)):
+                (5, manifest.CONTRACT_CYCLE_RECEIPTS_ID), (6, manifest.SITE_AUTHORITY_ID),
+                (7, manifest.DOC_SITE_BUSINESS_ID)):
             head, *_ = runner._sequence_source(target, None, 2000000000)
             self.assertEqual(head.entry['id'], target)
             self.assertEqual(head, manifest.load(revision=target))
@@ -49,7 +51,7 @@ class PartnerContractCreatePure(unittest.TestCase):
 
     def test_every_old_registry_prefix_loads_its_explicit_revision(self):
         registry = json.loads((manifest.ROOT / 'manifest.json').read_text())
-        for count in (1, 2, 3, 4, 5, 6):
+        for count in (1, 2, 3, 4, 5, 6, 7):
             with self.subTest(count=count), TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 shutil.copytree(manifest.ROOT / 'revisions', root / 'revisions')
@@ -64,11 +66,13 @@ class PartnerContractCreatePure(unittest.TestCase):
                         manifest.load(root, revision=manifest.CONTRACT_CYCLE_RECEIPTS_ID)
                 else:
                     self.assertEqual(manifest.load(root, revision=manifest.CONTRACT_CYCLE_RECEIPTS_ID).entry, registry['revisions'][4])
-                if count < 6:
+                if count >= 6:
+                    self.assertEqual(manifest.load(root, revision=manifest.SITE_AUTHORITY_ID).entry, registry['revisions'][5])
+                if count < 7:
                     with self.assertRaises(MigrationError):
                         manifest.load_known_head(root)
                 else:
-                    self.assertEqual(manifest.load_known_head(root).entry, registry['revisions'][5])
+                    self.assertEqual(manifest.load_known_head(root).entry, registry['revisions'][6])
 
     def test_all_successor_chain_fields_are_checked(self):
         packages = runner._packages(manifest.load(revision=manifest.CONTRACT_CREATE_ID))
@@ -94,7 +98,7 @@ class PartnerContractCreatePure(unittest.TestCase):
         with self.assertRaises(MigrationError):
             journal.validate_history(rows5 + [{**rows5[4], 'revision': '0006_future', 'ordinal': 6}],
                 known_head, 'clearledger')
-        actual_head = manifest.load_known_head()
+        actual_head = manifest.load(revision=manifest.SITE_AUTHORITY_ID)
         rows6 = rows5 + [row(actual_head)]
         self.assertTrue(journal.validate_history(rows6, actual_head, 'clearledger'))
         self.assertFalse(journal.validate_history(rows5, actual_head, 'clearledger'))
@@ -103,6 +107,16 @@ class PartnerContractCreatePure(unittest.TestCase):
         with self.assertRaises(MigrationError):
             journal.validate_history(rows6 + [{**rows6[5], 'revision': '0007_future', 'ordinal': 7}],
                 actual_head, 'clearledger')
+
+        newest_head = manifest.load_known_head()
+        rows7 = rows6 + [row(newest_head)]
+        self.assertTrue(journal.validate_history(rows7, newest_head, 'clearledger'))
+        self.assertFalse(journal.validate_history(rows6, newest_head, 'clearledger'))
+        with self.assertRaises(MigrationError):
+            journal.validate_history(rows7, actual_head, 'clearledger')
+        with self.assertRaises(MigrationError):
+            journal.validate_history(rows7 + [{**rows7[6], 'revision': '0008_future', 'ordinal': 8}],
+                newest_head, 'clearledger')
 
     def test_tampered_sql_contract_catalog_and_checksum_refuse(self):
         for suffix in ('.sql', '.json', '.py', 'artifact'):
@@ -121,19 +135,21 @@ class PartnerContractCreatePure(unittest.TestCase):
                 with self.assertRaises(MigrationError):
                     manifest.load(root, revision=manifest.ID)  # Старый requested package тоже проверяет весь известный source.
 
-    def test_unknown_seventh_unknown_sixth_fifth_names_and_foreign_fourth_refuse(self):
-        for mutation in ('seventh', 'sixth_name', 'fifth_name', 'foreign', 'parent'):
+    def test_unknown_eighth_unknown_seventh_sixth_fifth_names_and_foreign_fourth_refuse(self):
+        for mutation in ('eighth', 'seventh_name', 'sixth_name', 'fifth_name', 'foreign', 'parent'):
             with self.subTest(mutation=mutation), TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 shutil.copytree(manifest.ROOT / 'revisions', root / 'revisions')
                 registry = json.loads((manifest.ROOT / 'manifest.json').read_text())
                 (root / 'manifest.json').write_text(json.dumps(registry))
                 self.assertEqual(manifest.load(root).entry['id'], manifest.ID)
-                self.assertEqual(manifest.load_known_head(root).entry['id'], manifest.SITE_AUTHORITY_ID)
-                if mutation == 'seventh':
-                    future = copy.deepcopy(registry['revisions'][5])
-                    future.update(id='0007_future', ordinal=7, parent=manifest.SITE_AUTHORITY_ID)
+                self.assertEqual(manifest.load_known_head(root).entry['id'], manifest.DOC_SITE_BUSINESS_ID)
+                if mutation == 'eighth':
+                    future = copy.deepcopy(registry['revisions'][6])
+                    future.update(id='0008_future', ordinal=8, parent=manifest.DOC_SITE_BUSINESS_ID)
                     registry['revisions'].append(future)
+                elif mutation == 'seventh_name':
+                    registry['revisions'][6]['id'] = '0007_future'
                 elif mutation == 'sixth_name':
                     registry['revisions'][5]['id'] = '0006_future'
                 elif mutation == 'fifth_name':
@@ -144,11 +160,11 @@ class PartnerContractCreatePure(unittest.TestCase):
                 with self.assertRaises(MigrationError):
                     manifest.load(root)
 
-    def test_plan6_plan5_plan4_and_plan3_have_no_environment_access(self):
+    def test_plan7_plan6_plan5_plan4_and_plan3_have_no_environment_access(self):
         class NoEnvironment:
             def get(self, name):
                 raise AssertionError('offline plan read credentials')
-        for target in (manifest.PULSE_ID, manifest.CONTRACT_CREATE_ID, manifest.CONTRACT_CYCLE_RECEIPTS_ID, manifest.SITE_AUTHORITY_ID):
+        for target in (manifest.PULSE_ID, manifest.CONTRACT_CREATE_ID, manifest.CONTRACT_CYCLE_RECEIPTS_ID, manifest.SITE_AUTHORITY_ID, manifest.DOC_SITE_BUSINESS_ID):
             with redirect_stdout(io.StringIO()) as output:
                 code = runner.main(['plan', '--revision', target], NoEnvironment())
             self.assertEqual(code, 0)
