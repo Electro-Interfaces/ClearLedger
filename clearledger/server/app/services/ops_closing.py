@@ -24,6 +24,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ops_term_period_guard import lock_term_period_company
+
 from app.models import OpsCounterpartyDoc, OpsPeriodCharge, OpsPeriodClose
 from app.services.ops_expectations import (
     build_ctx,
@@ -313,6 +315,7 @@ async def close_period(db: AsyncSession, company_id: uuid.UUID, period: str,
     Без `force` закрытие останавливается и называет, сколько таких строк; с
     `force` они уходят в `waived` — «за месяц не начисляем», а не «начисляем 0».
     """
+    await lock_term_period_company(db, company_id, exclusive=True)
     period_row = await get_or_create(db, company_id, period)
     if period_row.status in CLOSED_STATUSES:
         raise ValueError(f"Период {period[:7]} уже закрыт")
@@ -391,6 +394,7 @@ async def close_period(db: AsyncSession, company_id: uuid.UUID, period: str,
 async def reopen_period(db: AsyncSession, company_id: uuid.UUID, period: str,
                         reason: str, user_id: uuid.UUID | None = None) -> dict[str, Any]:
     """Открыть закрытый месяц заново. Только с причиной — она остаётся навсегда."""
+    await lock_term_period_company(db, company_id, exclusive=True)
     if not (reason or "").strip():
         raise ValueError("Открытие закрытого периода требует причины")
     period_row = await get_or_create(db, company_id, period)

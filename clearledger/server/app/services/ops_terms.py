@@ -29,6 +29,9 @@ from app.models import (
     OpsPeriodCharge,
 )
 from app.services.ops_expectations import shift_month
+from app.services.ops_term_period_guard import (
+    check_term_periods, locked_term_snapshot, lock_term_period_company,
+)
 
 # Поля, которые человек правит в форме. Белый список: `company_id`, `contract_id`
 # и горизонт версии меняются только через свои операции, иначе условие можно
@@ -151,40 +154,47 @@ async def _check_window(db: AsyncSession, company_id, contract_id, *, cost_item,
 
 async def create_term(db: AsyncSession, company_id: uuid.UUID,
                       payload: dict[str, Any]) -> dict[str, Any]:
-    contract_id = payload.get("contractId") or payload.get("contract_id")
-    if not contract_id:
-        raise ValueError("Не указан договор")
-    contract = (await db.execute(select(Contract).where(
-        Contract.company_id == company_id,
-        Contract.id == uuid.UUID(str(contract_id)),
-    ))).scalar_one_or_none()
-    if contract is None:
-        raise ValueError("Договор не найден")
+    with db.no_autoflush:
+        await lock_term_period_company(db, company_id)
+        contract_id = payload.get("contractId") or payload.get("contract_id")
+        if not contract_id:
+            raise ValueError("Не указан договор")
+        contract_id = uuid.UUID(str(contract_id))
+        await _lock_contract_terms(db, company_id, contract_id)
+        # Column reads preserve caller-owned dirty identity-map state on refusal.
+        contract = (await db.execute(select(Contract.id, Contract.date, Contract.valid_until).where(
+            Contract.company_id == company_id, Contract.id == contract_id,
+        ).with_for_update())).one_or_none()
+        if contract is None:
+            raise ValueError("Договор не найден")
 
-    data = _clean(payload)
-    if not data.get("cost_item"):
-        raise ValueError("Не выбрана статья затрат")
-    _validate(data)
+        data = _clean(payload)
+        if not data.get("cost_item"):
+            raise ValueError("Не выбрана статья затрат")
+        _validate(data)
 
-    # Горизонт версии: начало — от договора, если человек не указал явно. Так
-    # условие покрывает историю, а не только будущее.
-    valid_from = (payload.get("validFrom") or payload.get("valid_from")
-                  or contract.date or date.today().isoformat())[:10]
-    valid_to = (payload.get("validTo") or payload.get("valid_to")
-                or contract.valid_until or None)
-    await _check_window(db, company_id, contract.id, cost_item=data["cost_item"],
-                        location_id=data.get("location_id"), valid_from=valid_from,
-                        valid_to=valid_to[:10] if valid_to else None)
+        # Горизонт версии: начало — от договора, если человек не указал явно. Так
+        # условие покрывает историю, а не только будущее.
+        valid_from = (payload.get("validFrom") or payload.get("valid_from")
+                      or contract.date or date.today().isoformat())[:10]
+        valid_to = (payload.get("validTo") or payload.get("valid_to")
+                    or contract.valid_until or None)
+        await _check_window(db, company_id, contract.id, cost_item=data["cost_item"],
+                            location_id=data.get("location_id"), valid_from=valid_from,
+                            valid_to=valid_to[:10] if valid_to else None)
 
-    row = OpsContractTerm(
-        company_id=company_id, contract_id=contract.id,
-        valid_from=valid_from, valid_to=(valid_to[:10] if valid_to else None),
-        scope_type=data.pop("scope_type", None) or "location",
-        periodicity=data.pop("periodicity", None) or "monthly",
-        source="manual", **data)
-    db.add(row)
-    await db.flush()
-    return _as_dict(row)
+        await check_term_periods(db, company_id,
+                                [(valid_from, valid_to[:10] if valid_to else None)])
+
+        row = OpsContractTerm(
+            company_id=company_id, contract_id=contract.id,
+            valid_from=valid_from, valid_to=(valid_to[:10] if valid_to else None),
+            scope_type=data.pop("scope_type", None) or "location",
+            periodicity=data.pop("periodicity", None) or "monthly",
+            source="manual", **data)
+        db.add(row)
+        await db.flush()
+        return _as_dict(row)
 
 
 async def update_term(db: AsyncSession, company_id: uuid.UUID, term_id: uuid.UUID,
@@ -194,62 +204,68 @@ async def update_term(db: AsyncSession, company_id: uuid.UUID, term_id: uuid.UUI
     Новая версия — правильный способ поднять ставку: старая закрывается днём
     раньше начала новой, и суммы уже закрытых месяцев остаются как были.
     """
-    contract_id = await db.scalar(select(OpsContractTerm.contract_id).where(
-        OpsContractTerm.company_id == company_id,
-        OpsContractTerm.id == term_id,
-    ))
-    if contract_id is None:
-        raise ValueError("Условие не найдено")
-    # Сначала общий барьер, затем свежий снимок. Иначе ожидающий PATCH проверял
-    # старую статью/дату, а записывал уже изменённую соседним запросом строку.
-    await _lock_contract_terms(db, company_id, contract_id)
-    term = (await db.execute(select(OpsContractTerm).where(
-        OpsContractTerm.company_id == company_id, OpsContractTerm.id == term_id,
-    ).execution_options(populate_existing=True))).scalar_one_or_none()
-    if term is None:
-        raise ValueError("Условие не найдено")
+    with db.no_autoflush:
+        await lock_term_period_company(db, company_id)
+        contract_id = await db.scalar(select(OpsContractTerm.contract_id).where(
+            OpsContractTerm.company_id == company_id,
+            OpsContractTerm.id == term_id,
+        ))
+        if contract_id is None:
+            raise ValueError("Условие не найдено")
+        await _lock_contract_terms(db, company_id, contract_id)
+        term = await locked_term_snapshot(db, company_id, term_id)
 
-    data = _clean(payload)
-    _validate({**{k: getattr(term, k) for k in EDITABLE if hasattr(term, k)}, **data})
+        data = _clean(payload)
+        _validate({**{k: getattr(term, k) for k in EDITABLE if hasattr(term, k)}, **data})
 
-    if not new_version:
-        start = str(payload.get("validFrom") or payload.get("valid_from") or term.valid_from)[:10]
-        end = term.valid_to
-        if "validTo" in payload or "valid_to" in payload:
-            end = payload.get("validTo", payload.get("valid_to")) or None
-            end = str(end)[:10] if end else None
+        if not new_version:
+            start = str(payload.get("validFrom") or payload.get("valid_from") or term.valid_from)[:10]
+            end = term.valid_to
+            if "validTo" in payload or "valid_to" in payload:
+                end = payload.get("validTo", payload.get("valid_to")) or None
+                end = str(end)[:10] if end else None
+            await _check_window(db, company_id, term.contract_id,
+                                cost_item=data.get("cost_item", term.cost_item),
+                                location_id=data.get("location_id", term.location_id),
+                                valid_from=start, valid_to=end, exclude_id=term.id)
+            await check_term_periods(db, company_id,
+                                    [(term.valid_from, term.valid_to), (start, end)])
+            term = await db.get(OpsContractTerm, term_id, populate_existing=True)
+            for col, value in data.items():
+                setattr(term, col, value)
+            term.valid_from, term.valid_to = start, end
+            await db.flush()
+            return _as_dict(term)
+
+        valid_from = str(payload.get("validFrom") or payload.get("valid_from")
+                         or shift_month(date.today().isoformat()[:7] + "-01", 1))[:10]
+        if valid_from <= term.valid_from:
+            raise ValueError("Новая версия должна начинаться позже текущей")
+        # Старая версия действует по день перед началом новой. Пересечения быть не
+        # должно: иначе месяц развернулся бы дважды, по обеим версиям.
+        fields = {col: getattr(term, col) for col in EDITABLE if hasattr(term, col)}
+        fields.update(data)
+        end = str(payload.get("validTo"))[:10] if payload.get("validTo") else None
         await _check_window(db, company_id, term.contract_id,
-                            cost_item=data.get("cost_item", term.cost_item),
-                            location_id=data.get("location_id", term.location_id),
-                            valid_from=start, valid_to=end, exclude_id=term.id)
-        for col, value in data.items():
-            setattr(term, col, value)
-        term.valid_from, term.valid_to = start, end
+                            cost_item=fields["cost_item"], location_id=fields.get("location_id"),
+                            valid_from=valid_from, valid_to=end, exclude_id=term.id)
+        # Union only the new range and the old tail that is actually cut off.
+        # An expired finite version is not extended into the effective-date gap.
+        ranges = [(valid_from, end)]
+        if term.valid_to is None or term.valid_to >= valid_from:
+            ranges.append((valid_from, term.valid_to))
+        await check_term_periods(db, company_id, ranges)
+        term = await db.get(OpsContractTerm, term_id, populate_existing=True)
+        prev_day = date.fromordinal(date.fromisoformat(valid_from).toordinal() - 1).isoformat()
+        term.valid_to = min(term.valid_to, prev_day) if term.valid_to else prev_day
+        row = OpsContractTerm(
+            company_id=company_id, contract_id=term.contract_id,
+            valid_from=valid_from,
+            valid_to=end,
+            source="manual", **fields)
+        db.add(row)
         await db.flush()
-        return _as_dict(term)
-
-    valid_from = str(payload.get("validFrom") or payload.get("valid_from")
-                     or shift_month(date.today().isoformat()[:7] + "-01", 1))[:10]
-    if valid_from <= term.valid_from:
-        raise ValueError("Новая версия должна начинаться позже текущей")
-    # Старая версия действует по день перед началом новой. Пересечения быть не
-    # должно: иначе месяц развернулся бы дважды, по обеим версиям.
-    fields = {col: getattr(term, col) for col in EDITABLE if hasattr(term, col)}
-    fields.update(data)
-    end = str(payload.get("validTo"))[:10] if payload.get("validTo") else None
-    await _check_window(db, company_id, term.contract_id,
-                        cost_item=fields["cost_item"], location_id=fields.get("location_id"),
-                        valid_from=valid_from, valid_to=end, exclude_id=term.id)
-    prev_day = date.fromordinal(date.fromisoformat(valid_from).toordinal() - 1).isoformat()
-    term.valid_to = min(term.valid_to, prev_day) if term.valid_to else prev_day
-    row = OpsContractTerm(
-        company_id=company_id, contract_id=term.contract_id,
-        valid_from=valid_from,
-        valid_to=end,
-        source="manual", **fields)
-    db.add(row)
-    await db.flush()
-    return _as_dict(row)
+        return _as_dict(row)
 
 
 async def delete_term(db: AsyncSession, company_id: uuid.UUID,
@@ -260,25 +276,31 @@ async def delete_term(db: AsyncSession, company_id: uuid.UUID,
     исчезновение условия не отменяет того, что месяц был закрыт этой суммой.
     Удаляем только ожидания, которых ещё никто не касался.
     """
-    term = (await db.execute(select(OpsContractTerm).where(
-        OpsContractTerm.company_id == company_id,
-        OpsContractTerm.id == term_id,
-    ))).scalar_one_or_none()
-    if term is None:
-        raise ValueError("Условие не найдено")
+    with db.no_autoflush:
+        await lock_term_period_company(db, company_id)
+        contract_id = await db.scalar(select(OpsContractTerm.contract_id).where(
+            OpsContractTerm.company_id == company_id, OpsContractTerm.id == term_id,
+        ))
+        if contract_id is None:
+            raise ValueError("Условие не найдено")
+        await _lock_contract_terms(db, company_id, contract_id)
+        snapshot = await locked_term_snapshot(db, company_id, term_id)
+        await check_term_periods(db, company_id, [(snapshot.valid_from, snapshot.valid_to)],
+                                deleting_term_id=term_id)
+        term = await db.get(OpsContractTerm, term_id, populate_existing=True)
 
-    open_rows = (await db.execute(select(OpsPeriodCharge).where(
-        OpsPeriodCharge.company_id == company_id,
-        OpsPeriodCharge.term_id == term_id,
-        OpsPeriodCharge.status == "expected",
-        OpsPeriodCharge.doc_id.is_(None),
-    ))).scalars().all()
-    for row in open_rows:
-        await db.delete(row)
-    # У остальных строк связь обнулится каскадом (SET NULL) — история цела.
-    await db.delete(term)
-    await db.flush()
-    return {"ok": True, "removedCharges": len(open_rows)}
+        open_rows = (await db.execute(select(OpsPeriodCharge).where(
+            OpsPeriodCharge.company_id == company_id,
+            OpsPeriodCharge.term_id == term_id,
+            OpsPeriodCharge.status == "expected",
+            OpsPeriodCharge.doc_id.is_(None),
+        ))).scalars().all()
+        for row in open_rows:
+            await db.delete(row)
+        # У остальных строк связь обнулится каскадом (SET NULL) — история цела.
+        await db.delete(term)
+        await db.flush()
+        return {"ok": True, "removedCharges": len(open_rows)}
 
 
 # ── Документы ──────────────────────────────────────────────────────────────
