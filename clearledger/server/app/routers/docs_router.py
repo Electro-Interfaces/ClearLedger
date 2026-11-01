@@ -65,6 +65,9 @@ from app.services import (
     task_mail, work_state,
 )
 from app.services.doc_numbers import next_number, render, scope_key
+from app.services.native_doc_create_locks import (
+    assert_doc_create_clean, prepare_doc_create, refresh_doc_create,
+)
 # Совместимые имена для прежних HTTP-адаптеров; владелец policy — сервис.
 from app.services.doc_access import (
     _CONTENT_PERMISSIONS,
@@ -2212,40 +2215,54 @@ async def create_doc(
 ):
     """Завести карточку. Номера у неё пока нет: регистрация — отдельное действие,
     и черновик обязан отличаться от зарегистрированного документа."""
-    cid = await assert_company_product(payload.company_id, current_user, db, "docs")
-    kind = await _kind_or_404(db, cid, payload.kind_id)
-    attrs = _validate_attrs(kind, payload.attrs, required=False)
+    assert_doc_create_clean(db)
+    prepared = await prepare_doc_create(
+        db, current_user, payload.company_id, kind_id=payload.kind_id,
+        organization_id=payload.organization_id, counterparty_id=payload.counterparty_id,
+        responsible_id=payload.responsible_id, signatory_id=payload.signatory_id,
+        source=payload.source, source_ref=payload.source_ref,
+    )
+    current_user = prepared.actor
+    cid = prepared.company_id
 
-    await _assert_ref(db, cid, payload.subject_ref, "subject_ref", user=current_user)
-    if payload.object_id:
-        await _assert_ref(db, cid, f"object:{payload.object_id}", "object_id")
+    async def validated_values():
+        cid = await assert_company_product(payload.company_id, current_user, db, "docs")
+        kind = await _kind_or_404(db, cid, payload.kind_id)
+        attrs = _validate_attrs(kind, payload.attrs, required=False)
 
-    name = payload.counterparty_name.strip()
-    if payload.counterparty_id:
-        # Компанию проверяем и здесь: без неё имя подтягивалось бы от контрагента
-        # соседнего пространства, а карточка вставала бы на чужую ссылку.
-        found = (await db.execute(select(Counterparty.name).where(
-            Counterparty.id == _uuid_or_400(payload.counterparty_id, "counterparty_id"),
-            Counterparty.company_id == cid))).scalar_one_or_none()
-        if found is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND,
-                                "Контрагент не найден в этой компании")
-        if not name:
-            name = found
+        await _assert_ref(db, cid, payload.subject_ref, "subject_ref", user=current_user)
+        if payload.object_id:
+            await _assert_ref(db, cid, f"object:{payload.object_id}", "object_id")
 
-    values = {
-        "title": payload.title.strip(), "summary": payload.summary,
-        "organization_id": await _organization_id(db, cid, payload.organization_id),
-        "counterparty_id": _uuid_or_400(payload.counterparty_id, "counterparty_id")
-        if payload.counterparty_id else None,
-        "counterparty_name": name,
-        "external_number": payload.external_number, "external_date": payload.external_date,
-        "subject_ref": payload.subject_ref, "object_id": payload.object_id or None,
-        "responsible_id": await _company_user_id(db, cid, payload.responsible_id, "responsible_id"),
-        "signatory_id": await _company_user_id(db, cid, payload.signatory_id, "signatory_id"),
-        "due_at": payload.due_at, "confidentiality": payload.confidentiality,
-        "attrs": attrs or None, "source": payload.source, "source_ref": payload.source_ref,
-    }
+        name = payload.counterparty_name.strip()
+        if payload.counterparty_id:
+            # Компанию проверяем и здесь: без неё имя подтягивалось бы от контрагента
+            # соседнего пространства, а карточка вставала бы на чужую ссылку.
+            found = (await db.execute(select(Counterparty.name).where(
+                Counterparty.id == _uuid_or_400(payload.counterparty_id, "counterparty_id"),
+                Counterparty.company_id == cid))).scalar_one_or_none()
+            if found is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                    "Контрагент не найден в этой компании")
+            if not name:
+                name = found
+
+        values = {
+            "title": payload.title.strip(), "summary": payload.summary,
+            "organization_id": await _organization_id(db, cid, payload.organization_id),
+            "counterparty_id": _uuid_or_400(payload.counterparty_id, "counterparty_id")
+            if payload.counterparty_id else None,
+            "counterparty_name": name,
+            "external_number": payload.external_number, "external_date": payload.external_date,
+            "subject_ref": payload.subject_ref, "object_id": payload.object_id or None,
+            "responsible_id": await _company_user_id(db, cid, payload.responsible_id, "responsible_id"),
+            "signatory_id": await _company_user_id(db, cid, payload.signatory_id, "signatory_id"),
+            "due_at": payload.due_at, "confidentiality": payload.confidentiality,
+            "attrs": attrs or None, "source": payload.source, "source_ref": payload.source_ref,
+        }
+        return kind, values
+
+    kind, values = await validated_values()
     # Ключ принадлежит одному намерению создать бумагу договора. Повтор после
     # потери HTTP-ответа возвращает её прежний ID, а не сливает похожие документы.
     if payload.source == "manual" and (payload.source_ref or "").startswith("contract-document:"):
@@ -2253,6 +2270,9 @@ async def create_doc(
         values["source_ref"] = f"contract-document:{token}"
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
                          {"key": f"doc-create:{cid}:{values['source_ref']}"})
+        await refresh_doc_create(db, prepared)
+        kind, values = await validated_values()
+        values["source_ref"] = f"contract-document:{token}"
         previous = (await db.execute(select(DocCard).where(
             DocCard.company_id == cid, DocCard.source == "manual",
             DocCard.source_ref == values["source_ref"],
@@ -2268,6 +2288,7 @@ async def create_doc(
                 raise HTTPException(409, "Этот ключ создания уже использован с другими реквизитами документа")
             return _card_out(previous, {str(kind.id): kind.name})
 
+    prepared.require(db)
     d = DocCard(company_id=cid, kind_id=kind.id, kind_code=kind.code,
                 family=kind.family, direction=kind.direction,
                 author_id=current_user.id, **values)
