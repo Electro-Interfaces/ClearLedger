@@ -228,7 +228,61 @@ async def test_true_requires_corresponding_principal_and_nonempty_legal_selectio
 
 
 async def test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union(world, monkeypatch):
+    from collections import Counter
+    from sqlalchemy import Column, Integer, Table
+    from sqlalchemy.sql import operators, visitors
+    from sqlalchemy.sql.annotation import (AnnotatedBinaryExpression, AnnotatedBindParameter,
+        AnnotatedBooleanClauseList, AnnotatedColumn, AnnotatedTable)
+    from sqlalchemy.sql.base import DialectKWArgs
+    from sqlalchemy.sql.dml import Delete, Insert, Update
+    from sqlalchemy.sql.elements import (BindParameter, BinaryExpression, BooleanClauseList,
+        ClauseList, ColumnClause, False_, Grouping, Null, TextClause, True_, quoted_name)
+    from sqlalchemy.sql.selectable import ForUpdateArg, HasHints, HasPrefixes, HasSuffixes, Select
+    from sqlalchemy.sql.sqltypes import NullType
+    from app.models_partner import PartnerCredential
+
     w, observed, sql, dml = world, [], [], []
+    parent_tables = tuple(model.__table__ for model in
+                          (Counterparty, Organization, ServiceLocation, UserCompany))
+    # Finite current activation grammar, not an arbitrary SQLAlchemy program.
+    # Exact annotation wrappers retain ordinary ORM entity/column SELECTs.
+    mapped_tables = tuple(model.__table__ for model in (
+        App, AuditEvent, Company, CompanyApp, CompanyRole, Counterparty,
+        Organization, ServiceLocation, User, UserCompany, Contract, DocCard,
+        EzsEquipmentUnit, PartnerClient, PartnerCredential, PartnerGrant,
+        PartnerInstallation, PartnerInstallationLocation, PartnerResourceScope,
+        PartnerResourceItem, Profile, Principal, Ref, Type))
+    mapped_columns = tuple(column for table in mapped_tables for column in table.c)
+    expression_types = (Select, Insert, Update, TextClause, Table, AnnotatedTable,
+        Column, AnnotatedColumn, BindParameter, BinaryExpression, BooleanClauseList,
+        AnnotatedBindParameter, AnnotatedBinaryExpression, AnnotatedBooleanClauseList,
+        ClauseList, Grouping, Null, True_, False_, ForUpdateArg)
+    # Exact source-owned text statements only: raw/unclassified SQL must fail
+    # closed, including commented or WITH-prefixed DML and driver SQL.
+    read_only_text = {
+        "SELECT pg_advisory_xact_lock_shared(CAST(:namespace AS INTEGER), CAST(:key AS INTEGER))",
+        "SELECT pg_advisory_xact_lock(CAST(:namespace AS INTEGER), CAST(:key AS INTEGER))",
+        "SELECT code, is_active FROM core.contract_types WHERE code=:code",
+        "SELECT code FROM core.contract_types WHERE code=:code FOR SHARE",
+    }
+
+    def bound_identity(statement, compiled, context, table, names):
+        where = statement.whereclause
+        assert isinstance(where, BooleanClauseList) and where.operator is operators.and_
+        values = {name: [] for name in names}
+        assert len(context.compiled_parameters) == 1
+        parameters = context.compiled_parameters[0]
+        for term in where.clauses:
+            assert isinstance(term, BinaryExpression)
+            column = term.left
+            if (getattr(column, "table", None) is not None
+                    and column.table._deannotate() is table and column.name in values):
+                assert term.operator is operators.eq and isinstance(term.right, BindParameter)
+                # compiled may be cached; the current execution owns the values.
+                values[column.name].append(parameters[compiled.bind_names[term.right]])
+        assert all(items and all(value == items[0] for value in items) for items in values.values())
+        return tuple(values[name][0] for name in names)
+
     original = identity.acquire_scoped_locks
     original_activation = activation.activate_partner_contract_create_profile
     contexts = []
@@ -248,10 +302,155 @@ async def test_one_original_b_exact_x_keys_full_closure_and_physical_parent_unio
         contexts.append((db, root, connection))
         return result
     def statements(conn, cursor, statement, params, context, many):
-        if "FOR SHARE" in statement or "FOR UPDATE" in statement:
-            sql.append((statement, str(params)))
-        if statement.lstrip().upper().startswith(("INSERT ", "UPDATE ", "DELETE ")):
-            dml.append(statement)
+        compiled = context.compiled
+        assert compiled is not None, "Unclassified driver SQL during activation"
+        assert not many, "Unexpected executemany during activation"
+        invoked = compiled.statement
+        state = compiled.compile_state
+        actual = invoked if isinstance(invoked, TextClause) else state.statement
+        # SQLAlchemy 2.0.36 initializes ctes only upon encountering a CTE;
+        # nested WITH rendering can empty that mapping again. Require None,
+        # not merely an empty mapping, before accepting ANY statement.
+        assert compiled.ctes is None, "Unexpected compiled CTE source during activation"
+        if (isinstance(invoked, (Insert, Update, Delete))
+                or isinstance(actual, (Insert, Update, Delete))):
+            # The pinned ORM flush creates core Table.insert()/update().
+            # Seal BOTH roots to those exact primitives: dialect/annotated
+            # subclasses may render extensions outside visitor traversal.
+            assert type(invoked) is type(actual) and type(actual) in (Insert, Update), \
+                "Unexpected nonprimitive DML root during activation"
+            assert compiled.dml_compile_state is state
+            for expression in (invoked, actual):
+                if type(expression) is Insert:
+                    # ON CONFLICT SET/WHERE can be opaque traversal leaves.
+                    # Reject every post-values extension, even on core Insert.
+                    assert expression._post_values_clause is None, \
+                        "Unexpected INSERT post-values clause during activation"
+                    assert expression.select is None, "Unexpected INSERT SELECT source during activation"
+                    # dp_dml_multi_values is another opaque children slot.
+                    assert not expression._multi_values, "Unexpected multi-values INSERT during activation"
+            # UPDATE infers FROM separately from get_children(), including
+            # proxy-column tables in WHERE/SET. Check the compiler-owned
+            # collection directly; this flat profile write needs no FROM.
+            if type(actual) is Update:
+                assert not state._extra_froms, "Unexpected DML FROM source during activation"
+        # literal_column renders raw SQL but is a traversal leaf, even inside
+        # SELECT/CTE/DML expressions. Check both compiled trees before any
+        # acceptance/early return. This activation uses mapped columns/binds;
+        # state's count(*) runs outside this listener, so no literal escape.
+        for expression in (invoked, actual):
+            expression_nodes = tuple(visitors.iterate(expression))
+            for node in expression_nodes:
+                # Check the owning mixins directly: hints contain plain strings
+                # outside get_children(), and dialect options are opaque too.
+                # No dialect or literal-specific exception and no getattr-based
+                # positive fallback; reject metadata even if PG ignores it.
+                if isinstance(node, HasHints):
+                    assert not node._statement_hints, "Unexpected statement hints during activation"
+                if isinstance(node, (Select, Insert, Update, Delete)):
+                    assert not node._hints, "Unexpected table hints during activation"
+                if isinstance(node, HasPrefixes):
+                    assert not node._prefixes, "Unexpected SQL prefixes during activation"
+                if isinstance(node, HasSuffixes):
+                    assert not node._suffixes, "Unexpected SQL suffixes during activation"
+                if isinstance(node, DialectKWArgs):
+                    assert not node.dialect_kwargs, "Unexpected dialect extensions during activation"
+                # Unsupported opaque functions, custom nodes, labels, aliases,
+                # raw ColumnClause names and operator strings are not admitted.
+                assert type(node) in expression_types, "Unexpected SQL construct during activation"
+                if type(node) in (Table, AnnotatedTable, Column, AnnotatedColumn):
+                    plain = node._deannotate()
+                    if isinstance(node, Table):
+                        assert any(plain is table for table in mapped_tables)
+                        assert node.schema is None and plain.schema is None
+                    else:
+                        assert any(plain is column for column in mapped_columns)
+                        assert node.table is plain.table and node.type is plain.type
+                    assert node.name == plain.name
+                    name = node.name
+                    assert type(name) in (str, quoted_name)
+                    assert type(name) is str or name.quote is not False
+                    assert (name and name.isascii() and (name[0].isalpha() or name[0] == "_")
+                            and all(char.isalnum() or char == "_" for char in name)), \
+                        "Unexpected SQL identifier during activation"
+                if isinstance(node, BindParameter):
+                    assert not node.literal_execute, "Unexpected literal-execute bind during activation"
+                    assert (type(node.type) in (NullType, Integer)
+                            or any(node.type is column.type for column in mapped_columns)), \
+                        "Unexpected bind SQL type during activation"
+                if isinstance(node, BinaryExpression):
+                    assert any(node.operator is operator for operator in
+                               (operators.eq, operators.in_op, operators.is_))
+                    assert not node.modifiers
+                if isinstance(node, BooleanClauseList):
+                    assert node.operator is operators.and_
+                if type(node) is ClauseList:
+                    assert node.operator is operators.comma_op
+            if isinstance(expression, (Insert, Update, Delete)):
+                assert not any(isinstance(node, Select) for node in expression_nodes), \
+                    "Unexpected DML SELECT source during activation"
+            assert not any(isinstance(node, ColumnClause) and node.is_literal
+                           for node in expression_nodes), \
+                "Unexpected literal column SQL during activation"
+            # Only a root Select may own a row lock. Traverse both trees,
+            # including scalar subqueries, aliases and CTEs, before any return
+            # or DML acceptance: outer nonlocking SELECT/DML cannot hide one.
+            # Pinned activation sources require no nested locking SELECT.
+            assert not any(isinstance(node, Select) and node is not expression
+                           and node._for_update_arg is not None
+                           for node in expression_nodes), \
+                "Unexpected nested row lock during activation"
+            assert not any(node is not expression
+                           and isinstance(node, (Insert, Update, Delete, TextClause))
+                           for node in expression_nodes), \
+                "Unexpected nested DML or textual SQL during activation"
+        if isinstance(invoked, TextClause):
+            assert invoked.text in read_only_text, "Unexpected textual SQL during activation"
+            assert not (context.isinsert or context.isupdate or context.isdelete)
+            return
+        flags = (context.isinsert, context.isupdate, context.isdelete)
+        if isinstance(actual, (Insert, Update, Delete)):
+            operation = type(actual)
+            assert flags == tuple(operation is kind for kind in (Insert, Update, Delete))
+            assert all(node is actual for node in visitors.iterate(actual)
+                       if isinstance(node, (Insert, Update, Delete)))
+            assert not any(isinstance(node, TextClause) for node in visitors.iterate(actual))
+            table = actual.table
+            assert isinstance(table, Table)
+            expected = {Insert: AuditEvent.__table__, Update: Profile.__table__}
+            assert operation in expected and table._deannotate() is expected[operation]
+            assert (table.name, table.schema) == (expected[operation].name, expected[operation].schema)
+            assert not many and len(context.compiled_parameters) == 1
+            assert len(observed) == 1 and conn is observed[0][2]
+            dml.append((operation, table.name, table.schema))
+            return
+        assert isinstance(actual, Select) and flags == (False, False, False)
+        nodes = tuple(visitors.iterate(actual))
+        assert not any(isinstance(node, (Insert, Update, Delete, TextClause)) for node in nodes), \
+            "Unexpected nested DML or textual SQL during activation"
+        locking = actual._for_update_arg
+        if locking is None:
+            return
+        tables = [table for table in parent_tables if any(
+            isinstance(node, Table) and (node.name, node.schema) == (table.name, table.schema)
+            for node in nodes)]
+        if not tables:
+            return
+        assert len(tables) == 1
+        table = tables[0]
+        froms = actual.get_final_froms()
+        assert len(froms) == 1 and isinstance(froms[0], Table)
+        assert froms[0]._deannotate() is table
+        assert (froms[0].name, froms[0].schema) == (table.name, table.schema)
+        assert locking.read is True
+        assert not locking.key_share and not locking.nowait and not locking.skip_locked
+        assert locking.of is None
+        assert not many
+        assert len(observed) == 1 and conn is observed[0][2]
+        names = ("user_id", "company_id") if table is UserCompany.__table__ else ("id", "company_id")
+        ident, company = bound_identity(actual, compiled, context, table, names)
+        assert company == w.company
+        sql.append((table, ident))
     monkeypatch.setattr(identity, "acquire_scoped_locks", observe)
     monkeypatch.setattr(activation, "activate_partner_contract_create_profile", on_actual_session)
     engine = w.factory.kw["bind"].sync_engine
@@ -263,20 +462,25 @@ async def test_one_original_b_exact_x_keys_full_closure_and_physical_parent_unio
     assert len(observed) == 1
     assert len(contexts) == 1
     assert len(dml) == 2
-    assert all("core.partner_contract_create_profiles" in statement or "core.audit_events" in statement for statement in dml)
+    assert Counter(dml) == Counter({
+        (Insert, AuditEvent.__table__.name, AuditEvent.__table__.schema): 1,
+        (Update, Profile.__table__.name, Profile.__table__.schema): 1,
+    })
     db, root, connection, cap, plan = observed[0]
     assert len(plan.requests) == len({r.key for r in plan.requests})
     keys = {r.key: r.mode for r in plan.requests}
     assert keys[locks.InstallationKey(w.iid)] == locks.LockMode.EXCLUSIVE
     assert keys[locks.CreateProfileKey(UUID((await w.http.get(w.base, headers=w.headers)).json()["profileId"]))] == locks.LockMode.EXCLUSIVE
     assert {locks.CompanyKey(w.home), locks.RoleKey(w.company, w.role), locks.UserKey(w.member)} <= keys.keys()
-    member_index = next(i for i, (statement, _) in enumerate(sql) if "core.user_companies" in statement)
-    for table, ids in [("core.counterparties", [w.cp, w.extra_cp]),
-                       ("core.organizations", [w.org, w.extra_org]),
-                       ("core.service_locations", [w.loc, w.extra_loc])]:
-        entries = [(i, params) for i, (statement, params) in enumerate(sql) if table in statement]
-        assert len(entries) == len(ids) and all(i < member_index for i, _ in entries)
-        assert all(any(str(ident) in params for _, params in entries) for ident in ids)
+    expected_parents = [(model.__table__, ident)
+        for model, ids in ((Counterparty, (w.cp, w.extra_cp)),
+                           (Organization, (w.org, w.extra_org)),
+                           (ServiceLocation, (w.loc, w.extra_loc)))
+        for ident in sorted(ids)]
+    expected_members = [(UserCompany.__table__, ident) for ident in sorted((w.admin, w.member), key=str)]
+    # Exactly the physical union, once per ID, in canonical model/ID order;
+    # every parent SHARE precedes the first Member SHARE on the original root.
+    assert sql == expected_parents + expected_members
     with pytest.raises(locks.ScopedLockError):
         locks.require_scoped_locks(db, cap, plan.requests)  # Completed original root.
 
