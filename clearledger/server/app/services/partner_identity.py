@@ -15,11 +15,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
-from typing import Literal, Mapping
+from typing import Literal, Mapping, Callable
 from urllib.parse import urlsplit
 
 import jwt
-from authlib.oauth2.rfc6749 import AuthorizationServer, InvalidGrantError, InvalidRequestError, InvalidScopeError, OAuth2Request
+from authlib.oauth2.rfc6749 import AuthorizationServer, InvalidClientError, InvalidGrantError, InvalidRequestError, InvalidScopeError, OAuth2Request
 from authlib.oauth2.rfc6749.grants import AuthorizationCodeGrant, ClientCredentialsGrant, RefreshTokenGrant
 from authlib.oauth2.rfc6749.requests import BasicOAuth2Payload
 from authlib.oauth2.rfc7009 import RevocationEndpoint
@@ -35,13 +35,18 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.util import await_only
 
-from app.auth import MAX_SESSION_DAYS, current_token_claims, get_current_user
+from app.auth import (MAX_SESSION_DAYS, current_token_claims, get_current_user,
+    decode_token, native_user_from_claims, native_visit_from_claims, native_claims_context)
 from app.config import get_settings
 from app.database import get_db
 from app.models import App, Company, CompanyApp, CompanyRole, ServiceLocation, User, UserCompany, Counterparty, Contract, DocCard, EzsEquipmentUnit
 from app.models_partner import (PartnerClient, PartnerCode, PartnerCredential,
-    PartnerGrant, PartnerInstallation, PartnerInstallationLocation, PartnerResourceItem, PartnerResourceScope, PartnerSubject, PartnerToken, PartnerTokenFamily)
+    PartnerGrant, PartnerInstallation, PartnerInstallationLocation, PartnerResourceItem, PartnerResourceScope, PartnerSubject, PartnerToken, PartnerTokenFamily, PartnerAuthorizationRequest)
+from app.services.contract_write_locks import (AppKey, ClientKey, CompanyKey, UserKey,
+    MemberKey, RoleKey, InstallationKey, LockMode, LockRequest, LockPlan,
+    ScopedLockCapability, ScopedLockError, acquire_scoped_locks, require_scoped_locks)
 
 settings = get_settings()
 NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
@@ -368,6 +373,351 @@ def pairwise_subject(db: Session, user_id: uuid.UUID, client_id: str) -> str:
     return db.get(PartnerSubject, (user_id, client_id)).subject
 
 
+# Canonical rows are a separate obligation from the typed advisory receipt.
+# These private descriptors freeze identity/pointers during clean MVCC discovery.
+_ROW_ORDER = (Company, App, PartnerClient, User, CompanyRole, UserCompany,
+              CompanyApp, PartnerInstallation, PartnerGrant, PartnerCredential,
+              PartnerTokenFamily, PartnerToken, PartnerAuthorizationRequest, PartnerCode)
+_POINTERS = {
+    Company: (), App: (), User: (),
+    PartnerClient: ("app_id", "owner_company_id"),
+    CompanyRole: ("company_id",), UserCompany: ("company_id", "user_id", "role_id"),
+    CompanyApp: ("company_id", "app_id"),
+    PartnerInstallation: ("company_id", "client_id"),
+    PartnerGrant: ("company_id", "client_id", "installation_id", "user_id", "kind"),
+    PartnerCredential: ("client_id",), PartnerTokenFamily: ("grant_id", "credential_id"),
+    PartnerToken: ("family_id",), PartnerAuthorizationRequest: ("client_id", "user_id"),
+    PartnerCode: ("client_id", "grant_id"),
+}
+_POINTERS.update({model: ("company_id",) for model, _ in RESOURCE_MODELS.values()})
+
+
+@dataclass(frozen=True)
+class _PartnerRow:
+    model: type
+    identity: tuple
+    pointers: tuple
+    update: bool
+    missing: bool = False
+
+    def statement(self):
+        # Tenant/owner predicates precede locking, including old pointers.
+        names = ("user_id", "company_id") if self.model is UserCompany else (
+            ("code_hash",) if self.model is PartnerCode else ("id",))
+        terms = [getattr(self.model, name) == value for name, value in zip(names, self.identity)]
+        terms.extend(getattr(self.model, name) == value
+                     for name, value in zip(_POINTERS[self.model], self.pointers))
+        return select(self.model).where(*terms).execution_options(populate_existing=True)
+
+
+def _writer_drift(db):
+    # No continuation, new key, retry or savepoint after observed pointer drift.
+    db.rollback()
+    raise HTTPException(409, "Partner authority changed; retry the whole request", headers=NO_STORE)
+
+
+def _installation_sets(db, iid):
+    """Scalar discovery/compare only; never locks or expands the typed plan."""
+    locations = tuple(db.scalars(select(PartnerInstallationLocation.location_id).where(
+        PartnerInstallationLocation.installation_id == iid).order_by(PartnerInstallationLocation.location_id)))
+    profiles = tuple(tuple(row) for row in db.execute(select(PartnerResourceScope.kind, PartnerResourceScope.mode).where(
+        PartnerResourceScope.installation_id == iid).order_by(PartnerResourceScope.kind)))
+    columns = tuple(getattr(PartnerResourceItem, column) for _, column in RESOURCE_MODELS.values())
+    items = tuple(tuple(row) for row in db.execute(select(PartnerResourceItem.id, PartnerResourceItem.kind, *columns).where(
+        PartnerResourceItem.installation_id == iid).order_by(PartnerResourceItem.id)))
+    return locations, profiles, items
+
+
+def _native_authority(db: AsyncSession, credentials, expected_user: User):
+    """Bridge public auth functions through run_sync's SAME greenlet/session.
+
+    Raw bearer is transient, never persisted. No get_current_user/presence commit,
+    second JWT decoder, prepare_native_write or second lock entrance.
+    """
+    bearer = credentials.credentials
+    async def check():
+        claims = decode_token(bearer)
+        user = await native_user_from_claims(claims, db)
+        visit = await native_visit_from_claims(claims, user, db)
+        with native_claims_context(claims, visit):
+            await require_core_user(user)
+        if user.id != expected_user.id:
+            raise HTTPException(401, "Core identity changed", headers=NO_STORE)
+        return user, claims
+    def on_same_session(sync):
+        if db.sync_session is not sync:
+            raise ScopedLockError("Native revalidation must use the caller actual Session")
+        return await_only(check())
+    return on_same_session
+
+
+@dataclass
+class _PartnerWrite:
+    db: Session
+    capability: ScopedLockCapability
+    rows: tuple[_PartnerRow, ...]
+    native: Callable | None = None
+    actor: User | None = None
+    admin_company: uuid.UUID | None = None
+    ca_id: uuid.UUID | None = None
+    original_installation: uuid.UUID | None = None
+    request_deadline: datetime | None = None
+
+    def discovered(self, model, ident):
+        return any(spec.model is model and spec.identity == (ident,) and not spec.missing for spec in self.rows)
+
+    def checkpoint(self):
+        """Repeat current authority after waits, never reacquire/extend a plan.
+
+        UPDATE rows may contain this operation's own pending changes; only
+        unchanged authority rows are repopulated here. Pointer drift is checked
+        while first acquiring each row, before touching any downstream row.
+        """
+        require_scoped_locks(self.db, self.capability, self.capability.plan.requests)
+        with self.db.no_autoflush:
+            for spec in self.rows:
+                if not spec.update:
+                    row = self.db.scalar(spec.statement())
+                    if (row is None) != spec.missing:
+                        _writer_drift(self.db)
+            claims = None
+            if self.native:
+                self.actor, claims = self.native(self.db)
+            if self.admin_company is not None:
+                admin(self.db, self.actor, self.admin_company)
+            if self.request_deadline is not None and self.request_deadline <= now():
+                raise PartnerProblem(410, "AUTH_REQUEST_EXPIRED", "Срок запроса авторизации истёк")
+        return claims
+
+
+def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
+                          grant_id=None, token_id=None, request_id=None, protocol=None,
+                          actor=None, native=None, company_id=None, admin_company=None,
+                          mutation="", new_app=None, new_client=None, selections=()):
+    """One private composition for all existing identity writers.
+
+    Caller owns rows, ACL, root completion and exception handling. Discovery is
+    MVCC/no_autoflush only; original pointers and exact typed keys are frozen
+    before advisory SQL, protocol locks, FK waits or any write. Capability proves
+    issuance/lifetime/coverage, NOT row ownership or eligibility.
+    """
+    if db.new or db.dirty or db.deleted:
+        raise ScopedLockError("Partner writer requires clean discovery; roll back the entire root")
+    found, requests, installation_sets, credential_sets = {}, [], {}, {}
+    request_deadline = None
+    S, X = LockMode.SHARED, LockMode.EXCLUSIVE
+
+    def key(value, mode=S):
+        requests.append(LockRequest(value, mode))
+
+    def remember(model, row, update=False):
+        if row is None:
+            return None
+        ident = (row.user_id, row.company_id) if model is UserCompany else (
+            (row.code_hash,) if model is PartnerCode else (row.id,))
+        entry = (model, ident)
+        previous = found.get(entry)
+        found[entry] = _PartnerRow(model, ident, tuple(getattr(row, n) for n in _POINTERS[model]),
+                                   update or bool(previous and previous.update))
+        return row
+
+    def get(model, ident, update=False):
+        row = db.get(model, ident, populate_existing=True)
+        if row is None:
+            identity = ident if type(ident) is tuple else (ident,)
+            found[(model, identity)] = _PartnerRow(model, identity, (), update, True)
+            return None
+        return remember(model, row, update)
+
+    def company(cid):
+        if cid is not None:
+            key(CompanyKey(cid)); get(Company, cid)
+
+    def references(model, cid, ids, *, selected=False):
+        ids = set(ids)
+        if not ids:
+            return
+        rows = db.scalars(select(model).where(model.company_id == cid, model.id.in_(ids)))
+        actual = set()
+        for row in rows:
+            actual.add(row.id)
+            remember(model, row)
+        if selected and actual != ids:
+            raise HTTPException(422, "Invalid company resource IDs", headers=NO_STORE)
+
+    def person(uid, cid=None):
+        if uid is None:
+            return
+        key(UserKey(uid)); get(User, uid)
+        if cid is not None:
+            key(MemberKey(cid, uid))
+            member = get(UserCompany, (uid, cid))
+            if member and member.role_id is not None:
+                key(RoleKey(cid, member.role_id))
+                # Even a malformed foreign Role is never locked outside tenant.
+                role = db.scalar(select(CompanyRole).where(
+                    CompanyRole.id == member.role_id, CompanyRole.company_id == cid))
+                if role is None:
+                    found[(CompanyRole, (member.role_id,))] = _PartnerRow(
+                        CompanyRole, (member.role_id,), (cid,), False, True)
+                else:
+                    remember(CompanyRole, role)
+
+    def client(cid):
+        if not cid:
+            return None
+        key(ClientKey(cid), X if mutation in {"client_status", "issue_credential", "revoke_credential"} else S)
+        row = get(PartnerClient, cid, mutation == "client_status")
+        if row:
+            company(row.owner_company_id)
+            key(AppKey(row.app_id)); get(App, row.app_id)
+            credentials = db.scalars(select(PartnerCredential).where(PartnerCredential.client_id == cid)).all()
+            credential_sets.setdefault(cid, tuple(sorted((c.id for c in credentials), key=str)))
+            for credential in credentials:
+                remember(PartnerCredential, credential, mutation == "revoke_credential")
+        return row
+
+    def installation(iid):
+        if iid is None:
+            return
+        key(InstallationKey(iid), X if mutation in {"approve_installation", "revoke_installation"} else S)
+        ca = get(CompanyApp, iid, mutation == "approve_installation")
+        row = get(PartnerInstallation, iid, mutation in {"approve_installation", "revoke_installation"})
+        if ca:
+            company(ca.company_id); key(AppKey(ca.app_id)); get(App, ca.app_id)
+        if row:
+            company(row.company_id); client(row.client_id)
+            # Existing sets are discovered before the plan, including absent
+            # children. InstallationKey serializes their full replacement.
+            installation_sets.setdefault(iid, _installation_sets(db, iid))
+            location_ids = db.scalars(select(PartnerInstallationLocation.location_id).where(
+                PartnerInstallationLocation.installation_id == iid)).all()
+            references(ServiceLocation, row.company_id, location_ids)
+            for kind, (model, column) in RESOURCE_MODELS.items():
+                refs = db.scalars(select(getattr(PartnerResourceItem, column)).where(
+                    PartnerResourceItem.installation_id == iid, PartnerResourceItem.kind == kind)).all()
+                references(model, row.company_id, refs)
+
+    def grant(gid):
+        row = get(PartnerGrant, gid, mutation == "revoke_grant") if gid else None
+        if row:
+            company(row.company_id); client(row.client_id); installation(row.installation_id)
+            person(row.user_id, row.company_id)
+        return row
+
+    with db.no_autoflush:
+        # Protocol authentication still belongs to Authlib; this only discovers
+        # the candidate graph, including a mismatching token's original parents.
+        if protocol is not None:
+            from authlib.oauth2.rfc6749.util import extract_basic_authorization
+            basic = extract_basic_authorization(protocol.headers)
+            client_id = basic[0] or protocol.payload.client_id
+            data = protocol.payload.data
+            # The endpoint already selected the operation. Ignored OAuth fields
+            # must not redirect discovery to another token/grant/parent graph.
+            if mutation == "token-code":
+                code = remember(PartnerCode, db.scalar(select(PartnerCode).where(
+                    PartnerCode.code_hash == digest(data.get("code", "")))), True)
+                if code:
+                    grant(code.grant_id); client(code.client_id)
+            elif mutation == "token-machine":
+                try:
+                    grant_id = uuid.UUID(data.get("grant_id", ""))
+                except ValueError:
+                    pass  # Authlib retains its original invalid_grant response.
+            value = None
+            if mutation == "token-refresh":
+                value = data.get("refresh_token")
+            elif mutation == "revoke":
+                value = data.get("token")
+            if value:
+                h = digest(value)
+                token = db.scalar(select(PartnerToken).where(
+                    PartnerToken.refresh_hash == h) if mutation == "token-refresh" else select(PartnerToken).where(
+                    (PartnerToken.access_hash == h) | (PartnerToken.refresh_hash == h)))
+                if token:
+                    token_id = token.id
+        if request_id is not None:
+            pending = get(PartnerAuthorizationRequest, request_id, True)
+            if pending:
+                if pending.user_id and actor and pending.user_id != actor.id:
+                    raise PartnerProblem(404, "AUTH_REQUEST_NOT_FOUND", "Запрос авторизации не найден")
+                request_deadline = pending.expires_at if not pending.finished else None
+                client_id = pending.client_id
+                person(pending.user_id)
+        if token_id is not None:
+            token = get(PartnerToken, token_id, mutation == "token-refresh")
+            family = get(PartnerTokenFamily, token.family_id, mutation in {"token-refresh", "revoke"}) if token else None
+            if family:
+                grant(family.grant_id)
+                if family.credential_id:
+                    credential = get(PartnerCredential, family.credential_id)
+                    if credential:
+                        client(credential.client_id)
+        original_grant = grant(grant_id)
+        installation(installation_id)
+        selected = client(client_id)
+        if selected and mutation in {"client_status", "issue_credential", "revoke_credential"}:
+            admin_company = selected.owner_company_id
+        if installation_id is not None and mutation in {"revoke_installation", "machine_grant"}:
+            original_ca = db.get(CompanyApp, installation_id)
+            admin_company = original_ca.company_id if original_ca else None
+        company(company_id)
+        if new_app is not None:
+            key(AppKey(new_app), X)
+        if new_client is not None:
+            key(ClientKey(new_client), X)
+        ca_id = None
+        if selected and company_id is not None and mutation in {"approve_installation", "consent-approve"}:
+            ca = remember(CompanyApp, db.scalar(select(CompanyApp).where(
+                CompanyApp.company_id == company_id, CompanyApp.app_id == selected.app_id)), mutation == "approve_installation")
+            ca_id = ca.id if ca else uuid.uuid4()
+            installation(ca_id)
+            if actor:
+                person(actor.id, company_id)
+        if actor:
+            # Self revocation deliberately has no new admin/member requirement.
+            if mutation == "revoke_grant" and original_grant:
+                admin_company = original_grant.company_id if original_grant.user_id != actor.id else None
+            person(actor.id, admin_company)
+        company(admin_company)
+        for model, ids in selections:
+            references(model, company_id, ids, selected=True)
+        ordered = tuple(sorted(found.values(), key=lambda r: (
+            _ROW_ORDER.index(r.model) if r.model in _ROW_ORDER else len(_ROW_ORDER),
+            r.model.__tablename__, tuple(map(str, r.identity)))))
+        if not requests:
+            raise InvalidClientError()
+        plan = LockPlan(tuple(requests))
+    cap = acquire_scoped_locks(db, plan)
+    with db.no_autoflush:
+        for spec in ordered:
+            # Authority SHARE, mutation UPDATE; never KEY SHARE.
+            row = db.scalar(spec.statement().with_for_update(read=not spec.update))
+            if (row is None) != spec.missing:
+                if spec.model is PartnerAuthorizationRequest:
+                    db.rollback()
+                    raise PartnerProblem(404, "AUTH_REQUEST_NOT_FOUND", "Запрос авторизации не найден")
+                _writer_drift(db)
+            if row is not None and spec.model is PartnerInstallation:
+                ca = db.get(CompanyApp, row.id)
+                client = db.get(PartnerClient, row.client_id)
+                if ca is None or client is None or ca.company_id != row.company_id or ca.app_id != client.app_id:
+                    _writer_drift(db)
+                if _installation_sets(db, row.id) != installation_sets[row.id]:
+                    _writer_drift(db)
+            if row is not None and spec.model is PartnerClient:
+                current_credentials = tuple(sorted(db.scalars(select(PartnerCredential.id).where(
+                    PartnerCredential.client_id == row.id)).all(), key=str))
+                if current_credentials != credential_sets[row.id]:
+                    _writer_drift(db)
+            if row is not None and spec.model is PartnerAuthorizationRequest:
+                request_deadline = row.expires_at if not row.finished else None
+    writer = _PartnerWrite(db, cap, ordered, native, actor, admin_company, ca_id, installation_id, request_deadline)
+    writer.checkpoint()
+    return writer
+
+
 class ClientAdapter:
     def __init__(self, model: PartnerClient, server: "PartnerAuthorizationServer"):
         self.model, self.server = model, server
@@ -447,7 +797,7 @@ class CodeGrant(AuthorizationCodeGrant):
 
     def save_authorization_code(self, code, request):
         server = self.server
-        claims = server.parent_claims
+        claims = server.checkpoint() or server.parent_claims
         parent_expiry = min(float(claims["exp"]), float(claims["at"]) + MAX_SESSION_DAYS * 86400)
         server.db.add(PartnerCode(code_hash=digest(code), grant_id=server.approved_grant.id,
             client_id=request.client.model.id, redirect_uri=request.payload.redirect_uri,
@@ -458,6 +808,9 @@ class CodeGrant(AuthorizationCodeGrant):
             expires_at=min(now() + timedelta(seconds=120), datetime.fromtimestamp(parent_expiry, timezone.utc))))
 
     def query_authorization_code(self, code, client):
+        self.server.checkpoint()
+        if not self.server.writer.discovered(PartnerCode, digest(code)):
+            return None
         row = self.server.db.scalar(select(PartnerCode).where(
             PartnerCode.code_hash == digest(code), PartnerCode.client_id == client.model.id
         ).with_for_update().execution_options(populate_existing=True))
@@ -466,9 +819,11 @@ class CodeGrant(AuthorizationCodeGrant):
         if not client.check_redirect_uri(row.redirect_uri):
             return None
         self.server.code = row
+        self.server.checkpoint()
         return row
 
     def delete_authorization_code(self, code):
+        self.server.checkpoint()
         code.consumed = True
         self.server.db.flush()
 
@@ -477,6 +832,7 @@ class CodeGrant(AuthorizationCodeGrant):
         if live.user is None or code.token_version != live.user.token_version:
             raise InvalidGrantError()
         self.server.live = live
+        self.server.live_scope = code.scope
         return live.user
 
 
@@ -498,25 +854,32 @@ class RotatingRefreshGrant(RefreshTokenGrant):
 
     def authenticate_refresh_token(self, value):
         db = self.server.db
+        self.server.checkpoint()
         row = db.scalar(select(PartnerToken).where(PartnerToken.refresh_hash == digest(value)))
         if row is None:
+            return None
+        if not self.server.writer.discovered(PartnerToken, row.id):
             return None
         # Family first: all rotations/revocations serialize on the same row.
         family = db.scalar(select(PartnerTokenFamily).where(PartnerTokenFamily.id == row.family_id)
             .with_for_update().execution_options(populate_existing=True))
         if family is None:
             return None
-        row = fresh(db, PartnerToken, row.id)
+        row = db.scalar(select(PartnerToken).where(PartnerToken.id == row.id,
+            PartnerToken.family_id == family.id).with_for_update().execution_options(populate_existing=True))
+        self.server.checkpoint()
         grant = fresh(db, PartnerGrant, family.grant_id)
         if row is None or grant is None or grant.client_id != self.request.client.model.id:
             return None
         if row.refresh_used:
             family.revoked = True
             db.flush()  # OAuth error response commits the reuse revocation.
+            self.server.reuse_revoked = True
             return None
         if row.revoked:
             return None
         self.server.live = live_grant(db, grant.id, family=family, scope=row.scope)
+        self.server.live_scope = row.scope
         if "offline_access" not in row.scope.split() or self.server.live.user is None:
             return None
         self.server.family = family
@@ -526,6 +889,7 @@ class RotatingRefreshGrant(RefreshTokenGrant):
         return self.server.live.user
 
     def revoke_old_credential(self, credential):
+        self.server.checkpoint()
         credential.row.refresh_used = True
         self.server.db.flush()
 
@@ -533,15 +897,19 @@ class RotatingRefreshGrant(RefreshTokenGrant):
 class MachineGrant(ClientCredentialsGrant):
     def validate_token_request(self):
         super().validate_token_request()
+        self.server.checkpoint()
         try:
             grant_id = uuid.UUID(self.request.form.get("grant_id", ""))
         except ValueError:
             raise InvalidGrantError() from None
+        if not self.server.writer.discovered(PartnerGrant, grant_id):
+            raise InvalidGrantError()
         live = live_grant(self.server.db, grant_id, scope=self.request.payload.scope)
         if (live.grant.kind != "machine" or live.client.id != self.request.client.model.id
                 or not self.request.payload.scope):
             raise InvalidGrantError()
         self.server.live = live
+        self.server.live_scope = self.request.payload.scope
 
 
 class PartnerOpenIDCode(OpenIDCode):
@@ -556,6 +924,7 @@ class PartnerOpenIDCode(OpenIDCode):
         if lock_key >= 2**63:
             lock_key -= 2**64
         self.server.db.execute(select(func.pg_advisory_xact_lock(lock_key)))
+        self.server.checkpoint()  # Native JWT/session and policy AFTER nonce wait.
         return self.server.db.scalar(select(PartnerCode.code_hash).where(
             PartnerCode.client_id == request.payload.client_id, PartnerCode.nonce == nonce).limit(1)) is not None
 
@@ -575,7 +944,10 @@ class PartnerOpenIDCode(OpenIDCode):
                 "token_use": "partner_id", "exp": min(int(time.time()) + 300, int(family.expires_at.timestamp()))}
 
     def generate_user_info(self, user, scope):
-        return UserInfo(**user_info(self.server.db, user, self.server.live.client.id, set(scope.split())))
+        self.server.checkpoint()
+        result = UserInfo(**user_info(self.server.db, user, self.server.live.client.id, set(scope.split())))
+        self.server.checkpoint()
+        return result
 
 
 class RevokeEndpoint(RevocationEndpoint):
@@ -583,37 +955,68 @@ class RevokeEndpoint(RevocationEndpoint):
 
     def query_token(self, token_string, token_type_hint):
         db = self.server.db
+        self.server.checkpoint()
         h = digest(token_string)
         row = db.scalar(select(PartnerToken).where(
             (PartnerToken.access_hash == h) | (PartnerToken.refresh_hash == h)))
         if row is None:
+            return None
+        if not self.server.writer.discovered(PartnerToken, row.id):
             return None
         family = db.scalar(select(PartnerTokenFamily).where(PartnerTokenFamily.id == row.family_id)
             .with_for_update().execution_options(populate_existing=True))
         if family is None:
             return None
         self.server.family = family
+        self.server.checkpoint()
         grant = fresh(db, PartnerGrant, family.grant_id)
         if grant is None:
             return None
         return RefreshHandle(row, grant.client_id)
 
     def revoke_token(self, token, request):
+        # docs_portal.close_session is an existing direct private caller outside
+        # this exact17 handoff. Preserve its logout semantics; its lock closure
+        # belongs to ROOT, not an implicit second plan acquired here.
+        if self.server.writer is not None:
+            self.server.checkpoint()
         self.server.family.revoked = True
         self.server.db.flush()
 
 
 class PartnerAuthorizationServer(AuthorizationServer):
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, writer: _PartnerWrite | None = None, protocol=None):
         super().__init__(list(SCOPE_DESCRIPTIONS))
         self.db = db
+        self.writer, self.protocol = writer, protocol
         self.code = self.family = self.live = self.approved_grant = None
         self.parent_claims = None
+        self.live_scope = None
+        self.reuse_revoked = False
         self.register_grant(CodeGrant, [S256Challenge(), PartnerOpenIDCode(self)])
         self.register_grant(RotatingRefreshGrant)
         self.register_grant(MachineGrant)
         self.register_endpoint(RevokeEndpoint)
         self.register_token_generator("default", self.issue_token)
+
+    def checkpoint(self):
+        if self.writer is None:
+            raise ScopedLockError("Partner callback requires caller canonical rows and original plan")
+        claims = self.writer.checkpoint()
+        # Reuse Authlib client authentication, including actual selected secret,
+        # after protocol waits. This does not acquire a plan or impersonate User.
+        if self.protocol is not None and self.protocol.method == "POST":
+            self.authenticate_client(self.protocol, ["client_secret_basic", "none"])
+        if self.live is not None:
+            self.live = live_grant(self.db, self.live.grant.id, family=self.family, scope=self.live_scope)
+            if self.code and (self.code.expires_at <= now() or self.code.parent_expires_at <= now()
+                    or self.live.user is None or self.code.token_version != self.live.user.token_version):
+                raise InvalidGrantError()
+        if self.approved_grant is not None:
+            live_grant(self.db, self.approved_grant.id)
+        if claims is not None:
+            self.parent_claims = claims
+        return claims
 
     def query_client(self, client_id):
         client = fresh(self.db, PartnerClient, client_id)
@@ -634,6 +1037,7 @@ class PartnerAuthorizationServer(AuthorizationServer):
         pass
 
     def issue_token(self, grant_type, client, user=None, scope=None, expires_in=None, include_refresh_token=True):
+        self.checkpoint()
         scopes = validate_scopes((scope or "").split())
         live = self.live
         if not scopes <= set(live.grant.scopes):
@@ -649,11 +1053,13 @@ class PartnerAuthorizationServer(AuthorizationServer):
                 expires_at=expiry, revoked=False)
             self.db.add(self.family)
             self.db.flush()
+            self.checkpoint()
         expiry = min(now() + timedelta(seconds=300), self.family.expires_at)
         if expiry <= now():
             raise InvalidGrantError()
         token_id = uuid.uuid4()
         subject = pairwise_subject(self.db, user.id, client.model.id) if user else "client:" + client.model.id
+        self.checkpoint()  # Subject INSERT ON CONFLICT/FK may have waited.
         payload = {"iss": settings.partner_oauth_issuer, "aud": settings.partner_oauth_audience,
             "sub": subject, "client_id": client.model.id, "jti": str(token_id),
             "iat": int(time.time()), "exp": int(expiry.timestamp()), "token_use": "partner_access",
@@ -665,6 +1071,7 @@ class PartnerAuthorizationServer(AuthorizationServer):
         self.db.add(PartnerToken(id=token_id, family_id=self.family.id, access_hash=digest(access),
             refresh_hash=digest(refresh) if refresh else None, scope=payload["scope"], expires_at=expiry))
         self.db.flush()
+        self.checkpoint()
         result = {"access_token": access, "token_type": "Bearer", "expires_in": max(0, int(expiry.timestamp()) - int(time.time())),
                   "scope": payload["scope"]}
         if refresh:
@@ -673,7 +1080,9 @@ class PartnerAuthorizationServer(AuthorizationServer):
 
     def save_token(self, token, request):
         # issue_token persists the token atomically with code/refresh consumption.
+        self.checkpoint()
         self.db.flush()
+        self.checkpoint()
 
 
 def user_info(db: Session, user: User, client_id: str, scopes: set[str]) -> dict:
@@ -734,6 +1143,38 @@ def verify_access(db: Session, token: str) -> VerifiedPartnerToken:
             own_organization_id=live.own_organization_id, resource_scopes=live.resource_scopes)
     except (jwt.InvalidTokenError, ValueError, TypeError, InvalidGrantError, KeyError):
         raise denied from None
+
+
+def verify_locked_partner_access(db: Session, token: str, *, capability: ScopedLockCapability,
+                                 expected: VerifiedPartnerToken) -> VerifiedPartnerToken:
+    """Reverify with the original verifier on caller's actual locked root.
+
+    PRECONDITION: caller already holds canonical Company/App/Client/User/Role/
+    Member/CA/Installation/Grant/Credentials/Family/Token rows on this Session,
+    with tenant predicates, populated current values and pointer drift checks.
+    Capability proves issuance/lifetime/exact typed coverage, NOT row locks/ACL.
+    The result carries fresh scopes/resources, not portable write authority:
+    keep the same locks/root and repeat this seam after any subsequent wait.
+    """
+    required = [LockRequest(key, LockMode.SHARED) for key in (
+        AppKey(expected.app_id), ClientKey(expected.client_id), CompanyKey(expected.company_id),
+        InstallationKey(expected.installation_id))]
+    if expected.user_id is not None:
+        required.extend((LockRequest(UserKey(expected.user_id), LockMode.SHARED),
+            LockRequest(MemberKey(expected.company_id, expected.user_id), LockMode.SHARED)))
+    require_scoped_locks(db, capability, tuple(required))
+    with db.no_autoflush:
+        if expected.user_id is not None:
+            member = fresh(db, UserCompany, (expected.user_id, expected.company_id))
+            if member and member.role_id is not None:
+                require_scoped_locks(db, capability, (LockRequest(
+                    RoleKey(expected.company_id, member.role_id), LockMode.SHARED),))
+        current = verify_access(db, token)
+    stable = ("token_id", "client_id", "app_id", "installation_id", "company_id",
+              "grant_id", "user_id", "is_machine", "subject")
+    if any(getattr(current, field) != getattr(expected, field) for field in stable):
+        _writer_drift(db)
+    return current
 
 
 async def verify_partner_access_token(token: str, db: AsyncSession) -> VerifiedPartnerToken:
