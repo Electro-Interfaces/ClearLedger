@@ -88,7 +88,10 @@ DocKind/id/company не получают вымышленных typed-key consum
 
 Определения PG охватывают actual create_doc против actual legacy Org DELETE
 в обоих порядках с ownOrg actor/selected Member и commit/rollback; actual
-Organization UPDATE в обоих порядках; Counterparty UPDATE; retained identity
+Organization UPDATE в обоих порядках; Counterparty UPDATE в обоих порядках
+с commit/rollback, включая create-first с реальным commit создателя, ровно одним
+DocEvent, сохранённым именем корреспондента в документе и текущим именем CP;
+retained identity
 freshness; session/Role/home drift; visit после последнего kind/manual wait;
 manual replay и поздний replay User parent; pending/cancellation; lifetime
 настоящей capability; strict-superadmin break-glass/audit/notify commit/rollback.

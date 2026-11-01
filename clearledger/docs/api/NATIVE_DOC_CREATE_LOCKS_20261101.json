@@ -63,8 +63,14 @@
         "test_actual_counterparty_update_precedes_create_and_refreshes_retained_parent",
         "test_actual_pending_entry_preserved_before_caller_rollback_without_sql",
         "test_cancelled_actual_B_wait_has_no_partial_write_and_requires_whole_root_rollback",
-        "test_observed_replay_old_user_is_in_initial_B_even_when_not_in_new_payload"
-      ]
+        "test_observed_replay_old_user_is_in_initial_B_even_when_not_in_new_payload",
+        "test_actual_create_first_blocks_actual_counterparty_update_until_native_commit"
+      ],
+      "counterparty_arrival_orders": {
+        "actual_create_first": "real creator commit -> actual Counterparty updater commit/rollback; observed PostgreSQL blocker; one DocEvent; denormalized document name/current parent name",
+        "actual_update_first": "actual update -> commit/rollback -> actual creator; retained parent/name fresh",
+        "status": "AUTHORDEFINITIONS_NOTRUN_INCLUDING_COLLECTION"
+      }
     }
   },
   "pg_profile": {

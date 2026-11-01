@@ -509,3 +509,37 @@ async def test_observed_replay_old_user_is_in_initial_B_even_when_not_in_new_pay
         assert locks.CompanyKey(store.home) in keys
         prepared.require(db)
         await db.rollback()
+
+
+@pytest.mark.parametrize("completion", ["commit", "rollback"])
+async def test_actual_create_first_blocks_actual_counterparty_update_until_native_commit(store, completion):
+    async with creator(store, hold_commit=True) as c:
+        await asyncio.wait_for(c.committing.wait(), 10)
+        async with store.factory() as updater, store.factory() as observer:
+            pid = await tag(updater, "updater")
+            admin = await updater.get(User, store.admin)
+            task = asyncio.create_task(refs.update_counterparty(str(store.cp),
+                CounterpartyUpdate(name="Synthetic changed after document"), updater, admin))
+            try:
+                await blocked(observer, pid, c.pid)
+                assert not task.done()
+                assert not c.task.done()
+                # Actual create_doc's overridden commit gate delegates to the
+                # real AsyncSession.commit; no fake successful handler/receipt.
+                c.release.set()
+                result = await asyncio.wait_for(c.task, 10)
+                await asyncio.wait_for(task, 10)
+                await getattr(updater, completion)()
+                async with store.factory() as check:
+                    card = await check.get(DocCard, UUID(result["id"]))
+                    current_cp = await check.get(Counterparty, store.cp)
+                    assert result["counterparty_name"] == card.counterparty_name == "Synthetic correspondent"
+                    assert current_cp.name == ("Synthetic changed after document"
+                        if completion == "commit" else "Synthetic correspondent")
+                    assert await check.scalar(select(func.count()).select_from(DocEvent).where(
+                        DocEvent.doc_id == card.id, DocEvent.kind == "created")) == 1
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await updater.rollback()
