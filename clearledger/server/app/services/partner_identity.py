@@ -613,22 +613,27 @@ def _prepare_partner_write(db: Session, *, client_id=None, installation_id=None,
             basic = extract_basic_authorization(protocol.headers)
             client_id = basic[0] or protocol.payload.client_id
             data = protocol.payload.data
-            kind = data.get("grant_type")
-            if kind == "authorization_code":
+            # The endpoint already selected the operation. Ignored OAuth fields
+            # must not redirect discovery to another token/grant/parent graph.
+            if mutation == "token-code":
                 code = remember(PartnerCode, db.scalar(select(PartnerCode).where(
                     PartnerCode.code_hash == digest(data.get("code", "")))), True)
                 if code:
                     grant(code.grant_id); client(code.client_id)
-            elif kind == "client_credentials":
+            elif mutation == "token-machine":
                 try:
                     grant_id = uuid.UUID(data.get("grant_id", ""))
                 except ValueError:
                     pass  # Authlib retains its original invalid_grant response.
-            value = data.get("refresh_token") if kind == "refresh_token" else data.get("token")
+            value = None
+            if mutation == "token-refresh":
+                value = data.get("refresh_token")
+            elif mutation == "revoke":
+                value = data.get("token")
             if value:
                 h = digest(value)
                 token = db.scalar(select(PartnerToken).where(
-                    PartnerToken.refresh_hash == h) if kind == "refresh_token" else select(PartnerToken).where(
+                    PartnerToken.refresh_hash == h) if mutation == "token-refresh" else select(PartnerToken).where(
                     (PartnerToken.access_hash == h) | (PartnerToken.refresh_hash == h)))
                 if token:
                     token_id = token.id

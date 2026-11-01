@@ -620,3 +620,165 @@ async def test_final_native_denial_after_replacement_flush_restores_complete_old
         profiles = (await db.scalars(select(PartnerResourceScope).where(
             PartnerResourceScope.installation_id == app["installation_id"]))).all()
         assert [(p.kind, p.mode) for p in profiles] == [("objects", "ALL")]
+
+
+@pytest.mark.parametrize("confidential", [False, True])
+@pytest.mark.parametrize("token_field", ["access_token", "refresh_token"])
+@pytest.mark.parametrize("extra_grant_type", [None, "refresh_token", "authorization_code", "client_credentials", "unknown"])
+@pytest.mark.parametrize("contradictory", [False, True])
+async def test_revoke_ignored_oauth_fields_only_discover_and_revoke_requested_family(
+        env, monkeypatch, confidential, token_field, extra_grant_type, contradictory):
+    # Includes PW-R1 exactly: grant_type=refresh_token, no refresh_token.
+    # Contradictory fields name legitimate grants/tokens owned by the same
+    # native administrator under a different client, never invented authority.
+    app = await registration(env, confidential=confidential)
+    other = await registration(env, confidential=confidential)
+    issued, _ = await tokens(env, app)
+    unrelated, _ = await tokens(env, other)
+    actual = await token_rows(issued["access_token"])
+    decoy = await token_rows(unrelated["access_token"])
+    other_code, _, _ = await consent(env, other)
+    form = {"token": issued[token_field]}
+    if extra_grant_type is not None:
+        form["grant_type"] = extra_grant_type
+        # Supported hints retain the existing access-or-refresh fallback,
+        # including a hint opposite to the requested token in half the cases.
+        form["token_type_hint"] = ("refresh_token" if token_field == "access_token" else "access_token") if contradictory else token_field
+    if contradictory:
+        form.update(refresh_token=unrelated["refresh_token"], code=other_code, grant_id=str(decoy.gid))
+    auth = (app["client_id"], app["secret"]) if confidential else None
+    if auth is None:
+        form["client_id"] = app["client_id"]
+    original, prepared = oauth._prepare_partner_write, []
+    def inspect_real_plan(sync, **kwargs):
+        writer = original(sync, **kwargs)  # Actual helper-issued cap and locked rows.
+        if kwargs.get("mutation") == "revoke":
+            locks.require_scoped_locks(sync, writer.capability, writer.capability.plan.requests)
+            for model, wanted, ignored in ((PartnerToken, actual.tid, decoy.tid),
+                    (PartnerTokenFamily, actual.fid, decoy.fid), (PartnerGrant, actual.gid, decoy.gid)):
+                assert writer.discovered(model, wanted) and not writer.discovered(model, ignored)
+            assert not any(row.model is PartnerCode for row in writer.rows)
+            keys = {request.key for request in writer.capability.plan.requests}
+            assert locks.ClientKey(other["client_id"]) not in keys
+            assert locks.InstallationKey(decoy.iid) not in keys
+            assert any(row.model is PartnerTokenFamily and row.identity == (actual.fid,)
+                       and row.update for row in writer.rows)
+            prepared.append(writer)
+        return writer
+    monkeypatch.setattr(oauth, "_prepare_partner_write", inspect_real_plan)
+    response = await env["client"].post("/api/oauth2/revoke", data=form, auth=auth)
+    assert response.status_code == 200 and response.json() == {}
+    assert len(prepared) == 1  # Same endpoint composer; no extra plan for ignored fields.
+    async with _test_session_factory() as db:
+        assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is True
+        assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
+        assert (await db.get(PartnerToken, decoy.tid)).refresh_used is False
+        assert (await db.get(PartnerCode, identity.digest(other_code))).consumed is False
+    assert (await env["client"].get("/api/oauth2/userinfo",
+        headers={"Authorization": "Bearer " + issued["access_token"]})).status_code == 401
+    assert (await env["client"].get("/api/oauth2/userinfo",
+        headers={"Authorization": "Bearer " + unrelated["access_token"]})).status_code == 200
+
+
+@pytest.mark.parametrize("confidential", [False, True])
+@pytest.mark.parametrize("token_field", ["access_token", "refresh_token"])
+async def test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors(env, confidential, token_field):
+    app = await registration(env, confidential=confidential)
+    other = await registration(env, confidential=confidential)
+    issued, _ = await tokens(env, app)
+    unrelated, _ = await tokens(env, other)
+    actual, decoy = await token_rows(issued["access_token"]), await token_rows(unrelated["access_token"])
+    other_code, _, _ = await consent(env, other)
+    form = {"token": issued[token_field], "grant_type": "refresh_token",
+        "refresh_token": unrelated["refresh_token"], "code": other_code, "grant_id": str(decoy.gid)}
+    auth = (app["client_id"], app["secret"]) if confidential else None
+    if auth is None:
+        form["client_id"] = app["client_id"]
+    unknown = await env["client"].post("/api/oauth2/revoke",
+        data={**form, "token": "unknown-" + uuid4().hex}, auth=auth)
+    assert unknown.status_code == 200 and unknown.json() == {}
+    invalid_hint = await env["client"].post("/api/oauth2/revoke",
+        data={**form, "token_type_hint": "unsupported"}, auth=auth)
+    assert invalid_hint.status_code == 400 and invalid_hint.json()["error"] == "unsupported_token_type"
+    foreign_auth = (other["client_id"], other["secret"]) if confidential else None
+    foreign_form = dict(form)
+    if foreign_auth is None:
+        foreign_form["client_id"] = other["client_id"]
+    wrong_client = await env["client"].post("/api/oauth2/revoke", data=foreign_form, auth=foreign_auth)
+    assert wrong_client.status_code == 400 and wrong_client.json()["error"] == "invalid_grant"
+    async with _test_session_factory() as db:
+        assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is False
+        assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
+    assert (await env["client"].get("/api/oauth2/userinfo",
+        headers={"Authorization": "Bearer " + issued["access_token"]})).status_code == 200
+    for _ in range(2):
+        response = await env["client"].post("/api/oauth2/revoke", data=form, auth=auth)
+        assert response.status_code == 200 and response.json() == {}
+    async with _test_session_factory() as db:
+        assert (await db.get(PartnerTokenFamily, actual.fid)).revoked is True
+        assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
+        assert (await db.get(PartnerCode, identity.digest(other_code))).consumed is False
+    assert (await env["client"].get("/api/oauth2/userinfo",
+        headers={"Authorization": "Bearer " + issued["access_token"]})).status_code == 401
+    assert (await env["client"].get("/api/oauth2/userinfo",
+        headers={"Authorization": "Bearer " + unrelated["access_token"]})).status_code == 200
+
+
+@pytest.mark.parametrize("mutation,confidential", [("token-code", False), ("token-code", True),
+    ("token-refresh", False), ("token-refresh", True), ("token-machine", True)])
+async def test_token_branch_ignores_fields_of_other_protocol_branches(env, monkeypatch, mutation, confidential):
+    app = await registration(env, confidential=confidential)
+    other = await registration(env)
+    unrelated, _ = await tokens(env, other)
+    decoy = await token_rows(unrelated["access_token"])
+    other_code, _, _ = await consent(env, other)
+    form = {"token": unrelated["access_token"], "refresh_token": unrelated["refresh_token"],
+        "code": other_code, "grant_id": str(decoy.gid), "redirect_uri": REDIRECT, "code_verifier": VERIFIER}
+    actual_token_id = None
+    if mutation == "token-code":
+        code, _, _ = await consent(env, app)
+        form.update(grant_type="authorization_code", code=code)
+        async with _test_session_factory() as db:
+            expected_grant = (await db.get(PartnerCode, identity.digest(code))).grant_id
+    elif mutation == "token-refresh":
+        issued, _ = await tokens(env, app)
+        actual = await token_rows(issued["access_token"])
+        actual_token_id, expected_grant = actual.tid, actual.gid
+        form.update(grant_type="refresh_token", refresh_token=issued["refresh_token"])
+    else:
+        approved = await env["client"].post(f"/api/developer/installations/{app['installation_id']}/machine-grants",
+            headers=env["headers"], json={"scopes": ["docs:read"]})
+        assert approved.status_code == 201
+        expected_grant = UUID(approved.json()["grantId"])
+        form.update(grant_type="client_credentials", grant_id=str(expected_grant), scope="docs:read")
+    auth = (app["client_id"], app["secret"]) if confidential else None
+    if auth is None:
+        form["client_id"] = app["client_id"]
+    original, prepared = oauth._prepare_partner_write, []
+    def inspect_real_plan(sync, **kwargs):
+        writer = original(sync, **kwargs)
+        if kwargs.get("mutation") == mutation:
+            locks.require_scoped_locks(sync, writer.capability, writer.capability.plan.requests)
+            assert writer.discovered(PartnerGrant, expected_grant)
+            assert not writer.discovered(PartnerGrant, decoy.gid)
+            assert not writer.discovered(PartnerToken, decoy.tid)
+            assert not writer.discovered(PartnerTokenFamily, decoy.fid)
+            if actual_token_id is not None:
+                assert writer.discovered(PartnerToken, actual_token_id)
+            if mutation != "token-code":
+                assert not any(row.model is PartnerCode for row in writer.rows)
+            keys = {request.key for request in writer.capability.plan.requests}
+            assert locks.ClientKey(other["client_id"]) not in keys
+            assert locks.InstallationKey(decoy.iid) not in keys
+            prepared.append(writer)
+        return writer
+    monkeypatch.setattr(oauth, "_prepare_partner_write", inspect_real_plan)
+    response = await env["client"].post("/api/oauth2/token", data=form, auth=auth)
+    assert response.status_code == 200 and len(prepared) == 1
+    async with _test_session_factory() as db:
+        verified = await db.run_sync(identity.verify_access, response.json()["access_token"])
+        assert verified.client_id == app["client_id"] and verified.grant_id == expected_grant
+        assert verified.is_machine == (mutation == "token-machine")
+        assert (await db.get(PartnerTokenFamily, decoy.fid)).revoked is False
+        assert (await db.get(PartnerToken, decoy.tid)).refresh_used is False
+        assert (await db.get(PartnerCode, identity.digest(other_code))).consumed is False

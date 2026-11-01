@@ -192,3 +192,37 @@ def test_absent_members_roles_and_parent_pointer_drift_are_explicit():
     assert "(row is None) != spec.missing" in raw
     assert "_writer_drift(db)" in raw
     assert not any(name in raw for name in ("CreateProfileKey(", "EmailKey(", "RefCompositeKey("))
+
+
+def test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields():
+    # PW-R1: inspect the composer BODY, never endpoint decorators/defaults.
+    # This source oracle rejects the old data.grant_type branch; it does not
+    # execute the composer or prove any actual lock, row or durable revocation.
+    node = symbol(IDENTITY, "_prepare_partner_write")
+    protocol = next(n for n in body_nodes(node) if isinstance(n, ast.If)
+                    and ast.unparse(n.test) == "protocol is not None")
+    reads = [n for n in body_nodes(protocol) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+             and n.func.value.id == "data" and n.func.attr == "get"]
+    assert {n.args[0].value for n in reads} == {"code", "grant_id", "refresh_token", "token"}
+    for mutation, field in (("token-code", "code"), ("token-machine", "grant_id"),
+                            ("token-refresh", "refresh_token"), ("revoke", "token")):
+        branch = next(n for n in body_nodes(protocol) if isinstance(n, ast.If)
+                      and ast.unparse(n.test) == f"mutation == {mutation!r}")
+        branch_reads = [n for statement in branch.body for n in body_nodes(statement)
+                       if n in reads]
+        assert len(branch_reads) == 1 and branch_reads[0].args[0].value == field
+    value_selection = next(n for n in body_nodes(protocol) if isinstance(n, ast.If)
+                           and ast.unparse(n.test) == "mutation == 'token-refresh'")
+    assert ast.unparse(value_selection.body[0]) == "value = data.get('refresh_token')"
+    assert ast.unparse(value_selection.orelse[0].test) == "mutation == 'revoke'"
+    assert ast.unparse(value_selection.orelse[0].body[0]) == "value = data.get('token')"
+    assert not value_selection.orelse[0].orelse
+    lookup = next(n for n in body_nodes(protocol) if isinstance(n, ast.IfExp))
+    assert ast.unparse(lookup.test) == "mutation == 'token-refresh'"
+    assert "PartnerToken.refresh_hash == h" in ast.unparse(lookup.body)
+    assert "PartnerToken.access_hash == h" in ast.unparse(lookup.orelse)
+    assert "PartnerToken.refresh_hash == h" in ast.unparse(lookup.orelse)
+    dispatcher = text(OAUTH, "_protocol_response")
+    assert 'mutation = "revoke" if revocation else' in dispatcher
+    assert len(calls(symbol(OAUTH, "_protocol_response"), "_prepare_partner_write")) == 1
