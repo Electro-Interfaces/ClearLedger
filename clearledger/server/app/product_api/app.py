@@ -1136,6 +1136,13 @@ def _describe_http_responses(schema):
         "streamingErrors": "Errors after response headers start cannot be replaced with a Problem response.",
     }
 
+    for path_name, path in schema["paths"].items():
+        response_name = ("ProductContractsMethodNotAllowed" if path_name == "/contracts"
+                         else "ProductMethodNotAllowed")
+        for operation in path.values():
+            if isinstance(operation, dict) and "responses" in operation:
+                operation["responses"]["405"] = {"$ref": "#/components/responses/" + response_name}
+
 
 def _canonical_object_id_paths(schema):
     """Keep the named SDK contract across equivalent FastAPI path schemas."""

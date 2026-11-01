@@ -406,3 +406,178 @@ class ProductOpenAPIHTTPContract(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+def assert_operation_405_contracts(document):
+    """Check operation attachment against the independent literal route oracle."""
+    expected = fixtures.EXPECTED_PRODUCT_MANIFEST
+    actual = {(method.upper(), path, operation["operationId"])
+              for path, item in document["paths"].items()
+              for method, operation in item.items()}
+    assert actual == expected and len(actual) == 17
+    components = document["components"]
+    contracts = {}
+    for method, path, operation_id in expected:
+        operation = document["paths"][path][method.lower()]
+        assert operation["operationId"] == operation_id
+        methods = {entry[0] for entry in expected if entry[1] == path}
+        expected_allow = ", ".join(sorted(methods))
+        collection = path == "/contracts"
+        response_name = ("ProductContractsMethodNotAllowed" if collection
+                         else "ProductMethodNotAllowed")
+        header_name = "ProductContractsAllow" if collection else "ProductAllow"
+        assert operation["responses"]["405"] == {
+            "$ref": "#/components/responses/" + response_name}
+        contract = components["responses"][response_name]
+        assert set(contract["headers"]) == {"Allow", "Cache-Control", "X-Request-Id"}
+        assert contract["headers"]["Allow"] == {
+            "$ref": "#/components/headers/" + header_name}
+        allow = components["headers"][header_name]
+        assert allow["required"] is True
+        assert allow["schema"] == {"type": "string", "const": expected_allow}
+        assert allow["example"] == expected_allow
+        for name, component_name in (("Cache-Control", "ProductCacheControl"),
+                                     ("X-Request-Id", "ProductRequestId")):
+            assert contract["headers"][name] == {
+                "$ref": "#/components/headers/" + component_name}
+            assert components["headers"][component_name]["required"] is True
+        assert components["headers"]["ProductCacheControl"]["schema"]["const"] == "no-store"
+        assert set(contract["content"]) == {"application/problem+json"}
+        media = contract["content"]["application/problem+json"]
+        assert media["schema"] == {"$ref": "#/components/schemas/Problem"}
+        assert media["example"] == {
+            "type": "about:blank", "title": "Method Not Allowed", "status": 405,
+            "code": "method_not_allowed", "detail": "Request could not be completed",
+            "requestId": components["headers"]["ProductRequestId"]["example"]}
+        Draft202012Validator(
+            {**media["schema"], "components": components},
+            format_checker=FormatChecker()).validate(media["example"])
+        contracts[(method, path)] = (contract, expected_allow)
+    return contracts
+
+
+class ProductOperationMethodNotAllowed(unittest.IsolatedAsyncioTestCase):
+    """Error-path definitions only: every identity/session entry fails closed."""
+
+    async def asyncSetUp(self):
+        self.guard_calls = {"sessions": 0, "verifier": 0}
+
+        def forbidden_sessions():
+            self.guard_calls["sessions"] += 1
+            raise AssertionError("Method routing must precede session access")
+
+        async def forbidden_verifier(*args, **kwargs):
+            self.guard_calls["verifier"] += 1
+            raise AssertionError("Method routing must precede identity verification")
+
+        self.app = product.create_product_api(
+            session_factory=forbidden_sessions, verifier=forbidden_verifier,
+            enabled=True, upload_dir="unused-method-contract-test", cursor_key=b"x" * 32,
+            issuer="https://method-contract.example.invalid", source_revision="method-contract-test",
+            budget_policy=product.budget.Policy(enabled=False))
+        self.schema = product.curated_openapi(self.app)
+
+    def test_formal_405_all_17_operations_and_browser_projection(self):
+        original = deepcopy(self.schema)
+        canonical = assert_operation_405_contracts(self.schema)
+        projected = product.public_client_openapi(self.schema)
+        self.assertEqual(assert_operation_405_contracts(projected), canonical)
+        self.assertEqual(projected["components"]["headers"], self.schema["components"]["headers"])
+        self.assertEqual(projected["components"]["responses"], self.schema["components"]["responses"])
+        local_schema_gate(self.schema)
+        local_schema_gate(projected)
+        self.assertEqual(self.schema, original)
+        projected["components"]["responses"]["ProductMethodNotAllowed"]["headers"].clear()
+        self.assertEqual(self.schema, original)
+        self.assertEqual(self.guard_calls, {"sessions": 0, "verifier": 0})
+
+    def test_formal_405_rejects_missing_and_unknown_response_reference(self):
+        assert_operation_405_contracts(self.schema)
+        for replacement in (None, {"$ref": "#/components/responses/UnknownMethodResponse"}):
+            with self.subTest(replacement=replacement):
+                candidate = deepcopy(self.schema)
+                responses = candidate["paths"]["/objects"]["get"]["responses"]
+                if replacement is None:
+                    del responses["405"]
+                else:
+                    responses["405"] = replacement
+                with self.assertRaises((AssertionError, KeyError)):
+                    assert_operation_405_contracts(candidate)
+
+    def test_formal_405_rejects_unknown_mismatched_or_optional_allow(self):
+        assert_operation_405_contracts(self.schema)
+        for case in ("unknown", "missing", "optional", "get-union", "collection-union", "problem"):
+            with self.subTest(case=case):
+                candidate = deepcopy(self.schema)
+                components = candidate["components"]
+                response = components["responses"]["ProductMethodNotAllowed"]
+                if case == "unknown":
+                    response["headers"]["Allow"] = {"$ref": "#/components/headers/UnknownAllow"}
+                elif case == "missing":
+                    del response["headers"]["Allow"]
+                elif case == "optional":
+                    components["headers"]["ProductAllow"]["required"] = False
+                elif case == "get-union":
+                    response["headers"]["Allow"] = {"$ref": "#/components/headers/ProductContractsAllow"}
+                elif case == "collection-union":
+                    components["responses"]["ProductContractsMethodNotAllowed"]["headers"]["Allow"] = {
+                        "$ref": "#/components/headers/ProductAllow"}
+                else:
+                    response["content"]["application/problem+json"]["example"]["status"] = "405"
+                with self.assertRaises((AssertionError, KeyError, ValidationError)):
+                    assert_operation_405_contracts(candidate)
+
+    async def test_actual_known_path_405_matches_all_operation_contracts(self):
+        from httpx import ASGITransport, AsyncClient
+
+        contracts = assert_operation_405_contracts(self.schema)
+        async with AsyncClient(transport=ASGITransport(app=self.app, raise_app_exceptions=False),
+                               base_url="https://method-contract.example.invalid") as client:
+            for (method, path), (contract, expected_allow) in sorted(contracts.items()):
+                with self.subTest(method=method, path=path):
+                    actual_path = path
+                    for name in ("equipmentId", "counterpartyId", "contractId", "docId", "versionId"):
+                        actual_path = actual_path.replace("{" + name + "}", str(fixtures.FILE))
+                    actual_path = actual_path.replace("{objectId}", "method-test-point")
+                    response = await client.delete(actual_path)
+                    self.assertEqual(response.status_code, 405, response.text)
+                    self.assertEqual(response.headers["content-type"], "application/problem+json")
+                    body = response.json()
+                    self.assertEqual(body["code"], "method_not_allowed")
+                    self.assertEqual(body["requestId"], response.headers["x-request-id"])
+                    media = contract["content"]["application/problem+json"]
+                    self.assertEqual({k: v for k, v in body.items() if k != "requestId"},
+                                     {k: v for k, v in media["example"].items() if k != "requestId"})
+                    Draft202012Validator(
+                        {**media["schema"], "components": self.schema["components"]},
+                        format_checker=FormatChecker()).validate(body)
+                    for name, definition in contract["headers"].items():
+                        header = self.schema["components"]["headers"][definition["$ref"].rsplit("/", 1)[1]]
+                        self.assertTrue(header["required"])
+                        self.assertIn(name, response.headers)
+                        Draft202012Validator(header["schema"], format_checker=FormatChecker()).validate(
+                            response.headers[name])
+                    self.assertEqual(response.headers["allow"], expected_allow)
+                    self.assertEqual(self.guard_calls, {"sessions": 0, "verifier": 0})
+
+    async def test_actual_unknown_path_404_has_no_allow(self):
+        from httpx import ASGITransport, AsyncClient
+
+        async with AsyncClient(transport=ASGITransport(app=self.app, raise_app_exceptions=False),
+                               base_url="https://method-contract.example.invalid") as client:
+            response = await client.delete("/unknown-method-contract-path")
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.headers["content-type"], "application/problem+json")
+        self.assertNotIn("allow", response.headers)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        body = response.json()
+        self.assertEqual(body["status"], 404)
+        self.assertEqual(body["code"], "not_found")
+        self.assertEqual(body["requestId"], response.headers["x-request-id"])
+        Draft202012Validator(self.schema["components"]["headers"]["ProductRequestId"]["schema"],
+                             format_checker=FormatChecker()).validate(body["requestId"])
+        Draft202012Validator(
+            {"$ref": "#/components/schemas/Problem", "components": self.schema["components"]},
+            format_checker=FormatChecker()).validate(body)
+        self.assertEqual(self.guard_calls, {"sessions": 0, "verifier": 0})
