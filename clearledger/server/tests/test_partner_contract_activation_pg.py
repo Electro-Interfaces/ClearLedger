@@ -527,9 +527,9 @@ async def test_actual_last_wait_rechecks_current_native_and_full_member_pointers
             await asyncio.wait_for(ready.wait(), 5)
             await blocked(w, pid_box["pid"], bp)
             injected = []
-            marker = {"typed": "pg_advisory_xact_lock", "parent": "core.organizations",
-                      "profile": "core.partner_contract_create_profiles",
-                      "type": "core.contract_types", "children": "core.partner_contract_create_principals"}[phase]
+            marker = {"typed": "pg_advisory_xact_lock", "parent": Organization.__table__.name,
+                      "profile": Profile.__table__.name,
+                      "type": "core.contract_types", "children": Principal.__table__.name}[phase]
             def after_actual_wait(conn, cursor, statement, params, context, many):
                 if injected or marker not in statement or not (
                         phase == "typed" or "FOR SHARE" in statement or "FOR UPDATE" in statement):
@@ -705,8 +705,8 @@ loses actual SQL eligibility, then stays denied after successful activation.
                     select(*CompanyApp.__table__.c).where(CompanyApp.id == w.iid),
                     select(*PartnerResourceScope.__table__.c).where(PartnerResourceScope.installation_id == w.iid),
                     select(*PartnerResourceItem.__table__.c).where(PartnerResourceItem.installation_id == w.iid)]
-                return tuple(tuple(sorted(tuple(map(str, row)) for row in (await db.execute(query)).all()))
-                             for query in queries)
+                return tuple([tuple(sorted(tuple(map(str, row)) for row in (await db.execute(query)).all()))
+                              for query in queries])
         before, oauth_before = await state(w), await oauth_state()
         assert before["counts"][:2] == (0, 0)
         async with w.factory() as db:
@@ -918,8 +918,8 @@ async def canonical_state(w, targets):
         statements.append(select(*PartnerInstallation.__table__.c).where(PartnerInstallation.id == w.iid))
         statements.extend(select(*model.__table__.c).where(model.company_id.in_({w.company, targets.company}))
             for model in (Counterparty, Organization, ServiceLocation, EzsEquipmentUnit, Contract, DocKind, DocCard, Intent))
-        return tuple(tuple(sorted(tuple(map(str, row)) for row in (await db.execute(statement)).all()))
-                     for statement in statements)
+        return tuple([tuple(sorted(tuple(map(str, row)) for row in (await db.execute(statement)).all()))
+                      for statement in statements])
 
 
 async def assert_raw_canonical_denied_before_b(w, targets, monkeypatch, *, user, service):
@@ -1038,8 +1038,8 @@ async def test_local_canonical_extras_keep_literal_unrequested_opaque_ids_and_fu
     assert (response.json()["userEnabled"], response.json()["serviceEnabled"]) == (enabled, enabled)
     assert len(targets.location) == 32 and targets.location.isspace()
     assert targets.location not in response.json()["locationIds"]
-    member_index = next(i for i, (statement, params) in enumerate(sql) if "core.user_companies" in statement)
-    for table, ident in (("core.service_locations", targets.location), ("core.counterparties", targets.cp)):
+    member_index = next(i for i, (statement, params) in enumerate(sql) if UserCompany.__table__.name in statement)
+    for table, ident in ((ServiceLocation.__table__.name, targets.location), (Counterparty.__table__.name, targets.cp)):
         literal = repr(ident) if isinstance(ident, str) else str(ident)
         entries = [(i, params) for i, (statement, params) in enumerate(sql) if table in statement and literal in params]
         assert len(entries) == 1 and entries[0][0] < member_index
