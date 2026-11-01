@@ -749,5 +749,48 @@
       "Full M00-M19+11 OPEN; no global completion percentage"
     ],
     "executionFloor": "Reviewer only FS/read-only Git/stdlib AST/hash/JSON/literal data and memory compile without exec; no project/test/helper/library imports or calls, pytest/collection/SQL/PG/Docker/SSH/Node/network/browser/install/workers/source change/commit/push. No control/env/DSN/privateRAW. C read only after Root frozen notification. Only new REVIEW.md/json written."
+  },
+  "optimizedCompositionLimitedAcceptance20261101": {
+    "source": "2d1b6454350515e546a8da26e9abc24af302e568",
+    "status": "INDEPENDENT_LIMITED_FUNCTIONAL139_ACCEPTED_B_C_GLOBAL_FAIL_PRESERVED",
+    "cases": 139,
+    "definitions": 27,
+    "phases": 417,
+    "unit": 37,
+    "nativePG": 102,
+    "reviewMDsha256": "64527e566590710b693810297ab45a025d4ab6cdb1522ad8cc708870c32c5277",
+    "reviewJSONsha256": "7790373c1e7fd0dd713b421eef450788befa6e478f8bf4710a4fa02bb79499a0",
+    "pinsReverifiedByRoot": 59,
+    "worlds": [
+      {
+        "label": "a",
+        "cases": 55,
+        "phases": 165,
+        "seconds": 148.0502140056342,
+        "pytestExit": 0
+      },
+      {
+        "label": "b",
+        "cases": 41,
+        "phases": 123,
+        "seconds": 191.95413346588612,
+        "pytestExit": 0
+      },
+      {
+        "label": "c",
+        "cases": 43,
+        "phases": 129,
+        "seconds": 123.55731648672372,
+        "pytestExit": 0
+      }
+    ],
+    "hostOutcomes": [
+      0,
+      1,
+      1
+    ],
+    "foreign": "A47→47exact;B47→45removed2/common45unchanged;C43→43removed2+added2/common41unchanged;causeUNKNOWN. StrictGLOBALFAIL retainedforB/C. Ownedresourcesremovedandpoolsclientslocks0 inallworlds.",
+    "limits": "OriginalassertionsandSourcebound,nofullHTTPbody/SQLparameter/chronologicaltrace;nonjointCI. HostexitRoottoolobservationsnotseparateFSargvreceipts. Old823PASSnottransferred.",
+    "currentUserScope": "ONLYRusHydro-requiredmethods; closespreviousauthorizedregressionpackage, allhistorical20+11notcurrentcompletiongate."
   }
 }
