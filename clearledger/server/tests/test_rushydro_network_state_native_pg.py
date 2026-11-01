@@ -384,7 +384,8 @@ async def test_NS06_money_invariance(network_world):
                         await db.commit()
 
 
-@pytest.mark.parametrize("fallback", [{"private": "R1"}, ["R1"], 7, None, "R1", "R" * 200 + "private" * 10000])
+@pytest.mark.parametrize("fallback", [{"private": "R1"}, ["R1"], 7, None, "R1", "R" * 200 + "private" * 10000],
+                         ids=["object", "array", "number", "null", "matching", "oversized"])
 async def test_NS07_nonstring_region_and_unknown_status(network_world, fallback):
     w = network_world
     async with changed(w, ServiceLocation, O1, operational_status="private-unrecognized",
