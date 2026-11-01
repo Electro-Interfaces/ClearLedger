@@ -97,6 +97,10 @@ from app.services.reference_identity import (
 )
 from app.services.contract_usage import contract_usage, usage_by_contract
 from app.services.native_contract_commands import create_native_contract
+from app.services.native_reference_locks import (
+    assert_native_reference_clean, assert_native_reference_member, prepare_native_reference_write,
+    lock_native_reference_rows, require_native_reference_write,
+)
 from app.services.reference_validation import (
     _CONTRACT_REQ_FIELDS, _check_type_code, _parse_uuid, _req_val, _validate_contract_parties,
 )
@@ -842,27 +846,26 @@ async def update_contract(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    assert_native_reference_clean(db)
     uid = _parse_uuid(item_id)
-    # До общего с импортом барьера даже проверка членства не должна вызвать
-    # autoflush pending-договора и взять row/FK locks в обратном порядке.
     with db.no_autoflush:
         c = await get_owned(Contract, uid, current_user, db)
         cid = c.company_id
-        await lock_manual_creation(db, cid, "contract")
-    await db.flush()
-    c = (await db.execute(select(Contract).where(
-        Contract.id == uid, Contract.company_id == cid,
-    ).execution_options(populate_existing=True))).scalar_one_or_none()
-    if c is None:
+        await _validate_contract_parties(
+            db, cid,
+            body.counterpartyId if body.counterpartyId is not None else c.counterparty_id,
+            body.organizationId if body.organizationId is not None else c.organization_id)
+    prepared = await prepare_native_reference_write(
+        db, current_user, cid, contract_id=uid,
+        type_change="typeCode" in body.model_fields_set, type_code=body.typeCode)
+    current_user = prepared.actor
+    c = await get_owned(Contract, uid, current_user, db)
+    rows = await lock_native_reference_rows(
+        db, prepared, parties=True,
+        counterparty_id=_parse_uuid(body.counterpartyId, "контрагента") if body.counterpartyId is not None else None,
+        organization_id=_parse_uuid(body.organizationId, "организации") if body.organizationId is not None else None)
+    if rows.contract is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
-    # Во время ожидания могли изменить роль/скоуп или удалить членство.
-    # Держим свежий объект: повторный get_owned сам не обновляет identity map.
-    if not current_user.is_superadmin:
-        membership = (await db.execute(select(UserCompany).where(
-            UserCompany.user_id == current_user.id, UserCompany.company_id == cid,
-        ).execution_options(populate_existing=True))).scalar_one_or_none()
-        if membership is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
     c = await get_owned(Contract, uid, current_user, db)
     before = snapshot_reference_fields(c)
 
@@ -871,6 +874,7 @@ async def update_contract(
         body.counterpartyId if body.counterpartyId is not None else c.counterparty_id,
         body.organizationId if body.organizationId is not None else c.organization_id,
     )
+    require_native_reference_write(db, prepared)
     sent = body.model_fields_set
     for api, col in (("validUntil", "valid_until"), ("amountLimit", "amount_limit"), ("vatRate", "vat_rate"),
                      ("amountInclVat", "amount_incl_vat"), ("settlementKind", "settlement_kind"),
@@ -890,7 +894,9 @@ async def update_contract(
     if body.type is not None:
         c.type = body.type
     if body.typeCode is not None:
-        c.type_code = await _check_type_code(db, body.typeCode)
+        with db.no_autoflush:
+            c.type_code = await _check_type_code(db, body.typeCode)
+        require_native_reference_write(db, prepared)
     if body.amountLimit is not None:
         c.amount_limit = body.amountLimit
     if body.kind is not None:
@@ -915,6 +921,7 @@ async def update_contract(
         c.scope_type = body.scopeType
 
     mark_reference_changes(c, before)
+    require_native_reference_write(db, prepared)
     await db.flush()
     await db.refresh(c)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _contract_resp(c)
@@ -926,7 +933,17 @@ async def delete_contract(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    assert_native_reference_clean(db)
     uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        c = await get_owned(Contract, uid, current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    await get_owned(Contract, uid, current_user, db)
+    rows = await lock_native_reference_rows(db, prepared)
+    if rows.contract is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
     c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
     # Договор со ссылками не стирается — закрывается (как пометка удаления в 1С).
     # Иначе расчёты станции и условия «Хозяйства» молча теряли договор.
@@ -935,6 +952,7 @@ async def delete_contract(
         where = ", ".join(f"{u['label']} ({u['count']})" for u in used)
         raise HTTPException(status_code=409,
                             detail=f"Договор используется: {where}. Удалить нельзя — закройте договор")
+    require_native_reference_write(db, prepared)
     await db.delete(c)
 
 
@@ -1031,7 +1049,18 @@ async def add_contract_link(
     current_user: User = Depends(get_current_user),
 ):
     """Привязать договор к приложению {app} и, если указан, к проекту {projectRef: 'site:<id>'}."""
-    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    assert_native_reference_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        c = await get_owned(Contract, uid, current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    await get_owned(Contract, uid, current_user, db)
+    rows = await lock_native_reference_rows(db, prepared)
+    if rows.contract is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    c = await get_owned(Contract, uid, current_user, db)
     from sqlalchemy import text as _t
     app = str(body.get("app") or "").strip()
     ref = str(body.get("projectRef") or "").strip()
@@ -1045,6 +1074,7 @@ async def add_contract_link(
     exists = (await db.execute(select(ContractLink).where(
         ContractLink.contract_id == c.id, ContractLink.app_code == app, ContractLink.project_ref == ref))).scalar_one_or_none()
     if exists is None:
+        require_native_reference_write(db, prepared)
         db.add(ContractLink(company_id=c.company_id, contract_id=c.id, app_code=app, project_ref=ref,
                             created_by=current_user.id))
         await db.flush()
@@ -1058,10 +1088,25 @@ async def delete_contract_link(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
-    ln = await db.get(ContractLink, _parse_uuid(link_id))
+    assert_native_reference_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        c = await get_owned(Contract, uid, current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    await get_owned(Contract, uid, current_user, db)
+    rows = await lock_native_reference_rows(db, prepared)
+    if rows.contract is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    c = await get_owned(Contract, uid, current_user, db)
+    lid = _parse_uuid(link_id)
+    ln = (await db.execute(select(ContractLink).where(
+        ContractLink.id == lid, ContractLink.contract_id == c.id, ContractLink.company_id == cid)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if ln is None or ln.contract_id != c.id:
         raise HTTPException(status_code=404, detail="Привязка не найдена")
+    require_native_reference_write(db, prepared)
     await db.delete(ln)
     await db.flush()
     return await _contract_links_resp(db, c)
@@ -1124,31 +1169,43 @@ async def set_contract_scope(
     current_user: User = Depends(get_current_user),
 ):
     """Установить охват договора: company | locations (набор точек) | unassigned."""
+    assert_native_reference_clean(db)
     if body.scopeType not in ("company", "locations", "unassigned"):
         raise HTTPException(status_code=422, detail="Недопустимый scopeType")
     uid = _parse_uuid(item_id)
-    c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+    with db.no_autoflush:
+        c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+        if not c:
+            raise HTTPException(status_code=404, detail="Договор не найден")
+        await assert_company_member(str(c.company_id), current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    c = (await db.execute(select(Contract).where(Contract.id == uid)
+                          .execution_options(populate_existing=True))).scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Договор не найден")
-    await assert_company_member(str(c.company_id), current_user, db)
-
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    rows = await lock_native_reference_rows(db, prepared, location_ids=(
+        tuple(dict.fromkeys(body.locationIds)) if body.scopeType == "locations" else ()))
+    c = rows.contract
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    require_native_reference_write(db, prepared)
     c.scope_type = body.scopeType
     # Связи пересобираем заново (для company/unassigned — очищаем).
     await db.execute(delete(ContractLocation).where(ContractLocation.contract_id == c.id))
     if body.scopeType == "locations":
         ids = list(dict.fromkeys(body.locationIds))  # уникальные, порядок сохранён
         if ids:
-            valid = set((await db.execute(
-                select(ServiceLocation.id).where(
-                    ServiceLocation.company_id == c.company_id,
-                    ServiceLocation.id.in_(ids),
-                )
-            )).scalars().all())
+            valid = {loc.id for loc in rows.locations}
             for lid in ids:
                 if lid in valid:
                     db.add(ContractLocation(
                         company_id=c.company_id, contract_id=c.id, location_id=lid,
                     ))
+    require_native_reference_write(db, prepared)
     await db.flush()
     # execute(delete)/insert истекают атрибуты c — освежаем перед сериализацией
     # (иначе lazy-load в async-контексте → MissingGreenlet).
@@ -1164,18 +1221,34 @@ async def link_contract_location(
 ):
     """Привязать договор к станции (из окна станции). Общий договор компании уже
     действует на все станции — его не превращаем в адресный молча."""
-    c = (await db.execute(select(Contract).where(Contract.id == _parse_uuid(item_id)))).scalar_one_or_none()
+    assert_native_reference_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+        if not c:
+            raise HTTPException(status_code=404, detail="Договор не найден")
+        await assert_company_member(str(c.company_id), current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    c = (await db.execute(select(Contract).where(Contract.id == uid)
+                          .execution_options(populate_existing=True))).scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Договор не найден")
-    await assert_company_member(str(c.company_id), current_user, db)
-    loc = (await db.execute(select(ServiceLocation).where(
-        ServiceLocation.id == loc_id, ServiceLocation.company_id == c.company_id))).scalar_one_or_none()
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    rows = await lock_native_reference_rows(db, prepared, location_ids=(loc_id,))
+    c = rows.contract
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    loc = next((loc for loc in rows.locations if loc.id == loc_id), None)
     if not loc:
         raise HTTPException(status_code=404, detail="Станция не найдена в пространстве")
     if c.scope_type == "company":
         raise HTTPException(status_code=409, detail=f"Договор № {c.number} общий на компанию — он уже действует на эту станцию")
     exists = (await db.execute(select(ContractLocation.id).where(
         ContractLocation.contract_id == c.id, ContractLocation.location_id == loc.id))).first()
+    require_native_reference_write(db, prepared)
     if not exists:
         db.add(ContractLocation(company_id=c.company_id, contract_id=c.id, location_id=loc.id))
     c.scope_type = "locations"
@@ -1191,10 +1264,27 @@ async def unlink_contract_location(
     current_user: User = Depends(get_current_user),
 ):
     """Отвязать договор от станции. Последняя станция ушла — договор «не распределён»."""
-    c = (await db.execute(select(Contract).where(Contract.id == _parse_uuid(item_id)))).scalar_one_or_none()
+    assert_native_reference_clean(db)
+    uid = _parse_uuid(item_id)
+    with db.no_autoflush:
+        c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+        if not c:
+            raise HTTPException(status_code=404, detail="Договор не найден")
+        await assert_company_member(str(c.company_id), current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    c = (await db.execute(select(Contract).where(Contract.id == uid)
+                          .execution_options(populate_existing=True))).scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Договор не найден")
-    await assert_company_member(str(c.company_id), current_user, db)
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    rows = await lock_native_reference_rows(db, prepared)
+    c = rows.contract
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    require_native_reference_write(db, prepared)
     await db.execute(delete(ContractLocation).where(
         ContractLocation.contract_id == c.id, ContractLocation.location_id == loc_id))
     left = (await db.execute(select(func.count()).select_from(ContractLocation).where(
@@ -2018,12 +2108,27 @@ async def set_contract_dimension(
     current_user: User = Depends(get_current_user),
 ):
     """Заменить набор элементов разреза dim_type у договора (пусто = снять ограничение)."""
+    assert_native_reference_clean(db)
     uid = _parse_uuid(item_id)
-    c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+    with db.no_autoflush:
+        c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+        if not c:
+            raise HTTPException(status_code=404, detail="Договор не найден")
+        await assert_company_member(str(c.company_id), current_user, db)
+        cid = c.company_id
+    prepared = await prepare_native_reference_write(db, current_user, cid, contract_id=uid)
+    current_user = prepared.actor
+    c = (await db.execute(select(Contract).where(Contract.id == uid)
+                          .execution_options(populate_existing=True))).scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Договор не найден")
-    await assert_company_member(str(c.company_id), current_user, db)
-
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    rows = await lock_native_reference_rows(db, prepared)
+    c = rows.contract
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_native_reference_member(db, prepared, str(c.company_id))
+    require_native_reference_write(db, prepared)
     await db.execute(delete(ContractDimension).where(
         ContractDimension.contract_id == c.id,
         ContractDimension.dim_type == dim_type,
