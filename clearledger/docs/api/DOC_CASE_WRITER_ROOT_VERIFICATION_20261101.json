@@ -1,0 +1,132 @@
+{
+  "status": "ACCEPT_SOURCE_AND_RAW_WITH_LIMITS",
+  "date": "2026-11-01",
+  "source": "8a3921cf6c97501877cdc55a59cf60d6c64bdbf7",
+  "tree": "f106e832d2c641e03a9a1ec9c14bc917bfd002ab",
+  "sourcePR": 116,
+  "rootIntegration": "0cc4628bc1a3c0ba7522b2ecd1e5df0f485516de",
+  "combinedRootRuntimeAccepted": false,
+  "actual": {
+    "collected": 84,
+    "calls": 84,
+    "definitions": 26,
+    "phases": 252,
+    "allPhasesPassed": true,
+    "seconds": 60.6463579935953,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "denied": []
+  },
+  "composition": {
+    "appFiles": 520,
+    "schemaFiles": 34,
+    "testFiles": 4,
+    "frozenSources": 558,
+    "dependencies": 115,
+    "models": 341,
+    "tables": 347,
+    "foreignKeys": 803,
+    "enabledRITriggers": 3212,
+    "role": "ordinaryclearledger",
+    "preImportRoleOIDPreflight": true,
+    "ordinaryConftest": false,
+    "appserver": false,
+    "lifespan": false,
+    "seed_data": false,
+    "actual_seed_doc_kinds": "syntheticrows only",
+    "actor": "programmatic native User/UserCompany/claims, noHTTPJWT",
+    "notify": "capture only"
+  },
+  "rawHashes": {
+    "evidence/result.json": "c7b336d0cce056cce575c4221167a9778a865715668a99a59f2dd57df5fa06d2",
+    "execution.json": "2089b0b136a68f2280100e616ca62f1174b93dd164e0b04bea4e7b804f4a9745",
+    "source-manifest.json": "61cba40d79428d873f74ee9d958c3f8f802a3f701b0fb72db8d7c403f476f9b4",
+    "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+    "evidence/case-fixture-pools.json": "0ce0effc7e12cb71ca528401707089f87209f2252ba24a6942fa56cb03a46b01"
+  },
+  "rawArtifact": ".artifacts/doc-case-writer-fullnative-pg-20261101-b7d2caaa6111",
+  "cleanup": {
+    "hostSession": 67012,
+    "hostExit": 0,
+    "hostReaped": true,
+    "fixturePools": {
+      "count": 84,
+      "allBeforeFinalRootDisposal0and0": true,
+      "sameLoopAlive": true
+    },
+    "globalPool": {
+      "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+      "before": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "after": {
+        "checkedout": 0,
+        "checkedin": 0
+      },
+      "loopAlive": true,
+      "poolErrors": []
+    },
+    "PG": {
+      "clients": 0,
+      "locks": 0
+    },
+    "owned2NormalRemoved": true,
+    "foreignSafeProjectionEqual": true,
+    "foreignCount": 41
+  },
+  "independentReview": {
+    "task": "task_eb664e0f46cf",
+    "dispatch": "ctx_e96b2c89503b",
+    "hashes": {
+      "REVIEW.md": "07daa3eef08420dc3c9764f7e0511573133b2876c87cf9eb64e8c160e5ebf6d7",
+      "REVIEW.json": "9823028c89d049bfb5f667b90cebd6f6243a6ceef7820aaf4f0531974b6fe7bc"
+    },
+    "resources": "succeeded accepted released beforeACK"
+  },
+  "sourceScope": [
+    "clearledger/server/app/services/doc_case_locks.py",
+    "clearledger/server/app/routers/docs_router.py",
+    "clearledger/server/app/seed.py",
+    "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+    "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+    "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+    "clearledger/docs/api/DOC_CASE_WRITER_PROTOCOL_20261101.md",
+    "clearledger/docs/api/DOC_CASE_WRITER_PROTOCOL_20261101.json"
+  ],
+  "sourcePins": {
+    "clearledger/server/app/services/doc_case_locks.py": "a1bae89ddb6ea61d94bf4bfd5ba8ad873fb2aa5bc3cad15ebc05196b8f7a9322",
+    "clearledger/server/app/routers/docs_router.py": "0ea5c97e246ad17218aa38495f57de0f42c30724b247e7f95dff15937e2ffdd3",
+    "clearledger/server/app/seed.py": "4811cb0b3bded3d480bf3d12baf2a887718df9e735016ee28255b22cb904a6de",
+    "clearledger/server/tests/test_doc_case_writer_protocol_pg.py": "ba09383cd88dbb2ff9b0abc73077c83aad1287f6b6f71ad5e79411e744e3b1d2",
+    "clearledger/server/tests/test_doc_case_writer_protocol_contract.py": "8694f3dd8b225da51d564018423132918211e4bc23773d54a511b23dad37aa3b",
+    "clearledger/server/tests/test_doc_case_seed_protocol_pg.py": "7f7d2b5e54b3d5a6a1763d598a2f029159661e99cfcf24ba72b4eab276f04b6d",
+    "clearledger/docs/api/DOC_CASE_WRITER_PROTOCOL_20261101.md": "ac164fe646f7f72fa4b14a2d5712a85dd36044a927210b55aaa27da8f1f92b41",
+    "clearledger/docs/api/DOC_CASE_WRITER_PROTOCOL_20261101.json": "9031e9e93795a1dd164bbb4a2276779f7409ae2c7293b62da122d9952f7a0421"
+  },
+  "unsupportedCompositions": [
+    "lateS-to-X afterrowlocks",
+    "latecompanykeysetextension",
+    "rawSQL/dynamic/externalwriters"
+  ],
+  "stillOpen": [
+    "fullregisterinitialB",
+    "postUPSERTfreshadmission",
+    "retainedpendingORM+lastwait",
+    "recipientDocACL/Chatvisibility",
+    "HTTPJWTinthiscomponent",
+    "globaldeadlockclosure",
+    "FullDocs/OrgDELETE",
+    "combinedlatestHEADfullCI",
+    "livepilot/release"
+  ],
+  "originalProgramme": {
+    "sections": "M00–M19",
+    "crossCutting": 11,
+    "completionAsserted": false
+  },
+  "merge": false,
+  "deploy": false,
+  "overallGO": false
+}
