@@ -5,9 +5,9 @@
   "api_version": "1.1.0",
   "readiness": "candidate",
   "base_commit": "c3fd7cf89035cae5bd9317c7e6ac18624e12d136",
-  "code_cut_commit": "b17a8014ee79b605e6369839048b01b21c84e4a1",
-  "code_cut_tree": "5b14cd72c85f4ab7557fe946999afda9b1a57447",
-  "docs_parent_commit": "b17a8014ee79b605e6369839048b01b21c84e4a1",
+  "code_cut_commit": "5ebb54b9df6deddc04c436f10077b9dbc6a15d7d",
+  "code_cut_tree": "fd769941f34392f4104af283224821657a6c29c9",
+  "docs_parent_commit": "5ebb54b9df6deddc04c436f10077b9dbc6a15d7d",
   "docs_scope": [
     "clearledger/docs/PARTNER_CONTRACT_CREATE_OPTIONS.md",
     "clearledger/docs/api/PARTNER_CONTRACT_CREATE_OPTIONS.json"
@@ -85,23 +85,23 @@
       "baseline_status": "NEW_NOT_IMPLEMENTED",
       "change_from_base": "added",
       "base_raw_sha256": null,
-      "code_cut_raw_sha256": "5011aef4f09bb4e8b5999bd58712af518f75bc21d323fec11f7dce33b39d8c91",
-      "code_cut_git_blob": "e1ac3e01c897c1bbc4589fcb5ac2899440084011",
-      "bytes": 16256,
-      "lines": 329,
+      "code_cut_raw_sha256": "41ba731f136a983782061d18ea0f26d29ecc995b3ee86a4339f8720e25417f2c",
+      "code_cut_git_blob": "7a00f0fe2f519dbf3c357e93d58f93acb99245f1",
+      "bytes": 17017,
+      "lines": 341,
       "relation_to_docs_parent": "same_code_blob",
-      "module_ast_sha256": "c319cc1626601dfc40e28b4a31c9b8c97f74f40ca7d8dce07977f9a42a889c40"
+      "module_ast_sha256": "fa15dbedc984e8e834dddb02f35dadf3986833f8c81685cd424b4d79d51ee7d6"
     },
     "clearledger/server/tests/test_partner_contract_create_options.py": {
       "baseline_status": "NEW_NOT_IMPLEMENTED",
       "change_from_base": "added",
       "base_raw_sha256": null,
-      "code_cut_raw_sha256": "86e3e067e1bef7316d47964ae568c05a20d7b34e842d0d11a6bd811c9fe5ca84",
-      "code_cut_git_blob": "f2fc3fd8a6867cc9eeb43c14251a131ce1a24d84",
-      "bytes": 11708,
-      "lines": 186,
+      "code_cut_raw_sha256": "e7ade8471abbb34086a1a34bdd1a35d1b59f56b50ab0a560303c008d8e08f8bf",
+      "code_cut_git_blob": "7c7dad82e732303fda164e183dc1cb8efddfef88",
+      "bytes": 15742,
+      "lines": 251,
       "relation_to_docs_parent": "same_code_blob",
-      "module_ast_sha256": "c9c23501f04d698c0d8d4df00d9c5eda47c5691cfd1c24cf30981373e603d063"
+      "module_ast_sha256": "879177b0891ceca65b6f43125f938be6ebbb2060f3a94c70e6d64d58a40fdb00"
     },
     "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py": {
       "baseline_status": "EXISTS_BASELINE",
@@ -205,12 +205,12 @@
       "baseline_status": "NEW_NOT_IMPLEMENTED",
       "change_from_base": "added",
       "base_raw_sha256": null,
-      "code_cut_raw_sha256": "b49544a2e4d4866eb4390d566a897cf69ef01a13787867e3f44724bc1ef2ebc5",
-      "code_cut_git_blob": "d296245946d8262a47545a4e5b1b111b6f2e8390",
-      "bytes": 33572,
-      "lines": 667,
+      "code_cut_raw_sha256": "12eaaee1fc96a69d7aa482e8883ed3154603809a678a9dcd325270a597c6cdc5",
+      "code_cut_git_blob": "58f282b9811635afca8cef34419c47ec803d57b3",
+      "bytes": 36563,
+      "lines": 724,
       "relation_to_docs_parent": "same_code_blob",
-      "module_ast_sha256": "d05748b155540efe89ad1a6f0ce5c03002d12538790dfdde088458ce83527e37"
+      "module_ast_sha256": "172b7b7aab4060e2ce1dd0b628f44ed9cf18190ed75111c27bcd32590b900efb"
     },
     "clearledger/server/tests/test_partner_contract_http_create.py": {
       "baseline_status": "EXISTS_BASELINE",
@@ -529,7 +529,76 @@
     "constant_time_compare": true,
     "key_rotation": "invalidates cursor",
     "invalid_stale_expired_cross_binding_new_token": "400 after current auth; omit cursor to restart",
-    "reservation_or_write_authority": false
+    "reservation_or_write_authority": false,
+    "payload_version": 2,
+    "payload_encoding": "binary fixed-width header + unsigned big-endian UTF8 byte length + exact UTF8 bytes; unpadded canonical base64url(payload).base64url(MAC); no JSON or compression",
+    "payload_layout": [
+      {
+        "field": "version",
+        "offset": 0,
+        "bytes": 1,
+        "value": 2
+      },
+      {
+        "field": "resource",
+        "offset": 1,
+        "bytes": 1,
+        "values": [
+          "organization",
+          "counterparty",
+          "location",
+          "type"
+        ]
+      },
+      {
+        "field": "pageSize",
+        "offset": 2,
+        "bytes": 1,
+        "min": 1,
+        "max": 100
+      },
+      {
+        "field": "expiry",
+        "offset": 3,
+        "bytes": 8,
+        "encoding": "unsigned big-endian epoch seconds"
+      },
+      {
+        "field": "lastValueByteLength",
+        "offset": 11,
+        "bytes": 2,
+        "encoding": "unsigned big-endian"
+      },
+      {
+        "field": "digest",
+        "offset": 13,
+        "bytes": 32,
+        "encoding": "HMAC selection digest"
+      },
+      {
+        "field": "lastValue",
+        "offset": 45,
+        "max_bytes": 1024,
+        "encoding": "exact strict UTF8, no NUL; type nonblank 1..256 characters; location 1..40; organization/counterparty canonical UUID"
+      }
+    ],
+    "capacity_proof": {
+      "fixed_bytes": 45,
+      "type_max_characters": 256,
+      "utf8_max_bytes_per_character": 4,
+      "payload_max_bytes": 1069,
+      "unpadded_base64_max_characters": 1426,
+      "separator_characters": 1,
+      "mac_raw_bytes": 32,
+      "mac_base64_characters": 43,
+      "cursor_max_characters": 1470,
+      "public_max_length_unchanged": 2048,
+      "all_legal_C0_non_NUL_and_multibyte": true,
+      "proof_kind": "own stdlib integer/UTF8 byte-length arithmetic only; encoder NOTRUN"
+    },
+    "cursor_mac_domain": "options-v1 domain separator with cursor-v2 label, binding and canonical encoded whole binary payload",
+    "decoder": "MAC and selection digest constant-time; input <=2048; raw45..1069; exact version/resource/pageSize/length; reject trailing bytes, malformed UTF8, NUL, invalid domain/expiry; invalid400 after current auth",
+    "unpublished_format_transition": "v1 JSON to opaque binary v2 before publication; old opaque tokens rejected400; endpoint/scope/policy unchanged"
   },
   "source_manifest_status": "static declarations, not executed runtime registry or exported OpenAPI",
   "source_manifest": [
@@ -771,19 +840,24 @@
   },
   "authored_tests": {
     "unit": {
-      "definitions": 10,
-      "ast_cartesian_variants": 66
+      "definitions": 14,
+      "ast_cartesian_variants": 90
     },
     "real_pg": {
-      "definitions": 21,
-      "ast_cartesian_variants": 68
+      "definitions": 23,
+      "ast_cartesian_variants": 75
     },
     "collected": false,
     "executed": false,
     "pass_count": null,
     "provider": "ROOT-admitted callable partner_contract_issuer_factory through issuer_world; independent actual clean Sessions/AsyncEngine >=2connections",
     "observations": "original canonical functions plus SQLAlchemy completed-SQL events, actual SHOW after t0, separate real writable commits, negative clock/cancel/deadline faults",
-    "cleanup": "ROOT lifecycle with w.owned users/installations/type_codes; synthetic company graph; no driver/conftest edits"
+    "cleanup": "ROOT lifecycle with w.owned users/installations/type_codes; synthetic company graph; no driver/conftest edits",
+    "repair_regressions": {
+      "unit": "legal256 C0 and4-byte UTF8/unstripped roundtrip, other resource bounds, authenticated malformed binary decoder, source exception/cleanup protocol",
+      "real_pg": "four actual invalid-query422 then original real quota429 cases; three legal two-type pageSize1 pairs; no Session/SQL/verifier positive stand-in",
+      "all_not_run": true
+    }
   },
   "remaining": [
     "fresh independent FULL21 SourceReview",
@@ -801,5 +875,18 @@
       11
     ],
     "complete": false
-  }
+  },
+  "repair_lineage": {
+    "initial_code_cut": "b17a8014ee79b605e6369839048b01b21c84e4a1",
+    "initial_docs_head": "2cce114652a661f2667a810f1b3eaaf4b2770a7e",
+    "repair_code_parent": "2cce114652a661f2667a810f1b3eaaf4b2770a7e",
+    "repair_code_changed_paths": 3,
+    "repair_docs_changed_paths": 2,
+    "repair_code_cumulative_paths_from_base": 21,
+    "docs_already_present_in_repair_code_parent": true,
+    "docs_child_changes": "two existing documents modified; 19 code/test blobs unchanged from immediate parent",
+    "frozen_negative_review": "/srv/projects/preview/partner-contract-create-options-review-20261101/review.json",
+    "source_pass": false
+  },
+  "framework_error_preservation": "Original Starlette HTTPException including BudgetExceeded and FastAPI RequestValidationError re-raised after mandatory rollback/close/scope cleanup; existing Problem handlers keep422/429/rate_limited/Retry-After; unexpected infra/timeouts503"
 }

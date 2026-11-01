@@ -7,9 +7,14 @@
 Версия API сохраняется `1.1.0`; готовность операции остаётся `candidate`.
 
 База: `c3fd7cf89035cae5bd9317c7e6ac18624e12d136`.
-Кодовый срез: `b17a8014ee79b605e6369839048b01b21c84e4a1`, дерево
-`5b14cd72c85f4ab7557fe946999afda9b1a57447`. Этот документ и JSON-контракт
-созданы отдельным дочерним коммитом; их непосредственный родитель — кодовый срез.
+Кодовый срез исправлений: `5ebb54b9df6deddc04c436f10077b9dbc6a15d7d`, дерево
+`fd769941f34392f4104af283224821657a6c29c9`. Этот документ и JSON-контракт
+обновлены отдельным дочерним коммитом; их непосредственный родитель — этот срез.
+Первоначальные кодовый срез `b17a8014ee79b605e6369839048b01b21c84e4a1` и docs-head
+`2cce114652a661f2667a810f1b3eaaf4b2770a7e` сохранены в истории. Исправление кода
+меняет три файла и наследует оба уже существующих документа; его cumulative diff
+от базы содержит 21 путь. Следующий docs-only child меняет два документа,
+сохраняя все 19 code/test blobs непосредственного родителя.
 [JSON-контракт](api/PARTNER_CONTRACT_CREATE_OPTIONS.json) содержит хэши 19 файлов
 кода и тестов именно этого родителя, без самохэширования документов.
 
@@ -140,6 +145,25 @@ installation locations и Member object_scope с отдельными None и п
 selectionVersion — HMAC binding. Payload курсора содержит только version,
 resource, pageSize, lastValue, expiry и digest; отдельный MAC связывает payload,
 binding и selectionVersion. Внутренние identity IDs и Bearer в payload не входят.
+Внутренний opaque-формат до публикации изменён на binary v2. Поля по порядку:
+version/resource/pageSize по 1 байту, expiry 8 байт unsigned big-endian,
+длина lastValue в UTF-8 2 байта unsigned big-endian, digest 32 байта и точные
+UTF-8 байты lastValue. Внешняя строка — canonical unpadded base64url(payload),
+точка и base64url(MAC). Cursor MAC использует отдельную метку `cursor-v2`
+в прежнем domain separator `options-v1`; selectionVersion и binding сохранены.
+JSON-экранирование и сжатие не используются. Старые unpublished v1 курсоры
+отвергаются как 400; endpoint, scope и policyVersion прежние.
+
+Доказательство ёмкости для всех допустимых значений: фиксированная часть 45 байт;
+256 символов typeCode занимают не больше 1024 байт UTF-8. Payload максимум
+1069 байт, unpadded Base64 — 1426 символов, точка и MAC — ещё 44. Итого максимум
+1470 < 2048; location (40 символов) и UUID короче. Все non-NUL C0 и четырёхбайтные
+Unicode укладываются; пробелы, регистр и байты сохраняются. Проверка nonblank
+для typeCode не изменяет исходную строку. Decoder ограничивает raw 45..1069,
+проверяет точную длину и отсутствие trailing bytes, strict UTF-8, domain,
+version/resource/pageSize/digest/expiry; неверный ввод даёт 400.
+Расчёт сделан собственной арифметикой автора, encoder/DTO не запускались.
+
 TTL не больше 300 секунд и не продлевается при переходе. MAC сравнивается через
 constant-time compare. Смена ресурса, pageSize, token ID, binding или ключа,
 повреждение, устаревание и expiry дают 400 после текущей авторизации. Для нового
@@ -158,6 +182,12 @@ constant-time compare. Смена ресурса, pageSize, token ID, binding и
 | 429 | Quota: `rate_limited`; generic HTTP429: прежний `internal_error` |
 | 500 | `internal_error` вне обработанного lifetime |
 | 503 | `api_unavailable`, в том числе deadline/overflow/incomplete load |
+
+После обязательных rollback/close и очистки request scope lifetime повторно
+поднимает исходные Starlette HTTPException (включая BudgetExceeded) и FastAPI
+RequestValidationError. Прежние product handlers сохраняют 422, quota 429,
+`rate_limited` и Retry-After; непредвиденные infrastructure ошибки/timeout дают
+503. Cleanup не обходится и его ошибки не подавляются.
 
 Problem использует `application/problem+json`. Приложение добавляет
 `Cache-Control: no-store`, `X-Request-Id`; 401/403 содержат Bearer challenge.
@@ -188,13 +218,18 @@ AST. DPL overlay сначала проверяет фактический extend
 дизайны не изменялись. V2 формулировка «код пока не написан» относится к плану;
 часть реализации к этому уточнению уже была написана и ещё не фиксировалась.
 
-Написаны 10 unit definitions / 66 AST variants и 21 PG definitions / 68 AST
-variants; это статический подсчёт, **не collection и не PASS**. ROOT подтвердил
+Написаны 14 unit definitions / 90 AST variants и 23 PG definitions / 75 AST
+variants (всего 165); это статический подсчёт, **не collection и не PASS**. ROOT подтвердил
 provider contract (`msg_c659cb3b82bf`, `msg_1542bcb93e2c`): callable возвращает
 чистые независимые actual AsyncSession, AsyncEngine даёт минимум два соединения
 и отдельные writable сессии. Тесты получают engine через actual connection,
 передают дополнительные synthetic users/installations/type_codes в `w.owned`;
 очисткой и допуском управляет ROOT. Driver и conftest не менялись.
+Добавлены определения регрессий F1/F2: 422 после yield и настоящее исчерпание
+quota с original budget.enforce/Retry-After; две страницы pageSize1 для пар
+256-символьных C0, четырёхбайтных Unicode и строк с краевыми пробелами.
+Unit definitions проверяют bounded roundtrip и authenticated malformed binary
+payload; Session, SQL и verifier не подменяются положительными stand-in.
 
 Остаются fresh independent FULL21 SourceReview, точный ROOT gate перед push/PR,
 отдельная actual приёмка канонической авторизации/PG/cleanup/deadline/cursor и
