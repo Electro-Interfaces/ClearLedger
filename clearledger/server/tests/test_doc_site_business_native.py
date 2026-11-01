@@ -68,6 +68,13 @@ CASES = (
     "partner_empty_site", "partner_site_set", "partner_revoke_site", "partner_grant_revoke",
     "partner_bound_empty_objects", "partner_file", "partner_file_revoked",
     "partner_doc_set_mid_request", "partner_site_set_mid_request", "partner_action_mid_request", "partner_grant_mid_request",
+    "partner_file_doc_set_mid_request", "partner_file_site_set_mid_request",
+    "partner_file_action_mid_request", "partner_file_grant_mid_request",
+    "native_dirty_title_preserved", "native_dirty_username_preserved",
+    "native_pending_site_draft", "native_transient_site_draft",
+    "native_pending_null_draft", "native_transient_null_draft",
+    "partner_pending_user", "partner_dirty_user", "partner_deleted_user",
+    "partner_pending_card", "partner_dirty_card", "partner_deleted_card",
 )
 
 
@@ -289,28 +296,147 @@ async def test_doc_site_business_native(doc_site_pg, case):
             await sql(pg, "UPDATE core.ezs_sites SET location_id=:loc WHERE id=:id", loc=LOCATION, id=SITE)
             await sql(pg, "UPDATE core.user_companies SET object_scope='[]'::jsonb WHERE user_id=:uid", uid=UID)
         await pg.publish()
-        file_case = case in {"partner_file", "partner_file_revoked"}
+        if case in {"partner_pending_user", "partner_dirty_user", "partner_deleted_user",
+                    "partner_pending_card", "partner_dirty_card", "partner_deleted_card"}:
+            path = f"/api/v1/documents/{DOC}"
+            assert (await pg.product_get(bearer, path)).status_code == 200
+            target = query_db = None
+            before_calls = after_calls = 0
+            observations = {}
+            user_case = case in {"partner_pending_user", "partner_dirty_user", "partner_deleted_user"}
+            pending = case in {"partner_pending_user", "partner_pending_card"}
+            deleting = case in {"partner_deleted_user", "partner_deleted_card"}
+            field = "name" if user_case else "title"
+            def snapshot(db):
+                # Only bounded primitive observations leave the actual Query
+                # Session. No SQL, refresh, flush or lazy attribute loads here.
+                state = inspect(target)
+                history = state.attrs[field].history
+                return (
+                    tuple(sorted((key, str(value)) for key, value in state.dict.items()
+                                 if key != "_sa_instance_state")),
+                    tuple(str(value) for value in history.added),
+                    tuple(str(value) for value in history.unchanged),
+                    tuple(str(value) for value in history.deleted),
+                    state.pending, state.persistent, state.deleted, state.transient,
+                    state.detached, state.modified, state.session is db.sync_session,
+                    target in db.new, target in db.dirty, target in db.deleted,
+                )
+            async def before_query(db):
+                nonlocal target, query_db, before_calls
+                before_calls += 1
+                assert before_calls == 1
+                query_db = db
+                with db.no_autoflush:
+                    if pending:
+                        if user_case:
+                            target = User(id=UUID("70000000-0000-4000-8000-000000000096"),
+                                          company_id=A, email="pending-p1d@example.invalid",
+                                          name="Pending product user", role="user",
+                                          password_hash="!synthetic-disabled-password")
+                        else:
+                            target = DocCard(id=UUID("70000000-0000-4000-8000-000000000096"),
+                                             company_id=A, kind_id=KIND, site_id=SITE,
+                                             organization_id=ORG, author_id=UID,
+                                             title="Pending product card")
+                        db.add(target)
+                        assert target in db.new and inspect(target).pending
+                    else:
+                        target = await db.get(User if user_case else DocCard, UID if user_case else DOC)
+                        assert target is not None and inspect(target).persistent
+                        if deleting:
+                            await db.delete(target)
+                            assert target in db.deleted
+                        else:
+                            setattr(target, field, "Dirty product user" if user_case else "Dirty product card")
+                            assert target in db.dirty and inspect(target).modified
+                observations["before"] = snapshot(db)
+            async def after_query(db):
+                nonlocal after_calls, target, query_db
+                after_calls += 1
+                assert after_calls == 1 and before_calls == 1 and db is query_db
+                # Root-approved observer C: after original awaited conditions
+                # (also on exception), before unchanged dependency finally.
+                observations["after"] = snapshot(db)
+                target = query_db = None
+            denied = await pg.product_get(bearer, path, before_query=before_query, after_query=after_query)
+            assert denied.status_code == 409
+            assert before_calls == after_calls == 1
+            assert observations["after"] == observations["before"]
+            assert b"Synthetic Site document" not in denied.content
+            return
+        file_case = case in {
+            "partner_file", "partner_file_revoked", "partner_file_doc_set_mid_request",
+            "partner_file_site_set_mid_request", "partner_file_action_mid_request",
+            "partner_file_grant_mid_request",
+        }
         path = f"/api/v1/documents/{DOC}" + (f"/versions/{VERSION}/content" if file_case else "")
+        # Read the actual seeded sort values with the same ordering as Query;
+        # bulk INSERT timestamps need not put the Site card on page one.
+        expected_first = (await sql(pg, "SELECT id FROM core.doc_cards WHERE company_id=:cid ORDER BY created_at,id LIMIT 1", cid=A)).scalar_one()
+        async def assert_listing(*, visible, grant_revoked=False, documents_revoked=False):
+            listing = await pg.product_get(bearer, "/api/v1/documents?pageSize=1")
+            if grant_revoked:
+                assert listing.status_code in {401, 403}
+                assert b"Synthetic Site document" not in listing.content
+                return
+            if documents_revoked:
+                # This is a NEW resolver after documents EMPTY: unlike the
+                # already-resolved mid-request path it denies before Query.
+                assert listing.status_code == 403
+                assert b"Synthetic Site document" not in listing.content
+                return
+            assert listing.status_code == 200
+            payload = listing.json()
+            assert payload["total"] == (2 if visible else 1)
+            assert [item["id"] for item in payload["items"]] == [str(expected_first if visible else LEGACY)]
+            if visible:
+                positive_listing = await pg.product_get(bearer, "/api/v1/documents?pageSize=2")
+                assert positive_listing.status_code == 200
+                assert positive_listing.json()["total"] == 2
+                assert {item["id"] for item in positive_listing.json()["items"]} == {str(DOC), str(LEGACY)}
+            else:
+                assert str(DOC) not in {item["id"] for item in listing.json()["items"]}
+        mid_request = case.endswith("_mid_request")
+        initially_visible = case not in {"partner_empty_site", "partner_bound_empty_objects"}
+        await assert_listing(visible=initially_visible)
+        if mid_request:
+            positive = await pg.product_get(bearer, path)
+            assert positive.status_code == 200
+            if file_case:
+                assert positive.content == b"Site document fixture\n"
+        callback_calls = 0
         async def after_resolve():
-            # An external observation seam after the REAL resolver has closed
-            # its Session; no fake facts, token or permission return value.
-            if case == "partner_doc_set_mid_request":
+            # The REAL resolver has closed its identity Session; original Query
+            # and file delivery have not run. Only actual committed rows change.
+            nonlocal callback_calls
+            callback_calls += 1
+            assert callback_calls == 1
+            if case in {"partner_doc_set_mid_request", "partner_file_doc_set_mid_request"}:
                 await sql(pg, "UPDATE core.partner_resource_scopes SET mode='EMPTY' WHERE installation_id=:iid AND kind='documents'", iid=iid)
-            elif case == "partner_site_set_mid_request":
+            elif case in {"partner_site_set_mid_request", "partner_file_site_set_mid_request"}:
                 await sql(pg, "UPDATE core.partner_resource_scopes SET mode='EMPTY' WHERE installation_id=:iid AND kind='sites'", iid=iid)
                 await sql(pg, "DELETE FROM core.partner_resource_items WHERE installation_id=:iid AND kind='sites'", iid=iid)
-            elif case == "partner_action_mid_request":
+            elif case in {"partner_action_mid_request", "partner_file_action_mid_request"}:
                 await sql(pg, "UPDATE core.site_user_permissions SET approved=false WHERE site_id=:id", id=SITE)
-            elif case == "partner_grant_mid_request":
+            elif case in {"partner_grant_mid_request", "partner_file_grant_mid_request"}:
                 await sql(pg, "UPDATE core.partner_grants SET approved=false WHERE installation_id=:iid", iid=iid)
             await pg.publish()
-        mid_request = case.endswith("_mid_request")
         before = await pg.product_get(bearer, path, after_resolve=after_resolve) if mid_request else await pg.product_get(bearer, path)
+        assert callback_calls == (1 if mid_request else 0)
         expected = 404 if case in {"partner_empty_site", "partner_bound_empty_objects"} or mid_request else 200
-        if case == "partner_grant_mid_request":
+        grant_revoked = case in {"partner_grant_mid_request", "partner_file_grant_mid_request"}
+        if grant_revoked:
             assert before.status_code in {401, 403}
-            return
-        assert before.status_code == expected
+        else:
+            assert before.status_code == expected
+        if file_case:
+            if before.status_code == 200:
+                assert before.content == b"Site document fixture\n"
+            else:
+                assert b"Site document fixture" not in before.content
+                assert "content-disposition" not in before.headers
+                assert before.headers.get("content-type", "").split(";")[0] != "application/octet-stream"
         if case in {"partner_revoke_site", "partner_file_revoked", "partner_grant_revoke"}:
             if case == "partner_grant_revoke":
                 await sql(pg, "UPDATE core.partner_grants SET approved=false WHERE installation_id=:iid", iid=iid)
@@ -318,10 +444,22 @@ async def test_doc_site_business_native(doc_site_pg, case):
                 await sql(pg, "UPDATE core.partner_resource_scopes SET mode='EMPTY' WHERE installation_id=:iid AND kind='sites'", iid=iid)
                 await sql(pg, "DELETE FROM core.partner_resource_items WHERE installation_id=:iid AND kind='sites'", iid=iid)
             await pg.publish()
-            assert (await pg.product_get(bearer, path)).status_code in {401, 403, 404}
-        listing = await pg.product_get(bearer, "/api/v1/documents?pageSize=1")
-        if listing.status_code == 200 and case in {"partner_empty_site", "partner_bound_empty_objects", "partner_revoke_site", "partner_file_revoked"}:
-            assert str(DOC) not in {item["id"] for item in listing.json()["items"]}
+            revoked = await pg.product_get(bearer, path)
+            grant_revoked = case == "partner_grant_revoke"
+            if grant_revoked:
+                assert revoked.status_code in {401, 403}
+            else:
+                assert revoked.status_code == 404
+            if file_case:
+                assert b"Site document fixture" not in revoked.content
+                assert "content-disposition" not in revoked.headers
+                assert revoked.headers.get("content-type", "").split(";")[0] != "application/octet-stream"
+        await assert_listing(
+            visible=initially_visible and not mid_request and case not in {
+                "partner_revoke_site", "partner_file_revoked", "partner_grant_revoke"},
+            grant_revoked=grant_revoked,
+            documents_revoked=case in {"partner_doc_set_mid_request", "partner_file_doc_set_mid_request"},
+        )
         return
     claims, user = await native_user(pg)
     if case in {"native_admin_read", "deny_admin_empty_objects"}:
@@ -358,6 +496,55 @@ async def test_doc_site_business_native(doc_site_pg, case):
     if case == "version_tombstone":
         await sql(pg, "UPDATE core.doc_versions SET tombstoned_at=now() WHERE id=:id", id=VERSION)
     with native_claims_context(claims, None):
+        if case in {"native_dirty_title_preserved", "native_dirty_username_preserved"}:
+            # Approved Site and assignment: pending presentation fields alone
+            # must not inherit the unrelated assignment denial of old cases.
+            assert await _can_doc(pg.session, A, doc, user, "read", record_break_glass_use=False)
+            target, field, pending = (
+                (doc, "title", "Pending approved title") if case == "native_dirty_title_preserved"
+                else (user, "name", "Pending approved username"))
+            original = getattr(target, field)
+            target_id = target.id
+            setattr(target, field, pending)
+            history = inspect(target).attrs[field].history
+            assert target in pg.session.dirty and inspect(target).modified
+            assert tuple(history.deleted) == (original,) and tuple(history.added) == (pending,)
+            assert await _can_doc(pg.session, A, doc, user, "read", record_break_glass_use=False)
+            await assert_fresh_doc_edit(pg.session, A, doc, user)
+            assert getattr(target, field) == pending
+            assert target in pg.session.dirty and inspect(target).modified
+            assert inspect(target).attrs[field].history == history
+            # Scalar projections prove neither refresh nor autoflush consumed
+            # the user's pending edit; no helper interception is used.
+            with pg.session.no_autoflush:
+                column = DocCard.title if target is doc else User.name
+                model = DocCard if target is doc else User
+                assert await pg.session.scalar(select(column).where(model.id == target_id)) == original
+            return
+        if case in {"native_pending_site_draft", "native_transient_site_draft",
+                    "native_pending_null_draft", "native_transient_null_draft"}:
+            site_draft = case in {"native_pending_site_draft", "native_transient_site_draft"}
+            pending = case in {"native_pending_site_draft", "native_pending_null_draft"}
+            draft = DocCard(id=UUID("70000000-0000-4000-8000-000000000097"),
+                            company_id=A, kind_id=KIND, title="Unwritten synthetic draft",
+                            site_id=SITE if site_draft else None, organization_id=ORG,
+                            author_id=UID, status="draft", confidentiality="company",
+                            retention_state="active", inherit_kind_acl=False)
+            if pending:
+                pg.session.add(draft)
+            assert inspect(draft).pending is pending
+            assert inspect(draft).transient is (not pending)
+            assert (await _can_doc(pg.session, A, draft, user, "read",
+                                   record_break_glass_use=False)) is (not site_draft)
+            assert inspect(draft).pending is pending
+            assert inspect(draft).transient is (not pending)
+            assert (draft in pg.session.new) is pending
+            assert draft.title == "Unwritten synthetic draft"
+            assert draft.site_id == (SITE if site_draft else None)
+            with pg.session.no_autoflush:
+                assert await pg.session.scalar(select(func.count()).select_from(DocCard).where(
+                    DocCard.id == draft.id)) == 0
+            return
         if case in {"linked_inbox", "linked_inbox_revoked"}:
             inbox_file = UUID("70000000-0000-4000-8000-000000000098")
             pg.session.add(DocInboxItem(company_id=A, doc_id=DOC, file_id=inbox_file,
