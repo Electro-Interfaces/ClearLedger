@@ -176,6 +176,17 @@ clock относится лишь к domain context. Fixture DML огранич�
 миром; строки/изменения восстанавливаются, credential отключается. NS11 держит
 табличный lock только в отдельной Root-owned test DB, не в рабочей БД.
 
+Узкое продолжение `task_abf22dca4fb9` / `ctx_c348f56e230e` от `c7b53983` меняет
+только отрицательный контроль NS11 и это пояснение. Hook сначала читает и
+проверяет реальные production statement_timeout=5s и transaction_read_only=on.
+Лишь в варианте deadline затем выполняется **тестовая** LOCAL-инъекция 10s:
+SQL timeout не может дать ожидаемый 503 до внешнего ожидания 8s, поэтому его
+должен обеспечить бизнес-дедлайн 5s. Отдельный вариант sql-timeout сохраняет
+LOCAL 150ms, cancel сохраняет явную отмену задачи. После каждого варианта
+прежняя проверка реальных соединений/запросов подтверждает rollback/reset до
+исходного statement_timeout и read-only=off; сама эта проверка ещё NOT RUN.
+Production owner/adapter/app/DTO и матрица 50 вариантов не меняются.
+
 Root предстоит: прочитать конкретный diff и immutable decision; проверить
 реальные импорты/DTO/route registration; отдельно допустить и прогнать новый
 модуль на настоящем PostgreSQL/Authlib внешним plugin без project conftest;

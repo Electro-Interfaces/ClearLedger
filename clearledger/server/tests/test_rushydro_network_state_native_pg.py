@@ -522,7 +522,12 @@ async def test_NS11_deadline_timeout_reset_cancel(network_world, variant):
         if "charge_sessions" in statement and "max(" in statement.lower():
             cursor.execute("SELECT current_setting('statement_timeout'), current_setting('transaction_read_only')")
             hook_settings.append(cursor.fetchone())
-            if variant == "sql-timeout":
+            assert hook_settings[-1] == ("5s", "on")
+            if variant == "deadline":
+                # Test-only negative control: SQL cannot supply the expected
+                # 503 before the 8s outer wait; the business 5s deadline must.
+                cursor.execute("SET LOCAL statement_timeout = '10s'")
+            elif variant == "sql-timeout":
                 # A shorter REAL local timeout makes PG cancellation distinct
                 # from the unchanged production 5s asyncio admission deadline.
                 cursor.execute("SET LOCAL statement_timeout = '150ms'")
