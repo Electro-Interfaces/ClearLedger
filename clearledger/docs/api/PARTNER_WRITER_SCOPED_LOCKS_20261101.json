@@ -1,12 +1,12 @@
 {
   "format": "partner-writer-scoped-locks-source-only-v1",
-  "status": "PW_R1_SOURCE_FIX_AUTHORED_RECHECK_PENDING",
+  "status": "PW_R2_P3_SOURCE_FIX_AUTHORED_RECHECK_PENDING_PW_R1_CLOSED_SOURCE_PRESERVED",
   "base": "e51876f994172c1d8306b934840541d2700486a6",
-  "source_commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
-  "task_id": "task_1f24ad59b9f9",
-  "dispatch_id": "ctx_153e3010a2db",
+  "source_commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+  "task_id": "task_ad8c1d20f601",
+  "dispatch_id": "ctx_237d651b9574",
   "run": "run_1e4d8306c273",
-  "workspace": "/home/mag/orca/workspaces/ledger-app/partner-writer-locks-fix-20261101",
+  "workspace": "/home/mag/orca/workspaces/ledger-app/partner-writer-auth-errors-fix-20261101",
   "scope": {
     "exact7": [
       "clearledger/server/app/routers/partner_admin_router.py",
@@ -32,7 +32,8 @@
     "secondary_user_authorization": "Coordinator msg_e07898532950 relays ROOT msg_5397173e27b5: «Разрешаю код, тесты и документацию в отдельных ветках». Full parent user history not directly available here.",
     "temporary_hold": "msg_86c386e19e87 hold; partial exact2 diff preserved, no commit/runtime; lifted by msg_e07898532950 on same Task/Dispatch. One identity patch shared an exec with inbox read before hold was sampled; reported transparently as msg_81c6b7c4f874.",
     "successor_authorization": "Live task relays ROOT msg_5397173e27b5 user quote «Разрешаю код, тесты и документацию в отдельных ветках», exact7 msg_0ef070c034f0, ROOT msg_93f6338e53ea same7 PW-R1 fix + negative OAuth definitions + independent recheck; runtime0. Parent history not independently accessed.",
-    "temporary_hold_context": "The preceding temporary_hold field describes the initial author run only; no current hold inferred."
+    "temporary_hold_context": "The preceding temporary_hold field describes the initial author run only; no current hold inferred.",
+    "pw_r2_successor_authorization": "Live dispatch relays ROOT msg_1a7c64c0e6db and msg_254271836893: narrow PW-R2 same exact7 + negative oracles + targeted independent recheck, runtime0; direct user permission ROOT msg_5397173e27b5 and scope msg_0ef070c034f0. No ROOT run management/subworkers/pull/rebase."
   },
   "proposal": {
     "path": "/srv/projects/preview/partner-writer-scope-proposal-20261101/proposal.json",
@@ -43,7 +44,7 @@
   "source_files": [
     {
       "path": "clearledger/server/app/routers/partner_admin_router.py",
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
       "raw_sha256": "206d64466ea56a3b760d1df98b77f500cd236e207645344d564b2417b4028d0c",
       "bytes": 13161,
       "lines": 235,
@@ -181,141 +182,141 @@
     },
     {
       "path": "clearledger/server/app/routers/partner_oauth_router.py",
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
-      "raw_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382",
-      "bytes": 19056,
-      "lines": 372,
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "raw_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3",
+      "bytes": 20304,
+      "lines": 390,
       "symbols": [
         {
           "symbol": "protocol_error",
-          "start": 34,
-          "end": 36,
+          "start": 35,
+          "end": 37,
           "raw_span_sha256": "e21c032e25fdfcb1297c72b31105f98ea7cc77b9602fb39d09c5c92a873c1718"
         },
         {
           "symbol": "result_response",
-          "start": 39,
-          "end": 45,
+          "start": 40,
+          "end": 46,
           "raw_span_sha256": "1631a54584e86d68aa76f1257458cde50dcde8338df5b604cba96e70a90e1e4d"
         },
         {
           "symbol": "throttle",
-          "start": 48,
-          "end": 62,
+          "start": 49,
+          "end": 63,
           "raw_span_sha256": "0f8bb8b5524f456c71a6760360f3f3c1a653d6c11a152fe1f2e2da5e30061f99"
         },
         {
           "symbol": "parameters",
-          "start": 65,
-          "end": 73,
+          "start": 66,
+          "end": 74,
           "raw_span_sha256": "73540c9a30bdc7a676707dcc1f6af8e33057a0230618122fbb395a802e1231d9"
         },
         {
           "symbol": "form_request",
-          "start": 76,
-          "end": 101,
+          "start": 77,
+          "end": 102,
           "raw_span_sha256": "224f56983e1f16a56cd06c79950835bf2a33260d4153c3fafaabad1e7d34e9d8"
         },
         {
           "symbol": "authorize",
-          "start": 105,
-          "end": 132,
+          "start": 106,
+          "end": 133,
           "raw_span_sha256": "3fa241edb30bac531cf6ae81d5bdb1323edce792702dedb112475bfc55452ac5"
         },
         {
           "symbol": "authorize.create",
-          "start": 116,
-          "end": 126,
+          "start": 117,
+          "end": 127,
           "raw_span_sha256": "e73d04a7e97af8e258140664c017453236184e70176ff7e4245574f10b97eb97"
         },
         {
           "symbol": "token",
-          "start": 136,
-          "end": 149,
+          "start": 137,
+          "end": 150,
           "raw_span_sha256": "4f0ae1ddda087caf267ed2b64947e99e9e23745391095f03c3c95c0d1f3e4885"
         },
         {
           "symbol": "revoke",
-          "start": 153,
-          "end": 164,
+          "start": 154,
+          "end": 165,
           "raw_span_sha256": "4f6ddfee4531617c103e062757bcb7215bd4b65a0706ae9933dc415238084de6"
         },
         {
           "symbol": "_protocol_response",
-          "start": 167,
-          "end": 186,
-          "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5"
+          "start": 168,
+          "end": 204,
+          "raw_span_sha256": "7e3716fd7dff2a2f3d0a37872f7b28bd53326fe38e3070dcb4354e816095cae5"
         },
         {
           "symbol": "discovery",
-          "start": 191,
-          "end": 204,
+          "start": 209,
+          "end": 222,
           "raw_span_sha256": "d069fb871b50f68f987791da2e48d1d7d9dd1075e756f9c595b339b3559054a3"
         },
         {
           "symbol": "jwks",
-          "start": 208,
-          "end": 210,
+          "start": 226,
+          "end": 228,
           "raw_span_sha256": "fcc32a1b339957566e329fc591734ad9a22de9f7da21a0eb993fe8fd740c4ee1"
         },
         {
           "symbol": "userinfo",
-          "start": 214,
-          "end": 229,
+          "start": 232,
+          "end": 247,
           "raw_span_sha256": "6ba422de681219982b93e81ac80f3fed7e6447e816ef2dff2a5d055c8c327e14"
         },
         {
           "symbol": "userinfo.detail",
-          "start": 218,
-          "end": 226,
+          "start": 236,
+          "end": 244,
           "raw_span_sha256": "147c9b2f27b4ff82b7ed27e54ac8b3ac8acd2ec665fc72098587ada47811f568"
         },
         {
           "symbol": "pending_request",
-          "start": 232,
-          "end": 245,
+          "start": 250,
+          "end": 263,
           "raw_span_sha256": "ae1d9083a1195a80e605326c760d7baef96200ff03fbb34863f30d7a31ae6424"
         },
         {
           "symbol": "eligible_installations",
-          "start": 248,
-          "end": 260,
+          "start": 266,
+          "end": 278,
           "raw_span_sha256": "6f9e14726cf1c5ab3a5f0a91764d8b6de4c0bacb19e9a892044b69baa227eaaa"
         },
         {
           "symbol": "get_request",
-          "start": 264,
-          "end": 289,
+          "start": 282,
+          "end": 307,
           "raw_span_sha256": "52e206ae750ac689a12cda7b494d0c0d6de04f018eef3dccdf023a2e6e00acfb"
         },
         {
           "symbol": "get_request.detail",
-          "start": 266,
-          "end": 283,
+          "start": 284,
+          "end": 301,
           "raw_span_sha256": "b05be9fcea23eeec1f6c6ef3f469e5fb84a74d8ae02dacc65064614cba60934a"
         },
         {
           "symbol": "approve",
-          "start": 293,
-          "end": 346,
+          "start": 311,
+          "end": 364,
           "raw_span_sha256": "5a856a0838822715497e74f6c32946097ef76c41039def93bfeaa8dbcd586611"
         },
         {
           "symbol": "approve.accept",
-          "start": 296,
-          "end": 339,
+          "start": 314,
+          "end": 357,
           "raw_span_sha256": "7ff9398231eb68926fbe5f9de2069fc20ec77bd57c2e8b712d9ca57a583fc475"
         },
         {
           "symbol": "deny",
-          "start": 350,
-          "end": 372,
+          "start": 368,
+          "end": 390,
           "raw_span_sha256": "c4b0a455dfaf79daa9038c28a39941461f56bd05a223f84e5f6750875153dd30"
         },
         {
           "symbol": "deny.decline",
-          "start": 352,
-          "end": 366,
+          "start": 370,
+          "end": 384,
           "raw_span_sha256": "39d5c819af0bb0738f1154786b7c51351c498ff0eb9f4bbc65026080fd95cf0e"
         }
       ],
@@ -325,7 +326,7 @@
     },
     {
       "path": "clearledger/server/app/services/partner_identity.py",
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
       "raw_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
       "bytes": 59546,
       "lines": 1206,
@@ -937,10 +938,10 @@
     },
     {
       "path": "clearledger/server/tests/test_partner_writer_scoped_locks.py",
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
-      "raw_sha256": "dfe74c356ad3ca19ce653976e058e6f9733b1bc9a955f33a2901594190885d6b",
-      "bytes": 12730,
-      "lines": 228,
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "raw_sha256": "744aa378f193b001f8451ba1e065658a2bec0004ec735f1635de851127ff1eaf",
+      "bytes": 20265,
+      "lines": 330,
       "symbols": [
         {
           "symbol": "tree",
@@ -985,87 +986,108 @@
           "raw_span_sha256": "27c155589b28946d2df0b613360cb20133bdf656a721877f6dfa02fabe51dd1d"
         },
         {
-          "symbol": "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
+          "symbol": "test_identity_free_validation_is_negative_only_before_composition",
           "start": 72,
-          "end": 80,
+          "end": 97,
+          "raw_span_sha256": "4fdabdb77c45d90f3b6409461426abf53b43f8b6f59438ba39b3e8c287772110"
+        },
+        {
+          "symbol": "test_identity_present_protocol_still_has_one_full_writer_and_final_checks",
+          "start": 100,
+          "end": 116,
+          "raw_span_sha256": "b79d6b6356564eb39133d6d1541dd832b93d179b240293ca9868120c26e165e6"
+        },
+        {
+          "symbol": "test_primary_no_client_methods_fail_before_lookup_and_protocol_callbacks",
+          "start": 119,
+          "end": 171,
+          "raw_span_sha256": "b02a1abfeaace31e3b08e1dd375563f16960f10a17906ac7c8f05f936910760f"
+        },
+        {
+          "symbol": "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
+          "start": 174,
+          "end": 182,
           "raw_span_sha256": "4108e2876fb1d0fb613510cef216111705e15dfcb168f90f26be23e2fa5309fc"
         },
         {
           "symbol": "test_row_protocol_is_canonical_share_or_update_and_tenant_before_lock",
-          "start": 83,
-          "end": 94,
+          "start": 185,
+          "end": 196,
           "raw_span_sha256": "603a6a908cd78b8e539dc5dab8dd8aa761987c7e9f9459391cd437e642ee1a52"
         },
         {
           "symbol": "test_native_reverification_uses_original_bearer_and_public_auth_same_session",
-          "start": 97,
-          "end": 105,
+          "start": 199,
+          "end": 207,
           "raw_span_sha256": "d68e4eff312cc0099cc3c208dcce398d23b9fcf80de0c3cfbf84de5de464cae8"
         },
         {
           "symbol": "test_seam_reuses_one_verifier_and_compares_original_stable_identity",
-          "start": 108,
-          "end": 116,
+          "start": 210,
+          "end": 218,
           "raw_span_sha256": "528810bcbd77bb3273a97d30a69cecd4dfb27cd5d7b7f9823daa3a907f409511"
         },
         {
           "symbol": "test_userinfo_canonical_rows_before_seam_and_rechecks_after_subject_flush",
-          "start": 119,
-          "end": 128,
+          "start": 221,
+          "end": 230,
           "raw_span_sha256": "2780ed9eeebc18c9b2c0347ddce5b16d1852a8bec367bbb5459802e396483a65"
         },
         {
           "symbol": "test_conflict_winner_checked_before_new_ca_lock_and_root_rollback",
-          "start": 131,
-          "end": 138,
+          "start": 233,
+          "end": 240,
           "raw_span_sha256": "3fdd95c654afec2d278414989fa187f08a635f67d9d79ee17dcb723db968d86a"
         },
         {
           "symbol": "test_consent_selected_company_and_self_revoke_policy_remain_distinct",
-          "start": 141,
-          "end": 147,
+          "start": 243,
+          "end": 249,
           "raw_span_sha256": "d0a193b4203dc6a07965be616118fc6043d839bcde009cee1a37a5ab6438056b"
         },
         {
           "symbol": "test_reuse_is_only_explicit_oauth_error_durability_exception",
-          "start": 150,
-          "end": 158,
+          "start": 252,
+          "end": 260,
           "raw_span_sha256": "058a56027991b4f188a26e395b65b5f1d04107be8b323a7fc926b4a53ce39dec"
         },
         {
           "symbol": "test_family_before_token_and_no_late_protocol_identity",
-          "start": 161,
-          "end": 167,
+          "start": 263,
+          "end": 269,
           "raw_span_sha256": "bf4ca2a6b0b5aa60ec07661c07ad0d6f51dc349a4af38387e485dc998c3dd66b"
         },
         {
           "symbol": "test_final_callbacks_and_native_checks_never_acquire_another_plan",
-          "start": 170,
-          "end": 177,
+          "start": 272,
+          "end": 279,
           "raw_span_sha256": "0d4c673f3fa8e79f71d6bb581f5436399a2892a34443d4f6a8d73bc80829f111"
         },
         {
           "symbol": "test_protocol_nonce_and_subject_uniqueness_are_preserved",
-          "start": 180,
-          "end": 185,
+          "start": 282,
+          "end": 287,
           "raw_span_sha256": "9aff340d3f27e5b2f003f845af52af97aa3e940f1aaf4dad2c1975fad622798d"
         },
         {
           "symbol": "test_absent_members_roles_and_parent_pointer_drift_are_explicit",
-          "start": 188,
-          "end": 194,
+          "start": 290,
+          "end": 296,
           "raw_span_sha256": "2d8b345e73960475d39df7d5bbd6e78f17b8eb28bf64ffe1c3ea6b0956299aab"
         },
         {
           "symbol": "test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields",
-          "start": 197,
-          "end": 228,
+          "start": 299,
+          "end": 330,
           "raw_span_sha256": "7eee4bdf72f7b72a45f1559138c4c7fbef38e6f74fbfc9851ac1b0d59d16f733"
         }
       ],
       "authored_test_functions": [
         "test_all_eight_admin_roots_enter_shared_composer_before_changes",
         "test_oauth_seven_named_roots_and_three_token_branches_share_composition",
+        "test_identity_free_validation_is_negative_only_before_composition",
+        "test_identity_present_protocol_still_has_one_full_writer_and_final_checks",
+        "test_primary_no_client_methods_fail_before_lookup_and_protocol_callbacks",
         "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
         "test_row_protocol_is_canonical_share_or_update_and_tenant_before_lock",
         "test_native_reverification_uses_original_bearer_and_public_auth_same_session",
@@ -1080,15 +1102,15 @@
         "test_absent_members_roles_and_parent_pointer_drift_are_explicit",
         "test_protocol_graph_selection_uses_endpoint_mutation_and_only_its_fields"
       ],
-      "all_function_definitions": 20,
-      "test_function_definitions": 15
+      "all_function_definitions": 23,
+      "test_function_definitions": 18
     },
     {
       "path": "clearledger/server/tests/test_partner_writer_scoped_locks_pg.py",
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
-      "raw_sha256": "8e6fc94cb9226a5cabc3cbad1a9ff3e9a61ebc437439b2b1d10ccf95c757107d",
-      "bytes": 46558,
-      "lines": 784,
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+      "raw_sha256": "a85f471f9f1fcdefe5a1c50d8b8479dd08ad2ee9c6211baaee35c8473876fb15",
+      "bytes": 58540,
+      "lines": 966,
       "symbols": [
         {
           "symbol": "pid",
@@ -1325,21 +1347,87 @@
           "raw_span_sha256": "a45efab23ea212b3488c5ee1abbd94c144f11b15789fbc762f9e4a5e33944b15"
         },
         {
+          "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql",
+          "start": 689,
+          "end": 755,
+          "raw_span_sha256": "e1b97eaa703f718dd9fea721959c076854dffe31a9680267a68c9f9bb861124d"
+        },
+        {
+          "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql.forbidden",
+          "start": 710,
+          "end": 712,
+          "raw_span_sha256": "37bc31035a9db18ebe178fbd8e20cd220ad31b42c161fed54339cb68f2af2e71"
+        },
+        {
+          "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql.record",
+          "start": 713,
+          "end": 714,
+          "raw_span_sha256": "cc133ca670c304da5cf2dd2e9dab1e918d88d74b96b603f49968e404128eaf83"
+        },
+        {
+          "symbol": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql.observe_validation",
+          "start": 716,
+          "end": 726,
+          "raw_span_sha256": "96d2bf70350549540fe9a927d409a3d7b7ba5b02819e8329fa5a811536b73e26"
+        },
+        {
+          "symbol": "test_unknown_token_and_malformed_basic_keep_original_401_challenge",
+          "start": 759,
+          "end": 776,
+          "raw_span_sha256": "6913caf9e860bfdca4199852e7f9897ce03156d18a2a7326839d906e74497b3b"
+        },
+        {
+          "symbol": "test_unknown_token_and_malformed_basic_keep_original_401_challenge.forbidden",
+          "start": 762,
+          "end": 764,
+          "raw_span_sha256": "5b66b7d8222fe71bd83686c34f1bb8052c786f6936972e7d7f3a3ad0bee37e20"
+        },
+        {
+          "symbol": "test_identity_free_unexpected_nonerror_rolls_back_real_root",
+          "start": 782,
+          "end": 794,
+          "raw_span_sha256": "9e420a91e12edb37a09d52c05645632d21a122fae29366c985a012bad58289d4"
+        },
+        {
+          "symbol": "test_identity_free_unexpected_nonerror_rolls_back_real_root.wrong_result",
+          "start": 783,
+          "end": 784,
+          "raw_span_sha256": "5940fc394fe195e6639059c4a44dba4077e124df898104ba4050d6649e310adb"
+        },
+        {
+          "symbol": "test_identity_free_unexpected_nonerror_rolls_back_real_root.forbidden",
+          "start": 785,
+          "end": 786,
+          "raw_span_sha256": "de2a86d9f2865bddb0c472b9be2fcdfa7c26ac7004aaf926595990e244c7435b"
+        },
+        {
+          "symbol": "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
+          "start": 804,
+          "end": 862,
+          "raw_span_sha256": "1d9107ad4c6d96d400972925173df93326371cd4b8b1a6475642d41a17453b7e"
+        },
+        {
+          "symbol": "test_identity_present_controls_use_real_composer_once_and_canonical_auth.inspect_real_plan",
+          "start": 822,
+          "end": 837,
+          "raw_span_sha256": "fec1991988084efcddf190400e0604f59c9962bd1843237eeaa9f0fae2b8b43f"
+        },
+        {
           "symbol": "test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors",
-          "start": 685,
-          "end": 724,
+          "start": 867,
+          "end": 906,
           "raw_span_sha256": "fb32af22ad5965d5d451643e8bf368534a36dcc617d27f57519855975e360506"
         },
         {
           "symbol": "test_token_branch_ignores_fields_of_other_protocol_branches",
-          "start": 729,
-          "end": 784,
+          "start": 911,
+          "end": 966,
           "raw_span_sha256": "1f3df095ebb239007a207f908494a96f2ac70b9b55545cd73f0542824bcd41f8"
         },
         {
           "symbol": "test_token_branch_ignores_fields_of_other_protocol_branches.inspect_real_plan",
-          "start": 758,
-          "end": 774,
+          "start": 940,
+          "end": 956,
           "raw_span_sha256": "a48ee74f4002bad52dfdc9a0c65f26b6e2ea39c17fcf156204d889e14798e810"
         }
       ],
@@ -1368,11 +1456,15 @@
         "test_real_reader_cap_blocks_actual_credential_revoke_until_root_end",
         "test_final_native_denial_after_replacement_flush_restores_complete_old_sets",
         "test_revoke_ignored_oauth_fields_only_discover_and_revoke_requested_family",
+        "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql",
+        "test_unknown_token_and_malformed_basic_keep_original_401_challenge",
+        "test_identity_free_unexpected_nonerror_rolls_back_real_root",
+        "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
         "test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors",
         "test_token_branch_ignores_fields_of_other_protocol_branches"
       ],
-      "all_function_definitions": 39,
-      "test_function_definitions": 26
+      "all_function_definitions": 50,
+      "test_function_definitions": 30
     }
   ],
   "unchanged_dependency_pins": [
@@ -3421,7 +3513,7 @@
     "rows": "Company -> App -> Client -> Users -> Role -> Member -> CA -> Installation -> Grant -> Credentials -> Family -> Token -> Request/Code -> known reference rows. UPDATE for mutated rows, SHARE for authority, never KEY SHARE; company/pointer predicates before lock; populate_existing.",
     "set_drift": "Complete original credential IDs and installation location/profile/item snapshots are scalar-discovered and compared after parent locks; drift rolls back whole root before new rows/keys.",
     "seam": {
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
       "path": "clearledger/server/app/services/partner_identity.py",
       "symbol": "verify_locked_partner_access",
       "start": 1148,
@@ -3431,7 +3523,7 @@
     },
     "non_portable": "Issued capability proves issuance/lifetime/logical coverage, NOT row locks or ACL; returned VerifiedPartnerToken is fresh data, never portable write authority. Caller owns canonical rows on same actual session/root and repeats seam after waits.",
     "native": {
-      "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+      "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
       "path": "clearledger/server/app/services/partner_identity.py",
       "symbol": "_native_authority",
       "start": 431,
@@ -3457,14 +3549,15 @@
       },
       "actual_get_db_or_pg_target_isolation": "UNCONFIRMED; ROOT must confirm/enforce READ COMMITTED before runtime admission"
     },
-    "protocol_discovery": "Trusted server mutation controls discovery: token-code=>code only; token-refresh=>refresh_token only; token-machine=>grant_id only; revoke=>RFC7009 token only, access OR refresh lookup. Other token/code/refresh_token/grant_id/grant_type fields never select unrelated graphs. Authlib retains original authentication/error/hint semantics; no allowlist/reject, payload rewrite, new parser, decoder, late keys or second plan."
+    "protocol_discovery": "For identity-present requests: trusted server mutation selects code/refresh_token/grant_id/revoke token only; full original single typed plan and canonical rows unchanged byte/AST from3bcb. Ignored fields remain ignored, no payload rewrite/allowlist/rejection. Identity-absent requests use the strictly negative canonical Authlib validation described in pw_r2_successor, never an unlocked writer.",
+    "negative_preflight": "Clean Session required before parsing; same extract_basic_authorization(headers)[0] OR payload.client_id. Only when both falsy, inside no_autoflush call original canonical server token/endpoint response with no writer, forward only actual error result with durable=False for whole-root rollback. Reject unexpected tuple/non-error/dirty result with explicit rollback and ScopedLockError. No hardcoded OAuth status/code/challenge/dispatch policy. All identity-present requests including bad-secret/nonempty unknown Basic usernames enter original one full composer. checkpoint and RevokeEndpoint writer guards unchanged."
   },
   "per_17_branches": [
     {
       "id": 1,
       "branch": "admin.register",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "register",
         "start": 58,
@@ -3475,13 +3568,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Newborn App X + Client X allocated before acquire.",
       "row_protocol": "Company/App/Client/User/Role/Member authority; new App flush -> Client flush -> final current native/admin checks -> commit.",
       "current_authority": "Raw bearer decode + public native policy/admin repeated after FK flush.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 2,
       "branch": "admin.client_status",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "client_status",
         "start": 83,
@@ -3492,13 +3585,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
       "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
       "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 3,
       "branch": "admin.issue_credential",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "issue_credential",
         "start": 93,
@@ -3509,13 +3602,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
       "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
       "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 4,
       "branch": "admin.revoke_credential",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "revoke_credential",
         "start": 111,
@@ -3526,13 +3619,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. Actual App S, actual Client X; complete credential set discovered.",
       "row_protocol": "Canonical parents; Client UPDATE for status; Credential UPDATE set for revoke; other authorities SHARE; issue credential flush after Client.",
       "current_authority": "Original owner-company admin and native session; no added enabled gate to status/revoke; issue retains active confidential gate.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 5,
       "branch": "admin.approve_installation",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "approve_installation",
         "start": 124,
@@ -3543,13 +3636,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; target Company S; existing/preallocated Installation X; original/new resource references scalar-discovered.",
       "row_protocol": "CA UPDATE before Installation UPDATE; absent CA INSERT ON CONFLICT -> actual-id scalar compare -> whole rollback409 on winner drift BEFORE different CA/install lock; full set replacement/FK flush -> final check.",
       "current_authority": "Original target admin, client/scopes/resources; exact selected reference rows SHARE by company+id; old/current selection drift aborts without late key.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 6,
       "branch": "admin.revoke_installation",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "revoke_installation",
         "start": 195,
@@ -3560,13 +3653,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; actual Installation X; owner/target companies S.",
       "row_protocol": "Company -> App -> Client -> User -> Role -> Member -> CA -> Installation; revoke Installation UPDATE; machine new Grant flush after canonical authority.",
       "current_authority": "Original native target admin; machine confidential client/scope restrictions preserved; no fake user as service principal.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 7,
       "branch": "admin.machine_grant",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "machine_grant",
         "start": 205,
@@ -3577,13 +3670,13 @@
       "full_original_plan": "Native actual User S, target Company S, Member(target,actor) S, discovered non-NULL Role(target,role) S; original admin gate only. All observed client owner companies S included. App/Client S; actual Installation S; owner/target companies S.",
       "row_protocol": "Company -> App -> Client -> User -> Role -> Member -> CA -> Installation; revoke Installation UPDATE; machine new Grant flush after canonical authority.",
       "current_authority": "Original native target admin; machine confidential client/scope restrictions preserved; no fake user as service principal.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 8,
       "branch": "admin.revoke_grant",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_admin_router.py",
         "symbol": "revoke_grant",
         "start": 224,
@@ -3594,169 +3687,172 @@
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. Grant grantee User/Member/current Role S when present; native actor User S; N only original nonself.",
       "row_protocol": "CA -> Installation SHARE -> Grant UPDATE. Self branch has NO new admin/member eligibility gate.",
       "current_authority": "Actual native bearer/session after waits; original self vs nonself admin branch retained, no live_grant requirement.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 9,
       "branch": "oauth.authorize",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "authorize",
-        "start": 105,
-        "end": 132,
+        "start": 106,
+        "end": 133,
         "raw_span_sha256": "3fa241edb30bac531cf6ae81d5bdb1323edce792702dedb112475bfc55452ac5",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "App/Client/actual owner Company S; no chosen User/company/installation.",
       "row_protocol": "Full typed plan + canonical parents BEFORE get_consent_grant/nonce; Request INSERT flush; final checkpoint -> commit.",
       "current_authority": "Actual public client/App and existing Authlib redirect/scope/PKCE/nonce; no fake Core actor.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 10,
       "branch": "consent.get_request",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "get_request",
-        "start": 264,
-        "end": 289,
+        "start": 282,
+        "end": 307,
         "raw_span_sha256": "52e206ae750ac689a12cda7b494d0c0d6de04f018eef3dccdf023a2e6e00acfb",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "App/Client/owner Company/native User S; original Request pointer/owner discovered.",
       "row_protocol": "Canonical parents -> Request UPDATE -> bind user; nonce callback may lock bigint; final native check/flush -> commit; GET WRITES.",
       "current_authority": "Raw native JWT/public native user/visit/ordinary policy repeated after Request/nonce/FK waits; displayed all-company choices remain advisory.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 11,
       "branch": "consent.approve",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "approve",
-        "start": 293,
-        "end": 346,
+        "start": 311,
+        "end": 364,
         "raw_span_sha256": "5a856a0838822715497e74f6c32946097ef76c41039def93bfeaa8dbcd586611",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse. Discovery selects ONLY body.companyId; existing chosen Installation S.",
       "row_protocol": "Canonical parent rows -> Request UPDATE -> nonce wait -> new Grant flush -> nonce/code -> Request finished flush -> final native/live check.",
       "current_authority": "Same selected-company eligible_scopes before grant and after nonce; current native claims supply code auth_time/tv/parent exp; no contracts:create/profile authority.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 12,
       "branch": "consent.deny",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "deny",
-        "start": 350,
-        "end": 372,
+        "start": 368,
+        "end": 390,
         "raw_span_sha256": "c4b0a455dfaf79daa9038c28a39941461f56bd05a223f84e5f6750875153dd30",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "App/Client/owner Company/native User S; original Request user/client pointers.",
       "row_protocol": "Parents -> Request UPDATE/bind -> Authlib deny response/nonce -> finished flush -> final checkpoint.",
       "current_authority": "Current native ordinary policy; Request owner/expiry/finished and actual client; no chosen-company ACL introduced.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 13,
       "branch": "oauth.token-code",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
-        "start": 167,
-        "end": 186,
-        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "start": 168,
+        "end": 204,
+        "raw_span_sha256": "7e3716fd7dff2a2f3d0a37872f7b28bd53326fe38e3070dcb4354e816095cae5",
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Canonical parents/Grant/Credentials SHARE -> original Code UPDATE -> new Family -> new Token flush -> consumed Code; OIDC after-response subject callback -> final checkpoint/flush.",
       "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 14,
       "branch": "oauth.token-refresh",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
-        "start": 167,
-        "end": 186,
-        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "start": 168,
+        "end": 204,
+        "raw_span_sha256": "7e3716fd7dff2a2f3d0a37872f7b28bd53326fe38e3070dcb4354e816095cae5",
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Canonical parents/Grant/Credentials SHARE -> Family UPDATE -> old Token UPDATE; issue new token -> mark old refresh used. Reuse family.revoked flush deliberately survives invalid_grant response.",
       "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 15,
       "branch": "oauth.token-machine",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
-        "start": 167,
-        "end": 186,
-        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "start": 168,
+        "end": 204,
+        "raw_span_sha256": "7e3716fd7dff2a2f3d0a37872f7b28bd53326fe38e3070dcb4354e816095cae5",
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Canonical actual service-client/App/Company/Installation/Grant/Credentials -> new Family -> new Token; no User row/fake claims.",
       "current_authority": "Existing Authlib client auth reused after waits; original scope passed to live_grant; fresh User tv/auth_time/MAX_SESSION, code/family/token/credential expiry; ordinary failed OAuth response rolls back whole root, except deliberate reuse revocation.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 16,
       "branch": "oauth.revoke",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "_protocol_response",
-        "start": 167,
-        "end": 186,
-        "raw_span_sha256": "17d20e084ce3095c02be1da47c349027107f23a35f440dbfaab6e23d7cd4ede5",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "start": 168,
+        "end": 204,
+        "raw_span_sha256": "7e3716fd7dff2a2f3d0a37872f7b28bd53326fe38e3070dcb4354e816095cae5",
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Original Family UPDATE before Token SHARE; known/revoked family marked revoked; unknown remains protocol success. PW-R1 successor: trusted mutation=revoke discovers only original RFC7009 token (access OR refresh); extra grant_type/refresh_token/code/grant_id cannot select another graph.",
       "current_authority": "Only original client authentication/token ownership gate; no live_grant/admin/member requirement, no replacement authority for revoked credentials/grants.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     },
     {
       "id": 17,
       "branch": "oauth.userinfo",
       "source": {
-        "commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+        "commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
         "path": "clearledger/server/app/routers/partner_oauth_router.py",
         "symbol": "userinfo",
-        "start": 214,
-        "end": 229,
+        "start": 232,
+        "end": 247,
         "raw_span_sha256": "6ba422de681219982b93e81ac80f3fed7e6447e816ef2dff2a5d055c8c327e14",
-        "raw_file_sha256": "1ac0b215a93f74b4aec87f83f57590d2f629a8dfcb6018f156b284d5e59f4382"
+        "raw_file_sha256": "f2c81e888eb6300c6e4ad1a11903f1ade875db332a7d9ea4799fbe5ff4bfd3b3"
       },
       "full_original_plan": "All candidate App/Client/owner+target Company S; original installation S; original grant/user/company/client/app pointers; selected credential set plus original family credential. Strongest merge/numeric pair order belongs unchanged helper. User-grant actual User/Member/current non-NULL Role S in selected company; service has no User/Member/Role; no extra live eligibility gate for revoke/reuse.",
       "row_protocol": "Caller canonical rows -> issued cap seam(existing verify_access) -> user_info conditional Subject INSERT ON CONFLICT -> flush -> same seam -> commit.",
       "current_authority": "Stable original token/client/app/install/company/grant/user/kind/subject tuple; fresh returned scopes/resources. Existing verifier requires stored subject; normal issued-token path does not itself prove missing-subject repair reachable.",
-      "acceptance": "Original54fd reviewed with PW-R1; successor narrow independent recheck PENDING; runtime NOTRUN/UNPROVEN"
+      "acceptance": "PW-R1 CLOSED_SOURCE at3bcb; PW-R2 P3 successor AUTHORED, targeted independent recheck PENDING; all runtime NOTRUN/UNPROVEN"
     }
   ],
   "authored_tests": {
-    "source_functions": 15,
-    "pg_functions": 26,
+    "source_functions": 18,
+    "pg_functions": 30,
     "names": {
       "clearledger/server/tests/test_partner_writer_scoped_locks.py": [
         "test_all_eight_admin_roots_enter_shared_composer_before_changes",
         "test_oauth_seven_named_roots_and_three_token_branches_share_composition",
+        "test_identity_free_validation_is_negative_only_before_composition",
+        "test_identity_present_protocol_still_has_one_full_writer_and_final_checks",
+        "test_primary_no_client_methods_fail_before_lookup_and_protocol_callbacks",
         "test_discovery_has_one_full_plan_and_acquisition_before_row_locks",
         "test_row_protocol_is_canonical_share_or_update_and_tenant_before_lock",
         "test_native_reverification_uses_original_bearer_and_public_auth_same_session",
@@ -3796,6 +3892,10 @@
         "test_real_reader_cap_blocks_actual_credential_revoke_until_root_end",
         "test_final_native_denial_after_replacement_flush_restores_complete_old_sets",
         "test_revoke_ignored_oauth_fields_only_discover_and_revoke_requested_family",
+        "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql",
+        "test_unknown_token_and_malformed_basic_keep_original_401_challenge",
+        "test_identity_free_unexpected_nonerror_rolls_back_real_root",
+        "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
         "test_revoke_extra_fields_preserve_unknown_repeat_wrong_client_and_hint_errors",
         "test_token_branch_ignores_fields_of_other_protocol_branches"
       ]
@@ -3883,7 +3983,8 @@
           ]
         }
       ],
-      "observer_limitation": "Two wrappers observe the actual endpoint composer and its real capability, returning it unchanged; verifier is not replaced. This is an authored oracle, not evidence of executed helpers/locks/HTTP."
+      "observer_limitation": "Two wrappers observe the actual endpoint composer and its real capability, returning it unchanged; verifier is not replaced. This is an authored oracle, not evidence of executed helpers/locks/HTTP.",
+      "historical_owner": "PW-R1 successor only; unchanged 1 source/3 PG/49 future parameter combinations, not collected cases."
     },
     "coverage_gaps_for_future_root_acceptance": [
       "Resource-profile test compares unchanged resources; no valid narrowing interleaving/changed snapshot definition.",
@@ -3893,15 +3994,256 @@
       "Partial-write cancellation and all eight admin permutations are not fully covered; typed-wait cancellation is narrower.",
       "Guarded subject repair call remains, but normal canonical verifier requires existing PartnerSubject; missing-subject repair reachability unproved.",
       "Shared helper/ROOT135/native27/body27 and full B/API/partner/flags/release are separate, not transferred proof. This targeted fix does not close these gaps."
-    ]
+    ],
+    "new_in_pw_r2": {
+      "source_function_definitions": 3,
+      "pg_function_definitions": 4,
+      "source_names": [
+        "test_identity_free_validation_is_negative_only_before_composition",
+        "test_identity_present_protocol_still_has_one_full_writer_and_final_checks",
+        "test_primary_no_client_methods_fail_before_lookup_and_protocol_callbacks"
+      ],
+      "pg_names": [
+        "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql",
+        "test_unknown_token_and_malformed_basic_keep_original_401_challenge",
+        "test_identity_free_unexpected_nonerror_rolls_back_real_root",
+        "test_identity_present_controls_use_real_composer_once_and_canonical_auth"
+      ],
+      "pg_literal_parameter_rows": 36,
+      "pg_future_combinations": 67,
+      "parameter_definitions": [
+        {
+          "function": "test_identity_free_http_preserves_canonical_errors_without_writer_or_sql",
+          "axes": [
+            {
+              "parameters": "authorization,empty_body_id",
+              "literal_rows": 6,
+              "values": [
+                [
+                  null,
+                  false
+                ],
+                [
+                  null,
+                  true
+                ],
+                [
+                  "Basic !!!",
+                  false
+                ],
+                [
+                  "Basic Og==",
+                  false
+                ],
+                [
+                  "Basic OnNlY3JldA==",
+                  false
+                ],
+                [
+                  "Digest fictional",
+                  false
+                ]
+              ]
+            },
+            {
+              "parameters": "operation,status,error",
+              "literal_rows": 7,
+              "values": [
+                [
+                  "authorization_code",
+                  401,
+                  "invalid_client"
+                ],
+                [
+                  "refresh_token",
+                  401,
+                  "invalid_client"
+                ],
+                [
+                  "client_credentials",
+                  401,
+                  "invalid_client"
+                ],
+                [
+                  "unknown",
+                  400,
+                  "unsupported_grant_type"
+                ],
+                [
+                  "password",
+                  400,
+                  "unsupported_grant_type"
+                ],
+                [
+                  null,
+                  400,
+                  "unsupported_grant_type"
+                ],
+                [
+                  "revoke",
+                  401,
+                  "invalid_client"
+                ]
+              ]
+            }
+          ],
+          "literal_parameter_rows": 13,
+          "future_combinations": 42,
+          "collected_cases": "NOTRUN",
+          "executions": 0
+        },
+        {
+          "function": "test_unknown_token_and_malformed_basic_keep_original_401_challenge",
+          "axes": [
+            {
+              "parameters": "operation",
+              "literal_rows": 2,
+              "values": [
+                "token",
+                "revoke"
+              ]
+            }
+          ],
+          "literal_parameter_rows": 2,
+          "future_combinations": 2,
+          "collected_cases": "NOTRUN",
+          "executions": 0
+        },
+        {
+          "function": "test_identity_free_unexpected_nonerror_rolls_back_real_root",
+          "axes": [
+            {
+              "parameters": "operation",
+              "literal_rows": 2,
+              "values": [
+                "token",
+                "revoke"
+              ]
+            },
+            {
+              "parameters": "unexpected",
+              "literal_rows": 4,
+              "values": [
+                [
+                  200,
+                  {
+                    "access_token": "must-not-publish"
+                  },
+                  []
+                ],
+                [
+                  302,
+                  {},
+                  [
+                    [
+                      "Location",
+                      "https://example.invalid"
+                    ]
+                  ]
+                ],
+                [
+                  400,
+                  {},
+                  []
+                ],
+                null
+              ]
+            }
+          ],
+          "literal_parameter_rows": 6,
+          "future_combinations": 8,
+          "collected_cases": "NOTRUN",
+          "executions": 0
+        },
+        {
+          "function": "test_identity_present_controls_use_real_composer_once_and_canonical_auth",
+          "axes": [
+            {
+              "parameters": "operation,auth_mode",
+              "literal_rows": 15,
+              "values": [
+                [
+                  "authorization_code",
+                  "public"
+                ],
+                [
+                  "refresh_token",
+                  "public"
+                ],
+                [
+                  "revoke",
+                  "public"
+                ],
+                [
+                  "authorization_code",
+                  "confidential"
+                ],
+                [
+                  "refresh_token",
+                  "confidential"
+                ],
+                [
+                  "client_credentials",
+                  "confidential"
+                ],
+                [
+                  "revoke",
+                  "confidential"
+                ],
+                [
+                  "authorization_code",
+                  "bad-secret"
+                ],
+                [
+                  "refresh_token",
+                  "bad-secret"
+                ],
+                [
+                  "client_credentials",
+                  "bad-secret"
+                ],
+                [
+                  "revoke",
+                  "bad-secret"
+                ],
+                [
+                  "authorization_code",
+                  "unknown-basic"
+                ],
+                [
+                  "refresh_token",
+                  "unknown-basic"
+                ],
+                [
+                  "client_credentials",
+                  "unknown-basic"
+                ],
+                [
+                  "revoke",
+                  "unknown-basic"
+                ]
+              ]
+            }
+          ],
+          "literal_parameter_rows": 15,
+          "future_combinations": 15,
+          "collected_cases": "NOTRUN",
+          "executions": 0
+        }
+      ],
+      "collection": "NOTRUN",
+      "execution": 0,
+      "existing_assertions": "All previous top-level function definitions in both test files AST-identical3bcb, including PW-R1; test_partner_identity.py and existing password unsupported_grant_type assertion byte-identical e518/3bcb. No source oracle weakened/deleted.",
+      "coverage": "42 identity-free valid-material HTTP combinations with no composer/cap/lookup/nonce/mutation callbacks and zero protocol SQL; exact2 empty-graph counterexample rows; 8 unexpected-result rollback combinations on actual root; 15 public/confidential/bad-secret/nonempty unknown Basic controls call original composer once with actual cap/canonical rows, canonical success or auth failure. Definitions only, no execution."
+    }
   },
   "verification": {
     "diff_check": "No whitespace diagnostics at source freeze",
-    "stdlib_ast_memory_compile": "5 authored Python files parsed and compiled in memory without exec/import; no syntax diagnostics; NOT runtime acceptance",
-    "independent_source_review": "Previous frozen54fd CHANGES_REQUESTED_SOURCE (one confirmed P2 PW-R1); new successor independent recheck PENDING, not acceptance.",
+    "stdlib_ast_memory_compile": "All 5 cumulative authored Python files parsed and compiled in memory without exec/import at source8964bfa4; no syntax diagnostics; no app import/runtime acceptance.",
+    "independent_source_review": "PW-R1 SOURCE_PASS3bcb remains immutable/CLOSED_SOURCE; subsequent independent negative follow-up confirmed one P3 PW-R2 on3bcb (also54). This new successor requires targeted independent recheck; no author acceptance verdict.",
     "runtime": "NOTRUN",
     "full_ci": "NOTRUN",
-    "prior_test_definitions_preserved": "All existing top-level definitions in both test files AST-identical54fd; no assertions weakened or removed.",
+    "prior_test_definitions_preserved": "All previous top-level definitions in both test files AST-identical3bcb; original test_partner_identity.py including password assertion unchanged e518/3bcb. No assertions removed/relaxed.",
     "canonical_policy_AST_unchanged": {
       "base": "e51876f994172c1d8306b934840541d2700486a6",
       "functions": [
@@ -3921,7 +4263,8 @@
       "all_12_semantic_equal": true,
       "method": "stdlib AST/Git comparison only, no function imports/invocation"
     },
-    "static_tool_note": "An initial metadata comparison searched sync FunctionDef only and stopped on async require_core_user; rerun included AsyncFunctionDef and verified all12. No application function ran."
+    "static_tool_note": "Only stdlib AST/JSON/hash/memory compile and Git/FS reads/writes; no imports of app/helper/encoder/pure/testhelper, no extracted function or library parser/auth calls. Memory compile does not prove app import.",
+    "positive_dispatch_preservation": "Entire original _protocol_response suffix from kind/mutation selection through final return byte- AND AST-identical3bcb; new prefix only. partner_identity.py and partner_admin_router.py byte-identical3bcb, preserving PW-R1 discovery, callbacks and positive17 guards. Transport form_request/protocol_error/result_response AST unchanged."
   },
   "outside_closure": [
     {
@@ -4171,7 +4514,7 @@
   },
   "final_target_identifier": {
     "rule": "The immutable Git commit containing this MD/JSON is the docs-only direct child of source_commit; exact final SHA and report raw hashes supplied externally in worker_done. No circular self-hash embedded.",
-    "parent": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
+    "parent": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
     "source5_byte_identical_to_source_commit": true,
     "required_final_delta": [
       "clearledger/docs/api/PARTNER_WRITER_SCOPED_LOCKS_20261101.md",
@@ -4193,11 +4536,499 @@
         "raw_sha256": "2f1f0f1ea2f13929104cb0f61fcd7cf2379f12011e6b3d3921888b15b9a52796"
       }
     ],
-    "fix_status": "SOURCE_AUTHORED_NOT_INDEPENDENTLY_RECHECKED",
+    "fix_status": "CLOSED_SOURCE_BY_INDEPENDENT_RECHECK_3bcb_PRESERVED",
     "runtime_status": "NOTRUN_UNPROVEN",
     "source_commit": "2e102827d5c90a3f279ee8b76c5edb5e645cea31",
     "original_identity_raw_sha256": "2239e9ba627a98497c1d6e937655b47974fc209ae4e8c5039fee05924b8a6152",
     "successor_identity_raw_sha256": "1c1748b3bb12fd9fa9ce017be20e35d109d835987fcb7fc57dfcbafe60c47724",
-    "scope": "Only PW-R1 selection + targeted negative OAuth field regression definitions; no broad audit/new features/helper/auth/model/DTO/fixture/runner/config changes."
+    "scope": "Only PW-R1 selection + targeted negative OAuth field regression definitions; no broad audit/new features/helper/auth/model/DTO/fixture/runner/config changes.",
+    "independent_recheck": {
+      "status": "CLOSED_SOURCE_UNCHANGED",
+      "old_report_verdict": "SOURCE_PASS",
+      "old_reports_immutable": [
+        {
+          "path": "/srv/projects/preview/partner-writer-locks-recheck-20261101/review.md",
+          "raw_sha256": "0b349de5db385ed144a3054992a4fe349be6d2b2287768b1d8e4bc7b349bf694"
+        },
+        {
+          "path": "/srv/projects/preview/partner-writer-locks-recheck-20261101/review.json",
+          "raw_sha256": "c68911389a5d2d8a2f2b3ce32bf43328b24dc0c82a1b653d6ee687077ae7a70d"
+        }
+      ],
+      "relation": "Supplemental distinct issue in original54 and3bcb; previous closure of PW-R1 is unaffected. Earlier broad no-additional-findings statement must be read alongside this new scoped finding; old artifacts are preserved, not rewritten."
+    }
+  },
+  "pw_r2_successor": {
+    "finding": "PW-R2",
+    "priority": "P3",
+    "prior_target": "3bcb00b3f6b07f2cb1ea77a966989f174ac0b10e",
+    "also_present_in_rejected_target": "54fd0c9ff141ffd97e31fe37b11eebff673b2d0d",
+    "source_commit": "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb",
+    "fix_status": "AUTHORED_TARGETED_INDEPENDENT_RECHECK_PENDING",
+    "runtime": "NOTRUN_UNPROVEN",
+    "review_inputs": [
+      {
+        "path": "/srv/projects/preview/partner-writer-auth-errors-review-20261101/review.md",
+        "raw_sha256": "42bb137f39087274a6c7c2e1bf604708d6df5df6ad35b1d3287f0cc1ad3a88f6"
+      },
+      {
+        "path": "/srv/projects/preview/partner-writer-auth-errors-review-20261101/review.json",
+        "raw_sha256": "4db192b8d22476647d2b29d6fe0d3ab02cb9e5e01f8bcdb5ed14e2d2fe6ba75e"
+      }
+    ],
+    "previous_PW_R1_reports_unchanged": [
+      {
+        "path": "/srv/projects/preview/partner-writer-locks-recheck-20261101/review.md",
+        "raw_sha256": "0b349de5db385ed144a3054992a4fe349be6d2b2287768b1d8e4bc7b349bf694"
+      },
+      {
+        "path": "/srv/projects/preview/partner-writer-locks-recheck-20261101/review.json",
+        "raw_sha256": "c68911389a5d2d8a2f2b3ce32bf43328b24dc0c82a1b653d6ee687077ae7a70d"
+      }
+    ],
+    "primary_version": {
+      "authlib": "1.9.1",
+      "metadata": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib-1.9.1.dist-info/METADATA",
+        "raw_sha256": "7141e57ccac936724fd004b401d0695e0ae48f32f2aee14d90259a9d4bc4fdbd"
+      },
+      "interpreter": "CPython3.13.7",
+      "interpreter_source": "Resolved venv/bin/python3.13 symlink and read pyvenv.cfg only; no interpreter/app function execution for this proof."
+    },
+    "primary_evidence": {
+      "parser": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/util.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          26,
+          42
+        ],
+        "raw_file_sha256": "fbed187c5d995474d530f18a0f5d223ea8f4d967a20e15ee62db57e2d4657953",
+        "raw_span_sha256": "e1859525ea0ada1f16cbc14853758bf153cf914ba9b29bde0c73645c4fcb1c6a",
+        "symbol": "extract_basic_authorization"
+      },
+      "client_auth": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authenticate_client.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          36,
+          51
+        ],
+        "raw_file_sha256": "206effd7463af6af48801ee1cf02bc551568719f92428b9d7a453021d9b9f76c",
+        "raw_span_sha256": "d5a80fdfda6155bd16eb16d068dd590a919a818bb4cb4516eae2607bca48492e",
+        "symbol": "ClientAuthentication.authenticate"
+      },
+      "basic_method": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authenticate_client.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          57,
+          67
+        ],
+        "raw_file_sha256": "206effd7463af6af48801ee1cf02bc551568719f92428b9d7a453021d9b9f76c",
+        "raw_span_sha256": "e92cf4565d0b6faef4422c7fd60e61a9dda3dcd6039d55fc617980edc3513ec6",
+        "symbol": "authenticate_client_secret_basic"
+      },
+      "none_method": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authenticate_client.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          85,
+          94
+        ],
+        "raw_file_sha256": "206effd7463af6af48801ee1cf02bc551568719f92428b9d7a453021d9b9f76c",
+        "raw_span_sha256": "6aa6f7ba447dd174adfd4ad3e2e804b27d99d1cabafe2999306dd9ac20cbd65e",
+        "symbol": "authenticate_none"
+      },
+      "invalid_client_error": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/errors.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          81,
+          110
+        ],
+        "raw_file_sha256": "c267cfca54e8f3fc31bd85c388f18ac9cfe09e7e24167a500373c2e3ee3e014a",
+        "raw_span_sha256": "aa4b59a510c67bf046e7ba4d6913f895c777a42ff12d37a387b991caca2baf49",
+        "symbol": "InvalidClientError"
+      },
+      "unsupported_grant_error": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/errors.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          151,
+          165
+        ],
+        "raw_file_sha256": "c267cfca54e8f3fc31bd85c388f18ac9cfe09e7e24167a500373c2e3ee3e014a",
+        "raw_span_sha256": "85bca53bf19c439bef48a5cf8414b7091d1497455a57e39e99d350a9f1d5945d",
+        "symbol": "UnsupportedGrantTypeError"
+      },
+      "http_error": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/common/errors.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          29,
+          58
+        ],
+        "raw_file_sha256": "2f8fc20c243b334f25ae7335ed0256acb5e821ea9ab73453e967059e8e052ad1",
+        "raw_span_sha256": "2179ff7c40df775441a50175195b56d83059a90e43be37981ecf4342c789e615",
+        "symbol": "AuthlibHTTPError"
+      },
+      "oauth_error": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/base.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          23,
+          62
+        ],
+        "raw_file_sha256": "a7a304ea29b7a150ddcd5cc582472c3aca9cfb7ecb88f260c69c94f0016f7d0d",
+        "raw_span_sha256": "a7d56b98ea0d03411f2fa0ca86701895a01c3e20680fc33415f260d78177b25f",
+        "symbol": "OAuth2Error"
+      },
+      "base64": {
+        "path": "/home/mag/.local/share/uv/python/cpython-3.13.7-linux-x86_64-gnu/lib/python3.13/base64.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          65,
+          88
+        ],
+        "raw_file_sha256": "274592a15ae8fbe6c7136537b649e129898036ee19fa84efac83803a42de22c4",
+        "raw_span_sha256": "c9c5d737030ca356f9d1f9b0286d2f65ed195d468c67c5c1761a8d7a02b2c5ed",
+        "symbol": "b64decode"
+      },
+      "to_unicode": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/common/encoding.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          18,
+          23
+        ],
+        "raw_file_sha256": "4bcd04921555240052b5d12e66f415d5ce3b8109eedf9f5f80b0050e6a8b68fd",
+        "raw_span_sha256": "74ade462f8d9327637ffd2bffd6e66665d09929fb955f1d67fb688802cccb731",
+        "symbol": "to_unicode"
+      },
+      "token_grant_selection": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authorization_server.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          284,
+          293
+        ],
+        "raw_file_sha256": "bad5c25d7f6c9f9d5e8478610ad85514150b87b869abd75cd1bd7b2e6d8d9373",
+        "raw_span_sha256": "b2ae76629585d94904d003ba2318913ab27cc0512a887d090d9ae11e2cbb8418",
+        "symbol": "AuthorizationServer.get_token_grant"
+      },
+      "token_response": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authorization_server.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          392,
+          408
+        ],
+        "raw_file_sha256": "bad5c25d7f6c9f9d5e8478610ad85514150b87b869abd75cd1bd7b2e6d8d9373",
+        "raw_span_sha256": "42d9f1b00a5f4066ec35dae238dff0ef8e6cab923499d9c8040317e2f154d6e2",
+        "symbol": "AuthorizationServer.create_token_response"
+      },
+      "endpoint_response": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authorization_server.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          321,
+          359
+        ],
+        "raw_file_sha256": "bad5c25d7f6c9f9d5e8478610ad85514150b87b869abd75cd1bd7b2e6d8d9373",
+        "raw_span_sha256": "f53384d7cda3b506cad847313f02c2d66a5d43447301f8b520681ebc1b065720",
+        "symbol": "AuthorizationServer.create_endpoint_response"
+      },
+      "error_response": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authorization_server.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          410,
+          411
+        ],
+        "raw_file_sha256": "bad5c25d7f6c9f9d5e8478610ad85514150b87b869abd75cd1bd7b2e6d8d9373",
+        "raw_span_sha256": "b3b9c4a28af7b127ae0125a9950d0fc44d3a4a3f0a6113078b1629c2b1a044eb",
+        "symbol": "AuthorizationServer.handle_error_response"
+      },
+      "authenticate_client": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/authorization_server.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          119,
+          125
+        ],
+        "raw_file_sha256": "bad5c25d7f6c9f9d5e8478610ad85514150b87b869abd75cd1bd7b2e6d8d9373",
+        "raw_span_sha256": "f47f73efa8c88357114d8bd4c14665010fc8f81f41610e71139edd10510032ab",
+        "symbol": "AuthorizationServer.authenticate_client"
+      },
+      "revocation": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc7009/revocation.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          9,
+          110
+        ],
+        "raw_file_sha256": "0b6a9fa7f8cb5955603533bb2f7eab91952e0ed0ae1ec1a8bf3a80acae17453a",
+        "raw_span_sha256": "29ac50ed3858e428828c3d31550f82ae2e6f9180d98151a7193c777a590f25a1",
+        "symbol": "RevocationEndpoint"
+      },
+      "token_endpoint": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/token_endpoint.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          4,
+          30
+        ],
+        "raw_file_sha256": "4b18b2f349688f8d40e1fc81a103f490840e844ccba5674f1b84654345f10dd5",
+        "raw_span_sha256": "d10db2c9e758bab8f6bb5b2188f9892fafb530b23df56400d435fc16e5df8a44",
+        "symbol": "TokenEndpoint"
+      },
+      "endpoint_call": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/endpoint.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          89,
+          90
+        ],
+        "raw_file_sha256": "e3d60bde6febb2b42a0c0bcd8373f210ba5fe59e1432fc057187c9293c3c10f3",
+        "raw_span_sha256": "b325ddadfd9c58dd12ec50096877d30bd9b5bf063558d81ccef06b2b31598b93",
+        "symbol": "Endpoint.__call__"
+      },
+      "token_endpoint_selection": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/base.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          96,
+          100
+        ],
+        "raw_file_sha256": "038b1a0d96d9d5d8d76ebc7d9681d4377a3c61926b0950c14f3f0a77c58a63c9",
+        "raw_span_sha256": "7b72c3557f0d30473dc45e684b3f589fc8e20412d2059106110177083e81232a",
+        "symbol": "TokenEndpointMixin.check_token_endpoint"
+      },
+      "payload_client_id": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/requests.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          18,
+          26
+        ],
+        "raw_file_sha256": "9276b9da2be482a3a52ddc98f25a42de3d32c3ab34bc1666430a2e2cddeaad71",
+        "raw_span_sha256": "1d654eccac711ae816cffb5990b54b0207e738154ae0cb557928ac1fcae979f0",
+        "symbol": "OAuth2Payload.client_id"
+      },
+      "payload_grant_type": {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/requests.py",
+        "commit": "INSTALLED_PRIMARY_SOURCE",
+        "range": [
+          37,
+          38
+        ],
+        "raw_file_sha256": "9276b9da2be482a3a52ddc98f25a42de3d32c3ab34bc1666430a2e2cddeaad71",
+        "raw_span_sha256": "5dbe6f7abcd4029f32d9f62a109d8ac165c114eee7cb21d5136d6cf16471d4b7",
+        "symbol": "OAuth2Payload.grant_type"
+      }
+    },
+    "additional_primary_spans": [
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/refresh_token.py",
+        "symbol": "RefreshTokenGrant._validate_request_client",
+        "range": [
+          32,
+          44
+        ],
+        "raw_file_sha256": "6a04803acafd874853a6679c313edd0e62580a95595de10578eb4dd34d58cc11",
+        "raw_span_sha256": "524586ae1d2c916097512bf418c7852c05f85b71ecb2e51779cc643075eebe6c"
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/refresh_token.py",
+        "symbol": "RefreshTokenGrant.validate_token_request",
+        "range": [
+          69,
+          107
+        ],
+        "raw_file_sha256": "6a04803acafd874853a6679c313edd0e62580a95595de10578eb4dd34d58cc11",
+        "raw_span_sha256": "fb10b1b1cdd667fe000d387357370fbb6e071190a994a624850a241783c24f93"
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/authorization_code.py",
+        "symbol": "AuthorizationCodeGrant.validate_token_request",
+        "range": [
+          166,
+          236
+        ],
+        "raw_file_sha256": "5201a26d069c94879634cac0592428b09aadfde5b6d0024a3d1d7e615b6a3205",
+        "raw_span_sha256": "9e6ca002d1d938f96e160462268df5a70f78f3573fa569dee99dc64f3ca4d619"
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc6749/grants/client_credentials.py",
+        "symbol": "ClientCredentialsGrant.validate_token_request",
+        "range": [
+          34,
+          76
+        ],
+        "raw_file_sha256": "96c2a63fa0103fefeb9a26bf364f446ae9c6f4a118aa23d91406212fa4da0d79",
+        "raw_span_sha256": "8cd1c1c8179a48b3d5ea19a4d4afed80ad77a9b9b32d3751c58a8e009fa4a270"
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oauth2/rfc7636/challenge.py",
+        "symbol": "CodeChallenge.__call__",
+        "range": [
+          59,
+          67
+        ],
+        "raw_file_sha256": "62ab4720d838275d5fcc5def659528d29b05160b7beea099834d786662aeba46",
+        "raw_span_sha256": "0bc1927630e4ccbe71adc2e7b48c1a933b9cf2a3d64e0b550fd6c45f0a113a64"
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/authlib/oidc/core/grants/code.py",
+        "symbol": "OpenIDCode.__call__",
+        "range": [
+          150,
+          159
+        ],
+        "raw_file_sha256": "4e507db9b976f7211468a1f272b852bb526a8d6b03299d5c9a1ea6e6986e2ed1",
+        "raw_span_sha256": "877870f3089917ab02e541c00b5c8037700e6405708df25ce009f1e8e3ae5ee7"
+      }
+    ],
+    "negative_proof": [
+      "Preflight uses the same parser username and payload.client_id as composer; both must be falsy. Basic method only calls _validate_client if client_id AND client_secret; none method only calls it if payload.client_id AND no body secret. Neither calls query_client or returns a client when identity is absent. Machine inherits basic-only, code/refresh/revoke permit basic+none only; no custom auth method registered.",
+      "Token get_token_grant runs BEFORE authentication: unknown/password/missing grant remain unsupported_grant_type400. Recognized code first authenticates before query_authorization_code; refresh first _validate_request_client/authenticates before _validate_request_token; machine super.validate_token_request authenticates before checkpoint. Revoke authenticates endpoint client before authenticate_token/query_token/checkpoint.",
+      "Code grant initialization only registers PKCE after_validate_token_request and OIDC after_create_token_response / authorization-only nonce hooks. Authentication failure prevents these callbacks. No query/lock/checkpoint/nonce/issuance/FK or protocol writes reachable on absent identity; clean/noautoflush precondition retained. No library parser/auth functions were executed to establish this.",
+      "ClientAuthentication raises its original invalid_client401 after failed methods, InvalidClientError renders full Basic challenge; original result_response strips JSON descriptions only and retains library headers/status. Actual canonical result is returned with durable=False; unexpected non-error/dirty results explicitly rollback and raise; no response publication.",
+      "Identity-present path entire original body unchanged, including original plan, canonical rows, client auth after waits, ordinary rollback, deliberate refresh-reuse durability and final callback checkpoints. No writer=None fallback for any potentially successful protocol."
+    ],
+    "before_fix_error_contract": [
+      {
+        "id": "E1",
+        "endpoint": "POST /api/oauth2/revoke",
+        "fictional_request": {
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": "Basic !!!"
+          },
+          "body": "token=fictionalunknown"
+        },
+        "preconditions": [
+          "Feature enabled and configured issuer/key valid; throttle not exhausted; well-formed small form with no query/body client_id/client_secret/extra graph inputs.",
+          "Clean caller Session; fictionalunknown token hash absent (hypothetical synthetic fixture condition, not a query result)."
+        ],
+        "parser_result": "CPython3.13.7 base64.b64decode default validate=False discards ! before padding; the remaining empty bytes decode to empty ASCII/UTF-8. Installed util returns empty username and None password, not UnicodeError. Thus form_request continues. No parser/function was executed; this is source-derived.",
+        "base_result": {
+          "http_status": 401,
+          "oauth_error": "invalid_client",
+          "www_authenticate": "Present: Basic error=\"invalid_client\", error_description=... (Authlib-generated)",
+          "mutation": "None; endpoint client authentication fails before query_token or revoke_token."
+        },
+        "target_result": {
+          "http_status": 400,
+          "oauth_error": "invalid_client",
+          "www_authenticate": "Absent",
+          "mutation": "None; composer raises before LockPlan/acquire/protocol callbacks; endpoint catch rolls back."
+        },
+        "base_chain": [
+          "form_request75-100 preserves the malformed Basic header: only UnicodeError is caught; parser returns falsy client identity.",
+          "Base revoke145-152 calls PartnerAuthorizationServer(sync).create_endpoint_response before any composer. Base RevokeEndpoint.CLIENT_AUTH_METHODS includes client_secret_basic and none.",
+          "Installed endpoint dispatch calls RevocationEndpoint.create_endpoint_response: authenticate_endpoint_client first. Basic method sees empty username/no password and returns no client; none sees no client_id and returns no client.",
+          "ClientAuthentication.authenticate37-51 raises InvalidClientError(status_code=401) after all methods fail. AuthorizationServer catches OAuth2Error and calls canonical error rendering; InvalidClientError.get_headers adds Basic WWW-Authenticate at401.",
+          "Base result_response38-44 strips descriptions from JSON only, retains status401 and library headers. Token query is not reached."
+        ],
+        "target_chain": [
+          "_protocol_response167-174 calls composer before Authlib endpoint.",
+          "Composer initially has requests=[]; parser gives falsy Basic username and payload.client_id=None. mutation=revoke reads only token, but absent fictional token produces no token_id/parents. actor/company/grant/install/request/new IDs are all absent. client(None) returns without key; requests remains empty.",
+          "partner_identity689-690 raises InvalidClientError() with default status400 before constructing/acquiring a plan. Authlib endpoint client authentication is not reached.",
+          "revoke160-164 catches OAuth2Error after rollback and uses protocol_error(error,status). At400 its Basic challenge branch is false; JSON invalid_client400 has no WWW-Authenticate."
+        ],
+        "evidence_keys": [
+          "parser",
+          "base64",
+          "to_unicode",
+          "client_auth",
+          "basic_method",
+          "none_method",
+          "invalid_client_error",
+          "revocation",
+          "token_endpoint",
+          "endpoint_call",
+          "endpoint_response",
+          "error_response"
+        ]
+      },
+      {
+        "id": "E2",
+        "endpoint": "POST /api/oauth2/token",
+        "fictional_request": {
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "grant_type=unknown"
+        },
+        "preconditions": [
+          "Same enabled/configured/not-throttled transport; clean caller; no Authorization, client_id, client_secret, token, code, grant_id or refresh_token.",
+          "unknown is not a registered Authlib grant type (the three registrations in exact source are code/refresh/client credentials). No DB rows are needed to establish the base rejection."
+        ],
+        "base_result": {
+          "http_status": 400,
+          "oauth_error": "unsupported_grant_type",
+          "www_authenticate": "Absent",
+          "mutation": "None; get_token_grant fails before client authentication or any issuance callback."
+        },
+        "target_result": {
+          "http_status": 400,
+          "oauth_error": "invalid_client",
+          "www_authenticate": "Absent",
+          "mutation": "None; empty composer rejects before Authlib grant selection."
+        },
+        "base_chain": [
+          "form_request accepts the form and creates ProtocolRequest; base token132-141 directly calls create_token_response(protocol).",
+          "Installed AuthorizationServer.create_token_response392-414 calls get_token_grant first. All three registered TokenEndpointMixin checks compare payload.grant_type with authorization_code/refresh_token/client_credentials; unknown matches none.",
+          "get_token_grant raises UnsupportedGrantTypeError; canonical create_token_response catch renders400 unsupported_grant_type before client authentication. Base result_response preserves this error code."
+        ],
+        "target_chain": [
+          "Dispatcher maps unknown to token-invalid, then calls composer before get_token_grant.",
+          "No supported mutation-specific graph field read, no client identity/actor/company/parent IDs, no requests. partner_identity689-690 raises default InvalidClientError400.",
+          "token147-149 catches it, rolls back and returns invalid_client400, replacing unsupported_grant_type400."
+        ],
+        "existing_contract_evidence": {
+          "path": "clearledger/server/tests/test_partner_identity.py",
+          "symbol": "test_token_transport_size_rate_and_password_grant",
+          "range": [
+            576,
+            580
+          ],
+          "meaning": "Already-existing unmodified definition submits password grant with no credentials and asserts unsupported_grant_type. Password is also unsupported; source-derived target outcome violates that assertion. Test NOTRUN."
+        },
+        "evidence_keys": [
+          "token_grant_selection",
+          "token_endpoint_selection",
+          "token_response",
+          "unsupported_grant_error",
+          "payload_grant_type"
+        ]
+      }
+    ],
+    "scope": "Only OAuth router prefix +3 source/4 PG definitions + MDJSON in existing exact7; no helper/auth/model/DTO/fixture/schema/config/CI/flag changes; no broad audit.",
+    "execution_counts": {
+      "application_imports": 0,
+      "library_parser_or_client_auth_calls": 0,
+      "app_helper_pure_encoder_testhelper_imports_or_extracted_calls": 0,
+      "pytest_collection_tests": 0,
+      "SQL_DB_DSN_application_env_HTTP_browser_SSH_Docker_Node_build_install_CI_externalrunner": 0,
+      "orca_cli_selector_env_reads": 1
+    },
+    "external_root_reports": "Native347tables/803FK/auth138/DTO4 ROOT PASS are external reported on another composition only; no own import or runtime evidence. Accepted DTO fix remains other owner; this exact-base worktree intentionally inherits old DTO until future ROOT integration.",
+    "unknowns": [
+      "Runtime source predictions not exercised; no real SDK or target behavior established.",
+      "Requires enabled feature/valid transport/configuration and synthetic absent-token assumption for revoke empty graph; no real token or DB inspected.",
+      "Same existing ROOT combined composition/schema4/target URL/approval/receipt/READ COMMITTED/outside Docs closure remain unknown/open; this error branch does not need a row-lock interleaving or isolation assumption to differ.",
+      "No new runner, target, deadline, quota or execution permission; no proposed regression test run/collection.",
+      "Primary library proof is version-pinned to installed Authlib1.9.1/CPython3.13.7 text, not another deployment library baseline."
+    ],
+    "source_commits": [
+      "c6833b3318cc06c07b42dfa4d58ed74752524457",
+      "8964bfa4aae5d8daf45defa52d1f0c8f8a96ecdb"
+    ],
+    "test_observer_scope": "SQL observer is installed only around the actual original _protocol_response body, which must run exactly once and return durable=False with clean Session. Actual HTTP/security middleware remains intact; its independent SecurityBlock reads/probe logging are outside identity protocol no-writes proof. No authenticator/verifier/positive writer is replaced. This observer refinement changes only a newly authored test, preserving all preexisting definitions.",
+    "mode_deviation": "At startup, one printenv ORCA_CLI_COMMAND ORCA_DEV_REPO_ROOT read resolved the CLI skill selector; both were absent and output was empty. Disclosed to coordinator separately. This is a literal no-env deviation, not a DB/DSN/application-env/credential read or app/library execution; none repeated. All application/parser/auth/test/SQL/HTTP execution counts remain0.",
+    "inbox_ordering_deviation": "Before the initial final docs commit, orca check and subsequent Git mutations shared one functions.exec with no intervening model checkpoint. Actual check returned count0/no delivery, as did the subsequent separate check; no message was skipped. Disclosed to coordinator; only own unpublished docs commit amended to record this. All source patches were preceded by separately observed empty inbox checkpoints."
   }
 }
