@@ -6,12 +6,48 @@ SOURCE_PASS, PG PASS или приёмка полного API. Profile95/RawSour
 только для прежнего компонента и не подтверждают готовность этого issuer.
 
 База: `011f0c571912aa7c5d972e851b0d0e3acdf645a9`.
-Неизменяемый source/test commit: `5c0b5028fd197151b17b877c6fbdf9c2259b83f1`.
+Первый source/test commit: `5c0b5028fd197151b17b877c6fbdf9c2259b83f1`;
+его docs-only child: `a741cc0eb2634abd965a376c304b6cb18d728ed3`.
+Актуальный R01 source/test commit: `35cf501f82af40242a112bec8a44ea70ad370859`.
 Ратификация: `msg_d78d5ba7a19d`, `msg_4bc270231cbd`; расширение точных путей:
 `msg_c014d327b3a5`. Ровно восемь Python-путей и два документа; schema0004,
 models, kernel, driver, native adapters, config, CI, SDK и flags не менялись.
 Машиночитаемые pins, SHA-256 исходных файлов и точные диапазоны строк находятся
-в `api/PARTNER_CONTRACT_SQL_ISSUER.json`; source commit выше закрепляет каждый pin.
+в `api/PARTNER_CONTRACT_SQL_ISSUER.json`; у каждого pin указан собственный commit.
+
+## Узкое исправление R01
+
+Первый независимый review запросил исправление условного ложного 409 при CREATE
+с несколькими opaque location IDs: Python `sorted` в consumer мог расходиться
+с SQL `ORDER BY location_id` из-за collation. Затронутость actual target
+**UNKNOWN**; влияние этой причины на replay не утверждается. Первичные отчёты
+author/review сохранены без перезаписи в каталогах preview от 01.11.2026;
+точные ссылки и исходные SHA находятся в JSON history.
+
+Один `_location_rows(rows) = tuple(sorted(rows))` теперь применяется к полным
+парам `(company_id, location_id)` в own-child recheck и к
+`(intent_id, location_id)` в receipt snapshot, а также к обеим consumer
+expectations. SQL и expected строки сортируются одинаково в Python. Любая
+перестановка SQL-ответа даёт тот же результат; строки ID, UUID родителей и
+кратность каждой пары сохраняются. `set`, strip, casefold, NFC и смены collation
+нет. Полные graph/absence/child snapshots, текущие auth/generation, проверки
+после flush и replay bindings сохранены. Обратное AST-сопоставление после
+удаления только этих обёрток даёт прежний CreateOperation и consumer.
+
+Добавлены 2 unit и 4 PG definitions (14 PG variants), все **NOTRUN**. Четыре
+opaque IDs включают пробелы, mixed case и кириллицу. Положительный PG observer
+читает исходные SQL rows и меняет только их порядок на обратный Python;
+оба snapshot checks проходят в определении с original issuer/auth. Проверяются
+точные значения и число child rows, отклонение повторного ID в body и same-key
+replay без дополнительных строк. Отдельно написаны negative missing/duplicate/
+changed-ID snapshot faults, реальные SQL delete/extra-child после flush с
+whole-root rollback и отказ при одном непокрытом location в каждом ceiling.
+Unit regression проверяет сохранение дублей самим helper; это не authority.
+
+G-LOC закрывается только на уровне authored coverage. G-FK, G-FOREIGN, G-WAITS,
+G-PARITY остаются **OPEN** coverage gaps, не доказанными bypass. Независимый
+review исправления **PENDING**; ROOT должен отдельно зафиксировать actual
+collation и пару IDs с различающимся SQL/Python порядком при admitted runtime.
 
 ## Реализованный внутренний вызов
 
@@ -120,14 +156,15 @@ proof не служат восстановлением. Immutable schema0004 и 
 
 ## Проверки и предел доказательств
 
-Написаны 30 PG definitions / 103 статических parametrized variants, 8 unit
-source definitions и один новый DPL extension definition (DPL всего 9).
-Матрица содержит 30 записей, по одной на PG definition. Это подсчёт AST,
+Написаны 34 PG definitions / 117 статических parametrized variants, 10 unit
+definitions и один новый DPL extension definition (DPL всего 9, без изменений).
+Матрица содержит 34 записи, по одной на PG definition. Всего 136 статических
+вариантов в трёх test modules. Это подсчёт AST,
 **не collection и не runtime outcomes**. Выполнены только stdlib AST/JSON/hash,
 компиляция восьми Python-файлов в памяти без exec и Git diff checks.
 
 PG definitions используют actual HTTP/Authlib user/machine tokens, настоящие
-SQL profiles и original issuer. Наблюдатели передают original return; fake
+SQL profiles и original issuer. Наблюдатели полномочий передают original return; fake
 positive auth/capability/proof отсутствуют. Wait definitions проверяют actual
 PID, pg_blocking_pids/pg_locks и fresh-reader SQL, а не только task.done/sleep.
 Post-flush faults подтверждают существование actual rows до negative injection.
