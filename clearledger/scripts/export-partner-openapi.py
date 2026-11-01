@@ -81,10 +81,31 @@ def export_schema(*, runtime_database=False):
         issuer="https://partner-schema.example.invalid", source_revision="offline-candidate")
     schema = curated_openapi(product)
     methods = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
-    operations = [operation for path in schema["paths"].values()
-                  for method, operation in path.items() if method in methods]
-    if len(operations) != 15 or any(operation.get("x-elsy-readiness") != "candidate" for operation in operations):
-        raise RuntimeError("Expected exactly 15 curated candidate product operations")
+    expected = {
+        ('get', '/objects', 'listObjects'),
+        ('get', '/objects/{objectId}', 'getObject'),
+        ('get', '/objects/{objectId}/monitoring', 'getObjectMonitoring'),
+        ('get', '/equipment', 'listEquipment'),
+        ('get', '/equipment/{equipmentId}', 'getEquipment'),
+        ('get', '/counterparties', 'listCounterparties'),
+        ('get', '/counterparties/{counterpartyId}', 'getCounterparty'),
+        ('get', '/contracts', 'listContracts'),
+        ('get', '/contract-types', 'getContractTypeMetadata'),
+        ('get', '/contracts/{contractId}', 'getContract'),
+        ('get', '/contracts/{contractId}/objects', 'listContractObjects'),
+        ('get', '/contracts/{contractId}/documents', 'listContractDocuments'),
+        ('get', '/documents', 'listDocuments'),
+        ('get', '/documents/{docId}', 'getDocument'),
+        ('get', '/documents/{docId}/versions/{versionId}/content', 'downloadDocumentVersion'),
+        ('post', '/contracts', 'createContract'),
+    }
+    operations = [(method, path, operation.get("operationId"))
+                  for path, item in schema["paths"].items()
+                  for method, operation in item.items() if method in methods]
+    if (len(operations) != len(expected) or set(operations) != expected
+            or any(operation.get("x-elsy-readiness") != "candidate"
+                   for item in schema["paths"].values() for method, operation in item.items() if method in methods)):
+        raise RuntimeError("Expected exact 15 GET + createContract POST method/path/id manifest")
     unexpected = {"app.main", "app.auth", "app.services.partner_identity"}
     if not runtime_database:
         unexpected.add("app.config")

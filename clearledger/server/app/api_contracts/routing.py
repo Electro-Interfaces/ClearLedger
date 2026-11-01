@@ -1,6 +1,7 @@
 """Executable route contracts for a new API surface, independent of legacy auth."""
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import Enum
 from inspect import isawaitable, iscoroutinefunction
 import re
 from typing import Awaitable, Callable
@@ -11,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.routing import Mount
 
 from .context import (
-    AccessContext, DatabaseAuthorityKind, PrincipalKind, ResourceScope, ScopeMode, _names,
+    AccessContext, CreateNewbornPreflight, DatabaseAuthorityKind, PrincipalKind, ResourceScope, ScopeMode, _names,
 )
 
 
@@ -23,6 +24,11 @@ ContextResolver = Callable[[Request], AccessContext | Awaitable[AccessContext]]
 ResourceSelector = Callable[[Request], ResourceScope | Awaitable[ResourceScope]]
 TenantSelector = Callable[[Request], str | Awaitable[str]]
 _CONTEXT_KEY = "elsy.api_contracts.access_context"
+
+
+class ResourceStage(str, Enum):
+    EXISTING = "existing"
+    CREATE_NEWBORN = "create-newborn"
 
 
 @dataclass(frozen=True)
@@ -37,8 +43,17 @@ class RoutePolicy:
     security_scheme: str | None = None
     required_fields: frozenset[str] = frozenset()
     accepted_database_authority_kinds: frozenset[DatabaseAuthorityKind] = frozenset()
+    resource_stage: ResourceStage = ResourceStage.EXISTING
 
     def __post_init__(self):
+        if type(self.resource_stage) is not ResourceStage:
+            raise PolicyConfigurationError("Explicit resource stage required")
+        if self.resource_stage is ResourceStage.CREATE_NEWBORN and (
+                (self.resource_type, self.action) != ("contracts", "create")
+                or self.required_scopes != {"contracts:create"} or not self.tenant_required
+                or not self.accepted_kinds <= {PrincipalKind.PARTNER, PrincipalKind.SERVICE}
+                or self.accepted_database_authority_kinds or self.required_fields):
+            raise PolicyConfigurationError("Explicit private newborn CREATE policy required")
         _names([self.owner, self.resource_type, self.action, self.policy_version])
         object.__setattr__(self, "accepted_kinds", frozenset(self.accepted_kinds))
         object.__setattr__(self, "required_scopes", _names(self.required_scopes))
@@ -85,6 +100,8 @@ class RoutePolicy:
         if self.accepted_database_authority_kinds:
             metadata["databaseAuthorityKinds"] = sorted(
                 kind.value for kind in self.accepted_database_authority_kinds)
+        if self.resource_stage is not ResourceStage.EXISTING:
+            metadata["resourceStage"] = self.resource_stage.value
         return metadata
 
 
@@ -94,6 +111,7 @@ class _Binding:
     resolver: ContextResolver
     selector: ResourceSelector | None = None
     tenant_selector: TenantSelector | None = None
+    request_lifetime: Callable | None = None
 
 
 async def _call(callback, request):
@@ -105,7 +123,7 @@ async def _call(callback, request):
     return await value if isawaitable(value) else value
 
 
-def authorize(context: AccessContext, policy: RoutePolicy) -> None:
+def authorize(context: AccessContext, policy: RoutePolicy, request: Request | None = None) -> None:
     if type(context) is not AccessContext or not context.valid:
         raise HTTPException(401, "Invalid access context")
     if context.policy_version != policy.policy_version:
@@ -116,6 +134,12 @@ def authorize(context: AccessContext, policy: RoutePolicy) -> None:
         raise HTTPException(403, "Tenant context is required")
     if not policy.required_scopes <= context.scopes:
         raise HTTPException(403, "Required scope is not granted")
+    if policy.resource_stage is ResourceStage.CREATE_NEWBORN:
+        descriptor = context.create_preflight
+        if (request is None or type(descriptor) is not CreateNewbornPreflight
+                or not descriptor.matches(context, request)):
+            raise HTTPException(403, "Current request CREATE preflight required")
+        return
     permission = context.permission(policy.resource_type, policy.action)
     if (permission.resources.mode in (ScopeMode.EMPTY, ScopeMode.UNINITIALIZED)
             and not context.permits_database_authority(
@@ -161,9 +185,9 @@ class PolicyRoute(APIRoute):
         original = super().get_route_handler()
         binding = self.binding
 
-        async def guarded(request: Request):
+        async def admitted(request: Request):
             context = await _call(binding.resolver, request)
-            authorize(context, binding.policy)
+            authorize(context, binding.policy, request)
             if binding.tenant_selector is not None:
                 try:
                     tenant = await _call(binding.tenant_selector, request)
@@ -186,6 +210,12 @@ class PolicyRoute(APIRoute):
             request.scope[_CONTEXT_KEY] = context
             return await original(request)
 
+        async def guarded(request: Request):
+            if binding.request_lifetime is not None:
+                async with binding.request_lifetime(request):
+                    return await admitted(request)
+            return await admitted(request)
+
         return guarded
 
 
@@ -200,12 +230,18 @@ class PolicyRouter(APIRouter):
 
     def operation(self, path: str, *, policy: RoutePolicy,
                   selector: ResourceSelector | None = None,
-                  tenant_selector: TenantSelector | None = None, **kwargs):
+                  tenant_selector: TenantSelector | None = None,
+                  request_lifetime: Callable | None = None, **kwargs):
         if type(policy) is not RoutePolicy:
             raise PolicyConfigurationError("Explicit RoutePolicy required")
         if any(item is not None and not callable(item) for item in (selector, tenant_selector)):
             raise PolicyConfigurationError("Selectors must be server callables")
-        binding = _Binding(policy, self.context_resolver, selector, tenant_selector)
+        if policy.resource_stage is ResourceStage.CREATE_NEWBORN:
+            if selector is not None or request_lifetime is None or not callable(request_lifetime):
+                raise PolicyConfigurationError("Newborn CREATE requires lifetime and no resource selector")
+        elif request_lifetime is not None:
+            raise PolicyConfigurationError("Request lifetime requires explicit newborn stage")
+        binding = _Binding(policy, self.context_resolver, selector, tenant_selector, request_lifetime)
         route_class = type("BoundPolicyRoute", (PolicyRoute,), {"binding": binding})
 
         def register(endpoint):

@@ -1,5 +1,5 @@
 """Immutable server-side access facts. No HTTP parsing, ORM or token issuance."""
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Iterable
 from uuid import UUID
@@ -200,6 +200,32 @@ class DatabaseResourcePermission:
                 and self.binding == context.receipt_read_binding)
 
 
+# Server-only identity binding. This descriptor is admission metadata, never
+# SQL evidence, a CREATE capability, a resource grant, or a read receipt.
+CREATE_PREFLIGHT_KEY = "elsy.api_contracts.create_preflight"
+
+
+@dataclass(frozen=True, eq=False)
+class CreateNewbornPreflight:
+    request: object = field(repr=False)
+    company_id: str
+    principal: Principal
+    policy_version: str
+    operation_id: str = "createContract"
+
+    def matches(self, context: "AccessContext", request: object) -> bool:
+        return (type(self) is CreateNewbornPreflight and request is self.request
+                and request.scope.get(CREATE_PREFLIGHT_KEY) is self
+                and type(context.principal) is Principal
+                and context.principal == self.principal
+                and self.principal.kind in (PrincipalKind.PARTNER, PrincipalKind.SERVICE)
+                and bool(self.company_id) and self.company_id == context.company_id
+                and self.policy_version == context.policy_version
+                and self.operation_id == "createContract"
+                and request.scope["route"].operation_id == self.operation_id
+                and request.method == "POST" and "contracts:create" in context.scopes)
+
+
 @dataclass(frozen=True)
 class AccessContext:
     principal: Principal
@@ -210,6 +236,7 @@ class AccessContext:
     valid: bool = False
     database_permissions: tuple[DatabaseResourcePermission, ...] = ()
     receipt_read_binding: PartnerContractReceiptBinding | None = None
+    create_preflight: CreateNewbornPreflight | None = None
 
     def __post_init__(self):
         if type(self.principal) is not Principal or type(self.valid) is not bool:
@@ -224,6 +251,8 @@ class AccessContext:
         keys = [(item.resource_type, item.action) for item in self.permissions]
         if len(keys) != len(set(keys)):
             raise ValueError("Ambiguous duplicate resource action")
+        if self.create_preflight is not None and type(self.create_preflight) is not CreateNewbornPreflight:
+            raise ValueError("Exact server CREATE preflight required")
         if self.receipt_read_binding is not None:
             if type(self.receipt_read_binding) is not PartnerContractReceiptBinding:
                 raise ValueError("Exact current receipt binding required")
@@ -266,7 +295,7 @@ class AccessContext:
                                      if binding is not None and item in other.database_permissions)
         return replace(self, scopes=self.scopes & other.scopes, permissions=permissions,
                        valid=self.valid and other.valid, database_permissions=database_permissions,
-                       receipt_read_binding=binding)
+                       receipt_read_binding=binding, create_preflight=None)
 
     def select(self, resource_type: str, action: str, selection: ResourceScope) -> "AccessContext":
         permission = self.permission(resource_type, action)

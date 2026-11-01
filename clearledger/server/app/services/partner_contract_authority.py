@@ -63,6 +63,48 @@ def _permits(scope, identifier):
         scope.mode == "SET" and identifier in scope.ids))
 
 
+def _require_coarse_create(db, current, expected_profile):
+    if WRITE_SCOPE not in current.scopes:
+        _deny()
+    profile_rows, (principals, refs, types) = expected_profile
+    profile = dict(zip(_PROFILE, profile_rows[0]))
+    if profile["revoked"] or profile["policy_generation"] <= 0:
+        _deny()
+    if current.is_machine:
+        grant = identity.fresh(db, PartnerGrant, current.grant_id)
+        client = identity.fresh(db, PartnerClient, current.client_id)
+        if (not profile["service_enabled"] or grant.kind != "machine" or grant.user_id is not None
+                or client.auth_method != "client_secret_basic"
+                or not any(r[2:] == ("machine", None, grant.id) for r in principals)):
+            _deny()
+    elif (not profile["user_enabled"] or current.user_id is None
+          or not any(r[2:] == ("user", current.user_id, None) for r in principals)):
+        _deny()
+    return refs, types
+
+
+def _load_coarse_create(db, current):
+    # MVCC reads only; no SQL stamp, locks, B, writes or retained ORM authority.
+    with db.no_autoflush:
+        rows = _rows(db, select(*(getattr(Profile, n) for n in _PROFILE)).where(
+            Profile.installation_id == current.installation_id))
+        if len(rows) != 1:
+            _deny()
+        profile = dict(zip(_PROFILE, rows[0]))
+        if (profile["company_id"], profile["client_id"], profile["installation_id"]) != (
+                current.company_id, current.client_id, current.installation_id):
+            _deny()
+        model, names = _CHILDREN[0]
+        principals = _rows(db, select(*(getattr(model, n) for n in names)).where(
+            model.profile_id == profile["id"]).order_by(*(getattr(model, n) for n in names)))
+        _require_coarse_create(db, current, (rows, (principals, (), ())))
+
+
+async def require_coarse_create(db: AsyncSession, current) -> None:
+    """Request preflight only. The real issuer repeats complete current policy."""
+    await db.run_sync(_load_coarse_create, current)
+
+
 class CreateOperation:
     """Private whole-graph snapshot extension of the ONE identity composer."""
     # Fixed parent order, independent of body/profile/identity discovery order.
@@ -199,22 +241,7 @@ class CreateOperation:
             writer.checkpoint()
 
     def policy(self, db, current):
-        if WRITE_SCOPE not in current.scopes:
-            _deny()
-        profile_rows, (principals, refs, types) = self.expected_profile
-        profile = dict(zip(_PROFILE, profile_rows[0]))
-        if profile["revoked"] or profile["policy_generation"] <= 0:
-            _deny()
-        if current.is_machine:
-            grant = identity.fresh(db, PartnerGrant, current.grant_id)
-            client = identity.fresh(db, PartnerClient, current.client_id)
-            if (not profile["service_enabled"] or grant.kind != "machine" or grant.user_id is not None
-                    or client.auth_method != "client_secret_basic"
-                    or not any(r[2:] == ("machine", None, grant.id) for r in principals)):
-                _deny()
-        elif (not profile["user_enabled"] or current.user_id is None
-              or not any(r[2:] == ("user", current.user_id, None) for r in principals)):
-            _deny()
+        refs, types = _require_coarse_create(db, current, self.expected_profile)
         orgs = {r[3] for r in refs if r[2] == "organization"}
         cps = {r[4] for r in refs if r[2] == "counterparty"}
         locs = {r[5] for r in refs if r[2] == "location"}
