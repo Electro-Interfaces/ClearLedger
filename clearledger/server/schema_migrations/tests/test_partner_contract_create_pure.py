@@ -1,4 +1,4 @@
-"""Написаны, NOT RUN: offline0004 integrity и прежние prefixes.
+"""Написаны, NOT RUN: offline0004 integrity и совместимость с head0005.
 
 Без driver/ORM/application imports. До запуска ROOT проверяет и замораживает
 новый source: прежние immutable acceptance helpers его не допускают.
@@ -27,22 +27,27 @@ def row(package):
 
 
 class PartnerContractCreatePure(unittest.TestCase):
-    def test_head4_default1_explicit3_and_frozen_artifact_ids(self):
+    def test_head5_default1_explicit3_4_5_and_frozen_artifact_ids(self):
         self.assertEqual(manifest.load().entry['id'], manifest.ID)
-        self.assertEqual(manifest.load_known_head().entry['id'], manifest.CONTRACT_CREATE_ID)
+        self.assertEqual(manifest.load_known_head().entry['id'], manifest.CONTRACT_CYCLE_RECEIPTS_ID)
         chain = runner._packages(manifest.load_known_head())
-        self.assertEqual([chain[i].entry['artifact_sha256'] for i in (1, 2, 3)], [
+        self.assertEqual(len(chain), 5)
+        self.assertEqual([chain[i].entry['artifact_sha256'] for i in (1, 2, 3, 4)], [
             '301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1',
             '203ee350a47fb3e12d2e2fb6d292fc0e1a19b4cd3cd348b507551cf233cae2f0',
-            'c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d'])
-        for target in (manifest.PULSE_ID, manifest.CONTRACT_CREATE_ID):
+            'c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d',
+            '58ff7a0cf33f7fb55fa080e4efe60c1a4aece67588cf1bfe8b44bc75e92c7e31'])
+        for ordinal, target in ((3, manifest.PULSE_ID), (4, manifest.CONTRACT_CREATE_ID),
+                (5, manifest.CONTRACT_CYCLE_RECEIPTS_ID)):
             head, *_ = runner._sequence_source(target, None, 2000000000)
             self.assertEqual(head.entry['id'], target)
-            self.assertEqual(len(runner._packages(head)), 3 if target == manifest.PULSE_ID else 4)
+            self.assertEqual(head, manifest.load(revision=target))
+            self.assertEqual(head, chain[ordinal])
+            self.assertEqual(len(runner._packages(head)), ordinal)
 
     def test_every_old_registry_prefix_loads_its_explicit_revision(self):
         registry = json.loads((manifest.ROOT / 'manifest.json').read_text())
-        for count in (1, 2, 3, 4):
+        for count in (1, 2, 3, 4, 5):
             with self.subTest(count=count), TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 shutil.copytree(manifest.ROOT / 'revisions', root / 'revisions')
@@ -52,9 +57,14 @@ class PartnerContractCreatePure(unittest.TestCase):
                 if count < 4:
                     with self.assertRaises(MigrationError):
                         manifest.load(root, revision=manifest.CONTRACT_CREATE_ID)
+                if count < 5:
+                    with self.assertRaises(MigrationError):
+                        manifest.load(root, revision=manifest.CONTRACT_CYCLE_RECEIPTS_ID)
+                else:
+                    self.assertEqual(manifest.load_known_head(root).entry, registry['revisions'][4])
 
     def test_all_successor_chain_fields_are_checked(self):
-        packages = runner._packages(manifest.load_known_head())
+        packages = runner._packages(manifest.load(revision=manifest.CONTRACT_CREATE_ID))
         rows = [row(packages[i]) for i in (1, 2, 3, 4)]
         self.assertTrue(journal.validate_history(rows, packages[4], 'clearledger'))
         self.assertFalse(journal.validate_history(rows[:3], packages[4], 'clearledger'))
@@ -68,6 +78,15 @@ class PartnerContractCreatePure(unittest.TestCase):
         for bad in [rows + [{**rows[3], 'revision': '0005_future', 'ordinal': 5}], rows[:2] + rows[3:]]:
             with self.assertRaises(MigrationError):
                 journal.validate_history(bad, packages[4], 'clearledger')
+        known_head = manifest.load_known_head()
+        rows5 = rows + [row(known_head)]
+        self.assertTrue(journal.validate_history(rows5, known_head, 'clearledger'))
+        self.assertFalse(journal.validate_history(rows, known_head, 'clearledger'))
+        with self.assertRaises(MigrationError):
+            journal.validate_history(rows5, packages[4], 'clearledger')
+        with self.assertRaises(MigrationError):
+            journal.validate_history(rows5 + [{**rows5[4], 'revision': '0006_future', 'ordinal': 6}],
+                known_head, 'clearledger')
 
     def test_tampered_sql_contract_catalog_and_checksum_refuse(self):
         for suffix in ('.sql', '.json', '.py', 'artifact'):
@@ -86,25 +105,32 @@ class PartnerContractCreatePure(unittest.TestCase):
                 with self.assertRaises(MigrationError):
                     manifest.load(root, revision=manifest.ID)  # Старый requested package тоже проверяет весь известный source.
 
-    def test_unknown_fifth_and_foreign_fourth_refuse(self):
-        for mutation in ('fifth', 'foreign', 'parent'):
+    def test_unknown_sixth_unknown_fifth_name_and_foreign_fourth_refuse(self):
+        for mutation in ('sixth', 'fifth_name', 'foreign', 'parent'):
             with self.subTest(mutation=mutation), TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 shutil.copytree(manifest.ROOT / 'revisions', root / 'revisions')
                 registry = json.loads((manifest.ROOT / 'manifest.json').read_text())
-                if mutation == 'fifth':
-                    registry['revisions'].append(copy.deepcopy(registry['revisions'][3]))
+                (root / 'manifest.json').write_text(json.dumps(registry))
+                self.assertEqual(manifest.load(root).entry['id'], manifest.ID)
+                self.assertEqual(manifest.load_known_head(root).entry['id'], manifest.CONTRACT_CYCLE_RECEIPTS_ID)
+                if mutation == 'sixth':
+                    future = copy.deepcopy(registry['revisions'][4])
+                    future.update(id='0006_future', ordinal=6, parent=manifest.CONTRACT_CYCLE_RECEIPTS_ID)
+                    registry['revisions'].append(future)
+                elif mutation == 'fifth_name':
+                    registry['revisions'][4]['id'] = '0005_future'
                 else:
                     registry['revisions'][3]['id' if mutation == 'foreign' else 'parent'] = '0004_foreign'
                 (root / 'manifest.json').write_text(json.dumps(registry))
                 with self.assertRaises(MigrationError):
                     manifest.load(root)
 
-    def test_plan4_and_plan3_have_no_environment_access(self):
+    def test_plan5_plan4_and_plan3_have_no_environment_access(self):
         class NoEnvironment:
             def get(self, name):
                 raise AssertionError('offline plan read credentials')
-        for target in (manifest.PULSE_ID, manifest.CONTRACT_CREATE_ID):
+        for target in (manifest.PULSE_ID, manifest.CONTRACT_CREATE_ID, manifest.CONTRACT_CYCLE_RECEIPTS_ID):
             with redirect_stdout(io.StringIO()) as output:
                 code = runner.main(['plan', '--revision', target], NoEnvironment())
             self.assertEqual(code, 0)
@@ -125,14 +151,15 @@ class PartnerContractCreatePure(unittest.TestCase):
         self.assertNotEqual(expression("a='ABC'"), expression("a='abc'"))
 
     def test_history_has_only_nullable_current_foreign_keys(self):
-        spec = manifest.load_known_head().contract
+        package = manifest.load(revision=manifest.CONTRACT_CREATE_ID)
+        spec = package.contract
         intent = spec['tables']['partner_contract_success_intents']
         self.assertEqual({(f['table'], f['delete']) for f in intent['foreign_keys'].values()}, {('users', 'n'), ('contracts', 'n')})
         self.assertEqual(len(intent['foreign_keys']), 2)
         self.assertEqual(spec['tables']['partner_contract_intent_locations']['primary'], ['intent_id', 'location_id'])
         self.assertEqual(len(spec['tables']['partner_contract_intent_locations']['foreign_keys']), 1)
         self.assertEqual(intent['unique']['uq_pc_intent_namespace'], ['company_id','app_id','installation_id','operation','creation_key'])
-        self.assertNotIn('INCLUDE', manifest.load_known_head().sql)
-        self.assertNotIn('IF NOT EXISTS', manifest.load_known_head().sql)
+        self.assertNotIn('INCLUDE', package.sql)
+        self.assertNotIn('IF NOT EXISTS', package.sql)
         for body in spec['functions'].values():
             self.assertNotIn('SECURITY DEFINER', body)
