@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy import select
+from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
 
 from app.api_contracts import (AccessContext, PolicyRouter, PrincipalKind, RoutePolicy,
@@ -48,6 +49,27 @@ class Settings:
     issuer: str | None
     source_revision: str
     budget_policy: object
+
+
+class _RequestMetadataMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        context = current_security_context.get()
+        scope.setdefault("state", {})["request_id"] = (
+            context.request_id if context is not None else str(uuid.uuid4()))
+
+        async def metadata_send(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Request-Id"] = scope["state"]["request_id"]
+                headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, metadata_send)
 
 
 def _problem(request, status, error_headers=None, *, budget_exceeded=False):
@@ -106,14 +128,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
         budget.configured_policy if budget_policy is None else (
             budget_policy if callable(budget_policy) else lambda: budget_policy))
 
-    @app.middleware("http")
-    async def request_id(request, call_next):
-        context = current_security_context.get()
-        request.state.request_id = context.request_id if context is not None else str(uuid.uuid4())
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = request.state.request_id
-        response.headers["Cache-Control"] = "no-store"
-        return response
+    app.add_middleware(_RequestMetadataMiddleware)
 
     @app.exception_handler(HTTPException)
     async def http_problem(request, error):
