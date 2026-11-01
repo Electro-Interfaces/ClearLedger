@@ -76,9 +76,22 @@ def test_full_sql_sets_and_original_absence_are_requeried_before_live_policy():
 
 
 def test_empty_scopes_and_every_location_have_explicit_intersections():
-    source = ast.unparse(node(AUTHORITY, "policy", "CreateOperation"))
+    policy = node(AUTHORITY, "policy", "CreateOperation")
+    coarse = node(AUTHORITY, "_require_coarse_create")
+    gate, = calls(policy, "_require_coarse_create")
+    # The exact shared gate must run first on this policy's current SQL snapshot
+    # and supply the refs/types consumed by the unchanged body-aware tail.
+    assert isinstance(policy.body[0], ast.Assign) and policy.body[0].value is gate
+    assert ast.unparse(policy.body[0].targets[0]) == "(refs, types)"
+    assert [ast.unparse(arg) for arg in gate.args] == ["db", "current", "self.expected_profile"]
+    assert not gate.keywords
+    assert ast.unparse(coarse.body[-1]) == "return (refs, types)"
+    coarse_source = ast.unparse(coarse)
     for fragment in ("WRITE_SCOPE not in current.scopes", "not profile['service_enabled']",
-                     "not profile['user_enabled']", "current.own_organization_id", "current.location_ids",
+                     "not profile['user_enabled']"):
+        assert fragment in coarse_source
+    source = ast.unparse(policy)
+    for fragment in ("current.own_organization_id", "current.location_ids",
                      "member.object_scope is not None", "loc not in locs", "not locations"):
         assert fragment in source
     assert "current.resource_scopes.get('objects')" in source

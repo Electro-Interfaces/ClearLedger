@@ -1,0 +1,211 @@
+{
+  "classification": "AUTHOR_FIX_SOURCE_CONTRACT_NOT_RUNTIME_ACCEPTANCE",
+  "source_base": "cdb65361f3207f82283c88da8b431625a5b1804c",
+  "source_commit": "0b873aba12265075c40b7c32e786401bc741449a",
+  "ratifications": [
+    "msg_dc2f907bf07e",
+    "msg_85a4864d991c",
+    "msg_243863d23160"
+  ],
+  "operation": {
+    "method": "POST",
+    "path": "/api/v1/contracts",
+    "child_path": "/contracts",
+    "operationId": "createContract",
+    "api_version": "v1",
+    "info_version": "1.1.0",
+    "tag": "Договоры",
+    "scope": "contracts:create",
+    "stage": "CREATE_NEWBORN"
+  },
+  "principals": {
+    "user": "actual delegated user grant + current profile user flag/principal + canonical current permissions",
+    "machine": "actual confidential client_secret_basic + exact machine grant/principal + user_id NULL + service flag"
+  },
+  "request": {
+    "model": "app.product_api.contract_create_body.ContractCreateBody",
+    "parser": "app.product_api.contract_create_body.parse_contract_create_body",
+    "max_actual_bytes_inclusive": 16384,
+    "wire_reader_count": 1,
+    "content_length_authority": false,
+    "automatic_fastapi_body": false,
+    "openapi_source": "same model_json_schema(by_alias=True,mode=validation); same canonical nested definitions",
+    "new_model_schema_hash": false
+  },
+  "success": {
+    "201": "new",
+    "200": "current authorized original-grant/actor/reference replay",
+    "allowlist": [
+      "contractId",
+      "replayed"
+    ],
+    "Location": false,
+    "read_permission_promise": false
+  },
+  "problems": {
+    "401": "invalid_credentials",
+    "403": "access_denied",
+    "409": "conflict",
+    "413": "request_too_large",
+    "415": "unsupported_media_type",
+    "422": "invalid_request",
+    "429_quota": "rate_limited",
+    "429_generic": "internal_error",
+    "500": "internal_error",
+    "503": "api_unavailable"
+  },
+  "metadata": {
+    "content_type": "application/problem+json",
+    "cache_control": "no-store",
+    "request_id": "X-Request-Id = Problem.requestId",
+    "bearer_challenge": [
+      401,
+      403
+    ],
+    "quota_retry_after": true,
+    "generic_retry_after": "only trusted supplied header for 429/503",
+    "collection_allow": "GET, POST",
+    "other_existing_allow": "GET"
+  },
+  "lifecycle": [
+    "short canonical read Session + shared coarse gate",
+    "close read Session",
+    "independent configured quota transaction/commit",
+    "new actual request Session/root",
+    "canonical Bearer reauth + shared coarse gate",
+    "request-bound non-SQL descriptor and guard",
+    "sole bounded strict stream parser",
+    "real create_partner_contract on same Session/root/Connection",
+    "allowlist DTO serialization",
+    "caller commit",
+    "Session close",
+    "response escapes"
+  ],
+  "rollback": [
+    "handler denial",
+    "parse/validation failure",
+    "serialization failure",
+    "cancellation with shielded HTTP rollback",
+    "commit failure including unknown acknowledgement"
+  ],
+  "unknown_commit": "new request/new root/same key/current auth/original grant+actor+refs; no old stamp or automatic retry",
+  "preserved": {
+    "GET_endpoint_AST_with_decorators": 15,
+    "read_resolver": "inverse AST projection identical",
+    "authority": "complete module inverse AST projection identical to source base",
+    "contracts_EMPTY": "unchanged; neither CREATE authority nor newborn veto",
+    "atomic_business_parts": 5,
+    "canonical_B": "one original complete composition",
+    "actual_flags_defaults_adminPUT": "unchanged; no activation",
+    "CREATE_context_permissions": [],
+    "canonical_token_resource_scopes": "unchanged/lossless; no projection or normalization in CREATE preflight",
+    "authority_raw_sha256": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18"
+  },
+  "openapi": {
+    "advertised_code_operations": 16,
+    "exact_manifest": "15 GET + POST method/path/operationId; source app/exporter/generator agree statically",
+    "canonical_profiles": [
+      "ProductOAuth",
+      "ProductServiceOAuth"
+    ],
+    "browser_execution_profiles": [
+      "ProductOAuth"
+    ],
+    "browser_service_credential_widgets": false,
+    "offline_import_guards": "unchanged; runtime identity/authority/consumer imports lazy"
+  },
+  "tests": {
+    "definitions": 22,
+    "parameterized_cases": 58,
+    "fixture": "tests.partner_contract_issuer_fixture.issuer_world",
+    "factory": "ROOT-owned external partner_contract_issuer_factory",
+    "positive_auth_or_authority_mocks": false,
+    "runtime_status": "NOTRUN_INCLUDING_IMPORTS_COLLECTION",
+    "count_method": "independent stdlib AST only; new user/machine loop is one static variant; NOT collection",
+    "old_HTTP_definitions_preserved": 21,
+    "issuer_unit_definitions": 13,
+    "issuer_unit_oracles_updated": 1,
+    "regression": "actual same-company extra space ID parent + installation/object grants; membership retains it for user; confidential machine has no native-member intersection; original verifier confirms both ceilings; real CREATE/replay and five-part SQL deltas, contracts EMPTY",
+    "coverage_limits": [
+      "no dedicated Session-close-fault definition",
+      "no dedicated parser-disconnect definition"
+    ]
+  },
+  "deferred": [
+    "GET create-options",
+    "OPTIONS",
+    "activation",
+    "generated SDK refresh",
+    "controlled runtime HTTP/SQL/auth/body/quota/replay/cancel verification",
+    "independent source review",
+    "FK/foreign/wait/parity gaps"
+  ],
+  "acceptance": {
+    "independent_source_review": "PENDING_FRESH_RECHECK",
+    "runtime0": true,
+    "HTTP": false,
+    "whole_SQL_issuer": false,
+    "API": false,
+    "B": false,
+    "full_partner": false,
+    "pilot": false,
+    "release": false,
+    "CI_pass": false,
+    "SDK_fresh": false,
+    "SOURCE_PASS": false
+  },
+  "original_program": {
+    "ref": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "sections": 20,
+    "criteria": 11,
+    "completion": false,
+    "copied": false
+  },
+  "source_scope": {
+    "cumulative_paths": 14,
+    "source_test_paths": 12,
+    "docs_paths": 2,
+    "repair_source_test_paths": [
+      "clearledger/server/app/product_api/access.py",
+      "clearledger/server/tests/test_partner_contract_http_create.py",
+      "clearledger/server/tests/test_partner_contract_issuer_unit.py"
+    ],
+    "commits": "source/test fix first, then docs-only child; hooks OFF, skip ci; no push/merge/rebase"
+  },
+  "history": {
+    "original_source": "0e0cc68ab702e73695b3b0a48325e6fc52e7d8a3",
+    "reviewed_docs_head": "0106a022c876fa8cbfb0e68df0a92429152af705",
+    "previous_verdict": "CHANGES_REQUESTED_SOURCE",
+    "author_report": {
+      "path": "/srv/projects/preview/partner-contract-http-post-author-20261101/report.json",
+      "sha256": "e36851f55757dd0e13cea56455b5258bc40d508b3ad823ddbc3553cebd02eca6"
+    },
+    "review_report": {
+      "path": "/srv/projects/preview/partner-contract-http-post-review-20261101/review.json",
+      "sha256": "84a680f607bc9680c9f9449b1c0e970b9311a67b8980b4f4903f34fc97b619db"
+    },
+    "historical_reports_overwritten": false,
+    "fresh_independent_review": "PENDING",
+    "author_SOURCE_PASS": false
+  },
+  "fixes": {
+    "R01": {
+      "finding": "HTTP-P2-01",
+      "classification": "SOURCE_CORRECTNESS_CONDITIONAL_DATA_EDGE; no auth bypass asserted",
+      "trigger": "normal requested/profile location plus extra same-company ServiceLocation id exactly one ASCII space in actual installation/object SET grants, absent from ProfileRef/body",
+      "before": "unnecessary CREATE read projection via scope_of/ResourceScope.selected/_names raises ValueError; generic 500 before parser",
+      "after": "CREATE permissions=(); verified principal/company/scopes and request-bound non-SQL descriptor preserved; original canonical token/resource_scopes and full SQL issuer/consumer unchanged",
+      "blank_requested_profile_location": "not a valid schema4 regression: ck_pc_ref_location forbids whitespace-only ProfileRef",
+      "target_data_and_installed_schema": "UNKNOWN",
+      "no_common_validator_or_GET_change": true
+    },
+    "R02": {
+      "file": "clearledger/server/tests/test_partner_contract_issuer_unit.py",
+      "only_definition": "test_empty_scopes_and_every_location_have_explicit_intersections",
+      "oracle": "single exact first _require_coarse_create(db,current,self.expected_profile) call binds refs/types; WRITE_SCOPE/flags stay asserted on shared helper; ALL old body-aware intersections and _permits checks retained",
+      "other_definitions_fixtures_locks_replay_atomic_assertions": "unchanged",
+      "production_issuer_changed_for_oracle": false
+    }
+  }
+}

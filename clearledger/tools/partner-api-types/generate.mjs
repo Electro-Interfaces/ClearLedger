@@ -13,8 +13,24 @@ import openapiTS, { astToString, COMMENT_HEADER } from "openapi-typescript";
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 const version = "7.10.1";
-const operationIds = new Set(["listObjects", "getObject", "getObjectMonitoring", "listEquipment", "getEquipment",
-  "listCounterparties", "getCounterparty", "listContracts", "getContract", "getContractTypeMetadata", "listContractObjects", "listContractDocuments", "listDocuments", "getDocument", "downloadDocumentVersion"]);
+const operationManifest = new Set([
+  "get /objects listObjects",
+  "get /objects/{objectId} getObject",
+  "get /objects/{objectId}/monitoring getObjectMonitoring",
+  "get /equipment listEquipment",
+  "get /equipment/{equipmentId} getEquipment",
+  "get /counterparties listCounterparties",
+  "get /counterparties/{counterpartyId} getCounterparty",
+  "get /contracts listContracts",
+  "get /contract-types getContractTypeMetadata",
+  "get /contracts/{contractId} getContract",
+  "get /contracts/{contractId}/objects listContractObjects",
+  "get /contracts/{contractId}/documents listContractDocuments",
+  "get /documents listDocuments",
+  "get /documents/{docId} getDocument",
+  "get /documents/{docId}/versions/{versionId}/content downloadDocumentVersion",
+  "post /contracts createContract",
+]);
 
 // Schema generation is local. A future accidental remote resolver fails closed.
 const noNetwork = () => { throw new Error("Network is forbidden during offline wire type generation"); };
@@ -30,15 +46,15 @@ export function validateSchema(schema) {
     throw new Error("Only the synthetic offline schema server is accepted");
   }
   const operations = [];
-  for (const item of Object.values(schema.paths)) {
+  for (const [path, item] of Object.entries(schema.paths)) {
     for (const [method, operation] of Object.entries(item)) {
       if (["get", "post", "put", "patch", "delete", "options", "head", "trace"].includes(method)) {
-        if (method !== "get" || operation["x-elsy-readiness"] !== "candidate") throw new Error("Expected candidate GET operations");
-        operations.push(operation.operationId);
+        if (operation["x-elsy-readiness"] !== "candidate") throw new Error("Expected candidate product operations");
+        operations.push(`${method} ${path} ${operation.operationId}`);
       }
     }
   }
-  if (operations.length !== 15 || new Set(operations).size !== 15 || operations.some(id => !operationIds.has(id))) {
+  if (operations.length !== operationManifest.size || new Set(operations).size !== operationManifest.size || operations.some(key => !operationManifest.has(key))) {
     throw new Error("Unexpected curated product operation manifest");
   }
   function refs(value) {
@@ -104,7 +120,7 @@ export async function main(args = process.argv.slice(2)) {
         await writeFile(staging, bytes);
         await rename(staging, output);
       } finally { await rm(staging, { force: true }); }
-      process.stdout.write("Generated partner wire types from 15 curated candidate operations\n");
+      process.stdout.write("Generated partner wire types from exact 15 GET + createContract POST candidate operations\n");
     }
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }

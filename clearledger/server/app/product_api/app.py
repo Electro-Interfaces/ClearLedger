@@ -1,4 +1,4 @@
-"""Opt-in versioned read API. Never mounts itself onto the legacy application."""
+"""Opt-in versioned product API. Never mounts itself onto the legacy application."""
 from dataclasses import dataclass
 from copy import deepcopy
 from http import HTTPStatus
@@ -19,7 +19,9 @@ from starlette.exceptions import HTTPException
 from app.api_contracts import (AccessContext, PolicyRouter, PrincipalKind, RoutePolicy,
                                create_policy_app, get_access_context, policy_registry)
 from app.security_context import current as current_security_context
-from . import access, budget, dto, files, monitoring
+from . import access, budget, contract_create, dto, files, monitoring
+from .contract_create_body import ContractCreateBody
+from app.api_contracts.routing import ResourceStage
 from .queries import Query
 
 
@@ -50,10 +52,12 @@ class Settings:
 
 def _problem(request, status, error_headers=None, *, budget_exceeded=False):
     codes = {400: "invalid_cursor", 401: "invalid_credentials", 403: "access_denied",
-             404: "not_found", 405: "method_not_allowed", 422: "invalid_request", 503: "api_unavailable"}
+             404: "not_found", 405: "method_not_allowed", 409: "conflict", 413: "request_too_large",
+             415: "unsupported_media_type", 422: "invalid_request", 503: "api_unavailable"}
     safe = {400: "Cursor is invalid or belongs to another query", 401: "Valid partner Bearer credentials are required",
             403: "Access is denied", 404: "Resource was not found", 422: "Request parameters are invalid",
-            503: "Partner API is unavailable"}
+            409: "Request conflicts with current state", 413: "Request body is too large",
+            415: "Request media type is unsupported", 503: "Partner API is unavailable"}
     value = dto.Problem(title=HTTPStatus(status).phrase, status=status,
         code="rate_limited" if budget_exceeded else codes.get(status, "internal_error"),
         request_id=getattr(request.state, "request_id", str(uuid.uuid4())),
@@ -94,7 +98,7 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
     key = secrets.token_bytes(32) if cursor_key is None else cursor_key
     if not isinstance(key, bytes) or len(key) < 32:
         raise ValueError("Cursor signing key must contain at least 32 bytes")
-    app = create_policy_app(context_resolver=access.resolve, title="ElsyPlus Product Read API", version="1.0.0")
+    app = create_policy_app(context_resolver=access.resolve, title="ElsyPlus Product API", version="1.1.0")
     app.state.product_settings = Settings(
         session_factory or access.configured_sessions, verifier or access.configured_verifier,
         access.configured_enabled if enabled is None else (enabled if callable(enabled) else lambda: enabled is True),
@@ -113,7 +117,10 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
 
     @app.exception_handler(HTTPException)
     async def http_problem(request, error):
-        return _problem(request, error.status_code, error.headers, budget_exceeded=isinstance(error, budget.BudgetExceeded))
+        headers = error.headers
+        if error.status_code == 405 and request.scope.get("route") is not None and request.scope["route"].path == "/contracts":
+            headers = {"Allow": "GET, POST"}
+        return _problem(request, error.status_code, headers, budget_exceeded=isinstance(error, budget.BudgetExceeded))
 
     @app.exception_handler(RequestValidationError)
     async def validation_problem(request, error):
@@ -500,6 +507,37 @@ def create_product_api(*, session_factory=None, verifier=None, enabled=None, upl
                })
     async def counterparty_detail(counterpartyId: dto.Id, params: Annotated[dto.EmptyQuery, QueryParams()], query: Query = Depends(query_dependency)):
         return (await query.project("counterparties", [await query.detail("counterparties", counterpartyId)]))[0]
+
+    # Request-only endpoint: FastAPI must not pre-read or parse the body.
+    # The explicit requestBody is generated from the existing strict model.
+    create_schema = ContractCreateBody.model_json_schema(
+        by_alias=True, mode="validation", ref_template="#/components/schemas/{model}")
+    create_schema.pop("$defs", None)
+    create_policy = RoutePolicy(owner="contracts", accepted_kinds={PrincipalKind.PARTNER, PrincipalKind.SERVICE},
+        resource_type="contracts", action="create", required_scopes={"contracts:create"},
+        policy_version=access.POLICY_VERSION, tenant_required=True, security_scheme="ProductOAuth",
+        resource_stage=ResourceStage.CREATE_NEWBORN)
+    create_problems = {status: {"model": dto.Problem, "content": {"application/problem+json": {}}}
+        for status in (401, 403, 409, 413, 415, 422, 429, 500, 503)}
+
+    @router.operation("/contracts", policy=create_policy, methods=["POST"],
+        request_lifetime=contract_create.request_lifetime, operation_id="createContract",
+        tags=[RESOURCE_TAGS["contracts"]], response_model=dto.ContractCreateResult, status_code=201,
+        responses={**create_problems, 200: {"model": dto.ContractCreateResult, "description": "Current authorized replay"}},
+        summary="Create an authorized contract card",
+        description="Strict JSON, at most 16384 actual stream bytes. Same creationKey on retries. "
+            "Current CREATE authority and profile are required on every request, including replay. "
+            "201 creates; 200 replays. Result grants no read access; no Location is promised. "
+            "409 conflict is generic and checked only after complete current CREATE authorization. "
+            "Quota 429 uses rate_limited; generic HTTP429 uses internal_error. "
+            "Application responses carry Cache-Control: no-store and X-Request-Id; "
+            "401/403 carry Bearer, quota 429 carries Retry-After. Unknown commit requires a new request "
+            "with the same creationKey and current original-grant/actor/reference authority.",
+        openapi_extra={"x-elsy-owner": "contracts", "x-elsy-access-class": "partner",
+            "x-elsy-resource-policy": "contracts:create", "x-elsy-readiness": "candidate",
+            "requestBody": {"required": True, "content": {"application/json": {"schema": create_schema}}}})
+    async def contract_create_post(request: Request):
+        return await contract_create.create(request)
 
     @operation("/contracts", "contracts", "listContracts", dto.Page[dto.Contract],
                summary='List authorized contracts',
@@ -973,6 +1011,9 @@ def _describe_http_responses(schema):
         401: ("invalid_credentials", "Valid partner Bearer credentials are required"),
         403: ("access_denied", "Access is denied"), 404: ("not_found", "Resource was not found"),
         405: ("method_not_allowed", "Request could not be completed"),
+        409: ("conflict", "Request conflicts with current state"),
+        413: ("request_too_large", "Request body is too large"),
+        415: ("unsupported_media_type", "Request media type is unsupported"),
         422: ("invalid_request", "Request parameters are invalid"),
         429: ("internal_error", "Request could not be completed"),
         500: ("internal_error", "Request could not be completed"),
@@ -1004,7 +1045,7 @@ def _describe_http_responses(schema):
             responses["500"] = {"description": "Internal application error before response streaming starts."}
             for status, response in responses.items():
                 response.setdefault("headers", {}).update(common)
-                if status in {"400", "401", "403", "404", "422", "500", "503"}:
+                if status in {"400", "401", "403", "404", "409", "413", "415", "422", "500", "503"}:
                     response["content"] = problem_content(int(status))
                 if status == "429":
                     response["description"] = "Enabled shared PostgreSQL product quota exhausted (rate_limited), " \
@@ -1021,16 +1062,23 @@ def _describe_http_responses(schema):
 
     components.setdefault("responses", {}).update({
         "ProductMethodNotAllowed": {"description": "Unsupported method on a known application path; "
-            "this is not a registered write operation.",
+            "this path permits GET; collection overrides are listed separately.",
             "headers": {**common, "Allow": header("ProductAllow")}, "content": problem_content(405)},
         "ProductInjectedRateLimit": {"description": "Only an explicitly raised application HTTPException(429). "
             "The generic code is internal_error; the opt-in product quota instead returns rate_limited. "
             "Proxy-generated 429 responses are outside this contract.",
             "headers": {**common, "Retry-After": header("ProductRetryAfter")}, "content": problem_content(429)},
     })
+    components["headers"]["ProductContractsAllow"] = {
+        "description": "Methods permitted on the contracts collection.", "required": True,
+        "schema": {"type": "string", "const": "GET, POST"}, "example": "GET, POST"}
+    components["responses"]["ProductContractsMethodNotAllowed"] = {
+        "description": "Unsupported method on the contracts collection.",
+        "headers": {**common, "Allow": header("ProductContractsAllow")}, "content": problem_content(405)}
     schema["x-elsy-http-profile"] = {
         "scope": "product-child-application",
-        "knownPaths": {"methods": ["GET"], "unsupportedMethodResponse": {"$ref": "#/components/responses/ProductMethodNotAllowed"}},
+        "knownPaths": {"methods": ["GET"], "methodOverrides": {"/contracts": {"methods": ["GET", "POST"],
+            "unsupportedMethodResponse": {"$ref": "#/components/responses/ProductContractsMethodNotAllowed"}}}, "unsupportedMethodResponse": {"$ref": "#/components/responses/ProductMethodNotAllowed"}},
         "injectedApplicationRateLimit": {"response": {"$ref": "#/components/responses/ProductInjectedRateLimit"},
                                         "builtInLimiter": False},
         "productRequestBudget": {"defaultEnabled": False, "store": "PostgreSQL",
@@ -1100,6 +1148,11 @@ def curated_openapi(app):
         raise ValueError("Configured HTTPS space issuer is required for curated OpenAPI")
     entries = policy_registry(app)
     schema = get_openapi(title=app.title, version=app.version, routes=app.routes, tags=OPENAPI_TAGS)
+    body_schema = ContractCreateBody.model_json_schema(
+        by_alias=True, mode="validation", ref_template="#/components/schemas/{model}")
+    definitions = body_schema.pop("$defs", {})
+    schema.setdefault("components", {}).setdefault("schemas", {}).update(definitions)
+    schema["components"]["schemas"]["ContractCreateBody"] = body_schema
     _canonical_object_id_paths(schema)
     for path in schema["paths"].values():
         for operation in path.values():
@@ -1111,7 +1164,7 @@ def curated_openapi(app):
     schema["servers"] = [{"url": issuer.rstrip("/") + "/api/v1"}]
     descriptions = {**{access.READ_SCOPES[key]: f"Read {key}" for key in access.RESOURCES},
                     access.DOWNLOAD_SCOPE: "Download an authorized document version",
-                    monitoring.SCOPE: monitoring.DESCRIPTION}
+                    monitoring.SCOPE: monitoring.DESCRIPTION, "contracts:create": "Create a contract card"}
     service_scopes = {scope for entry in entries if PrincipalKind.SERVICE.value in entry["principalKinds"]
                       for scope in entry["scopes"]}
     schemes = schema.setdefault("components", {}).setdefault("securitySchemes", {})
@@ -1161,11 +1214,11 @@ def curated_openapi(app):
     schema["x-elsy-runtime-registry"] = export_runtime_registry(app)
     schema["x-elsy-capabilities"] = {
         "implemented": {"servicePoint": "ServiceLocation read", "station": "EzsEquipmentUnit(kind=station) read",
-            "counterparty": "read", "contract": "read", "document": "user read and native authorized version content",
+            "counterparty": "read", "contract": "read and profile-gated createContract candidate", "document": "user read and native authorized version content",
             "monitoring": "energy service-point status and non-financial charging aggregates"},
         "gaps": {"site": "not exposed", "evse": "not exposed", "connector": "not exposed",
             "machineDocumentAccess": "denied", "sharedDomainFileContent": "denied pending canonical shared-file policy",
-            "writes": "not implemented", "historicalVersionListing": "not exposed",
+            "writes": "only createContract candidate; activation and generated SDK pending", "historicalVersionListing": "not exposed",
             "monitoringFinance": "not exposed; separate financial scopes required",
             "monitoringTickets": "not exposed; separate ticket scopes required"}}
     _describe_http_responses(schema)

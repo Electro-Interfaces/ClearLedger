@@ -2,6 +2,7 @@
 import datetime as _datetime
 from datetime import date, datetime
 import re
+from uuid import UUID
 from typing import Annotated, Generic, Literal, TypeAliasType, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -866,3 +867,8 @@ class Problem(DTO):
             'Safe human-readable detail; not a stable discriminator.'
         ),
         examples=['Resource was not found'])
+
+
+class ContractCreateResult(DTO):
+    contract_id: UUID
+    replayed: bool
