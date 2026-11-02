@@ -4428,13 +4428,19 @@ async def create_all() -> None:
             # поэтому перевод безопасен; ошибку приведения глотаем, чтобы старт не
             # падал на базе, где кто-то успел записать не-UUID.
             "DO $$ BEGIN"
+            " IF EXISTS (SELECT 1 FROM pg_catalog.pg_attribute"
+            " WHERE attrelid = 'contracts'::regclass AND attname = 'counterparty_id'"
+            " AND NOT attisdropped AND atttypid <> 'pg_catalog.uuid'::regtype) THEN"
             " ALTER TABLE contracts ALTER COLUMN counterparty_id TYPE uuid"
             "   USING counterparty_id::uuid;"
-            " EXCEPTION WHEN others THEN NULL; END $$",
+            " END IF; EXCEPTION WHEN others THEN NULL; END $$",
             "DO $$ BEGIN"
+            " IF EXISTS (SELECT 1 FROM pg_catalog.pg_attribute"
+            " WHERE attrelid = 'contracts'::regclass AND attname = 'organization_id'"
+            " AND NOT attisdropped AND atttypid <> 'pg_catalog.uuid'::regtype) THEN"
             " ALTER TABLE contracts ALTER COLUMN organization_id TYPE uuid"
             "   USING organization_id::uuid;"
-            " EXCEPTION WHEN others THEN NULL; END $$",
+            " END IF; EXCEPTION WHEN others THEN NULL; END $$",
             "CREATE INDEX IF NOT EXISTS idx_contracts_company_cp"
             " ON contracts (company_id, counterparty_id)",
             # Отбор по компании — первый в КАЖДОМ запросе слоя. Без индекса это
