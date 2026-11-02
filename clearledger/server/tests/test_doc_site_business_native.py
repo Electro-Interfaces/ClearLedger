@@ -391,8 +391,12 @@ async def test_doc_site_business_native(doc_site_pg, case):
                 return
             assert listing.status_code == 200
             payload = listing.json()
-            assert payload["total"] == (2 if visible else 1)
-            assert [item["id"] for item in payload["items"]] == [str(expected_first if visible else LEGACY)]
+            if case == "partner_bound_empty_objects":
+                assert payload["total"] == 0
+                assert payload["items"] == []
+            else:
+                assert payload["total"] == (2 if visible else 1)
+                assert [item["id"] for item in payload["items"]] == [str(expected_first if visible else LEGACY)]
             if visible:
                 positive_listing = await pg.product_get(bearer, "/api/v1/documents?pageSize=2")
                 assert positive_listing.status_code == 200
