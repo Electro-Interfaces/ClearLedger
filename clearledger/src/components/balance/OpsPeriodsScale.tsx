@@ -36,14 +36,13 @@ export function OpsPeriodsScale({ current, onPick }: {
     queryKey: ['ops-periods', companyId],
     queryFn: () => getOpsPeriods(companyId!, 12, 2),
     enabled: !!companyId,
-    // Разворот ожиданий за 14 месяцев — недёшево; в рамках сессии данные не
-    // меняются сами по себе, меняет их человек, и он же жмёт «Обновить».
+    // Сохранённый срез; явная подготовка месяца инвалидирует его отдельно.
     staleTime: 5 * 60 * 1000,
   })
 
   if (q.isLoading) {
     return <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-4 text-sm text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" />Разворачиваю ожидания по всем периодам…
+      <Loader2 className="h-4 w-4 animate-spin" />Загружаем периоды…
     </div>
   }
   if (q.isError || !q.data) return null

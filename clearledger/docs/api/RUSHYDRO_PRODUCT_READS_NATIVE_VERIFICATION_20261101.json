@@ -1,0 +1,41 @@
+{
+  "status": "ROOT_VERIFIED_PASS_SCOPED25",
+  "source": "2da44d38684349a14f46d92176f11e8a1da74f33",
+  "authorSource": "8dced82a8523e3153eefb08839c311adfa4e018a",
+  "initialIntegration": "832b64ce3c7beceaec5a67344c35b2cfec9271f7",
+  "cases": 25,
+  "businessGets": 30,
+  "authSetupRequests": 5,
+  "testDefs": 4,
+  "phases": 75,
+  "secondsIncludingBootstrap": 37.54190173372626,
+  "sourceBlobs": 564,
+  "actualSqlEvents": 1742,
+  "models": 341,
+  "nativeTables": 347,
+  "allOwnedRemoved": true,
+  "foreignProjectionUnchanged": true,
+  "clients": 0,
+  "locks": 0,
+  "artifacts": {
+    "source-manifest.json": "e7114800461c1ac21627b538ab03d18f4aa510627de7edd36956183d5064ec63",
+    "driver-manifest.json": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+    "evidence/result.json": "9fc8a12553a99c15fc30965e970fe8cf782e0d985d5f0aaa44aeafb2d5a883b4",
+    "evidence/full-native-bootstrap.json": "9310c2e4525359124432029b4b98d5dba6756cae758ad7845a02f7c3c57c9430",
+    "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+    "evidence/profile-factory-cleanup.json": "edd33b41850a7ae1a98894148344fe83e6bfab11d85a89a8207af7275074c49a",
+    "evidence/actual-sql-classes.json": "3c43aa4efb58a04bd0bd7fb998685540b4e9aa77625acdd06fbbe4996afd166f",
+    "database-after.json": "2ad0513260f927e09cf4f0741bb1c11fb8d7e45c5c5a3dfdc6ba5f94e630a965",
+    "foreign-before.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+    "foreign-after.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+    "execution.json": "cd8f61150689aeacacc1cb5a1f5cb3b409a4e3dee1b5276e23a12dd4e837e034"
+  },
+  "limits": [
+    "Scoped25 only, not full17/current CI/all RusHydro methods",
+    "In-process ASGI, no browser/ingress/SSO/partner pilot/deploy",
+    "Machine document denial without document scopes, not isolated principal-kind proof",
+    "Selected13business-table columns/classifier/file snapshots, not all DB or absence of intermediate DML",
+    "No multi-page traversal or full parameter validation suite",
+    "Initial native seed unique-index setup error retained separately"
+  ]
+}

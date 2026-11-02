@@ -1,0 +1,194 @@
+{
+  "format": 1,
+  "name": "core_partner_prerequisites_v1",
+  "namespace": "core",
+  "base_contract_sha256": "5af1123d5bd784d21269062b7af9973a19711d06e6b0cb5ebb484b4b6ff200fa",
+  "base_sql_sha256": "3dab85f4430b177168d111e7952ed79122eb802ed0988c5f1b24b14563190942",
+  "profiles": {
+    "ce94e2bf30c0676208b1d70c5c135fe91d1a23f2": {
+      "name": "core_partner_prerequisites_v1.ce94e2bf_prepared_exact",
+      "model_source_sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "parents": {
+        "companies": {
+          "class": "Company",
+          "lines": [
+            40,
+            75
+          ],
+          "source_sha256": "0c581005263a37dcd585fb24d0c60e123daff4dd0c2e311198f5781b06e5754f"
+        },
+        "users": {
+          "class": "User",
+          "lines": [
+            81,
+            200
+          ],
+          "source_sha256": "459aad1d68d4ee40b40def4402e6be1a1129a202a153be27cdb262c86fc3afcb"
+        },
+        "organizations": {
+          "class": "Organization",
+          "lines": [
+            1182,
+            1236
+          ],
+          "source_sha256": "d5064c92534e6c56ea9778e5797b84265e360841caf40b1c875d0fd7e5cafd89"
+        },
+        "eco_apps": {
+          "class": "App",
+          "lines": [
+            8231,
+            8247
+          ],
+          "source_sha256": "8f78df89585b95eea9bc45db0d5d387e4a5305115662bac4fc3a6d153180cf6d"
+        },
+        "eco_company_apps": {
+          "class": "CompanyApp",
+          "lines": [
+            8268,
+            8283
+          ],
+          "source_sha256": "8df9ffd75b895a0570a18c45df42b5e5adfeff8fc03a3b9cd6ff02dfb46c8a51"
+        },
+        "calendar_events": {
+          "class": "CalendarEvent",
+          "lines": [
+            11302,
+            11385
+          ],
+          "source_sha256": "91523a8f5a4ef2ebfef74ebf7159e9dd073bdf55b57c70606df79cef33096ca1"
+        },
+        "company_roles": {
+          "class": "CompanyRole",
+          "lines": [
+            392,
+            418
+          ],
+          "source_sha256": "086b9069221701bf63da79f597a623300e51e6db532c37c14bea5f393af1f47c"
+        },
+        "pulse_views": {
+          "class": "PulseView",
+          "lines": [
+            12424,
+            12487
+          ],
+          "source_sha256": "67cb69de32971c370d307b62cea283a5708c9328ab20262cfc64ed034b6509bb"
+        }
+      },
+      "phone_sql_sha256": "6fec29331a810e7b285d626aeaa67b00de523442fcebf4ffea1d2b302ecbba7a",
+      "expected_profile": "prepared",
+      "calendar_managed_present": false
+    },
+    "5ce5779b20151a8d04de7d3a1681d1862a80d9dd": {
+      "name": "core_partner_prerequisites_v1.5ce5779b_prepared_exact",
+      "model_source_sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "parents": {
+        "companies": {
+          "class": "Company",
+          "lines": [
+            40,
+            75
+          ],
+          "source_sha256": "0c581005263a37dcd585fb24d0c60e123daff4dd0c2e311198f5781b06e5754f"
+        },
+        "users": {
+          "class": "User",
+          "lines": [
+            81,
+            200
+          ],
+          "source_sha256": "459aad1d68d4ee40b40def4402e6be1a1129a202a153be27cdb262c86fc3afcb"
+        },
+        "organizations": {
+          "class": "Organization",
+          "lines": [
+            1182,
+            1236
+          ],
+          "source_sha256": "d5064c92534e6c56ea9778e5797b84265e360841caf40b1c875d0fd7e5cafd89"
+        },
+        "eco_apps": {
+          "class": "App",
+          "lines": [
+            8231,
+            8247
+          ],
+          "source_sha256": "8f78df89585b95eea9bc45db0d5d387e4a5305115662bac4fc3a6d153180cf6d"
+        },
+        "eco_company_apps": {
+          "class": "CompanyApp",
+          "lines": [
+            8268,
+            8283
+          ],
+          "source_sha256": "8df9ffd75b895a0570a18c45df42b5e5adfeff8fc03a3b9cd6ff02dfb46c8a51"
+        },
+        "calendar_events": {
+          "class": "CalendarEvent",
+          "lines": [
+            11302,
+            11385
+          ],
+          "source_sha256": "91523a8f5a4ef2ebfef74ebf7159e9dd073bdf55b57c70606df79cef33096ca1"
+        },
+        "company_roles": {
+          "class": "CompanyRole",
+          "lines": [
+            392,
+            418
+          ],
+          "source_sha256": "086b9069221701bf63da79f597a623300e51e6db532c37c14bea5f393af1f47c"
+        },
+        "pulse_views": {
+          "class": "PulseView",
+          "lines": [
+            12424,
+            12487
+          ],
+          "source_sha256": "67cb69de32971c370d307b62cea283a5708c9328ab20262cfc64ed034b6509bb"
+        }
+      },
+      "phone_sql_sha256": "6fec29331a810e7b285d626aeaa67b00de523442fcebf4ffea1d2b302ecbba7a",
+      "expected_profile": "prepared",
+      "calendar_managed_present": false
+    }
+  },
+  "required_existing": [
+    "calendar_events",
+    "companies",
+    "company_roles",
+    "eco_apps",
+    "eco_company_apps",
+    "organizations",
+    "pulse_views",
+    "users"
+  ],
+  "required_absent": [
+    "partner_clients",
+    "partner_installations",
+    "product_api_budgets",
+    "core_schema_versions",
+    "pulse_view_role_grants"
+  ],
+  "literal_sections": [
+    {
+      "table": "partner_clients",
+      "file": "core_prerequisites_v1.sql",
+      "start_byte": 5714,
+      "end_byte": 6336,
+      "sha256": "e4c368f5c72c26569072ad1a1e90f9907d6737345bba8d858544e5d8ec1e6f7a",
+      "start_line": 154,
+      "end_line": 167
+    },
+    {
+      "table": "partner_installations",
+      "file": "core_prerequisites_v1.sql",
+      "start_byte": 6336,
+      "end_byte": 6932,
+      "sha256": "327f0f23c5a3bedb3233b43766a5f13dda58b7e329a50a0be889b2e2efcd61af",
+      "start_line": 168,
+      "end_line": 180
+    }
+  ],
+  "repair_existing": false,
+  "new_registry_revision": false
+}

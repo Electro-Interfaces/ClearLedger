@@ -45,11 +45,79 @@ FROM nginx:alpine
 # (Контейнер nginx-router в compose стоит ПЕРЕД frontend и роутит /api/.)
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY <<'EOF' /etc/nginx/conf.d/default.conf
+# Logging-only: snapshot normalized classification before SPA/internal rewrites.
+# Raw request fallback also masks known prefixes when parsing fails before rewrite.
+map $args $frontend_query_logged_request {
+    default $request;
+    ~(^|&)(code|state|access_token|refresh_token|id_token|token)= "$request_method $uri $server_protocol";
+}
+map $request $frontend_raw_capability_path {
+    default "";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:a|%61)(?:p|%70)(?:i|%69)(?:/|%2f)(?:d|%64)(?:o|%6f)(?:c|%63)(?:-|%2d)(?:s|%73)(?:h|%68)(?:a|%61)(?:r|%72)(?:e|%65)(?:/|%2f) "/api/doc-share/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:a|%61)(?:p|%70)(?:i|%69)(?:/|%2f)(?:i|%69)(?:n|%6e)(?:v|%76)(?:i|%69)(?:t|%74)(?:e|%65)(?:/|%2f) "/api/invite/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:a|%61)(?:p|%70)(?:i|%69)(?:/|%2f)(?:w|%77)(?:o|%6f)(?:r|%72)(?:k|%6b)(?:/|%2f)(?:c|%63)(?:a|%61)(?:l|%6c)(?:e|%65)(?:n|%6e)(?:d|%64)(?:a|%61)(?:r|%72)(?:/|%2f)(?:f|%66)(?:e|%65)(?:e|%65)(?:d|%64)(?:/|%2f)(?!rotate(?:[?\x20]|$)) "/api/work/calendar/feed/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:a|%61)(?:p|%70)(?:i|%69)(?:/|%2f)(?:a|%61)(?:u|%75)(?:t|%74)(?:h|%68)(?:/|%2f)(?:r|%72)(?:e|%65)(?:s|%73)(?:e|%65)(?:t|%74)(?:-|%2d)(?:p|%70)(?:a|%61)(?:s|%73)(?:s|%73)(?:w|%77)(?:o|%6f)(?:r|%72)(?:d|%64)(?:/|%2f) "/api/auth/reset-password/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:a|%61)(?:p|%70)(?:i|%69)(?:/|%2f)(?:i|%69)(?:n|%6e)(?:v|%76)(?:i|%69)(?:t|%74)(?:a|%61)(?:t|%74)(?:i|%69)(?:o|%6f)(?:n|%6e)(?:s|%73)(?:/|%2f)(?:a|%61)(?:c|%63)(?:c|%63)(?:e|%65)(?:p|%70)(?:t|%74)(?:/|%2f) "/api/invitations/accept/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:a|%61)(?:p|%70)(?:i|%69)(?:/|%2f)(?:s|%73)(?:h|%68)(?:o|%6f)(?:w|%77)(?:c|%63)(?:a|%61)(?:s|%73)(?:e|%65)(?:/|%2f) "/api/showcase/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:d|%64)(?:o|%6f)(?:c|%63)(?:-|%2d)(?:s|%73)(?:h|%68)(?:a|%61)(?:r|%72)(?:e|%65)(?:/|%2f) "/doc-share/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:d|%64)(?:o|%6f)(?:c|%63)(?:-|%2d)(?:v|%76)(?:e|%65)(?:r|%72)(?:i|%69)(?:f|%66)(?:y|%79)(?:/|%2f) "/doc-verify/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:m|%6d)(?:e|%65)(?:e|%65)(?:t|%74)(?:i|%69)(?:n|%6e)(?:g|%67)(?:/|%2f) "/meeting/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:i|%69)(?:n|%6e)(?:v|%76)(?:i|%69)(?:t|%74)(?:e|%65)(?:/|%2f) "/invite/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:r|%72)(?:e|%65)(?:s|%73)(?:e|%65)(?:t|%74)(?:-|%2d)(?:p|%70)(?:a|%61)(?:s|%73)(?:s|%73)(?:w|%77)(?:o|%6f)(?:r|%72)(?:d|%64)(?:/|%2f) "/reset-password/[redacted]";
+    ~*^[^\x20]+\x20(?:/|%2f)(?:s|%73)(?:h|%68)(?:o|%6f)(?:w|%77)(?:c|%63)(?:a|%61)(?:s|%73)(?:e|%65)(?:/|%2f) "/showcase/[redacted]";
+}
+# Нормализованный путь читается один раз на server rewrite до любого redirect/
+# @public/try_files. Map без volatile хранит первоначальную classification.
+# /ClearLedger/ — прежний redirect alias, его Location/URI не меняем.
+map $uri $frontend_normalized_capability_path {
+    default "";
+    ~^/(?:ClearLedger/)?p/public\.html$ "/p/public.html";
+    ~*^/(?:ClearLedger/)?api/doc-share/ "/api/doc-share/[redacted]";
+    ~*^/(?:ClearLedger/)?api/invite/ "/api/invite/[redacted]";
+    ~*^/(?:ClearLedger/)?api/work/calendar/feed/(?!rotate$) "/api/work/calendar/feed/[redacted]";
+    ~*^/(?:ClearLedger/)?api/auth/reset-password/ "/api/auth/reset-password/[redacted]";
+    ~*^/(?:ClearLedger/)?api/invitations/accept/ "/api/invitations/accept/[redacted]";
+    ~*^/(?:ClearLedger/)?api/showcase/ "/api/showcase/[redacted]";
+    ~*^/(?:ClearLedger/)?doc-share/ "/doc-share/[redacted]";
+    ~*^/(?:ClearLedger/)?doc-verify/ "/doc-verify/[redacted]";
+    ~*^/(?:ClearLedger/)?meeting/ "/meeting/[redacted]";
+    ~*^/(?:ClearLedger/)?invite/ "/invite/[redacted]";
+    ~*^/(?:ClearLedger/)?reset-password/ "/reset-password/[redacted]";
+    ~*^/(?:ClearLedger/)?showcase/ "/showcase/[redacted]";
+}
+map $frontend_normalized_capability_path $frontend_capability_path {
+    "" $frontend_raw_capability_path;
+    default $frontend_normalized_capability_path;
+}
+map $frontend_capability_path $frontend_logged_request {
+    "" $frontend_query_logged_request;
+    default "$request_method $frontend_capability_path $server_protocol";
+}
+map $frontend_capability_path $frontend_capability_referrer_policy {
+    "" "";
+    default "no-referrer";
+}
+log_format frontend_safe '$remote_addr [$time_local] "$frontend_logged_request" '
+                         '$status $body_bytes_sent "$http_user_agent"';
 server {
+    set $frontend_privacy_warmup $frontend_capability_path;
+    add_header Referrer-Policy $frontend_capability_referrer_policy always;
     listen 80 default_server;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
+    # @public сохраняет исходные args при rewrite в /p/public.html; только
+    # location callback недостаточно для защиты журнала второго nginx.
+    access_log /var/log/nginx/access.log frontend_safe;
+
+    # OAuth callback не должен оказаться в журнале второго nginx или Referer
+    # чанков до загрузки React. Внешний auth gate стека остаётся обязательным.
+    location = /developer/api/callback {
+        access_log off;
+        add_header Cache-Control "no-store" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files /index.html =404;
+    }
 
     # Хэшированные ассеты Vite — кэшировать намертво (имя меняется при пересборке).
     # Отсутствующий чанк = честный 404 (НЕ HTML-fallback: иначе браузер получает
@@ -57,10 +125,12 @@ server {
     location /ClearLedger/assets/ {
         alias /usr/share/nginx/html/assets/;
         add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header Referrer-Policy $frontend_capability_referrer_policy always;
         try_files $uri =404;
     }
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header Referrer-Policy $frontend_capability_referrer_policy always;
         try_files $uri =404;
     }
 
@@ -70,6 +140,7 @@ server {
     location /ClearLedger/ {
         alias /usr/share/nginx/html/;
         add_header Cache-Control "no-cache";
+        add_header Referrer-Policy $frontend_capability_referrer_policy always;
         try_files $uri $uri/ /index.html;
     }
 
@@ -78,6 +149,7 @@ server {
     location ~* \.webmanifest$ {
         default_type application/manifest+json;
         add_header Cache-Control "no-cache";
+        add_header Referrer-Policy $frontend_capability_referrer_policy always;
     }
 
     # Слои карты (границы регионов): без своего типа nginx отдаёт их как
@@ -85,10 +157,12 @@ server {
     location ~* \.geojson$ {
         default_type application/geo+json;
         add_header Cache-Control "public, max-age=2592000";
+        add_header Referrer-Policy $frontend_capability_referrer_policy always;
     }
 
     location / {
         add_header Cache-Control "no-cache";
+        add_header Referrer-Policy $frontend_capability_referrer_policy always;
         try_files $uri $uri/ /index.html;
     }
 

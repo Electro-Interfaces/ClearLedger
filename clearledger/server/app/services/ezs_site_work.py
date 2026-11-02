@@ -19,7 +19,8 @@ from typing import Any
 from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import EzsProject, EzsSite, EzsSiteEvent, User
+from app.models import EzsProject, EzsSite, EzsSiteEvent, ServiceLocation, User
+from app.scope import scope_location_conds
 from app.services.ezs_checklist import PHASE_LABELS_DOC, WAIVE_FORBIDDEN, gates_by_stage
 from app.services.ezs_checklist_integration import gates_by_stage as integration_gates
 from app.services.ezs_sites import (
@@ -115,6 +116,7 @@ EDITABLE_FIELDS = {
     "has_internet", "subsidy_amount",
     # графы чек-листа согласования (v2.26)
     "input_price_kwth", "smr_cost", "long_term_contract", "has_video", "has_mobile",
+    "dismantle_location_ids", "decommissioned_on",
     "owner_contact", "source_company", "source_person",
     # условия аренды и площадки (предложения отдела развития 09.10.2026)
     "contract_kind", "rent_variable", "rent_revenue_pct", "rent_indexation_pct",
@@ -362,6 +364,20 @@ async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | N
 def _coerce(field: str, value: Any) -> Any:
     if value in ("", None):
         return None
+    if field == "dismantle_location_ids":
+        if not isinstance(value, list) or len(value) > 2000 or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 40 for item in value):
+            raise ValueError("ЭЗС к демонтажу: выберите станции из реестра")
+        return list(dict.fromkeys(value))
+    if field == "decommissioned_on":
+        from datetime import date
+        try:
+            result = date.fromisoformat(str(value)).isoformat()
+            if result != str(value):
+                raise ValueError
+            return result
+        except ValueError:
+            raise ValueError("Дата вывода ЭЗС из эксплуатации: укажите корректную дату ГГГГ-ММ-ДД") from None
     if field in _NUMERIC:
         try:
             return float(str(value).replace(",", ".").replace(" ", ""))
@@ -388,20 +404,35 @@ async def update_site(db: AsyncSession, site: EzsSite, patch: dict[str, Any],
     """Правка карточки. Изменённые поля запоминаются как ручные — импорт их не тронет."""
     if (site.workspace_data or {}).get("next_ref") and any(patch.get(k) for k in ("next_action", "next_action_due")):
         return {"ok": False, "message": "Следующий результат связан с работой Трека. Измените срок в её карточке или снимите связь в обзоре"}
+    # Проверить весь запрос до первой записи: ошибка даты не оставляет частичных правок.
+    prepared = {field: _coerce(field, value) for field, value in patch.items() if field in EDITABLE_FIELDS}
+    ids = prepared.get("dismantle_location_ids") or []
+    dismantle_names = {}
+    if "dismantle_location_ids" in prepared and (ids or site.dismantle_location_ids):
+        stations = (await db.execute(select(ServiceLocation).where(
+            ServiceLocation.company_id == site.company_id,
+            ServiceLocation.type == "ev_charging",
+            ServiceLocation.id.in_(set(ids) | set(site.dismantle_location_ids or [])),
+            *scope_location_conds(ServiceLocation.id),
+        ))).scalars().all()
+        dismantle_names = {station.id: " · ".join(filter(None, (station.code, station.name))) for station in stations}
+        if not set(ids).issubset(dismantle_names):
+            raise ValueError("ЭЗС к демонтажу: одна из станций недоступна. Обновите выбор")
     changed: list[str] = []
     changes: list[dict[str, Any]] = []
     owner_values: tuple[Any, Any] | None = None
     manual = set(site.manual_fields or [])
-    for f, v in patch.items():
-        if f not in EDITABLE_FIELDS:
-            continue
-        new = _coerce(f, v)
+    for f, new in prepared.items():
         old = getattr(site, f, None)
         if old == new:
             continue
         setattr(site, f, new)
         changed.append(f)
         changes.append(make_change(f, old, new))
+        if f == "dismantle_location_ids":
+            changes[-1].update(old=old or [], new=new or [],
+                oldDisplay="; ".join(dismantle_names.get(key, "Недоступная ЭЗС") for key in old or []) or "не выбраны",
+                newDisplay="; ".join(dismantle_names.get(key, "Недоступная ЭЗС") for key in new or []) or "не выбраны")
         if f == "owner_user_id":
             owner_values = (old, new)
         manual.add(f)
@@ -1002,6 +1033,8 @@ def site_out_full(site: EzsSite, owner_name: str | None = None,
         # графы чек-листа согласования (v2.26)
         "inputPriceKwth": float(site.input_price_kwth) if site.input_price_kwth is not None else None,
         "smrCost": float(site.smr_cost) if site.smr_cost is not None else None,
+        "dismantleLocationIds": site.dismantle_location_ids or [],
+        "decommissionedOn": site.decommissioned_on,
         "longTermContract": site.long_term_contract,
         "hasVideo": site.has_video, "hasMobile": site.has_mobile,
         "ownerContact": site.owner_contact, "sourceCompany": site.source_company,

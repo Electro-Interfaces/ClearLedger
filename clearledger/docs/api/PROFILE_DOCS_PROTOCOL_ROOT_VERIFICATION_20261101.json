@@ -1,0 +1,87 @@
+{
+  "asOf": "2026-11-01T04:37:36.696548+00:00",
+  "status": "TWO_INDEPENDENT_COMPONENT_PROFILES_ACCEPTED_RFC_RETEST_OPEN",
+  "acceptedIndependentProfiles": [
+    {
+      "id": "profile95",
+      "sourceCommit": "9841890a3fd19f51a2ae388ce845c3bd19ea328e",
+      "cases": 95,
+      "definitions": 26,
+      "phases": 285,
+      "seconds": 60.68324876856059,
+      "artifact": "partner-profile-admin-fullnative-pg-20261101-6bedf22cffa0",
+      "status": "ACCEPTED_COMPONENT_SOURCE_RAW",
+      "resultSHA256": "d370212bd8b570c01b5c8571b3ba316fa1fb7d4bb7a8cbabeb9b892af92c81db",
+      "executionSHA256": "7dadf04e510c0478846b58748d7cf9efb3c7896aafe3e3c77eaa92c79de18272",
+      "independentReview": {
+        "REVIEW.md": "5d0cc0a0a4e588ce64125195ac26b91d0025ef44e233470aac684cdf41640cff",
+        "REVIEW.json": "63a30e0859a15a6d26d3246cbe3d8dbd48aac59a4728fd66e1e655c5cda2fb1f"
+      },
+      "cleanup": "normal2ownedremoved PGclientslocks0/0 pool0/0 alive noERROR foreign41safeprojectionequal",
+      "scope": "real admin ASGI nativeJWT currentauthority CAS defaultoff"
+    },
+    {
+      "id": "doc46",
+      "sourceCommit": "5b27ed4decd3f86a776d05cb58104bd0d2549f4b",
+      "cases": 46,
+      "definitions": 20,
+      "phases": 138,
+      "seconds": 40.182711753062904,
+      "artifact": "native-doc-create-fullnative-pg-20261101-4d0f924178fc",
+      "status": "ACCEPTED_COMPONENT_SOURCE_RAW",
+      "resultSHA256": "d56762472cceb2fbd2a990949bc633672e03348795564fd02e726902940dee44",
+      "executionSHA256": "aa26e4185c7333d7dc17a720a334497f8d8b557147244a72c2691f62d3495264",
+      "independentReview": {
+        "REVIEW.md": "ebd9e29d43d7dc7b4ab28d98666e1cede61f8d7f50b02ec0cb850aae154d249b",
+        "REVIEW.json": "1da757b7a47ba0a3240836a0b7ea680aaa30f57d2ab19749e5b16fd022834858"
+      },
+      "cleanup": "normal2ownedremoved PGclientslocks0/0 pool0/0 alive noERROR foreign41safeprojectionequal",
+      "scope": "actual native handlers programmaticclaims; notifycapture not delivery; no nativeHTTP"
+    }
+  ],
+  "singleCombined141Pass": false,
+  "rfc7009": {
+    "source": "c6376f2b887dad9947409d6947520cd3ec6704fa",
+    "sourceAccepted": true,
+    "runtimeAccepted": false,
+    "firstAttempt": "9bc1c03b1a16 normalROOTgracefulSIGINT after3publicunknownclient400expected401;64calls3failed0error0skip; hostexit1pytest2, allownedclean",
+    "plannedRetest": "two independent a48/b46 series same correctedSource; no current94PASS"
+  },
+  "uuid5": {
+    "source": "5b27ed4decd3f86a776d05cb58104bd0d2549f4b",
+    "coreAdapted": 34,
+    "allAdapted": 86,
+    "physicalDDLChanged": false
+  },
+  "guards": {
+    "source": "28d7451c",
+    "originalProtected": 19,
+    "handlerPins": 17,
+    "canonicalPolicyPins": 12,
+    "directPureSource8PassedEach": [
+      "Python3.11",
+      "Python3.13"
+    ],
+    "appImports": 0
+  },
+  "originalScope": {
+    "sections": 20,
+    "crossCutting": 11,
+    "unchanged": true,
+    "overallPercent": null,
+    "completion": false
+  },
+  "remaining": [
+    "issuer/currentgeneration/options/external contractPOST",
+    "actualFKwait dedicated NOTAUTHORED",
+    "GET cancellation/lostACKplusfreshCAS combined NOTRUN",
+    "fullDocs/globalOrgDelete/legacy0–2seven/currentfullCI/SDK pilots"
+  ],
+  "deployment": {
+    "merge": false,
+    "release": false,
+    "liveflagsChanged": false
+  },
+  "ledgerSourceHead": "28d7451c",
+  "nextCode": "G3 audit-after-root-commit exact8 technicallyratified; peer authorsource fromc6376f2b; G1case/numberingnotincluded"
+}

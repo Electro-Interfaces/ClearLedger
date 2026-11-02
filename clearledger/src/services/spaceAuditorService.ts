@@ -9,7 +9,7 @@
  * Запрос идёт токеном пользователя: аудитор своих прав не имеет и не покажет того,
  * чего человек не видит сам.
  */
-import { get, getToken, post, put } from './apiClient'
+import { captureApiContextGuard, get, getToken, post, put } from './apiClient'
 
 /** Где человек находился, когда позвал. Отсюда агент понимает, куда смотреть. */
 export interface AuditorContext {
@@ -224,16 +224,39 @@ export async function getKnowledge(companyId: string): Promise<AuditorKnowledge[
  * поставку, принимает человек, посмотрев дифф.
  */
 export async function exportWork() {
-  const res = await fetch(`${BASE}/export-work`, {
-    headers: { Authorization: `Bearer ${getToken() ?? ''}` },
-  })
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Не выгрузилось (${res.status})`)
-  const url = URL.createObjectURL(await res.blob())
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'auditor-work.tar.gz'
-  a.click()
-  URL.revokeObjectURL(url)
+  const guard = captureApiContextGuard()
+  guard()
+  try {
+    const res = await fetch(`${BASE}/export-work`, {
+      headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+    })
+    guard()
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null)
+      guard()
+      throw new Error(detail?.error || `Не выгрузилось (${res.status})`)
+    }
+    const blob = await res.blob()
+    guard()
+    const url = URL.createObjectURL(blob)
+    let anchor: HTMLAnchorElement | undefined
+    try {
+      guard()
+      anchor = document.createElement('a')
+      guard()
+      anchor.href = url
+      anchor.download = 'auditor-work.tar.gz'
+      guard()
+      anchor.click()
+      guard()
+    } finally {
+      try { anchor?.remove() } finally { URL.revokeObjectURL(url) }
+    }
+    guard()
+  } catch (error) {
+    guard()
+    throw error
+  }
 }
 
 /**
@@ -414,46 +437,71 @@ export function ask(
   workshop = false,
 ): AbortController {
   const controller = new AbortController()
+  // Компания запроса явная; guard отслеживает время жизни UI-контекста,
+  // включая организацию, A→B→A и новый вход с тем же Bearer.
+  const contextGuard = captureApiContextGuard()
+  const guard = () => { controller.signal.throwIfAborted(); contextGuard() }
+  let callbackFailed = false
+  const emit = (callback: () => void) => {
+    guard()
+    try { callback() } catch (error) { callbackFailed = true; throw error }
+    guard()
+  }
 
-  fetch(`${BASE}/ask`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getToken() ?? ''}`,
-      'X-Company-Id': companyId,
-    },
-    body: JSON.stringify({ question, context: ctx, history, files, workshop }),
-    signal: controller.signal,
-  })
-    .then(async (res) => {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  let response: Response | undefined
+  let exhausted = false
+  let cancellation: Promise<void> | undefined
+  const cancelReader = () => {
+    if (reader) cancellation ??= reader.cancel().catch(() => {})
+  }
+
+  void (async () => {
+    try {
+      guard()
+      const res = response = await fetch(`${BASE}/ask`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken() ?? ''}`,
+          'X-Company-Id': companyId,
+        },
+        body: JSON.stringify({ question, context: ctx, history, files, workshop }),
+        signal: controller.signal,
+      })
+      guard()
       if (!res.ok || !res.body) {
         // Ответ ошибки — обычный JSON, а не поток: 503 «нет CLI», 401 «токен не принят».
         const detail = await res.json().catch(() => null)
-        ev.onError?.(detail?.error || `${res.status} ${res.statusText}`)
-        ev.onDone?.()
+        emit(() => ev.onError?.(detail?.error || `${res.status} ${res.statusText}`))
+        emit(() => ev.onDone?.())
         return
       }
       // Профиль `auditor` в стеке не поднят — кромка не знает такого пути и отдаёт SPA
       // Ядра с кодом 200. Без этой проверки панель молча дочитывала бы HTML до конца и
       // не показывала ничего: ни ответа, ни ошибки.
       if (!res.headers.get('content-type')?.includes('text/event-stream')) {
-        ev.onError?.('Аудитор в этом пространстве не подключён')
-        ev.onDone?.()
+        emit(() => ev.onError?.('Аудитор в этом пространстве не подключён'))
+        emit(() => ev.onDone?.())
         return
       }
-      const reader = res.body.getReader()
+      reader = res.body.getReader()
+      controller.signal.addEventListener('abort', cancelReader, { once: true })
       const decoder = new TextDecoder()
       let buffer = ''
       for (;;) {
+        guard()
         const { done, value } = await reader.read()
-        if (done) break
+        guard()
+        if (done) { exhausted = true; break }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
         for (const line of lines) {
+          guard()
           if (!line.startsWith('data: ')) continue
           const raw = line.slice(6)
-          if (raw === '[DONE]') { ev.onDone?.(); return }
+          if (raw === '[DONE]') { emit(() => ev.onDone?.()); return }
           try {
             const msg = JSON.parse(raw)
             if (msg.type === 'text') ev.onText(msg.content)
@@ -464,15 +512,31 @@ export function ask(
             else if (msg.type === 'run') ev.onRun?.(msg.content)
             else if (msg.type === 'error') ev.onError?.(msg.content)
           } catch { /* не наша строка потока */ }
+          // Callback тоже может сменить контекст/остановить запрос. Проверка
+          // снаружи parse-catch не даёт проглотить AbortError и продолжить пачку.
+          guard()
         }
       }
-      ev.onDone?.()
-    })
-    .catch((e: Error) => {
-      if (e.name === 'AbortError') return
-      ev.onError?.(e.message)
-      ev.onDone?.()
-    })
+      emit(() => ev.onDone?.())
+    } catch (e) {
+      try {
+        guard()
+        if (callbackFailed || (e as Error).name === 'AbortError') return
+        emit(() => ev.onError?.((e as Error).message))
+        emit(() => ev.onDone?.())
+      } catch { /* устаревший/остановленный вызов и ошибки callbacks не покидают void API */ }
+    } finally {
+      controller.signal.removeEventListener('abort', cancelReader)
+      if (reader) {
+        if (!exhausted) cancelReader()
+        await cancellation
+        reader.releaseLock()
+      } else {
+        // Ответ мог прийти уже после смены контекста или оказаться не SSE.
+        await response?.body?.cancel().catch(() => {})
+      }
+    }
+  })()
 
   return controller
 }

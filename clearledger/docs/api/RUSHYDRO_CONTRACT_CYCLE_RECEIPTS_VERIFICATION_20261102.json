@@ -1,0 +1,67 @@
+{
+  "status": "PASS_ROOT_FINITE_RECEIPT34",
+  "sourceCommit": "0db9a97e2f6b86f2307cfa5abefb1a32982d37ec",
+  "authorCommit": "499ef454d3724b9fdc70d4eeb804847d639a5141",
+  "testHelperFixAuthor": "86048db69c9ef0825384ffbd3c17ecede3b4f716",
+  "cases": 34,
+  "definitions": 1,
+  "phases": 102,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "pytestSecondsIncludingWorlds": 345.95,
+  "postgresVersion": "16.15",
+  "nativeMappedModels": 343,
+  "physicalTablesByPrefix": {
+    "3": 341,
+    "4": 347,
+    "5": 349
+  },
+  "nativeWorlds": 34,
+  "explicitFactoryContexts": 33,
+  "frozenPinsSetupOnlyWorlds": 1,
+  "ipcRequests": 70,
+  "sameOriginalFunctionObjects": true,
+  "allWorldsCleaned": true,
+  "sameLoopPoolsClosed": true,
+  "clients": 0,
+  "locks": 0,
+  "ownedContainersRemoved": true,
+  "foreignProjectionUnchanged": true,
+  "old0001Through0004ArtifactsUnchanged": true,
+  "boundedQuiescenceSeconds": 5,
+  "quiescenceChecks": 73,
+  "quiescenceRetries": 0,
+  "secondNativeRun": {
+    "accepted": false,
+    "recordedPhasesPassed": 74,
+    "failure": "Root immediate quiescence gate at drop52; controller alone changed to bounded read-only polling; final zero requirement retained; fresh full repeat"
+  },
+  "firstNativeRun": {
+    "passed": 22,
+    "failed": 12,
+    "accepted": false,
+    "failure": "test contents helper async generator TypeError before invariants; only helper fixed; full34 repeated"
+  },
+  "offlineRegression": {
+    "sourceCommit": "6e14711315d9d96fb0607fee9bf7013d03763b8d",
+    "cases": 29,
+    "subtests": 71,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "firstHarnessFailure": "Root snapshot omitted original safety module; harness alone fixed; first evidence retained"
+  },
+  "notCovered": [
+    "HTTP/OAuth authorization",
+    "Site authority/native document or file ACL",
+    "birth policy",
+    "new V2 business writers",
+    "all final CI",
+    "load or latency SLA",
+    "partner pilot",
+    "deployment"
+  ],
+  "pytestWarnings": 39,
+  "quiescenceNote": "All73 final quiescence probes were immediately zero in the accepted run; zero retries. The cause of the earlier nonzero observation was not reproduced."
+}

@@ -1,0 +1,1932 @@
+{
+  "status": "PARTIAL_IMPLEMENTATION_AND_TARGETED_VERIFICATION",
+  "fullProgram": "20M00–M19 +11 original cross-cutting requirements unchanged/open; no overall percentage",
+  "contractCard": {
+    "rootCodeCommit": "489e385d20b467a3f9244961e513f7e7bb5ff764",
+    "source": {
+      "status": "SOURCE_ACCEPTED_RUNTIME_NOTRUN",
+      "sources": [
+        {
+          "folder": "/home/mag/orca/workspaces/ledger-app/contract-create-workflow-20261101",
+          "head": "2e1a96d5fbee291c93e2b3869028af01d6c40a57",
+          "parent": "675654298f9a7cde30f3ab8097935478bb534088",
+          "files": {
+            "clearledger/server/app/services/contract_card_creation.py": "9a18628d5e6f701dab13c30fced65ef711ce8aa3d7fef4a0ae51ecf8cf5b4158",
+            "clearledger/server/app/services/native_contract_commands.py": "9a8f88d0b5bb539a19c596a374e786d5f00be672f489625be4066557a71f49e4",
+            "clearledger/server/tests/test_contract_card_creation.py": "4dd129e23d0317a31d1446900aeed259c664c1c3c5be596d79a057e82716cbf2",
+            "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.md": "fbe295e31c83f5536cfaf6073e932a4b24e933f98558f7c63ed769047b9ca2f3",
+            "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.json": "324a459fa5bf191d488c45425a72c7c6f760de6e2e981eb9b12be7b1eda203d0"
+          }
+        },
+        {
+          "folder": "/home/mag/orca/workspaces/ledger-app/contract-card-typecode-followup-20261101",
+          "head": "8f260771a3d44788bec6acd256941829b5579715",
+          "parent": "2e1a96d5fbee291c93e2b3869028af01d6c40a57",
+          "files": {
+            "clearledger/server/tests/test_contract_card_creation.py": "9e869985cb574f2dd26ced6d63377b715d1ce7e64618fb41b5333c4f514f20d6",
+            "clearledger/docs/api/CONTRACT_CARD_TYPE_CODE_PORTABILITY_20261101.md": "188eae336a014a1843d952ba09450160db5f965b9f736e199ee29dc24a83f9a7",
+            "clearledger/docs/api/CONTRACT_CARD_TYPE_CODE_PORTABILITY_20261101.json": "a92b1a503a4992bf5ab7ad072d384f8fd7d861dd84cb213ad3cf4323111c6ca7"
+          }
+        }
+      ]
+    },
+    "actualNewPG10": "NOTRUN",
+    "legacyNative55": "NOT_RERUN",
+    "partnerCREATE": "NOT_IMPLEMENTED"
+  },
+  "commonPermission": {
+    "sourceHead": "4cd4d20020c7e36e698c3c85753cf90ec0fbec4a",
+    "integration": {
+      "rootCodeCommit": "d71e4f3754efce7c911cc95cb46eb22707e8efbc",
+      "sourceFiles": 5,
+      "testCompositionExactSHA": 8,
+      "independentF1Review": "SOURCECLOSED",
+      "reviewMD": "14e52958c572a3da8e850334edb431c838293664994ad4ecc8c0b151f401a3b5",
+      "reviewJSON": "7a21104d8110aa73d8f186451f92ad339792a862dc2d87cfd52bc4ba180cc1b2",
+      "notNewRun": true
+    },
+    "targetedActual": {
+      "status": "ROOT_ACCEPTED_ISOLATED_PURE_AND_SYNTHETIC_ASGI",
+      "sourceHead": "4cd4d20020c7e36e698c3c85753cf90ec0fbec4a",
+      "passed": 264,
+      "failed": 0,
+      "skipped": 0,
+      "suiteCounts": {
+        "tests.test_api_contracts_context": 34,
+        "tests.test_api_contracts_http": 56,
+        "tests.test_named_contract_receipt_permission": 174
+      },
+      "execution": {
+        "argv": [
+          "/home/mag/.local/share/uv/python/cpython-3.13.7-linux-x86_64-gnu/bin/python3.13",
+          "-I",
+          "-S",
+          "-B",
+          "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/h01-root-pure-verification-20261101-v3/isolated.py"
+        ],
+        "exitCode": 0,
+        "elapsed": 2.24354076012969,
+        "reaped": true,
+        "runnerSHA256": "08fb9d6393ba657a1b0874004d41a158406bcef584e691d250d4e5bac342913f",
+        "limits": {
+          "wall": 45,
+          "cpu": 30,
+          "as": 1073741824,
+          "nofile": 128,
+          "fsize": 8388608
+        },
+        "profile": "8 selected copied source files/no conftest/plugins/DB/product imports/network/subprocess",
+        "stdout": {
+          "bytes": 1419,
+          "SHA256": "f9ba3f32884c5ff0a4d8d22798978f9b35172a4f98f73df8ada62a4e370489c9"
+        },
+        "stderr": {
+          "bytes": 0,
+          "SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "audit": {
+        "denied": [],
+        "modules": [
+          "app",
+          "app.api_contracts",
+          "app.api_contracts.context",
+          "app.api_contracts.routing",
+          "tests",
+          "tests.test_api_contracts_context",
+          "tests.test_api_contracts_http",
+          "tests.test_named_contract_receipt_permission"
+        ]
+      },
+      "rawFiles": {
+        "source.json": "c6dd5ebb4ef88252ff5223ec76366b222f36c94296b05ee5c68f99d973484255",
+        "isolated.py": "08fb9d6393ba657a1b0874004d41a158406bcef584e691d250d4e5bac342913f",
+        "execution.json": "06cb9f9fe34984567ee30f44b5fa70188a7467bc60b9e09493b9cfc9a8baef30",
+        "stdout": "f9ba3f32884c5ff0a4d8d22798978f9b35172a4f98f73df8ada62a4e370489c9",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "junit.xml": "7abffd565e0914457e1f86fb25f187cdb03684e3545381f0e132373656666280",
+        "audit.json": "89f9237a3ec246a02058cb64a72b14d27ff645852cfdd2757b31844d0c85b009"
+      },
+      "v1v2": "Outer refused exact readonly entropy device, historical output not accepted; same264 are not792 distinct tests",
+      "productionDBOrOAuthOrLivePilot": "NOTRUN",
+      "globalPercent": null
+    },
+    "productionRouteOptIns": 0,
+    "SQLIssuer": "NOT_IMPLEMENTED",
+    "OAuthPilot": "NOTRUN"
+  },
+  "CoreBootstrap": {
+    "acceptedDistinctIDs": 55,
+    "totalComponentIDs": 57,
+    "separateSeries": 50,
+    "remaining": [
+      "REC-old-binaries NOTPASS wall180",
+      "REC-synthetic-restore NOTRUN"
+    ],
+    "wholeProgramRatio": null
+  },
+  "support": {
+    "rootHead": "bcb2bbce54d62704f1afcf22924c7421f1a098fd",
+    "guardTestsActualPassed": 16,
+    "atomicSeamActualPassed": 22,
+    "physicalPG": {
+      "status": "ROOT_ACCEPTED_COMPONENT_PAIR_AFTER_INDEPENDENT_REVIEW",
+      "cases": 2,
+      "report": "PROJECTED_OBJECT_SYNC_PHYSICAL_PG_ROOT_VERIFICATION_20261101.md",
+      "sharedCore": "NOTRUN"
+    }
+  },
+  "reviewLimits": [
+    "memory compile and hashes do not prove runtime parity",
+    "264 =174 new synthetic guard cases +90 existing common guard cases, not whole CI",
+    "V1/V2 outer refused readonly entropy reads; V3 accepts only actual char1:9 readonly; repeated outputs not added",
+    "No full combined tree runtime, merge, deploy, working activation or external pilot"
+  ],
+  "nextImplementation": {
+    "DX": "scoped parent lock implementation, then actual roles/member writers",
+    "RootSchemaAuthor": "task_59227e1bdafa/ctx_b573a2312fc1; SOURCE ordinal4 0004_partner_contract_create reserved; explicit migration not working activation"
+  },
+  "serviceContractAlias": {
+    "root": "c8d05f9aef2002b1e03fb6d136b3cf4c76a9f171",
+    "actualTargetedTests": 16,
+    "guards": 3,
+    "PGMethods": 13,
+    "fail": 0,
+    "skip": 0,
+    "profile": "synthetic narrow4column and actual PG catalogue; not fullCore/installed203",
+    "SQL203Execution": "NOTRUN"
+  },
+  "contractCreateSchema4": {
+    "source": "e9223fc5269d392c696ba244c0ed566302dec66a",
+    "root": "2e9571889a4a74c9b08e8857e33cd92670d2fea4",
+    "sourceReview": "SOURCE_ACCEPTABLE",
+    "offlineActual": {
+      "tests": 23,
+      "new": 9,
+      "legacy": 14,
+      "fail": 0,
+      "skip": 0
+    },
+    "actualORMAndPG": "NOTRUN",
+    "oldCore55NotMovedTo4": true
+  },
+  "scopedWriterVerification": {
+    "status": "PROGRESS_COMPONENT_RESULTS_SEPARATE_NATIVE_REJECTED",
+    "asOfUTC": "2026-10-31T23:34:06Z",
+    "originalProgram": "M00–M19 +11 original cross-cutting criteria retained and not wholly completed",
+    "overallPercent": null,
+    "sourceIntegrations": [
+      {
+        "commit": "326457edd0b8029b2739cf5563c492f4f8169a10",
+        "source": "d73d46fcdcb902d09e0a1aee12676296efbcfd8b",
+        "files": 12,
+        "scope": "PR98 helper +PR99 native users/roles; source integrated, native runtime rejected"
+      },
+      {
+        "commit": "121461a1d35ba79b430f3b60ff673f29eb34ee6c",
+        "source": "a25559dda2dca0002203d6ac2ea27af0d8c99d2a",
+        "files": 6,
+        "scope": "PR100 common Store card adapter; unit19 accepted, PG NOTRUN"
+      }
+    ],
+    "results": [
+      {
+        "component": "scoped-helper",
+        "verdict": "ACCEPTED_HELPER_ONLY_AFTER_INDEPENDENT_REVIEW",
+        "artifactDirectory": ".artifacts/contract-scoped-locks-pg-20261101-32e5b3bbb0c4",
+        "sourceRoot": "326457edd0b8029b2739cf5563c492f4f8169a10",
+        "collected": 99,
+        "uniqueCases": 99,
+        "originalFunctions": 30,
+        "passed": 99,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "seconds": 2.4701559422537684,
+        "actualCaseIds": [
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key0-1346568208-{\"key\":\"app\",\"parts\":{\"app_id\":\"00000000-0000-0000-0000-000000000001\"},\"v\":1}-ecf05944133da2dd9cac8e935ee13a319819715aa0b76855571084d6514d6f88--319792828]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key1-1346568224-{\"key\":\"client\",\"parts\":{\"client_id\":\"client-A\"},\"v\":1}-69630af0726cee7674ef25bafbbfbd4b3618b154c08f668bc34a3b16815a3e56-1768098544]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key2-1346568240-{\"key\":\"user\",\"parts\":{\"user_id\":\"00000000-0000-0000-0000-000000000002\"},\"v\":1}-cc2cc6c2e0b77ec39351f43b338e271d17dffb1ed5ec2314b67bff2518b6c55c--869480766]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key3-1346568256-{\"key\":\"company\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\"},\"v\":1}-cdd56396e65159d2b8f0fa18690157d4e95da67403546e3da07234757ef220a8--841653354]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key4-1346568272-{\"key\":\"installation\",\"parts\":{\"installation_id\":\"00000000-0000-0000-0000-000000000004\"},\"v\":1}-602de6a432251500136e9b8dcb84428be0c3dd7b5ad061e02a6c1a4a021e837a-1613620900]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key5-1346568288-{\"key\":\"create_profile\",\"parts\":{\"profile_id\":\"00000000-0000-0000-0000-000000000005\"},\"v\":1}-52697f44fd26ac7eda36b01c82a61444a81f23398e9aab5b7673c3839fc6ee25-1382645572]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key6-1346568304-payload6-0343196270bdf3cad67c3ddb6b2592c0402f08164f19a16da56ccb6c8247e712-54729058]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key7-1346568320-payload7-69b929ee74b36386ddc397f86f012bbeb809b9358d50c5049f312bb1d1cfaa48-1773742574]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key8-1346568336-{\"key\":\"ref_composite\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\"},\"v\":1}-5ed08e6466353575a9fbfceabb5b153f81d6a9a641c211a1febb947be53dd79c-1590726244]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key9-1346568341-{\"key\":\"type_catalog\",\"parts\":{\"type_code\":\"\\u0414\\u043e\\u0433\\u043e\\u0432\\u043e\\u0440 A \"},\"v\":1}-25102e3a65e56f60f92a3e7f4c1b15e41456c374cdf65eded642e1336a3a95d7-621817402]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[00000000-0000-0000-0000-000000000001-RoleKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[00000000-0000-0000-0000-000000000001-MemberKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[True-RoleKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[True-MemberKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[invalid2-RoleKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[invalid2-MemberKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[client-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[client-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[True-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[True-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[None-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[None-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[invalid4-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[invalid4-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_no_normalization_or_uuid_string_coercion",
+          "tests/test_contract_write_locks.py::test_full_numeric_order_and_strongest_duplicate_merge",
+          "tests/test_contract_write_locks.py::test_real_sha_prefix_collision_is_serialization_only",
+          "tests/test_contract_write_locks.py::test_explicit_two_integer_sql_shape[statement0-pg_advisory_xact_lock_shared]",
+          "tests/test_contract_write_locks.py::test_explicit_two_integer_sql_shape[statement1-pg_advisory_xact_lock]",
+          "tests/test_contract_write_locks.py::test_forged_and_copied_caps_have_no_issuance",
+          "tests/test_contract_write_locks_pg.py::test_shared_coexists_and_exclusive_waits_on_actual_two_int_lock",
+          "tests/test_contract_write_locks_pg.py::test_disjoint_company_exclusive_keys_do_not_block",
+          "tests/test_contract_write_locks_pg.py::test_real_collision_waits_but_does_not_grant_another_logical_identity",
+          "tests/test_contract_write_locks_pg.py::test_colliding_plan_executes_once_with_strongest_mode_and_original_coverage",
+          "tests/test_contract_write_locks_pg.py::test_session_end_invalidates_and_new_root_can_acquire[commit]",
+          "tests/test_contract_write_locks_pg.py::test_session_end_invalidates_and_new_root_can_acquire[rollback]",
+          "tests/test_contract_write_locks_pg.py::test_session_end_invalidates_and_new_root_can_acquire[close]",
+          "tests/test_contract_write_locks_pg.py::test_direct_connection_end_invalidates_even_with_live_session_root[commit]",
+          "tests/test_contract_write_locks_pg.py::test_direct_connection_end_invalidates_even_with_live_session_root[rollback]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[commit-session]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[commit-connection]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[rollback-session]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[rollback-connection]",
+          "tests/test_contract_write_locks_pg.py::test_nested_entry_is_rejected_before_lock_sql[session]",
+          "tests/test_contract_write_locks_pg.py::test_nested_entry_is_rejected_before_lock_sql[connection]",
+          "tests/test_contract_write_locks_pg.py::test_foreign_copied_and_forged_capability_rejected_on_real_sessions",
+          "tests/test_contract_write_locks_pg.py::test_actual_sqlalchemy_pending_state_sets_reject_entry[new]",
+          "tests/test_contract_write_locks_pg.py::test_actual_sqlalchemy_pending_state_sets_reject_entry[dirty]",
+          "tests/test_contract_write_locks_pg.py::test_actual_sqlalchemy_pending_state_sets_reject_entry[deleted]",
+          "tests/test_contract_write_locks_pg.py::test_authorized_dirty_validation_and_normal_flush_child_remain_valid",
+          "tests/test_contract_write_locks_pg.py::test_baseexception_after_partial_acquisition_poisons_until_outer_rollback",
+          "tests/test_contract_write_locks_pg.py::test_inactive_session_entry_rejected",
+          "tests/test_contract_write_locks_pg.py::test_connection_invalidation_rejects_live_root_capability",
+          "tests/test_contract_write_locks_pg.py::test_multiple_enlisted_connections_rejected",
+          "tests/test_contract_write_locks_pg.py::test_async_uses_actual_sync_session_and_same_capability_protocol",
+          "tests/test_contract_write_locks_pg.py::test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan[upgrade]",
+          "tests/test_contract_write_locks_pg.py::test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan[numeric_reverse]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_commit_keeps_attempt_across_orm_roots[True]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_commit_keeps_attempt_across_orm_roots[False]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_close_keeps_attempt_across_orm_roots[True]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_close_keeps_attempt_across_orm_roots[False]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[True-commit]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[True-close]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[False-commit]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[False-close]",
+          "tests/test_contract_write_locks_pg.py::test_actual_outer_rollback_allows_new_db_root_on_same_connection[False]",
+          "tests/test_contract_write_locks_pg.py::test_actual_outer_rollback_allows_new_db_root_on_same_connection[True]"
+        ],
+        "originalFunctionIds": [
+          "tests.test_contract_write_locks.test_both_composite_parts_are_exact_uuid",
+          "tests.test_contract_write_locks.test_exact_nonempty_text",
+          "tests.test_contract_write_locks.test_explicit_two_integer_sql_shape",
+          "tests.test_contract_write_locks.test_forged_and_copied_caps_have_no_issuance",
+          "tests.test_contract_write_locks.test_full_numeric_order_and_strongest_duplicate_merge",
+          "tests.test_contract_write_locks.test_independent_literal_goldens",
+          "tests.test_contract_write_locks.test_no_normalization_or_uuid_string_coercion",
+          "tests.test_contract_write_locks.test_real_sha_prefix_collision_is_serialization_only",
+          "tests.test_contract_write_locks.test_uuid_parts_require_exact_uuid",
+          "tests.test_contract_write_locks_pg.test_actual_outer_rollback_allows_new_db_root_on_same_connection",
+          "tests.test_contract_write_locks_pg.test_actual_sqlalchemy_pending_state_sets_reject_entry",
+          "tests.test_contract_write_locks_pg.test_async_uses_actual_sync_session_and_same_capability_protocol",
+          "tests.test_contract_write_locks_pg.test_authorized_dirty_validation_and_normal_flush_child_remain_valid",
+          "tests.test_contract_write_locks_pg.test_baseexception_after_partial_acquisition_poisons_until_outer_rollback",
+          "tests.test_contract_write_locks_pg.test_colliding_plan_executes_once_with_strongest_mode_and_original_coverage",
+          "tests.test_contract_write_locks_pg.test_connection_invalidation_rejects_live_root_capability",
+          "tests.test_contract_write_locks_pg.test_direct_connection_end_invalidates_even_with_live_session_root",
+          "tests.test_contract_write_locks_pg.test_disjoint_company_exclusive_keys_do_not_block",
+          "tests.test_contract_write_locks_pg.test_foreign_copied_and_forged_capability_rejected_on_real_sessions",
+          "tests.test_contract_write_locks_pg.test_inactive_session_entry_rejected",
+          "tests.test_contract_write_locks_pg.test_multiple_enlisted_connections_rejected",
+          "tests.test_contract_write_locks_pg.test_nested_entry_is_rejected_before_lock_sql",
+          "tests.test_contract_write_locks_pg.test_partial_attempt_survives_rollback_only_orm_root_replacement",
+          "tests.test_contract_write_locks_pg.test_real_collision_waits_but_does_not_grant_another_logical_identity",
+          "tests.test_contract_write_locks_pg.test_rollback_only_close_keeps_attempt_across_orm_roots",
+          "tests.test_contract_write_locks_pg.test_rollback_only_commit_keeps_attempt_across_orm_roots",
+          "tests.test_contract_write_locks_pg.test_savepoint_history_invalidates_after_nested_object_disappears",
+          "tests.test_contract_write_locks_pg.test_session_end_invalidates_and_new_root_can_acquire",
+          "tests.test_contract_write_locks_pg.test_shared_coexists_and_exclusive_waits_on_actual_two_int_lock",
+          "tests.test_contract_write_locks_pg.test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan"
+        ],
+        "profile": "exact helper unit and real-PG locks/probe only; no native routers/full Core/schema4",
+        "allOwnedRemoved": true,
+        "foreignProjectionsUnchanged": true,
+        "pins": {
+          "evidence/result.json": "a065c557f85483a14afff705d25542b4a7ba294e3e022b179cce2298e7f772da",
+          "execution.json": "601ca23cf9f8ed20d4f682ea97d0f3f98e80a398bb74afcd82bf41d6b87ea31d",
+          "root-acceptance.json": "75cb0bfffdd134a7ada65374dda8f78ccca887ea83f10afcb546da5f68c3e0b1",
+          "control/contract.json": "c2a3cfeeefa711cb3ecde8a467799a1d655b402ec168d8eb08f9b0da2328d678",
+          "python.stdout": "a0f13fda3f4a000b36b73f65a8b88f106ab4f6d5974dd86910561549bd9249ee",
+          "python.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "component": "native-users-roles",
+        "verdict": "REJECTED_18_FAILURES",
+        "artifactDirectory": ".artifacts/native-user-role-pg-20261101-fa0a460dc22a",
+        "sourceRoot": "326457edd0b8029b2739cf5563c492f4f8169a10",
+        "collected": 27,
+        "uniqueCases": 27,
+        "originalFunctions": 19,
+        "passed": 9,
+        "failed": 18,
+        "errors": 0,
+        "skipped": 0,
+        "seconds": 5.798551104962826,
+        "actualCaseIds": [
+          "tests/test_native_user_role_locks.py::test_actual_writer_roots_enter_before_mutation_and_keep_commit_ownership",
+          "tests/test_native_user_role_locks.py::test_complete_old_new_role_plan_and_absent_member",
+          "tests/test_native_user_role_locks.py::test_account_and_self_actor_modes_merge_upfront",
+          "tests/test_native_user_role_locks.py::test_dirty_entry_refuses_even_read_discovery",
+          "tests/test_native_user_role_locks.py::test_remove_and_role_delete_source_schedule",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[users-reset_sessions-kwargs0]",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[users-create_user-kwargs1]",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[users-set_member_access-kwargs2]",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[roles-delete_role-kwargs3]",
+          "tests/test_native_user_role_locks_pg.py::test_actual_role_move_waits_for_old_and_new_parents",
+          "tests/test_native_user_role_locks_pg.py::test_absent_grant_uses_same_member_guard",
+          "tests/test_native_user_role_locks_pg.py::test_actual_account_reset_takes_user_exclusive",
+          "tests/test_native_user_role_locks_pg.py::test_wait_revalidates_pointer_acl_and_session[member_parent]",
+          "tests/test_native_user_role_locks_pg.py::test_wait_revalidates_pointer_acl_and_session[actor_admin]",
+          "tests/test_native_user_role_locks_pg.py::test_wait_revalidates_pointer_acl_and_session[actor_session]",
+          "tests/test_native_user_role_locks_pg.py::test_remove_has_user_row_before_member_delete_and_no_late_user_upgrade",
+          "tests/test_native_user_role_locks_pg.py::test_delete_role_holders_wait_behind_role_exclusive",
+          "tests/test_native_user_role_locks_pg.py::test_preserved_admin_malformed_role_and_system_role_branches",
+          "tests/test_native_user_role_locks_pg.py::test_update_global_name_empty_value_and_role_scope_error",
+          "tests/test_native_user_role_locks_pg.py::test_create_user_full_plan_precedes_user_or_membership_flush[False]",
+          "tests/test_native_user_role_locks_pg.py::test_create_user_full_plan_precedes_user_or_membership_flush[True]",
+          "tests/test_native_user_role_locks_pg.py::test_cross_company_legacy_role_pointer_and_holder_fail_closed",
+          "tests/test_native_user_role_locks_pg.py::test_role_update_preserves_omitted_chat_scope_and_audit_commit",
+          "tests/test_native_user_role_locks_pg.py::test_access_legacy_error_order[False-False-malformed-404]",
+          "tests/test_native_user_role_locks_pg.py::test_access_legacy_error_order[True-True-malformed-403]",
+          "tests/test_native_user_role_locks_pg.py::test_access_legacy_error_order[True-False-00000000-0000-0000-0000-00000001869f-400]",
+          "tests/test_native_user_role_locks_pg.py::test_access_rechecks_target_superadmin_between_preflight_and_discovery"
+        ],
+        "originalFunctionIds": [
+          "tests.test_native_user_role_locks.test_account_and_self_actor_modes_merge_upfront",
+          "tests.test_native_user_role_locks.test_actual_route_dirty_preflight_cannot_autoflush",
+          "tests.test_native_user_role_locks.test_actual_writer_roots_enter_before_mutation_and_keep_commit_ownership",
+          "tests.test_native_user_role_locks.test_complete_old_new_role_plan_and_absent_member",
+          "tests.test_native_user_role_locks.test_dirty_entry_refuses_even_read_discovery",
+          "tests.test_native_user_role_locks.test_remove_and_role_delete_source_schedule",
+          "tests.test_native_user_role_locks_pg.test_absent_grant_uses_same_member_guard",
+          "tests.test_native_user_role_locks_pg.test_access_legacy_error_order",
+          "tests.test_native_user_role_locks_pg.test_access_rechecks_target_superadmin_between_preflight_and_discovery",
+          "tests.test_native_user_role_locks_pg.test_actual_account_reset_takes_user_exclusive",
+          "tests.test_native_user_role_locks_pg.test_actual_role_move_waits_for_old_and_new_parents",
+          "tests.test_native_user_role_locks_pg.test_create_user_full_plan_precedes_user_or_membership_flush",
+          "tests.test_native_user_role_locks_pg.test_cross_company_legacy_role_pointer_and_holder_fail_closed",
+          "tests.test_native_user_role_locks_pg.test_delete_role_holders_wait_behind_role_exclusive",
+          "tests.test_native_user_role_locks_pg.test_preserved_admin_malformed_role_and_system_role_branches",
+          "tests.test_native_user_role_locks_pg.test_remove_has_user_row_before_member_delete_and_no_late_user_upgrade",
+          "tests.test_native_user_role_locks_pg.test_role_update_preserves_omitted_chat_scope_and_audit_commit",
+          "tests.test_native_user_role_locks_pg.test_update_global_name_empty_value_and_role_scope_error",
+          "tests.test_native_user_role_locks_pg.test_wait_revalidates_pointer_acl_and_session"
+        ],
+        "profile": "native four-table/unit route schedules only; audits/response/invites substituted; no full Core/schema4/HTTP/production",
+        "allOwnedRemoved": true,
+        "foreignProjectionsUnchanged": true,
+        "pins": {
+          "evidence/result.json": "69ab964f8b5fa30ba253bd5422ddb057315ffedf47ca0c6bc3de786e7c91d929",
+          "execution.json": "55a970cd5562ab4548813d8d0cc3815d835646bdc4b1e7792d216c49ae74c6d4",
+          "root-acceptance.json": "98e1bc1034f423ce9c6393ae88ac45b7cb0a7ff0cec317cf8699a3766abb8359",
+          "control/contract.json": "0cf6020e80ea469f945aa8b45dee047d00be20094798162329b13b6c76e0b521",
+          "python.stdout": "0f08e60e7cd728d661e40cd1529234a101e3b72b5672fbadf1de357bb188f4fe",
+          "python.stderr": "49e5fce78fe6eeb26dcfbc7c41d2ebf0d923aa23f8940d56471ad5d35f9e3f5e"
+        }
+      },
+      {
+        "component": "store-unit",
+        "verdict": "ACCEPTED_UNIT_ONLY",
+        "artifactDirectory": ".artifacts/store-contract-unit-20261101-dbdb4eb5164b",
+        "sourceRoot": "121461a1d35ba79b430f3b60ff673f29eb34ee6c",
+        "collected": 19,
+        "uniqueCases": 19,
+        "originalFunctions": 11,
+        "passed": 19,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "seconds": 4.580349473282695,
+        "actualCaseIds": [
+          "tests/test_store_contract_commands_unit.py::test_create_barriers_validation_matcher_before_mutation_and_defaults",
+          "tests/test_store_contract_commands_unit.py::test_legacy_null_empty_falsy_values[None]",
+          "tests/test_store_contract_commands_unit.py::test_legacy_null_empty_falsy_values[]",
+          "tests/test_store_contract_commands_unit.py::test_legacy_null_empty_falsy_values[0]",
+          "tests/test_store_contract_commands_unit.py::test_legacy_null_empty_falsy_values[False]",
+          "tests/test_store_contract_commands_unit.py::test_required_400_before_barriers_and_writes[changes0-\\u043d\\u0443\\u0436\\u043d\\u044b \\u043a\\u043e\\u043d\\u0442\\u0440\\u0430\\u0433\\u0435\\u043d\\u0442 \\u0438 \\u043e\\u0440\\u0433\\u0430\\u043d\\u0438\\u0437\\u0430\\u0446\\u0438\\u044f]",
+          "tests/test_store_contract_commands_unit.py::test_required_400_before_barriers_and_writes[changes1-\\u043d\\u0443\\u0436\\u043d\\u044b \\u043a\\u043e\\u043d\\u0442\\u0440\\u0430\\u0433\\u0435\\u043d\\u0442 \\u0438 \\u043e\\u0440\\u0433\\u0430\\u043d\\u0438\\u0437\\u0430\\u0446\\u0438\\u044f]",
+          "tests/test_store_contract_commands_unit.py::test_required_400_before_barriers_and_writes[changes2-\\u043d\\u0443\\u0436\\u043d\\u043e \\u043d\\u0430\\u0438\\u043c\\u0435\\u043d\\u043e\\u0432\\u0430\\u043d\\u0438\\u0435 \\u0434\\u043e\\u0433\\u043e\\u0432\\u043e\\u0440\\u0430 \\u0438\\u043b\\u0438 \\u0435\\u0433\\u043e \\u043d\\u043e\\u043c\\u0435\\u0440]",
+          "tests/test_store_contract_commands_unit.py::test_update_uses_current_parties_type_excludes_self_preserves_raw_overrides",
+          "tests/test_store_contract_commands_unit.py::test_missing_update_404_and_duplicate_409_have_no_mutation",
+          "tests/test_store_contract_commands_unit.py::test_mixed_plan_locks_and_org_validation_before_first_mutation",
+          "tests/test_store_contract_commands_unit.py::test_mixed_invalid_organization_rejected_before_add[None]",
+          "tests/test_store_contract_commands_unit.py::test_mixed_invalid_organization_rejected_before_add[foreign]",
+          "tests/test_store_contract_commands_unit.py::test_mixed_invalid_organization_rejected_before_add[missing]",
+          "tests/test_store_contract_commands_unit.py::test_router_contract_keeps_acl_commit_and_response[False]",
+          "tests/test_store_contract_commands_unit.py::test_router_contract_keeps_acl_commit_and_response[True]",
+          "tests/test_store_contract_commands_unit.py::test_partner_empty_contract_stations_and_early_inn_shape",
+          "tests/test_store_contract_commands_unit.py::test_partner_plan_failure_prevents_cp_edge_and_station_writes",
+          "tests/test_store_contract_commands_unit.py::test_partner_mixed_success_has_both_barriers_before_cp_add"
+        ],
+        "originalFunctionIds": [
+          "tests.test_store_contract_commands_unit.test_create_barriers_validation_matcher_before_mutation_and_defaults",
+          "tests.test_store_contract_commands_unit.test_legacy_null_empty_falsy_values",
+          "tests.test_store_contract_commands_unit.test_missing_update_404_and_duplicate_409_have_no_mutation",
+          "tests.test_store_contract_commands_unit.test_mixed_invalid_organization_rejected_before_add",
+          "tests.test_store_contract_commands_unit.test_mixed_plan_locks_and_org_validation_before_first_mutation",
+          "tests.test_store_contract_commands_unit.test_partner_empty_contract_stations_and_early_inn_shape",
+          "tests.test_store_contract_commands_unit.test_partner_mixed_success_has_both_barriers_before_cp_add",
+          "tests.test_store_contract_commands_unit.test_partner_plan_failure_prevents_cp_edge_and_station_writes",
+          "tests.test_store_contract_commands_unit.test_required_400_before_barriers_and_writes",
+          "tests.test_store_contract_commands_unit.test_router_contract_keeps_acl_commit_and_response",
+          "tests.test_store_contract_commands_unit.test_update_uses_current_parties_type_excludes_self_preserves_raw_overrides"
+        ],
+        "profile": "Store unit mocked DB/collaborators; no PostgreSQL/B/full Core/HTTP proof",
+        "allOwnedRemoved": true,
+        "foreignProjectionsUnchanged": true,
+        "pins": {
+          "evidence/result.json": "2932d1b4ad4cadc646e3e6d255168b2fe61b2a8768a551b6aae26fc9b2b99daa",
+          "execution.json": "d8facba49c2136707764492fbe57ffce4361a8570d4de027564447fd3968daa9",
+          "root-acceptance.json": "b849afc5f470cf438cdcfe45ab160ccc73210f5a1b3a3eae75d612fbb7d46707",
+          "control/contract.json": "f9baaa7ec5c617a3adef1169eff108a1bfca42822e70e074c826e0a83502efd2",
+          "python.stdout": "b968db81fde81a20fbf765754fd9874dd5f5a6cf91a4a5b1fd3d7287f99ef58e",
+          "python.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    ],
+    "independentReview": {
+      "task": "task_4df76e57dbdd",
+      "dispatch": "ctx_47596e801065",
+      "outcome": "succeeded",
+      "cleanup": "released before inbox ACK",
+      "scope": "99 helper cases only; native failure is an attributed separate limit",
+      "MD_SHA256": "5f66217eaf00af97c4d575ad3d38ec0463300c0919999561ffc67b45672c1955",
+      "JSON_SHA256": "28397fa204e1915ad2227c74ff44b3f88fd685e2824177760e509745d4a12136"
+    },
+    "nativeFailure": {
+      "target": ".artifacts/native-user-role-pg-20261101-fa0a460dc22a",
+      "root": "326457edd0b8029b2739cf5563c492f4f8169a10",
+      "resultSHA256": "69ab964f8b5fa30ba253bd5422ddb057315ffedf47ca0c6bc3de786e7c91d929",
+      "sourceDiagnosis": "SQLAlchemy2.0.36 ConnectionEvents._accept_with checks one parent dispatch; Connection with OptionEngine(schema_translate_map) has nested joined dispatch; event.listen(conn,commit) fails before lock acquisition",
+      "affectedActualCases": 16,
+      "ASTOracleDefects": 2,
+      "oracleDiagnosis": "ast.walk(AsyncFunctionDef) includes router.delete HTTP decorator, counted as db.delete before handler entrance",
+      "fixOwner": "DX coordinator, notified msg_8d9ef1e3552f/msg_2f6f20e1a57f",
+      "fixAndRetest": "PENDING; no waiver, no runtime acceptance"
+    },
+    "storeB": {
+      "status": "HELD_PENDING_SOURCE_FRESHNESS_FIX_AND_REVIEW",
+      "rejectedFreeze": "fd1e2ab14cd4404a331548653bf3d6753582ca2f",
+      "sourceFinding": "retained ORM Contract identity after advisory wait can retain old duplicate identity; CP/Org reviewed too",
+      "owner": "Owner coordinator, msg_0b5b194a0968",
+      "alsoBlockedBy": "helper OptionEngine runtime compatibility until reviewed successor"
+    },
+    "executionLimits": [
+      "No app servers/working data/merge/deploy/flags or live schema changes",
+      "Root-only isolated temporary PostgreSQL, read-only copied source/runtime, no published ports; Store unit has no network/database",
+      "Native PG fixture has four tables and substituted audit/response/invites; full Core/schema4/native external effects not verified",
+      "Private psycopg3.2.3 binary test dependency; product requirements unchanged; C libpq does not emit Python socket.connect audit",
+      "Existing full venv content was not newly attested; no claim of complete kernel TCB verification",
+      "99 helper cases and19 Store unit cases are different compositions and are not a full CI or global percentage"
+    ],
+    "next": [
+      "Reviewed helper OptionEngine and native AST successors, then new isolated execution composition",
+      "Store B freshness successor and independent source recheck",
+      "Actual auth/invitation writer source, then runtime admission",
+      "Schema4 full-native Core ORM/DDL/trigger/lifecycle fixture; old Core3 remaining2 not waived",
+      "Partner CREATE/receipt/admin/query/OAuth/Swagger/SDK/final combined CI/external pilots remain open"
+    ],
+    "controllerSHA256": {
+      "contract-scoped-locks-root-20261101.py": "58ccd3e9d2d30859aa1a4615c1da51ef72dc5076b4f20099245e169d894d6e09",
+      "native-user-role-root-v2-20261101.py": "ae2c2773a0c9461bfdfcc0251152338232a44413039a524ca9890bc0f4583f3c",
+      "store-contract-unit-root-20261101.py": "b8e3b893b707b2cf64ee7298fa5a463c4e19f3112ab1554303ddabbe06dd19a3",
+      "lifecycleHelperSHA256": "98a86e5395561903d67546dcf3fb221c404b816baf0801847bf6ff8671d5470c"
+    }
+  },
+  "afterfixWriterCheckpoint": {
+    "status": "AFTERFIX_COMPONENT_GROUPS_ACCEPTED_SEPARATELY",
+    "asOfUTC": "2026-11-01T00:06:18Z",
+    "overallPercent": null,
+    "sourceIntegrations": {
+      "nativeAST": "3c4d4a65b0eca96a445151ac487cdb8e9ef7396f",
+      "StoreB": "591a18ff97e31474f6b9f426c622c28c45a6b323",
+      "OptionEngine": "e51876f994172c1d8306b934840541d2700486a6",
+      "createBody": "f1dd2dca0799a0583e7779e5d28cb2e82b0298d9"
+    },
+    "currentSeparateResults": [
+      {
+        "component": "helper-OptionEngine",
+        "rootAcceptance": "ROOT_ACCEPTED_AFTER_INDEPENDENT_SOURCE_RAW_REVIEW",
+        "sourceRoot": "e51876f994172c1d8306b934840541d2700486a6",
+        "cases": 135,
+        "passed": 135,
+        "failed": 0,
+        "error": 0,
+        "skip": 0,
+        "actualIds": [
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key0-1346568208-{\"key\":\"app\",\"parts\":{\"app_id\":\"00000000-0000-0000-0000-000000000001\"},\"v\":1}-ecf05944133da2dd9cac8e935ee13a319819715aa0b76855571084d6514d6f88--319792828]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key1-1346568224-{\"key\":\"client\",\"parts\":{\"client_id\":\"client-A\"},\"v\":1}-69630af0726cee7674ef25bafbbfbd4b3618b154c08f668bc34a3b16815a3e56-1768098544]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key2-1346568240-{\"key\":\"user\",\"parts\":{\"user_id\":\"00000000-0000-0000-0000-000000000002\"},\"v\":1}-cc2cc6c2e0b77ec39351f43b338e271d17dffb1ed5ec2314b67bff2518b6c55c--869480766]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key3-1346568256-{\"key\":\"company\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\"},\"v\":1}-cdd56396e65159d2b8f0fa18690157d4e95da67403546e3da07234757ef220a8--841653354]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key4-1346568272-{\"key\":\"installation\",\"parts\":{\"installation_id\":\"00000000-0000-0000-0000-000000000004\"},\"v\":1}-602de6a432251500136e9b8dcb84428be0c3dd7b5ad061e02a6c1a4a021e837a-1613620900]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key5-1346568288-{\"key\":\"create_profile\",\"parts\":{\"profile_id\":\"00000000-0000-0000-0000-000000000005\"},\"v\":1}-52697f44fd26ac7eda36b01c82a61444a81f23398e9aab5b7673c3839fc6ee25-1382645572]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key6-1346568304-payload6-0343196270bdf3cad67c3ddb6b2592c0402f08164f19a16da56ccb6c8247e712-54729058]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key7-1346568320-payload7-69b929ee74b36386ddc397f86f012bbeb809b9358d50c5049f312bb1d1cfaa48-1773742574]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key8-1346568336-{\"key\":\"ref_composite\",\"parts\":{\"company_id\":\"00000000-0000-0000-0000-000000000003\"},\"v\":1}-5ed08e6466353575a9fbfceabb5b153f81d6a9a641c211a1febb947be53dd79c-1590726244]",
+          "tests/test_contract_write_locks.py::test_independent_literal_goldens[key9-1346568341-{\"key\":\"type_catalog\",\"parts\":{\"type_code\":\"\\u0414\\u043e\\u0433\\u043e\\u0432\\u043e\\u0440 A \"},\"v\":1}-25102e3a65e56f60f92a3e7f4c1b15e41456c374cdf65eded642e1336a3a95d7-621817402]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[AppKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[UserKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CompanyKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[InstallationKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[CreateProfileKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-00000000-0000-0000-0000-000000000001]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-True]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-1]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-None]",
+          "tests/test_contract_write_locks.py::test_uuid_parts_require_exact_uuid[RefCompositeKey-invalid4]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[00000000-0000-0000-0000-000000000001-RoleKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[00000000-0000-0000-0000-000000000001-MemberKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[True-RoleKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[True-MemberKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[invalid2-RoleKey]",
+          "tests/test_contract_write_locks.py::test_both_composite_parts_are_exact_uuid[invalid2-MemberKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[client-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[client-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[True-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[True-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[None-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[None-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[invalid4-ClientKey]",
+          "tests/test_contract_write_locks.py::test_exact_nonempty_text[invalid4-TypeCatalogKey]",
+          "tests/test_contract_write_locks.py::test_no_normalization_or_uuid_string_coercion",
+          "tests/test_contract_write_locks.py::test_full_numeric_order_and_strongest_duplicate_merge",
+          "tests/test_contract_write_locks.py::test_real_sha_prefix_collision_is_serialization_only",
+          "tests/test_contract_write_locks.py::test_explicit_two_integer_sql_shape[statement0-pg_advisory_xact_lock_shared]",
+          "tests/test_contract_write_locks.py::test_explicit_two_integer_sql_shape[statement1-pg_advisory_xact_lock]",
+          "tests/test_contract_write_locks.py::test_forged_and_copied_caps_have_no_issuance",
+          "tests/test_contract_write_locks_pg.py::test_shared_coexists_and_exclusive_waits_on_actual_two_int_lock",
+          "tests/test_contract_write_locks_pg.py::test_disjoint_company_exclusive_keys_do_not_block",
+          "tests/test_contract_write_locks_pg.py::test_real_collision_waits_but_does_not_grant_another_logical_identity",
+          "tests/test_contract_write_locks_pg.py::test_colliding_plan_executes_once_with_strongest_mode_and_original_coverage",
+          "tests/test_contract_write_locks_pg.py::test_session_end_invalidates_and_new_root_can_acquire[commit]",
+          "tests/test_contract_write_locks_pg.py::test_session_end_invalidates_and_new_root_can_acquire[rollback]",
+          "tests/test_contract_write_locks_pg.py::test_session_end_invalidates_and_new_root_can_acquire[close]",
+          "tests/test_contract_write_locks_pg.py::test_direct_connection_end_invalidates_even_with_live_session_root[commit]",
+          "tests/test_contract_write_locks_pg.py::test_direct_connection_end_invalidates_even_with_live_session_root[rollback]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[commit-session]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[commit-connection]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[rollback-session]",
+          "tests/test_contract_write_locks_pg.py::test_savepoint_history_invalidates_after_nested_object_disappears[rollback-connection]",
+          "tests/test_contract_write_locks_pg.py::test_nested_entry_is_rejected_before_lock_sql[session]",
+          "tests/test_contract_write_locks_pg.py::test_nested_entry_is_rejected_before_lock_sql[connection]",
+          "tests/test_contract_write_locks_pg.py::test_foreign_copied_and_forged_capability_rejected_on_real_sessions",
+          "tests/test_contract_write_locks_pg.py::test_actual_sqlalchemy_pending_state_sets_reject_entry[new]",
+          "tests/test_contract_write_locks_pg.py::test_actual_sqlalchemy_pending_state_sets_reject_entry[dirty]",
+          "tests/test_contract_write_locks_pg.py::test_actual_sqlalchemy_pending_state_sets_reject_entry[deleted]",
+          "tests/test_contract_write_locks_pg.py::test_authorized_dirty_validation_and_normal_flush_child_remain_valid",
+          "tests/test_contract_write_locks_pg.py::test_baseexception_after_partial_acquisition_poisons_until_outer_rollback",
+          "tests/test_contract_write_locks_pg.py::test_inactive_session_entry_rejected",
+          "tests/test_contract_write_locks_pg.py::test_connection_invalidation_rejects_live_root_capability",
+          "tests/test_contract_write_locks_pg.py::test_multiple_enlisted_connections_rejected",
+          "tests/test_contract_write_locks_pg.py::test_async_uses_actual_sync_session_and_same_capability_protocol",
+          "tests/test_contract_write_locks_pg.py::test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan[upgrade]",
+          "tests/test_contract_write_locks_pg.py::test_two_sessions_share_one_db_root_and_cannot_acquire_second_plan[numeric_reverse]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_commit_keeps_attempt_across_orm_roots[True]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_commit_keeps_attempt_across_orm_roots[False]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_close_keeps_attempt_across_orm_roots[True]",
+          "tests/test_contract_write_locks_pg.py::test_rollback_only_close_keeps_attempt_across_orm_roots[False]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[True-commit]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[True-close]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[False-commit]",
+          "tests/test_contract_write_locks_pg.py::test_partial_attempt_survives_rollback_only_orm_root_replacement[False-close]",
+          "tests/test_contract_write_locks_pg.py::test_actual_outer_rollback_allows_new_db_root_on_same_connection[False]",
+          "tests/test_contract_write_locks_pg.py::test_actual_outer_rollback_allows_new_db_root_on_same_connection[True]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_enrollment_preserves_actual_connection_and_root[0]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_enrollment_preserves_actual_connection_and_root[1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_enrollment_preserves_actual_connection_and_root[2]",
+          "tests/test_contract_write_locks_pg.py::test_precreated_connection_observes_late_class_install_and_deduplicates[0]",
+          "tests/test_contract_write_locks_pg.py::test_precreated_connection_observes_late_class_install_and_deduplicates[1]",
+          "tests/test_contract_write_locks_pg.py::test_precreated_connection_observes_late_class_install_and_deduplicates[2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[commit-session-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[commit-session-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[commit-connection-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[commit-connection-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[rollback-session-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[rollback-session-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[rollback-connection-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_managed_end_invalidates_exact_lifetime[rollback-connection-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[commit-session-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[commit-session-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[commit-connection-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[commit-connection-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[rollback-session-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[rollback-session-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[rollback-connection-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_savepoint_history_stays_poisoned_and_preserves_b1[rollback-connection-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[error-commit-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[error-commit-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[error-close-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[error-close-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[cancel-commit-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[cancel-commit-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[cancel-close-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_partial_failure_keeps_actual_attempt_until_db_end[cancel-close-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_foreign_connection_events_do_not_poison_issuer[False-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_foreign_connection_events_do_not_poison_issuer[False-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_foreign_connection_events_do_not_poison_issuer[True-1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_foreign_connection_events_do_not_poison_issuer[True-2]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_authorized_dirty_and_normal_flush_child_stay_live[1]",
+          "tests/test_contract_write_locks_pg.py::test_option_engine_authorized_dirty_and_normal_flush_child_stay_live[2]"
+        ],
+        "seconds": 4.244748746044934,
+        "subTestObservations": 0,
+        "subTestsAreExtraTests": false,
+        "evidence": ".artifacts/contract-scoped-locks-afterfix-pg-20261101-810d717989bf",
+        "pins": {
+          "evidence/result.json": "10c10b832f30d269162669e942eb4784e347fa6f012dc3c20c66425c3088c4fb",
+          "root-acceptance.json": "c85d4df28e181337057ed769117248c95c65f2327ca8ce13f5e0588ae72bc1f2",
+          "execution.json": "543431d5adbdbbbfe87102b5c6778904961ed51d55c9e1ca7246db62dcfe907c"
+        },
+        "scope": "helper plus OptionEngine successor actual lifecycle; no native routers/full Core/schema4"
+      },
+      {
+        "component": "native-users-roles",
+        "rootAcceptance": "ROOT_ACCEPTED_AFTER_INDEPENDENT_SOURCE_RAW_REVIEW",
+        "sourceRoot": "e51876f994172c1d8306b934840541d2700486a6",
+        "cases": 27,
+        "passed": 27,
+        "failed": 0,
+        "error": 0,
+        "skip": 0,
+        "actualIds": [
+          "tests/test_native_user_role_locks.py::test_actual_writer_roots_enter_before_mutation_and_keep_commit_ownership",
+          "tests/test_native_user_role_locks.py::test_complete_old_new_role_plan_and_absent_member",
+          "tests/test_native_user_role_locks.py::test_account_and_self_actor_modes_merge_upfront",
+          "tests/test_native_user_role_locks.py::test_dirty_entry_refuses_even_read_discovery",
+          "tests/test_native_user_role_locks.py::test_remove_and_role_delete_source_schedule",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[users-reset_sessions-kwargs0]",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[users-create_user-kwargs1]",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[users-set_member_access-kwargs2]",
+          "tests/test_native_user_role_locks.py::test_actual_route_dirty_preflight_cannot_autoflush[roles-delete_role-kwargs3]",
+          "tests/test_native_user_role_locks_pg.py::test_actual_role_move_waits_for_old_and_new_parents",
+          "tests/test_native_user_role_locks_pg.py::test_absent_grant_uses_same_member_guard",
+          "tests/test_native_user_role_locks_pg.py::test_actual_account_reset_takes_user_exclusive",
+          "tests/test_native_user_role_locks_pg.py::test_wait_revalidates_pointer_acl_and_session[member_parent]",
+          "tests/test_native_user_role_locks_pg.py::test_wait_revalidates_pointer_acl_and_session[actor_admin]",
+          "tests/test_native_user_role_locks_pg.py::test_wait_revalidates_pointer_acl_and_session[actor_session]",
+          "tests/test_native_user_role_locks_pg.py::test_remove_has_user_row_before_member_delete_and_no_late_user_upgrade",
+          "tests/test_native_user_role_locks_pg.py::test_delete_role_holders_wait_behind_role_exclusive",
+          "tests/test_native_user_role_locks_pg.py::test_preserved_admin_malformed_role_and_system_role_branches",
+          "tests/test_native_user_role_locks_pg.py::test_update_global_name_empty_value_and_role_scope_error",
+          "tests/test_native_user_role_locks_pg.py::test_create_user_full_plan_precedes_user_or_membership_flush[False]",
+          "tests/test_native_user_role_locks_pg.py::test_create_user_full_plan_precedes_user_or_membership_flush[True]",
+          "tests/test_native_user_role_locks_pg.py::test_cross_company_legacy_role_pointer_and_holder_fail_closed",
+          "tests/test_native_user_role_locks_pg.py::test_role_update_preserves_omitted_chat_scope_and_audit_commit",
+          "tests/test_native_user_role_locks_pg.py::test_access_legacy_error_order[False-False-malformed-404]",
+          "tests/test_native_user_role_locks_pg.py::test_access_legacy_error_order[True-True-malformed-403]",
+          "tests/test_native_user_role_locks_pg.py::test_access_legacy_error_order[True-False-00000000-0000-0000-0000-00000001869f-400]",
+          "tests/test_native_user_role_locks_pg.py::test_access_rechecks_target_superadmin_between_preflight_and_discovery"
+        ],
+        "seconds": 6.220891355536878,
+        "subTestObservations": 0,
+        "subTestsAreExtraTests": false,
+        "evidence": ".artifacts/native-user-role-afterfix-pg-20261101-832182901c43",
+        "pins": {
+          "evidence/result.json": "f59c4763d39e2cd5af9e0930e9f869e418bb300fcef45e38accac76a27da1d93",
+          "root-acceptance.json": "8e374f191ce6b35652790c6ea90b86a6768030a4056b06a25a8ead1e638d3e45",
+          "execution.json": "2102dada2a97d864540b2526cfbe274db6ee10989678eca0215ea7d7f7a2ee7e"
+        },
+        "scope": "native four-table/unit route schedules only; audits/response/invites substituted; no full Core/schema4/HTTP/production"
+      },
+      {
+        "component": "contract-create-body",
+        "rootAcceptance": "ROOT_ACCEPTED_BODY27_ONLY",
+        "sourceRoot": "f1dd2dca0799a0583e7779e5d28cb2e82b0298d9",
+        "cases": 27,
+        "passed": 27,
+        "failed": 0,
+        "error": 0,
+        "skip": 0,
+        "actualIds": [
+          "root_partner_create_body_tests.ContractCreateModelTests.test_all_required_fields",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_canonical_exact_differences",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_canonical_independent_literal_and_digest",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_canonical_order_uuid_spelling_comment_and_creation_key",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_canonical_rejects_non_exact_model",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_canonical_revalidates_model_construct_and_copy",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_discriminators_and_coverage_shape",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_forbidden_fields_every_level_and_snake_aliases",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_location_bounds_raw_arrays_and_element_types",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_location_uniqueness_uses_exact_unicode_identity",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_postgres_text_and_utf8_every_text_field",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_required_nullable_and_optional_nullable_distinctions",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_strict_calendar_date",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_text_bounds_types_and_nonblank",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_uuid_strict_wire_and_exact_typed_uuid",
+          "root_partner_create_body_tests.ContractCreateModelTests.test_valid_exact_frozen_models",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_cancellation_disconnect_and_upstream_errors_propagate",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_content_length_missing_false_zero_large_and_invalid",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_duplicate_keys_at_root_nested_and_escaped_spelling",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_inclusive_actual_byte_boundary",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_invalid_utf8_escaped_surrogates_nul_and_deep_json",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_json_objects_only_malformed_trailing_and_constants",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_media_accepts_only_json_optional_utf8_token",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_media_rejections_do_not_read_stream",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_oversized_chunk_stops_before_more_receive_and_before_json",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_parser_maps_dto_failure_without_raw_input",
+          "root_partner_create_body_tests.ContractCreateParserTests.test_real_request_chunked_utf8_and_no_body_method"
+        ],
+        "seconds": 0.24858912266790867,
+        "subTestObservations": 408,
+        "subTestsAreExtraTests": false,
+        "evidence": ".artifacts/partner-contract-body-unit-20261101-a9ac08efe990",
+        "pins": {
+          "evidence/result.json": "323b8486c476fb1941ef1abc80da9ce594173276ebc8165aa8416b2d5e8df4d0",
+          "root-acceptance.json": "dd7f526e9adb93fb7d49101bec83835d2c1c961db79fcdb9f5acd920edfa739d",
+          "execution.json": "9178fe1776342ccd6b05c61b4861b13cfa4e509751ff5c4fe76c12c5cfebc495"
+        },
+        "scope": "real DTO/Starlette Request and streaming only; no endpoint/auth/quota/ORM/SQL/SDK"
+      }
+    ],
+    "independentSourceRawPG": {
+      "MD_SHA256": "70fc346f52051621557dc574e79178c32b9940df24d38a7eb7471b176fbe83f8",
+      "JSON_SHA256": "104108a6796723ff5a507c4172fc8189c33b16b1e4338fe139b521e0fd3d0b3a",
+      "scope": "135helper and27native only",
+      "reviewer": "task0705/ctx5e05",
+      "resource": "released"
+    },
+    "independentBodySource": {
+      "MD_SHA256": "b9c6a3444d81bc30c9f462d3bcc8bc6542b269a04abeeeb9b9b9f9aead4a4531",
+      "JSON_SHA256": "48e0b1b50a7bf9a6e79b94b91bfaf8eccd879904f9faeefc9252ba70c607e036",
+      "scope": "Source4 only; Root separately ran27 actual methods",
+      "resource": "released"
+    },
+    "history": "Earlier99minimal helper PASS and native9PASS/18FAIL retained unchanged; afterfix actual27 closes those18 only in four-table profile. Earlier9 AST unit and19 Store unit are historical, not additive new tests. Body V1 inner27PASS but rejected outerKeyError; acceptedV2 same27, not54.",
+    "schemaFixture": {
+      "source": "220c4e32eec1111505ac0da0b45e2d987b57825a",
+      "base": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "scope": "exact5 Source full native registry337 plus535 source manifest; physical counts unmeasured",
+      "prefixes": "builder3/4 only; original0–2 cases retained mandatory/open",
+      "review": "Source review no provenP0/P1;P2 wording fixed by doc-only successor220, verified Root;3helperbytes/535manifest unchanged;Root full code read/integration still pending",
+      "runtime": "NOTRUN; Root full read/independent runtime envelope pending"
+    },
+    "queued": {
+      "auth": "PR1020bc1af34 exact7 Source accepted+DOCfix; Root full PG testcase read/hash/integration/runtime pending",
+      "nativeContracts": "Owner coordinator R1 refs/native helper scope authorized msg19f35bd1dc5e on e518",
+      "partnerIdentity": "DX partner admin/OAuth/identity exact7 author82094/ctxd582 active;17branches; Source/runtime0"
+    },
+    "open": "Full Core/schema4/StoreB/native55/Auth PG/real identity/receipt SQL/admin/create options/POST transport/OpenAPI17/official SDK/combinedCI/external pilots/all20+11 not completed",
+    "deployment": "no merge/deploy/activation/working schema changes"
+  },
+  "authAndFullNativeSchema4Checkpoint20261101": {
+    "status": "SEPARATE_COMPONENTS_ACCEPTED_NOT_OVERALL_GO",
+    "asOfUTC": "2026-11-01 00:56 UTC",
+    "originalScope": {
+      "sections": 20,
+      "crossCutting": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "rootLedgerSourceHead": "98fab81ef13340081369d96e68801f0af9db285b",
+    "auth": {
+      "source": "0bc1af34b4f45b170213fb3742dd6a76009f65dd",
+      "rootSource": "87ee36e518d23617b3a321f5bd6d9a827813558e",
+      "artifact": "native-auth-pg-20261101-87902c65ef57",
+      "status": "ROOT_SIX_TABLE_COMPONENT_ACCEPTED_AFTER_REVIEW",
+      "actualCases": 138,
+      "unit": 43,
+      "PG": 95,
+      "functions": 46,
+      "phases": 414,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 98.54464386031032,
+      "resultSHA256": "043cd7f1cb366360cdb4f24fe6288181f553743b5019ad9f1900e689f6b3977c",
+      "executionSHA256": "0dda2799d02ff483c4a2f065958c44a50f292edee9ebdddf3cbc5c231b9f9e8b",
+      "independentReview": {
+        "verdict": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "110ff11ae461af833c4f235a98422b1934d4c5922059b22c89a2ab26c5b7c079",
+        "jsonSHA256": "5611256916ec7a7064f457ea282da8cc8e43d675caac031a9a7f7f880c9ce3f5",
+        "source": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/native-auth-root-review-20261101",
+        "overallGO": false
+      },
+      "limits": "synthetic six-table nullable/FK subset; real handlers/bcrypt/TOTP/audit; external delivery/security substituted; no full HTTP/JWT/production/CI"
+    },
+    "schema4": {
+      "status": "ROOT_FOUR_NATIVE_COMPONENT_CASES_ACCEPTED_AFTER_REVIEW",
+      "fixtureSource": "ff6a4028baa0de560617bb1442d4b92fe5956f49",
+      "rootFixture": "98fab81e",
+      "appBase": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+      "onlyAppOverlay": "be49c4e688c80b3d7c40aedc6b283b477732b01e:clearledger/server/app/product_api/dto.py",
+      "immutableFiles": 535,
+      "immutableBytes": 14634482,
+      "immutableSHA256": "040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56",
+      "models": 341,
+      "registrySHA256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a",
+      "beforeTables": 341,
+      "afterTables": 347,
+      "physicalFKs": 803,
+      "actualDTOUnitTests": 4,
+      "versionedORMFullColumnSelects": 6,
+      "cases": [
+        {
+          "case": "smoke-prefix3",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-smoke-prefix3-20261101-e5aa29cf49fb",
+          "seconds": 33.93229422997683,
+          "sqlCount": 6784,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "82a0e9b958c5162c6a6a71c24f8cdc0cb35a67d54f04a234ce610ef42c32449a",
+          "executionSHA256": "afe321fb47f0f63275731d41b9d6a4af2acc56bf422db7e9a48b621a50631046",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "current-fk-tombstones",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-current-fk-tombstones-20261101-87b760c47cd3",
+          "seconds": 32.097433945164084,
+          "sqlCount": 5538,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "e4ea68f5c89459ba3c6952852f3c3276bbc5942af71c98cff2a2e824d0456b8d",
+          "executionSHA256": "247021d70fa2b9b89fb2a090dad86f38fdc7f51cec50ea42475cb885141f5567",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "approval-ref-deletes",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-approval-ref-deletes-20261101-3b6baab8ec44",
+          "seconds": 30.767367414198816,
+          "sqlCount": 5086,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "bb3ccdf4e34180165905c5d290a56864399d666b2137b31610a88bd42ad20f84",
+          "executionSHA256": "a857d0c477218ecd86652a5a462286103abb5fcebe926dff91fa201c84fff924",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "parent-history-retention",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-parent-history-retention-20261101-166a263417f0",
+          "seconds": 31.651295457035303,
+          "sqlCount": 5091,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "8436a34ff04325cd650828a8a2e169139d7db0b885f6bb64f1ebd013615d9619",
+          "executionSHA256": "b579710c5fdedb3e4f9655fc2506229da0e0c7931792a6491b5e09974192102f",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        }
+      ],
+      "independentReview": {
+        "verdict": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "eb8191ed56a708f073d6f17a15f7d082c2b43b387280e531dcdd95435962d93e",
+        "jsonSHA256": "c1a11abbf0cd5629933ce8adfade409cdf0648c4996eb4442728fd4c4bab5865",
+        "source": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/schema4-native-root-review-20261101",
+        "overallGO": false
+      },
+      "controllerSHA256": "d7a41687e11d62a18e4e8da02eb061c636d896567c569b355f8a72d095337459",
+      "history": "five refused/failed native trials retained: exacthost representation, DTO import, incomplete337 source registry; current341 includes4 models outside models*.py",
+      "limits": "cold empty-edge energy native Core profile; legacy extra columns/FKs explicit; no all13groups/originalprefix0–2, old-binaries/restore, full latestRoot composition/HTTP/CI/production"
+    },
+    "remaining": [
+      "original13group matrix and prefix0–2",
+      "Core old-binaries and restore",
+      "StoreB actual PG and full authority closure",
+      "native contract/reference + OneC fixes/re-review/joint two-session PG",
+      "partner identity revoke fix/re-review/current combined runtime and coverage gaps",
+      "partner contract POST/admin/receipt SQL/query/options/OpenAPI17/official SDK",
+      "final joint CI and external pilots"
+    ],
+    "mergeDeployActivation": false
+  },
+  "matrix47AndWriterSourcesCheckpoint20261101": {
+    "status": "COMPONENT_PROGRESS_NOT_OVERALL_GO",
+    "asOfUTC": "2026-11-01 01:54 UTC",
+    "ledgerSourceHead": "bf741aa6ee852bdee511204bfb1027436dd845a9",
+    "originalScope": {
+      "sections": 20,
+      "crossCutting": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "schema4": {
+      "originalGroups": 13,
+      "requiredVariants": 54,
+      "actualAcceptedVariants": 47,
+      "previousAcceptedCases": [
+        {
+          "case": "smoke-prefix3",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-smoke-prefix3-20261101-e5aa29cf49fb",
+          "seconds": 33.93229422997683,
+          "sqlCount": 6784,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "82a0e9b958c5162c6a6a71c24f8cdc0cb35a67d54f04a234ce610ef42c32449a",
+          "executionSHA256": "afe321fb47f0f63275731d41b9d6a4af2acc56bf422db7e9a48b621a50631046",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "current-fk-tombstones",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-current-fk-tombstones-20261101-87b760c47cd3",
+          "seconds": 32.097433945164084,
+          "sqlCount": 5538,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "e4ea68f5c89459ba3c6952852f3c3276bbc5942af71c98cff2a2e824d0456b8d",
+          "executionSHA256": "247021d70fa2b9b89fb2a090dad86f38fdc7f51cec50ea42475cb885141f5567",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "approval-ref-deletes",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-approval-ref-deletes-20261101-3b6baab8ec44",
+          "seconds": 30.767367414198816,
+          "sqlCount": 5086,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "bb3ccdf4e34180165905c5d290a56864399d666b2137b31610a88bd42ad20f84",
+          "executionSHA256": "a857d0c477218ecd86652a5a462286103abb5fcebe926dff91fa201c84fff924",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        },
+        {
+          "case": "parent-history-retention",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW",
+          "artifact": "schema4-native-parent-history-retention-20261101-166a263417f0",
+          "seconds": 31.651295457035303,
+          "sqlCount": 5091,
+          "mappedModels": 341,
+          "physicalTablesBefore": 341,
+          "physicalTablesAfter": 347,
+          "resultSHA256": "8436a34ff04325cd650828a8a2e169139d7db0b885f6bb64f1ebd013615d9619",
+          "executionSHA256": "b579710c5fdedb3e4f9655fc2506229da0e0c7931792a6491b5e09974192102f",
+          "ownedContainersRemoved": true,
+          "PGClientsAndLocks": [
+            0,
+            0
+          ],
+          "foreignSafeProjectionsUnchanged": true
+        }
+      ],
+      "newAcceptedCases": [
+        {
+          "case": "rollback-error-prefix3",
+          "resultSHA256": "d67b39f6654dbf785c56ae8c5bdcc479d475a3fef71a5a55efb2c66f06de60fe",
+          "executionSHA256": "b6653c91fc644a830b47b7e3f265000f0e7e6cf9b4dec694ae95236ecf0391a6",
+          "seconds": 27.028123389929533,
+          "sql": 4794,
+          "function": "rollback_cancel",
+          "entryPrefix": 3,
+          "artifact": "schema4-native-rollback-error-prefix3-20261101-fda77e513046",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "rollback-cancel-prefix3",
+          "resultSHA256": "6b6dc303e2b1f688f4bcf0702a32dd47613154967eba80ce26ad2a69b69da5dc",
+          "executionSHA256": "cdc3e422ebe44423d31d1f65ffa5cd67d9dd66e71f3b334e5328ca40185dee12",
+          "seconds": 26.85821509640664,
+          "sql": 4794,
+          "function": "rollback_cancel",
+          "entryPrefix": 3,
+          "artifact": "schema4-native-rollback-cancel-prefix3-20261101-11c4a0770dc1",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "unknown-commit-prefix3",
+          "resultSHA256": "1d24ad1c5b48f4f9c8dd25a1b581226367d5ba60783954d0e30b37a2bee5b5a6",
+          "executionSHA256": "9696706bf277d4d8e0a1ae9cd2613aad8695684410080396730c4d5a6d816f16",
+          "seconds": 29.243858785368502,
+          "sql": 6766,
+          "function": "unknown_commit",
+          "entryPrefix": 3,
+          "artifact": "schema4-native-unknown-commit-prefix3-20261101-5ba187ea863e",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "principal-xor-typed-ref-unique",
+          "resultSHA256": "bc0a204a4bd138cf7115c685563716a63ca7e479c354244ecba340fe91fccf5a",
+          "executionSHA256": "b1ae754099da1481e52fcbdd8bb0e79e8c2d05861191aae9b14ae95ad595578a",
+          "seconds": 31.107302480377257,
+          "sql": 5142,
+          "function": "principal_typed_refs_unique",
+          "entryPrefix": 4,
+          "artifact": "schema4-native-principal-xor-typed-ref-unique-20261101-409a144eae70",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "success-namespace-immutable",
+          "resultSHA256": "d71472da8619a24930b2fba69d7442ef9c0587e3724259a55a0c2e2c86edba16",
+          "executionSHA256": "b2849f41d3429b6d91ccc269bbee4f34d41873fb222137212392e3b49fa47369",
+          "seconds": 30.9092764435336,
+          "sql": 5142,
+          "function": "success_namespace_immutable",
+          "entryPrefix": 4,
+          "artifact": "schema4-native-success-namespace-immutable-20261101-607690f947eb",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "old-prefix-3",
+          "resultSHA256": "041c160ad7a454fa8bb782b9e4d97b285dc4f33b3fa3048f6a7a2f913d392dfc",
+          "executionSHA256": "f4700f8bb97fa3a2f155003a3b319dd0faaf9e2fe66e5dfd1014994c09ce6960",
+          "seconds": 27.73718315921724,
+          "sql": 5680,
+          "function": "old_prefix_required",
+          "entryPrefix": 3,
+          "artifact": "schema4-native-old-prefix-3-20261101-8511743be12c",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "old-prefix-4",
+          "resultSHA256": "a2f3101d73480a03e1a59bb2cddb8f1298f57f99c0929ea176f94844a8a0a1d6",
+          "executionSHA256": "77361ac4a87fe46720c4f354f27cd11fba7025b2d049f8d9aa3dfdd7c9d46be8",
+          "seconds": 31.865797298960388,
+          "sql": 5910,
+          "function": "old_prefix_required",
+          "entryPrefix": 4,
+          "artifact": "schema4-native-old-prefix-4-20261101-efc10b9e2173",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "occupied-partial",
+          "resultSHA256": "a322d6758d076a71e9f665cfa892a8783ab38fbd984f07944a7a1d59134c879c",
+          "executionSHA256": "4fd54ee6774356fc6c1420e9a1962d9e17dcc4d240a0fcf4ac17c6caac0b392c",
+          "seconds": 26.104663187637925,
+          "sql": 4202,
+          "entryPrefix": 3,
+          "function": "occupied_no_adopt",
+          "variant": "partial",
+          "artifact": "schema4-native-occupied-partial-20261101-dd896e121328",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "occupied-index-name",
+          "resultSHA256": "b24f042c3e33b72813f91ab9c36b5842c0742b75b6b34c4890c1dee192da2a9b",
+          "executionSHA256": "2bfddae373465be29c979895fba295705c49d6bf1315b390fb73f9c38dc430be",
+          "seconds": 26.314970210194588,
+          "sql": 4202,
+          "entryPrefix": 3,
+          "function": "occupied_no_adopt",
+          "variant": "index-name",
+          "artifact": "schema4-native-occupied-index-name-20261101-c219b474de1c",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "occupied-type-name",
+          "resultSHA256": "6a9fdbc83811625ad70dbd766763e4ca92090fd9f4f59edf3599b2bf7c401154",
+          "executionSHA256": "07d15855d9f5d796d1d1e54a574ec9131399844835d1b487f52fc5b42acde897",
+          "seconds": 25.966282228939235,
+          "sql": 4199,
+          "entryPrefix": 3,
+          "function": "occupied_no_adopt",
+          "variant": "type-name",
+          "artifact": "schema4-native-occupied-type-name-20261101-69984db000a1",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "occupied-array-name",
+          "resultSHA256": "22c5406a2a2d918705b6231e6fee7f109dc301cbd184cb48670947a3189b436a",
+          "executionSHA256": "3ff4413cec8654ca25023ba7331e83c6ca2e745210b0eb160d2ef55dc13a42f9",
+          "seconds": 26.842640887014568,
+          "sql": 4202,
+          "entryPrefix": 3,
+          "function": "occupied_no_adopt",
+          "variant": "array-name",
+          "artifact": "schema4-native-occupied-array-name-20261101-ac6cba9e4837",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "occupied-function-name",
+          "resultSHA256": "178821250ceb027ae43f9f57f81a135eb2e8967ba2e20f325c1886ba37fb16cc",
+          "executionSHA256": "2d4bcde5890e1ba6e465dec995da20adda511d7d4ee49dc7073432c16ca99ff4",
+          "seconds": 27.02592741511762,
+          "sql": 4202,
+          "entryPrefix": 3,
+          "function": "occupied_no_adopt",
+          "variant": "function-name",
+          "artifact": "schema4-native-occupied-function-name-20261101-b529fcf11eae",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "occupied-exact-unrecorded",
+          "resultSHA256": "6a56070e7a05d390c9d33caa8037342e5681b1b5a9c57f2ce2529b03f45dc100",
+          "executionSHA256": "b882326411ad07a78258d976eb9f247e50fa4411375a784443036a8032b3e1c6",
+          "seconds": 26.425355024635792,
+          "sql": 4202,
+          "entryPrefix": 3,
+          "function": "occupied_no_adopt",
+          "variant": "exact-unrecorded",
+          "artifact": "schema4-native-occupied-exact-unrecorded-20261101-ca89824ffb62",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-default",
+          "resultSHA256": "b23d63dcb41c2a5150529d467f1a7ab46e4b2b76906862ff017933b560a25413",
+          "executionSHA256": "271a1fc7280fc1eaee68621b7e534ec2c0944307d160edaab5134ee280e29b03",
+          "seconds": 32.12931323517114,
+          "sql": 5373,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "default",
+          "artifact": "schema4-native-catalogue-default-20261101-86bb122e7380",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-null",
+          "resultSHA256": "8c35969ecddc86156f4589b2079cb80e6da261f9f2e87bd56a820f53b5b3ddb3",
+          "executionSHA256": "fb6c38888cbaccd137ec6f44ee02e585e03e588afa495553a8dc2214c337111e",
+          "seconds": 31.02728371694684,
+          "sql": 5381,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "null",
+          "artifact": "schema4-native-catalogue-null-20261101-32e0c791e329",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-check",
+          "resultSHA256": "5e05c24abbf9019006e9aa7fb8fbd53ee981a6e2f62bacff94bf02d39dc393fc",
+          "executionSHA256": "c7dd839e7f97b41d40f0083655f516199e117edb993a460ec6abf7bc4b5a7c28",
+          "seconds": 30.61438507027924,
+          "sql": 5513,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "check",
+          "artifact": "schema4-native-catalogue-check-20261101-c7062a98a5c1",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-fk",
+          "resultSHA256": "760614aab7c546d1b16de0e0963890a35aaffd9b76ce4495dc8e0e1d0bf507b4",
+          "executionSHA256": "214240e080e2bb9db8ab42f8106479f3bc5aa828cc3db4427a437f388584e5eb",
+          "seconds": 31.40073173865676,
+          "sql": 5513,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "fk",
+          "artifact": "schema4-native-catalogue-fk-20261101-a252f97a8358",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-index",
+          "resultSHA256": "89a6e3394ce4bcec77694b265e7f51cf97c27b719475ef160c40bfd324c75439",
+          "executionSHA256": "204bbd9c309d94c4f36ef26596162c5f281dea3468605fe9faf6683e5895b6d4",
+          "seconds": 31.55988317821175,
+          "sql": 5537,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "index",
+          "artifact": "schema4-native-catalogue-index-20261101-2786a8b202f1",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-predicate",
+          "resultSHA256": "a0d062bfca9d213bd60d2ec32be97544d5991cdb21361fe2e8d16bb561703a87",
+          "executionSHA256": "f9436cdd05768d7ff4bf804a89b2888382a1e40942fd5ba05cccd8abe0965251",
+          "seconds": 30.8217357583344,
+          "sql": 5539,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "predicate",
+          "artifact": "schema4-native-catalogue-predicate-20261101-c35b08dcc3c1",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-trigger",
+          "resultSHA256": "66db90e551dacfcf0bac3e697d03bffdcf6fd0694f10472f9e4f098ad6823437",
+          "executionSHA256": "6c3eb5a12d145dfb698eb45b4d1670e6fc199a356e218f5e8ab3c493415c800c",
+          "seconds": 32.33957296330482,
+          "sql": 5587,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "trigger",
+          "artifact": "schema4-native-catalogue-trigger-20261101-3713bf7ce14b",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-function-path",
+          "resultSHA256": "a51abd091a86e320857690dfc4787a8d13a1a0c3c23b9abe3d688cb3635e6d30",
+          "executionSHA256": "c6794719376c362ec07079f7960f299d9c16d4c162fb055d411bb25056c926c5",
+          "seconds": 31.679705057293177,
+          "sql": 5575,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "function-path",
+          "artifact": "schema4-native-catalogue-function-path-20261101-42630693fdc3",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-function-security",
+          "resultSHA256": "fbc0e30b05147a47d7f064355a5b54ff0fe77a8c76f970a6753da44f8e1a49b4",
+          "executionSHA256": "3702f499b04f6807510f1e2d50b9a39e2404623c0b714a86278c5949f5e4eeb3",
+          "seconds": 31.193005091510713,
+          "sql": 5575,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "function-security",
+          "artifact": "schema4-native-catalogue-function-security-20261101-27646ce36029",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-acl",
+          "resultSHA256": "529abe5e8ed625728167fe6d27ebc8fd123a89fdbebf45ad277d21170cebe794",
+          "executionSHA256": "6dbc48e190ff72262b00b249c87d2981fbba611dd7b011b5f21645d6ec1bce0b",
+          "seconds": 31.93060874287039,
+          "sql": 5505,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "acl",
+          "artifact": "schema4-native-catalogue-acl-20261101-edeba0cb19bc",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-rls",
+          "resultSHA256": "4fc16c6aa45bea108340668dc5d9b577e0b7f509f62d37ad06bb1d28d9814184",
+          "executionSHA256": "c5af2bd988295288d0256d2a0cec275e46ea75388d7c52148a0de5e5b84cebdc",
+          "seconds": 31.34669732954353,
+          "sql": 5241,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "rls",
+          "artifact": "schema4-native-catalogue-rls-20261101-3976c16f7cde",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-options",
+          "resultSHA256": "b427c5acdb9f20e360f6acc80f89bed67944c50bb4f3f354d73ccb1ff0af5e63",
+          "executionSHA256": "5b6aa12085faad820a97bb62ab3e8fb0c418b3a1d43d31138c051d831b2487b0",
+          "seconds": 32.052153564058244,
+          "sql": 5439,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "options",
+          "artifact": "schema4-native-catalogue-options-20261101-408989a9f694",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-column",
+          "resultSHA256": "73169aae0ce8ff897709b37f9e1302cf79e15f0d054f9b0858f275459e7f60e3",
+          "executionSHA256": "3ab65845c704a59158c801feccb739c5274cea02a072fc700eedaf0b60faa9d1",
+          "seconds": 31.388551524840295,
+          "sql": 5381,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "column",
+          "artifact": "schema4-native-catalogue-column-20261101-dd883129229d",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-column-type",
+          "resultSHA256": "8f01942b81a5d61170b54d998cc62dc8eef1ddeccbd263f3abce4d06e7013c5a",
+          "executionSHA256": "607d988cd19f959c91e1c9846d1ae7f8a5cae7256258fe11fb7c5be74f35f0f3",
+          "seconds": 32.52977496664971,
+          "sql": 5381,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "column-type",
+          "artifact": "schema4-native-catalogue-column-type-20261101-11e4f8dbdb03",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-unknown-check",
+          "resultSHA256": "04bd45a8093b59a6d7eaf412fa4eef8bb84035a192bccebbfb4a81c44afe55e1",
+          "executionSHA256": "3519620ee552be000fec76a7c3baab7a41b5cbb97b8bb64a020330ba997f22f3",
+          "seconds": 32.573681951500475,
+          "sql": 5513,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "unknown-check",
+          "artifact": "schema4-native-catalogue-unknown-check-20261101-09922eec7458",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-check-inheritance",
+          "resultSHA256": "2b3cbc8b52c33105fd5c684f18e699c991a7ecf96bb2929b8eb23dd3670f32cb",
+          "executionSHA256": "35ff06440771debd5fc91765e667eb60f3a0b30d60ee6a180a69b32e379588e1",
+          "seconds": 30.66809105221182,
+          "sql": 5395,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "check-inheritance",
+          "artifact": "schema4-native-catalogue-check-inheritance-20261101-63084bf0e775",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-fk-action",
+          "resultSHA256": "5463fa5e83337c8ee929f248e414c358477ce3a66fb9f88b8ed6b68bd51fd722",
+          "executionSHA256": "ed5793c160b9ba34e56cd0850737dc4f3a6d24381b69e8984a95cacb230dd264",
+          "seconds": 32.1072151241824,
+          "sql": 5531,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "fk-action",
+          "artifact": "schema4-native-catalogue-fk-action-20261101-4ba8b65276eb",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-extra-index",
+          "resultSHA256": "6101288413a54190c4ab53e04f9ac3adbfc4bbca9974afc08f95866d5fb60d6f",
+          "executionSHA256": "1e474479a343e0beea4fd303cf8431b401facda0e6b5e235d1177004b29abb5a",
+          "seconds": 31.351532184518874,
+          "sql": 5537,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "extra-index",
+          "artifact": "schema4-native-catalogue-extra-index-20261101-d2f67619ae7d",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-function-acl",
+          "resultSHA256": "5d30db1d756e9d566299404eea84ecde95087c6d7db2ead62f6491193f7fa91a",
+          "executionSHA256": "e097920b9a0f3e485c2f1b67ca7ff05000f2d83a43469bdbc09638bbb6d6b419",
+          "seconds": 29.23947774618864,
+          "sql": 5577,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "function-acl",
+          "artifact": "schema4-native-catalogue-function-acl-20261101-da9bf8fd8ba2",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-function-overload",
+          "resultSHA256": "237f03df7ff214e0b355f63fbb60a06746edebd50680c74c62c34498ad96c1ac",
+          "executionSHA256": "cedb78d4818e23dbf114bad24346d69d447ac5363d3d71a14c5589f648dfa3d4",
+          "seconds": 30.761005853302777,
+          "sql": 5575,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "function-overload",
+          "artifact": "schema4-native-catalogue-function-overload-20261101-10c26386cccb",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-extra-trigger",
+          "resultSHA256": "57b23e77dcd4dbd1b780e1da9ff3816709067505f319ea1c2d592fb68aaf9b04",
+          "executionSHA256": "e1b2f98d4a47c2e7311fa558618b98bd9a4b3e5503ce0399d8fb7bdb71da3740",
+          "seconds": 31.863385355100036,
+          "sql": 5587,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "extra-trigger",
+          "artifact": "schema4-native-catalogue-extra-trigger-20261101-870fa17d5e7c",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "catalogue-foreign-namespace",
+          "resultSHA256": "32fceb467c6859bf8dec2847e848a85c8fbd69c064ca7863783934a55a8d1c3d",
+          "executionSHA256": "8e0ef37ed06cc8b4a7ad21916e4c4f9b4538e35897323a54a9c8df6d75efc26f",
+          "seconds": 32.36303267814219,
+          "sql": 5247,
+          "entryPrefix": 4,
+          "function": "catalogue_drift",
+          "variant": "foreign-namespace",
+          "artifact": "schema4-native-catalogue-foreign-namespace-20261101-9389325dd3ac",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "prerequisite-missing",
+          "resultSHA256": "5350e4dc3860f071235b5565cddd7451a6ae30bed8680dd4f6126205625f2558",
+          "executionSHA256": "139246effe5d796febc70e5546252ccd8f1b9ee00af909cf863846dbd0fb01c3",
+          "seconds": 26.799362243153155,
+          "sql": 4150,
+          "entryPrefix": 3,
+          "function": "prerequisite_drift",
+          "variant": "missing",
+          "artifact": "schema4-native-prerequisite-missing-20261101-9f70b24a249b",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "prerequisite-null",
+          "resultSHA256": "71de1316ef81c06f84bcfd465071fcd1b686ad6eb3ba21d6f51b89e8cfb3dca9",
+          "executionSHA256": "ade7ed5f589008459a0c2cb135cbcc094458f6cd578131e5734d510382496c49",
+          "seconds": 25.92891880683601,
+          "sql": 4104,
+          "entryPrefix": 3,
+          "function": "prerequisite_drift",
+          "variant": "null",
+          "artifact": "schema4-native-prerequisite-null-20261101-1f45903b4383",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "prerequisite-type",
+          "resultSHA256": "02555965ee96fd76ad6efb2e8caf5c80733fc721f1f9be90bed8cdc4175e522e",
+          "executionSHA256": "ff6e769cf7b7c1e68f5e47661fd812264ab5297c84f2669a6791f1185a5f6cf9",
+          "seconds": 28.19774017855525,
+          "sql": 4151,
+          "entryPrefix": 3,
+          "function": "prerequisite_drift",
+          "variant": "type",
+          "artifact": "schema4-native-prerequisite-type-20261101-3b16aed11efd",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "prerequisite-key",
+          "resultSHA256": "073af596e5889c128982a54f40224d71f9bd26b327606d6887f7b748c3743861",
+          "executionSHA256": "727863f5eeacef0765f509366da225415ff2dc741f05ffc49db15724d9bfe189",
+          "seconds": 26.952395550906658,
+          "sql": 4132,
+          "entryPrefix": 3,
+          "function": "prerequisite_drift",
+          "variant": "key",
+          "artifact": "schema4-native-prerequisite-key-20261101-df06a4884d66",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "history-future",
+          "resultSHA256": "99372fb10481fad3e93e7d56594c220b26b33ab5f7cb68d4bd51201716e47372",
+          "executionSHA256": "9d45b3a3febc05dd4354293796deecbe04e3f1ea4336509474502e44d8b492e7",
+          "seconds": 31.40616275370121,
+          "sql": 5088,
+          "entryPrefix": 4,
+          "function": "history_drift",
+          "variant": "future",
+          "artifact": "schema4-native-history-future-20261101-18f005b49ad3",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "history-foreign-owner",
+          "resultSHA256": "83fefa8fbf1b7afce54f11f6d5793268e5b19123d4959692ec9e2e4a8e25c563",
+          "executionSHA256": "22c72c4d445bec64fd75d71014022611e05de1310fa92be79e74a4759f9bd95c",
+          "seconds": 32.294572591781616,
+          "sql": 5088,
+          "entryPrefix": 4,
+          "function": "history_drift",
+          "variant": "foreign-owner",
+          "artifact": "schema4-native-history-foreign-owner-20261101-d4beebee4280",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "history-adopted4",
+          "resultSHA256": "9dae519530e04bf1b6b6bf8b02a0b60d8a63646e7015a1d68f304ad1b2b6c09b",
+          "executionSHA256": "d05e15df141eaff13da03840be727a76b365c8c3369f76c91cd2d20cf34aa195",
+          "seconds": 30.38483931683004,
+          "sql": 5088,
+          "entryPrefix": 4,
+          "function": "history_drift",
+          "variant": "adopted4",
+          "artifact": "schema4-native-history-adopted4-20261101-2c2b113cdef7",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        },
+        {
+          "case": "history-foreign4",
+          "resultSHA256": "79effac68def6ed4052e2fc00e74258c6b244848dc0f05a065e8416d5362f218",
+          "executionSHA256": "2484fc9ad040244f643a9da917bbba27072fa310d7e3fc71cbfddab57f1de94b",
+          "seconds": 31.05263217817992,
+          "sql": 5088,
+          "entryPrefix": 4,
+          "function": "history_drift",
+          "variant": "foreign4",
+          "artifact": "schema4-native-history-foreign4-20261101-78669d4ef6da",
+          "status": "ROOT_COMPONENT_ACCEPTED_AFTER_INDEPENDENT_REVIEW"
+        }
+      ],
+      "newIndependentReviews": [
+        {
+          "name": "schema4-original-matrix-review-20261101",
+          "verdict": "COMPONENT_SCOPE_ACCEPTABLE",
+          "markdownSHA256": "a65841030cdf5157866acd1591f8557b32f92c18651fe27c88a30ad4a94d4557",
+          "jsonSHA256": "860726a71cac68f634a96da81b34debb9ae8d9401aa4935d61bc3309ce183ad5"
+        },
+        {
+          "name": "schema4-original-matrix-remaining36-review-20261101",
+          "verdict": "COMPONENT_SCOPE_ACCEPTABLE",
+          "markdownSHA256": "25ea9236f487d6c005e7c5f279f8a27641dcd1695069634c551020bc33469206",
+          "jsonSHA256": "3fd9ea34622e8f4d3f731acc043f2444ef85447458a2417f3598515f29610602"
+        }
+      ],
+      "pendingHistoricalVariants": [
+        {
+          "caseId": "fresh-prefix-0",
+          "group": "fresh-continuation-repeat",
+          "entryPrefix": 0,
+          "availability": "historical native recipe implementation pending"
+        },
+        {
+          "caseId": "fresh-prefix-1",
+          "group": "fresh-continuation-repeat",
+          "entryPrefix": 1,
+          "availability": "historical native recipe implementation pending"
+        },
+        {
+          "caseId": "fresh-prefix-2",
+          "group": "fresh-continuation-repeat",
+          "entryPrefix": 2,
+          "availability": "historical native recipe implementation pending"
+        },
+        {
+          "caseId": "old-prefix-1",
+          "group": "old-prefix-required",
+          "entryPrefix": 1,
+          "availability": "historical native recipe implementation pending"
+        },
+        {
+          "caseId": "old-prefix-2",
+          "group": "old-prefix-required",
+          "entryPrefix": 2,
+          "availability": "historical native recipe implementation pending"
+        },
+        {
+          "caseId": "rollback-error-prefix0",
+          "group": "rollback-cancel",
+          "entryPrefix": 0,
+          "argument": false,
+          "availability": "historical native recipe implementation pending"
+        },
+        {
+          "caseId": "rollback-cancel-prefix0",
+          "group": "rollback-cancel",
+          "entryPrefix": 0,
+          "argument": true,
+          "availability": "historical native recipe implementation pending"
+        }
+      ],
+      "fixedComposition": {
+        "appBase": "aaf472b8123bf1d01538049ef8b5308c9b72fd6b",
+        "onlyAppOverlay": "be49c4e688c80b3d7c40aedc6b283b477732b01e:clearledger/server/app/product_api/dto.py",
+        "immutableFiles": 535,
+        "immutableBytes": 14634482,
+        "immutableSHA256": "040e2004298eecbc415d7d24c5c8ed783f3fe4c9e42676706b1bbaf8fe6bdc56",
+        "models": 341,
+        "registrySHA256": "d865202f524ccd2b43d48d05a931cfea8e42316e3aba982fbec80642594fb52a"
+      },
+      "controllerSHA256": "534a7fed7ebc5db97948e42a75493ad0c028fe813a1ef8de6d6d29472cf5ead1",
+      "historicalFixtureAfterfixSource": "1c6dde91e041156173c99719ba1f67735b0cbb80",
+      "historicalFixtureStatus": "THREE_SOURCE_FINDINGS_FIXED_PENDING_INDEPENDENT_RECHECK_NOTRUN",
+      "limits": [
+        "47 variants only; seven historical0–2 NOTRUN",
+        "535 immutable app files plus DTO overlay; not latest combined Ledger HEAD",
+        "refusal snapshots cover selected relations and migration history, not every external datum",
+        "SQL trace aggregates counts/phases/text, no bind values or chronological schedule",
+        "original13 groups not all complete; old binaries/restore/production/joint CI remain open"
+      ]
+    },
+    "nativeR1OneC": {
+      "sourceIntegratedHead": "e4c86ad071af8e168c5aba3fdef8672c9e9adf62",
+      "exactFiles": 13,
+      "unitActualCases": 24,
+      "unitDefinitions": 14,
+      "unitSuccessfulPhases": 72,
+      "unitResultSHA256": "2eeb0c396113182d180870ba9c62da828cedd3cea1b695da3866b66f42da0b1a",
+      "executionSHA256": "40e7a64294d07fdd7bd755aa540d8112973385d9523533eb704250eeb1093e4c",
+      "unitIndependentReview": {
+        "status": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "671fadd588685df544445b184fb5dc9b0598d8efb174b1a42138f68560c6ee8c",
+        "jsonSHA256": "187a65aa6e900d3d21f02ffa34a446675f1a6c8e03d33283089c12d2867d9f02"
+      },
+      "PGDefinitionsAuthoredNotRun": 51,
+      "oldNative55Rerun": "NOTRUN",
+      "limits": "pure/source tests only; Root PostgreSQL identity preflight outside unit phase; no unit SQL/concurrency/fullNative/HTTP acceptance"
+    },
+    "partnerIdentity": {
+      "finalSource": "cd5c9fcf2b31515b0745a6a547f5b7b551208511",
+      "rootIntegration": "bf741aa6ee852bdee511204bfb1027436dd845a9",
+      "exactFiles": 7,
+      "status": "INDEPENDENT_SOURCE_REVIEW_ACCEPTED_RUNTIME_NOTRUN",
+      "sourceTestDefinitionsNotRun": 22,
+      "PGTestDefinitionsNotRun": 38,
+      "strictInstallationPreflight": "same readonly validator preserves legacy error order, repeated on current actor after complete lock plan",
+      "limits": [
+        "READ COMMITTED per actual writer unconfirmed",
+        "Docs portal logout separate mandatory task",
+        "ordinary conftest contains destructive schema fixture and was not executed",
+        "no full identity/API closure"
+      ]
+    },
+    "nextWork": [
+      "seven historical schema variants after Source recheck and Root admission",
+      "native R1+OneC PostgreSQL two-session cases",
+      "partner identity current combined PostgreSQL execution",
+      "native CP/Org eight handlers Source plus independent review",
+      "OrgDELETE MemberScope prerequisite and joint lock plan",
+      "Docs portal logout composition",
+      "all remaining original M00–M19 and11 requirements, endpoint/receipt/admin/query/OpenAPI/SDK/CI/pilots"
+    ],
+    "mergeDeployActivation": false
+  },
+  "oneCActualFailureAndHistoricalFixtureCheckpoint20261101": {
+    "status": "ROOT_OBSERVED_ONEC_FAILURE_NOT_ACCEPTED",
+    "asOfUTC": "2026-11-01 02:11 UTC",
+    "source": "e4c86ad071af8e168c5aba3fdef8672c9e9adf62",
+    "oneC": {
+      "testDefinitions": 9,
+      "actualCases": 21,
+      "passed": 3,
+      "failures": 18,
+      "errors": 0,
+      "skipped": 0,
+      "resultSHA256": "3fb2bc3b8608f319db205aa793d337a4fa2bb6c1cb81ab2c780436f77105eddd",
+      "executionSHA256": "08a30fbaab9f814a728461e932ee94a968bde4d45e04162f3c246fb44331e9cc",
+      "artifact": "onec-fullnative-pg-20261101-8915cf2db85f",
+      "seconds": 114.22542715352029,
+      "bootstrap": {
+        "status": "PASS_NATIVE_BOOTSTRAP_ONLY",
+        "models": 341,
+        "tablesBefore4": 341,
+        "tablesAfter4": 347,
+        "scope": "unchanged native create_all + explicit owners3/4, mapped names/columns/PK/FK/actions and enabled RI coverage; no lifecycle/seeds/server",
+        "proofSHA256": "5b87d84d4c6d00ae77bd5e2597066a1174baaaa992a32e579884dad2e5f2f363"
+      },
+      "observation": "actual persisted OneCConnection rejected before synchronization; other failures include timeouts and unobserved waits; full rerun required after fix"
+    },
+    "UUIDDiagnostic": {
+      "status": "ACTUAL_ORM_TYPE_AND_REFUSALS_OBSERVED_NOT_COMPONENT_ACCEPTANCE",
+      "artifact": "uuid-orm-diagnostic-20261101-d00b74395535",
+      "resultSHA256": "5ea164aa3119922c8dc8ffc2ec9af2d4dc02d2d83ebb66d04d2ded863fa6bef7",
+      "executionSHA256": "89a0a2da68523c4ae8dc2ec2391da38e0a9ed077939898e49ded212585977444",
+      "actualORM": {
+        "ormClass": "app.models.OneCConnection",
+        "persisted": true,
+        "identity": {
+          "class": "asyncpg.pgproto.pgproto.UUID",
+          "exactStdlibUUID": false,
+          "isinstanceStdlibUUID": true,
+          "canonicalEquality": true,
+          "mro": [
+            "asyncpg.pgproto.pgproto.UUID",
+            "uuid.UUID",
+            "builtins.object"
+          ]
+        },
+        "companyID": {
+          "class": "asyncpg.pgproto.pgproto.UUID",
+          "exactStdlibUUID": false,
+          "isinstanceStdlibUUID": true,
+          "canonicalEquality": true,
+          "mro": [
+            "asyncpg.pgproto.pgproto.UUID",
+            "uuid.UUID",
+            "builtins.object"
+          ]
+        },
+        "actualOneCRefusal": {
+          "class": "app.services.contract_write_locks.ScopedLockError",
+          "message": "Persisted OneCConnection identity required"
+        },
+        "actualKernelRefusal": {
+          "class": "builtins.TypeError",
+          "message": "company_id requires exact nonempty UUID"
+        }
+      },
+      "seconds": 29.669501507654786,
+      "childExitCode": 0,
+      "rootHostExitCode": 1,
+      "rootHostError": "bookkeeping KeyError: diagnostic result has no exitCode; original NOT_ACCEPTED execution preserved",
+      "scope": "actual Company/OneC insert commit then new-session ORM reload on new fullnative DB; not OneC remediation/concurrency PASS"
+    },
+    "cleanup": {
+      "bothWorldsOwnedContainersRemoved": true,
+      "PGClientsAndLocks": [
+        0,
+        0
+      ],
+      "foreign41SafeProjectionsUnchanged": true,
+      "wholeForeignStateProven": false
+    },
+    "historicalFixture": {
+      "source": "38db6925099c222f12abb5bbdd16a321c5923e90",
+      "rootIntegration": "f6c6619caec053ddab83799b1556d3da488307cb",
+      "status": "INDEPENDENT_SOURCE_RECHECK_ACCEPTED_HISTORICAL7_NOTRUN",
+      "helperSHA256": "29aa8465a646862439737248fc6ec280b2579db6c1a3d8e1a5454a565035a17c",
+      "manifestSHA256": "5fb1b380e06b21bfb461e744153b16db34ebbd249b3441c6800a5b6f10040f76",
+      "independentTargetedReviewSHA256": "048da166dbc8459b21ce0047367cceca879bb64e13ea1dbe724e874098ed5a2e"
+    },
+    "next": "Root Source-only shared UUID-boundary strategy, bounded implementation + independent review + rerun original21 and R1/identity affected suites",
+    "originalScope": {
+      "sections": 20,
+      "crossCutting": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "preserved": "47/54 schema variants and24 unit cases retain previous distinct immutable composition boundaries; no new OneC PASS/overall CI/merge/deploy/flags"
+  },
+  "uuidAndNativeWriterAcceptance20261101": {
+    "status": "ROOT_TWO_COMPONENT_PROFILES_ACCEPTED_NOT_OVERALL_GO",
+    "asOfUTC": "2026-11-01 03:03 UTC",
+    "testedApplicationSource": "29baa0c6a938c366edb2ee69cbcd1a60532558e4",
+    "currentRootSourceBeforeReport": "c9f8812c31a2cb76e440c9e33135cc8fb7d3a410",
+    "UUIDFix": {
+      "codeFiles": 7,
+      "coreColumns": 28,
+      "partnerColumns": 26,
+      "dormantProfileColumns": 25,
+      "docsColumns": 1,
+      "kernelDriverPolicyUnchanged": true,
+      "metadataConsumers": [
+        "counterparty_usage",
+        "product_api.queries"
+      ],
+      "sourceReviewMarkdownSHA256": "d8b6acfc303119ef8bdc4b8ee3b5bfae2503677ed8ab7818ebcff38c9dd094e4"
+    },
+    "oneCAndUUID": {
+      "artifact": "uuid-boundary-onec-pg-20261101-67acf90bdc66",
+      "cases": 38,
+      "definitions": 20,
+      "phases": 114,
+      "seconds": 36.15727649535984,
+      "resultSHA256": "8f39d77440e44767e19ab06e5a47bd72513b79ea7cd97c8aefe61cea44dbdeba",
+      "executionSHA256": "f885ac0d81c01d6d73a70a9d944ce29eebf38b0d64eaf849851f2cc737c85365",
+      "originalOneCUnchangedCases": 21,
+      "newUUIDUnitCases": 14,
+      "newUUIDPGCases": 3,
+      "sourceFileCount": 553,
+      "sourceBytes": 17756331,
+      "sourceManifestSHA256": "e548cbe9d2ab9403edc0e89c958dd8ceb47202e786116e211aa6d316f1f75c8c",
+      "independentReview": {
+        "status": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "5aa858434fd4f643531259f510ccdf088c2c09f84f9f1a8723a5dacd8cc597be",
+        "jsonSHA256": "3ffd50dcb92494ba64da66521fd8f1469c100f852eb185fcb331733ae68ab698"
+      }
+    },
+    "nativeR1": {
+      "artifact": "native-r1-fullnative-pg-v2-20261101-112864d38685",
+      "cases": 162,
+      "definitions": 42,
+      "phases": 486,
+      "seconds": 89.54593244660646,
+      "resultSHA256": "161bcc3467755c54583ff7cf2ef6e0d87b69a1b571f581923cb39bb67fc93ced",
+      "executionSHA256": "9c405dcaf72fc0c004f6c55cdab9ae1bdff8606a50780c7b3a310d4ca0657e27",
+      "originalFunctions": 42,
+      "routerEntrances": 9,
+      "directUseCase": true,
+      "sourceFileCount": 551,
+      "sourceBytes": 17781273,
+      "sourceManifestSHA256": "2111ac19fd063ddce47acb306a03a29f50c8a6605a696cf75dc9a6f2dd8afc9e",
+      "poolCleanup": {
+        "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 1
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "poolErrors": []
+      },
+      "poolCleanupSHA256": "27b74f7ced7aadb662e4a29bb87ffb138aafd4b876af8c8f17b4e57c98a1799e",
+      "independentReview": {
+        "status": "COMPONENT_SCOPE_ACCEPTABLE",
+        "markdownSHA256": "9f78ea5a0b0d60d5ed50b1f8e6dae68b0e80f767d0b3bd921f6ae6e5106f239c",
+        "jsonSHA256": "99cc18a048d1499345a73942f3023241d9bbec09aa4e6daa588443a582844abb"
+      },
+      "harnessFinding": "R1-HARNESS-01 CLOSED_IN_V2; original162/P2/raw retained",
+      "bounds": "programmatic native claims/handlers/usecase; no full HTTP/JWT/entire auth/identity/Store"
+    },
+    "physicalNativeComposition": {
+      "models": 341,
+      "tablesBeforeAfter": [
+        341,
+        347
+      ],
+      "columnsBeforeAfter": [
+        4675,
+        4720
+      ],
+      "FKsBeforeAfter": [
+        790,
+        803
+      ],
+      "enabledRITriggersBeforeAfter": [
+        3160,
+        3212
+      ],
+      "adaptedUUIDColumnsPhysicallyUUID": 80,
+      "limits": "mapped names/columns/PK/FK/action coverage; not full every type/default/index equivalence; distinct from old535/historical675 profiles"
+    },
+    "cleanup": {
+      "allOwnedNormalRemoved": true,
+      "PGClientsLocks": [
+        0,
+        0
+      ],
+      "foreign41SafeProjectionsUnchanged": true,
+      "allForeignStateProven": false
+    },
+    "historyPreserved": {
+      "oneCBeforeFix": "21 cases 3PASS/18FAIL on e4; result3fb2bc3b retained",
+      "diagnostic": "actual ORM subtype proof with Root host bookkeeping KeyError retained NOT_ACCEPTED",
+      "R1FirstRun": "162 assertions passed with post-pytest cross-loop disposal P2; v2 rerun fixed same-test-loop cleanup",
+      "R1ScopeErratum": "actual38 contained zero test definitions from R1 module; all42 were separate subsequent execution"
+    },
+    "DocsLogout": {
+      "source": "7a84b3de85a996336b198016cd4abcc71508d801",
+      "rootIntegration": "c9f8812c31a2cb76e440c9e33135cc8fb7d3a410",
+      "exactFiles": 6,
+      "status": "INDEPENDENT_SOURCE_ACCEPTED_RUNTIME_NOTRUN",
+      "sourceDefinitions": 7,
+      "PGDefinitions": 17,
+      "knownJointSourceRequirement": "three protected model byte guards still pin bf741 and need explicit reviewed UUID29b composition before execution; no blind skip/repin"
+    },
+    "remaining": [
+      "schema matrix historical seven0–2; original47/54 separate immutable535 composition",
+      "old binaries/restore and new adapter-aware all-metadata recorder",
+      "current auth/userRole/Store/partner identity and Docs joint runtime",
+      "native CP/Org/contact and MemberScope Source handoffs, all OrgDELETE producers",
+      "external CREATE SQL receipt/profile/admin/options/query/OpenAPI/SDK",
+      "final joint CI and real partner pilots"
+    ],
+    "originalScope": {
+      "M00_M19": 20,
+      "crossCuttingRequirements": 11,
+      "unchanged": true,
+      "overallPercent": null
+    },
+    "mergeDeployActivation": false
+  }
+}

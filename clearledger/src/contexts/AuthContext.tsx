@@ -7,7 +7,7 @@
  * компаниями — чтобы офлайн-localStorage-разработка работала без логина.
  */
 import {
-  createContext, useCallback, useContext, useEffect, useState, type ReactNode,
+  createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode,
 } from 'react'
 import * as authService from '@/services/authService'
 import type { AuthUser } from '@/services/authService'
@@ -50,11 +50,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(apiEnabled ? null : DEMO_USER)
   const [token, setTokenState] = useState<string | null>(() => api.getToken())
   const [loading, setLoading] = useState<boolean>(apiEnabled)
+  const profileVersion = useRef(0)
+
+  const loadProfile = useCallback(async (expectedToken: string, version: number, options?: { signal?: AbortSignal }) => {
+    const current = () => version === profileVersion.current
+      && (api.getToken() === expectedToken || api.getToken() === null)
+    try {
+      const me = await authService.getMe(options)
+      if (current() && api.getToken() === expectedToken) {
+        setUser(me); setTokenState(expectedToken)
+      }
+    } catch (error) {
+      // A current HTTP401 may already have cleared its own token in apiClient.
+      // Unmounted/replaced loads own neither React state nor shared storage.
+      if (current()) {
+        api.clearToken()
+        setUser(null); setTokenState(null)
+      }
+      throw error
+    } finally {
+      if (current()) setLoading(false)
+    }
+  }, [])
 
   // На маунте в API-режиме — подтянуть /me при наличии токена.
   useEffect(() => {
     if (!apiEnabled) return
     let alive = true
+    const version = ++profileVersion.current
+    const controller = new AbortController()
+    const cleanup = () => { alive = false; profileVersion.current += 1; controller.abort() }
     const t = api.getToken()
     if (!t) {
       // Стенд, открытый из кабинета сайта, узнаётся по базовому пути сборки
@@ -62,45 +87,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // и есть признак показа, а лишняя переменная разъехалась бы с ней.
       if (import.meta.env.BASE_URL.startsWith('/demo-run/')) {
         authService.demoSession()
-          .then(() => authService.getMe())
+          .then(() => authService.getMe({ signal: controller.signal }))
           .then((me) => { if (alive) { setUser(me); setTokenState(api.getToken()) } })
           // Молча падаем на форму входа: показ без сессии — это неудобно,
           // но экран ошибки посреди демонстрации хуже.
           .catch(() => { if (alive) setUser(null) })
           .finally(() => { if (alive) setLoading(false) })
-        return
+        return cleanup
       }
-      setUser(null); setLoading(false); return
+      setUser(null); setLoading(false); return cleanup
     }
-    authService.getMe()
-      .then((me) => { if (alive) { setUser(me); setTokenState(t) } })
-      .catch(() => { api.clearToken(); if (alive) { setUser(null); setTokenState(null) } })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [apiEnabled])
+    // Bootstrap has no caller to receive the error; loadProfile already closes
+    // the current session on failure, while stale completions are ignored.
+    void loadProfile(t, version, { signal: controller.signal }).catch(() => {})
+    return cleanup
+  }, [apiEnabled, loadProfile])
 
   const login = useCallback(async (email: string, password: string, otp?: string) => {
-    const res = await authService.login(email, password, otp)  // токен сохранён сервисом
-    const me = await authService.getMe()
-    setTokenState(res.access_token)
-    setUser(me)
-  }, [])
+    const version = ++profileVersion.current
+    const previousToken = api.getToken()
+    const res = await authService.login(email, password, otp)
+    if (version !== profileVersion.current || api.getToken() !== previousToken) return
+    api.setToken(res.access_token)
+    await loadProfile(res.access_token, version)
+  }, [loadProfile])
 
   const applySession = useCallback(async (accessToken: string) => {
+    const version = ++profileVersion.current
     api.setToken(accessToken)
-    const me = await authService.getMe()
-    setTokenState(accessToken)
-    setUser(me)
-  }, [])
+    await loadProfile(accessToken, version)
+  }, [loadProfile])
 
   const refreshMe = useCallback(async () => {
-    setUser(await authService.getMe())
+    const version = profileVersion.current
+    const expectedToken = api.getToken()
+    const me = await authService.getMe()
+    if (version === profileVersion.current && api.getToken() === expectedToken) setUser(me)
   }, [])
 
   const logout = useCallback(() => {
+    profileVersion.current += 1
     authService.logout()
     setUser(null)
     setTokenState(null)
+    setLoading(false)
     // Полная зачистка чужих данных из памяти при выходе.
     resetServiceCaches()
     queryClient.clear()

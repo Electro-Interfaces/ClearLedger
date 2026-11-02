@@ -1,0 +1,1895 @@
+{
+  "schemaVersion": 1,
+  "kind": "manual-core-special-protocol-source-facts",
+  "sourceRevision": "e4f866d0259f7d551ded8410bfa63776ab58f401",
+  "runtimeSourceRevision": "e1cb1a53ee0ba90a74805d0105d2358974660dcd",
+  "inventorySha256": "f056e74b77564f8b1a9f650bf2dc87dbc24ad1bd558d6df967ef5fab86fa2af8",
+  "inventoryOperations": 1703,
+  "curatedOperations": 12,
+  "websocketOperations": 1,
+  "scope": "Manually reviewed special protocol endpoints; not an all-route ACL/security assessment",
+  "operations": [
+    {
+      "id": "S01",
+      "method": "WEBSOCKET",
+      "path": "/api/chat/ws",
+      "endpoint": "app.routers.chat_router.chat_ws",
+      "registryOrder": [
+        1471
+      ],
+      "protocol": "websocket",
+      "kind": "WS",
+      "transport": "JSON frames",
+      "admission": "W",
+      "selectors": "chat/user/company channel",
+      "statusHeaders": "1008 before accept; connected/pong/subscribe:denied",
+      "targetDecision": "W",
+      "source": "clearledger/server/app/routers/chat_router.py",
+      "line": 3296,
+      "registryDependencies": [
+        "app.deps.capture_company_header"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S02",
+      "method": "DELETE",
+      "path": "/api/store/station/{station_id}/console/{path:path}",
+      "endpoint": "app.routers.station_console_router.station_console",
+      "registryOrder": [
+        26
+      ],
+      "protocol": "http",
+      "kind": "PROXY",
+      "transport": "upstream Content-Type; HTML rewritten; buffered bytes",
+      "admission": "C",
+      "selectors": "station_id + path + repeated query",
+      "statusHeaders": "upstream status and filtered headers; 400/401/403/503/504",
+      "targetDecision": "C",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 239,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S03",
+      "method": "GET",
+      "path": "/api/store/station/{station_id}/console/{path:path}",
+      "endpoint": "app.routers.station_console_router.station_console",
+      "registryOrder": [
+        26
+      ],
+      "protocol": "http",
+      "kind": "PROXY",
+      "transport": "upstream Content-Type; HTML rewritten; buffered bytes",
+      "admission": "C",
+      "selectors": "station_id + path + repeated query",
+      "statusHeaders": "upstream status and filtered headers; 400/401/403/503/504",
+      "targetDecision": "C",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 239,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S04",
+      "method": "HEAD",
+      "path": "/api/store/station/{station_id}/console/{path:path}",
+      "endpoint": "app.routers.station_console_router.station_console",
+      "registryOrder": [
+        26
+      ],
+      "protocol": "http",
+      "kind": "PROXY",
+      "transport": "upstream Content-Type; HTML rewritten; buffered bytes",
+      "admission": "C",
+      "selectors": "station_id + path + repeated query",
+      "statusHeaders": "upstream status and filtered headers; 400/401/403/503/504",
+      "targetDecision": "C",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 239,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S05",
+      "method": "POST",
+      "path": "/api/store/station/{station_id}/console/{path:path}",
+      "endpoint": "app.routers.station_console_router.station_console",
+      "registryOrder": [
+        26
+      ],
+      "protocol": "http",
+      "kind": "PROXY",
+      "transport": "upstream Content-Type; HTML rewritten; buffered bytes",
+      "admission": "C",
+      "selectors": "station_id + path + repeated query",
+      "statusHeaders": "upstream status and filtered headers; 400/401/403/503/504",
+      "targetDecision": "C",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 239,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S06",
+      "method": "PUT",
+      "path": "/api/store/station/{station_id}/console/{path:path}",
+      "endpoint": "app.routers.station_console_router.station_console",
+      "registryOrder": [
+        26
+      ],
+      "protocol": "http",
+      "kind": "PROXY",
+      "transport": "upstream Content-Type; HTML rewritten; buffered bytes",
+      "admission": "C",
+      "selectors": "station_id + path + repeated query",
+      "statusHeaders": "upstream status and filtered headers; 400/401/403/503/504",
+      "targetDecision": "C",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 239,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S07",
+      "method": "POST",
+      "path": "/api/store/station/{station_id}/session",
+      "endpoint": "app.routers.station_console_router.station_console_session",
+      "registryOrder": [
+        25
+      ],
+      "protocol": "http",
+      "kind": "ADMISSION",
+      "transport": "empty 204 + station cookie",
+      "admission": "C0",
+      "selectors": "station_id + selected company",
+      "statusHeaders": "204 Set-Cookie; 403",
+      "targetDecision": "C",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 200,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S08",
+      "method": "GET",
+      "path": "/api/files/{file_id}",
+      "endpoint": "app.routers.intake_router.download_file",
+      "registryOrder": [
+        471
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME; FileResponse",
+      "admission": "F",
+      "selectors": "file_id → SourceFile",
+      "statusHeaders": "400/404; filename; private,no-store",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/intake_router.py",
+      "line": 112,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S09",
+      "method": "GET",
+      "path": "/api/v1/documents/{docId}/versions/{versionId}/content",
+      "endpoint": "app.product_api.app.create_product_api.<locals>.document_content",
+      "registryOrder": [
+        0,
+        11
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "application/octet-stream; 64KiB generator",
+      "admission": "P",
+      "selectors": "docId/versionId + verified company/resource scope",
+      "statusHeaders": "404; attachment filename*; no-store; nosniff",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/product_api/app.py",
+      "line": 196,
+      "registryDependencies": [
+        "app.api_contracts.routing.get_access_context",
+        "app.product_api.app.query_dependency"
+      ],
+      "policy": {
+        "action": "download",
+        "fields": [],
+        "owner": "documents",
+        "policyVersion": "product-read-1",
+        "principalKinds": [
+          "partner"
+        ],
+        "resourceType": "documents",
+        "scopes": [
+          "documents.files:download",
+          "documents:read"
+        ],
+        "securityScheme": "ProductOAuth",
+        "tenantRequired": true
+      }
+    },
+    {
+      "id": "S10",
+      "method": "GET",
+      "path": "/api/store/documents/{record_id}/files/{file_row_id}/download",
+      "endpoint": "app.routers.store_documents_router.document_file_download",
+      "registryOrder": [
+        1241
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME; FileResponse",
+      "admission": "S",
+      "selectors": "record_id/file_row_id; company + projection station",
+      "statusHeaders": "404; attachment filename; no explicit cache header",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/store_documents_router.py",
+      "line": 1715,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "app.routers.store_documents_router._require_store_module",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S11",
+      "method": "GET",
+      "path": "/api/store/documents/{record_id}/print",
+      "endpoint": "app.routers.store_documents_router.document_print_form",
+      "registryOrder": [
+        1235
+      ],
+      "protocol": "http",
+      "kind": "HTML",
+      "transport": "text/html; generated form",
+      "admission": "S",
+      "selectors": "record_id; variant main/diff",
+      "statusHeaders": "409 if no form; no explicit cache header",
+      "targetDecision": "H",
+      "source": "clearledger/server/app/routers/store_documents_router.py",
+      "line": 1491,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "app.routers.store_documents_router._require_store_module",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S12",
+      "method": "GET",
+      "path": "/api/sites/{site_id}/docs/{doc_id}/file",
+      "endpoint": "app.routers.sites_router.download_site_doc",
+      "registryOrder": [
+        915
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME; FileResponse",
+      "admission": "M",
+      "selectors": "company_id/site_id/doc_id → file",
+      "statusHeaders": "404; attachment filename; no explicit cache header",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/sites_router.py",
+      "line": 1016,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S13",
+      "method": "GET",
+      "path": "/api/sites/{site_id}/tech-connection/shared-documents/{doc_id}/file",
+      "endpoint": "app.routers.sites_router.download_tp_shared_document",
+      "registryOrder": [
+        924
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "application/pdf; FileResponse",
+      "admission": "M",
+      "selectors": "company/site → TP applicant organization → document",
+      "statusHeaders": "404; filename; private,no-store",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/sites_router.py",
+      "line": 1201,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S14",
+      "method": "GET",
+      "path": "/api/sites/{site_id}/tech-connection/application",
+      "endpoint": "app.routers.sites_router.tech_connection_application",
+      "registryOrder": [
+        925
+      ],
+      "protocol": "http",
+      "kind": "HTML",
+      "transport": "text/html; generated application",
+      "admission": "M",
+      "selectors": "company_id/site_id → owned site",
+      "statusHeaders": "400/404; private,no-store",
+      "targetDecision": "H",
+      "source": "clearledger/server/app/routers/sites_router.py",
+      "line": 1221,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S15",
+      "method": "GET",
+      "path": "/api/partner-space/attachments/{attachment_id}",
+      "endpoint": "app.routers.space_bridge_router.partner_attachment",
+      "registryOrder": [
+        297
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME or application/octet-stream; buffered read",
+      "admission": "M",
+      "selectors": "company_id/attachment_id → company attachment → SourceFile",
+      "statusHeaders": "404/410; attachment filename; no explicit cache header",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/space_bridge_router.py",
+      "line": 600,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S16",
+      "method": "GET",
+      "path": "/api/mail/attachment",
+      "endpoint": "app.routers.mail_router.attachment",
+      "registryOrder": [
+        1657
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME or application/octet-stream; buffered DB content",
+      "admission": "MC",
+      "selectors": "company_id/attachment_id",
+      "statusHeaders": "empty 404; attachment filename*; no explicit cache header",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/mail_router.py",
+      "line": 276,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S17",
+      "method": "GET",
+      "path": "/api/tasks/attachments/{attachment_id}",
+      "endpoint": "app.routers.tasks_router.download_attachment",
+      "registryOrder": [
+        65
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME or application/octet-stream; FileResponse",
+      "admission": "T",
+      "selectors": "company_id/attachment_id → task → file",
+      "statusHeaders": "400/404; filename; private,no-store",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/tasks_router.py",
+      "line": 2213,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S18",
+      "method": "GET",
+      "path": "/api/work/calendar/{event_id}/papers/{paper_id}/file",
+      "endpoint": "app.routers.work_router.paper_file",
+      "registryOrder": [
+        215
+      ],
+      "protocol": "http",
+      "kind": "FILE",
+      "transport": "stored MIME or application/octet-stream; FileResponse",
+      "admission": "E",
+      "selectors": "company/event_id/paper_id → event member → file",
+      "statusHeaders": "400/404; filename; private,no-store",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/work_router.py",
+      "line": 2442,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S19",
+      "method": "GET",
+      "path": "/api/doc-share/{token}/file/{version_id}",
+      "endpoint": "app.routers.doc_share_router.download",
+      "registryOrder": [
+        303
+      ],
+      "protocol": "http",
+      "kind": "CAPABILITY",
+      "transport": "stored MIME or application/octet-stream; FileResponse",
+      "admission": "L",
+      "selectors": "token hash/plain legacy fallback; version snapshot + doc/version chain",
+      "statusHeaders": "uniform 404; filename; no-store/no-referrer/noindex",
+      "targetDecision": "L",
+      "source": "clearledger/server/app/routers/doc_share_router.py",
+      "line": 187,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S20",
+      "method": "GET",
+      "path": "/api/work/calendar/feed/{token}.ics",
+      "endpoint": "app.routers.work_router.calendar_feed",
+      "registryOrder": [
+        200
+      ],
+      "protocol": "http",
+      "kind": "CAPABILITY",
+      "transport": "text/calendar; finite generated feed",
+      "admission": "K",
+      "selectors": "User.calendar_feed_token → organizer/attendee; ±365 days",
+      "statusHeaders": "404; inline trek.ics; no-store",
+      "targetDecision": "L",
+      "source": "clearledger/server/app/routers/work_router.py",
+      "line": 1424,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S21",
+      "method": "GET",
+      "path": "/api/work/calendar/{event_id}/ics",
+      "endpoint": "app.routers.work_router.calendar_ics",
+      "registryOrder": [
+        202
+      ],
+      "protocol": "http",
+      "kind": "CALENDAR",
+      "transport": "text/calendar; finite event file",
+      "admission": "EP",
+      "selectors": "company_id/event_id; participant",
+      "statusHeaders": "400/404; attachment meeting.ics; no explicit cache header",
+      "targetDecision": "F",
+      "source": "clearledger/server/app/routers/work_router.py",
+      "line": 1510,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S22",
+      "method": "GET",
+      "path": "/api/invite/{token}/ics",
+      "endpoint": "app.routers.invite_router.invite_ics",
+      "registryOrder": [
+        311
+      ],
+      "protocol": "http",
+      "kind": "CAPABILITY",
+      "transport": "text/calendar; finite event file",
+      "admission": "I",
+      "selectors": "guest token hash → nonrevoked unexpired guest → event",
+      "statusHeaders": "404; attachment meeting.ics; no explicit cache header",
+      "targetDecision": "L",
+      "source": "clearledger/server/app/routers/invite_router.py",
+      "line": 233,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S23",
+      "method": "GET",
+      "path": "/api/export/excel",
+      "endpoint": "app.routers.export_router.export_excel",
+      "registryOrder": [
+        460
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX; buffered workbook in StreamingResponse",
+      "admission": "A",
+      "selectors": "company_id or user.company_id; status; max 100000",
+      "statusHeaders": "400/403; attachment RFC5987; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/export_router.py",
+      "line": 136,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S24",
+      "method": "GET",
+      "path": "/api/export/csv",
+      "endpoint": "app.routers.export_router.export_csv",
+      "registryOrder": [
+        461
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "text/csv UTF-8 BOM; BytesIO in StreamingResponse",
+      "admission": "A",
+      "selectors": "company_id or user.company_id; status; max 100000",
+      "statusHeaders": "400/403; attachment RFC5987; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/export_router.py",
+      "line": 192,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S25",
+      "method": "GET",
+      "path": "/api/store/doc-files/archive",
+      "endpoint": "app.routers.store_router.store_doc_files_archive",
+      "registryOrder": [
+        1286
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "application/zip; BytesIO in StreamingResponse",
+      "admission": "SN",
+      "selectors": "selected company; period/station_id; live StoreDocFile rows",
+      "statusHeaders": "403/404/413; attachment; X-Archive-Name/X-Files-Count",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/store_router.py",
+      "line": 3170,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "app.routers.store_router._require_store_module",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S26",
+      "method": "GET",
+      "path": "/api/store/reports/{kind}",
+      "endpoint": "app.routers.store_router.store_network_report",
+      "registryOrder": [
+        1276
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "JSON default; format=csv or xlsx buffered bytes (Response alias FileResponse)",
+      "admission": "SC",
+      "selectors": "selected company; kind/date/stations → builder",
+      "statusHeaders": "404; attachment RFC5987 for exports; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/store_router.py",
+      "line": 2239,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "app.routers.store_router._require_store_module",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S27",
+      "method": "GET",
+      "path": "/api/store/reports/goods-report/print",
+      "endpoint": "app.routers.store_router.store_goods_report_print",
+      "registryOrder": [
+        1275
+      ],
+      "protocol": "http",
+      "kind": "HTML",
+      "transport": "text/html; generated goods report",
+      "admission": "SC",
+      "selectors": "selected company; period/stations → goods-report builder",
+      "statusHeaders": "200; no explicit cache header",
+      "targetDecision": "H",
+      "source": "clearledger/server/app/routers/store_router.py",
+      "line": 2213,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "app.routers.store_router._require_store_module",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S28",
+      "method": "GET",
+      "path": "/api/sites/export/{report}",
+      "endpoint": "app.routers.sites_router.export_report",
+      "registryOrder": [
+        890
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX buffered Response",
+      "admission": "M",
+      "selectors": "company_id/report allowlist; filters; dynamic export_*_xlsx helper",
+      "statusHeaders": "404 unknown report; attachment; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/sites_router.py",
+      "line": 523,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S29",
+      "method": "GET",
+      "path": "/api/sites/{site_id}/report.xlsx",
+      "endpoint": "app.routers.sites_router.project_report_xlsx",
+      "registryOrder": [
+        905
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX buffered Response",
+      "admission": "M",
+      "selectors": "company_id/site_id → owned project → project_report",
+      "statusHeaders": "404; attachment filename + filename*",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/sites_router.py",
+      "line": 774,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S30",
+      "method": "GET",
+      "path": "/api/corporate/billing-export",
+      "endpoint": "app.routers.corporate_router.corporate_billing_export",
+      "registryOrder": [
+        1199
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX via services.export_files.xlsx_response",
+      "admission": "MS",
+      "selectors": "company_id/date/client/stations/regions/vat_rate",
+      "statusHeaders": "400 date errors; attachment RFC5987",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/corporate_router.py",
+      "line": 119,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S31",
+      "method": "GET",
+      "path": "/api/charge-sessions/export",
+      "endpoint": "app.routers.charge_sessions_router.export_sessions",
+      "registryOrder": [
+        1192
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX via xlsx_response",
+      "admission": "MS",
+      "selectors": "company_id/date/user_type/client/stations/regions/limit",
+      "statusHeaders": "400 date errors; attachment RFC5987",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/charge_sessions_router.py",
+      "line": 658,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S32",
+      "method": "GET",
+      "path": "/api/charge-sessions/export/pivot",
+      "endpoint": "app.routers.charge_sessions_router.export_sessions_pivot",
+      "registryOrder": [
+        1193
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX via xlsx_response; pivot workbook",
+      "admission": "MS",
+      "selectors": "company_id/date/stations/regions/limit",
+      "statusHeaders": "attachment RFC5987; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/charge_sessions_router.py",
+      "line": 740,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S33",
+      "method": "GET",
+      "path": "/api/charge-sessions/export/monthly-matrix",
+      "endpoint": "app.routers.charge_sessions_router.export_monthly_matrix",
+      "registryOrder": [
+        1194
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX via xlsx_response",
+      "admission": "MS",
+      "selectors": "company_id; entire monthly horizon",
+      "statusHeaders": "attachment RFC5987; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/charge_sessions_router.py",
+      "line": 772,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S34",
+      "method": "GET",
+      "path": "/api/reconciliation/export",
+      "endpoint": "app.routers.reconciliation_router.export_reconciliation_act",
+      "registryOrder": [
+        560
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX via xlsx_response",
+      "admission": "M",
+      "selectors": "company_id/date/limit → reconciliation workbook",
+      "statusHeaders": "attachment RFC5987; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/reconciliation_router.py",
+      "line": 91,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S35",
+      "method": "GET",
+      "path": "/api/docs/reports/export",
+      "endpoint": "app.routers.docs_router.export_report",
+      "registryOrder": [
+        131
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "XLSX via xlsx_response",
+      "admission": "D",
+      "selectors": "company_id/report/date; delegates to report endpoint",
+      "statusHeaders": "403 report gate; attachment RFC5987",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/docs_router.py",
+      "line": 1908,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S36",
+      "method": "GET",
+      "path": "/api/docs/export",
+      "endpoint": "app.routers.docs_router.export_docs",
+      "registryOrder": [
+        132
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "format=csv UTF-8 BOM or xlsx via xlsx_response",
+      "admission": "DL",
+      "selectors": "company_id + registry filters; pages via list_docs",
+      "statusHeaders": "attachment RFC5987; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/docs_router.py",
+      "line": 2091,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S37",
+      "method": "GET",
+      "path": "/api/docs/{doc_id}/print",
+      "endpoint": "app.routers.docs_router.print_doc",
+      "registryOrder": [
+        151
+      ],
+      "protocol": "http",
+      "kind": "HTML",
+      "transport": "text/html; doc_print.render_card",
+      "admission": "DP",
+      "selectors": "company_id/doc_id; print action",
+      "statusHeaders": "403/404; private,no-store",
+      "targetDecision": "H",
+      "source": "clearledger/server/app/routers/docs_router.py",
+      "line": 3430,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S38",
+      "method": "GET",
+      "path": "/api/docs/{doc_id}/export/download",
+      "endpoint": "app.routers.docs_router.download_package",
+      "registryOrder": [
+        168
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "application/zip; buffered doc_exchange.build_package",
+      "admission": "DX",
+      "selectors": "company_id/doc_id; export AND download; row lock/recheck",
+      "statusHeaders": "403/404/409 retention; attachment filename*; private,no-store",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/docs_router.py",
+      "line": 4577,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S39",
+      "method": "GET",
+      "path": "/api/pulse/export",
+      "endpoint": "app.routers.pulse_router.pulse_export",
+      "registryOrder": [
+        316
+      ],
+      "protocol": "http",
+      "kind": "EXPORT",
+      "transport": "text/csv UTF-8 BOM; buffered Response",
+      "admission": "MP",
+      "selectors": "company_id/view week,objects,operations; money visibility",
+      "statusHeaders": "403; attachment; no explicit cache header",
+      "targetDecision": "X",
+      "source": "clearledger/server/app/routers/pulse_router.py",
+      "line": 2328,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S40",
+      "method": "GET",
+      "path": "/api/edge/alerts",
+      "endpoint": "app.routers.edge_router.alerts",
+      "registryOrder": [
+        603
+      ],
+      "protocol": "http",
+      "kind": "TEXT",
+      "transport": "application/json default or as_text=true text/plain",
+      "admission": "AK",
+      "selectors": "key company + station_id → edge_service.alerts",
+      "statusHeaders": "401/403 key; 200 report/text; no attachment header",
+      "targetDecision": "J",
+      "source": "clearledger/server/app/routers/edge_router.py",
+      "line": 1528,
+      "registryDependencies": [
+        "app.auth.get_company_by_api_key",
+        "app.database.get_db"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S41",
+      "method": "GET",
+      "path": "/api/developer/docs/assets/{name}",
+      "endpoint": "app.routers.docs_portal_router.asset",
+      "registryOrder": [
+        1013
+      ],
+      "protocol": "http",
+      "kind": "ASSET",
+      "transport": "text/css or text/javascript; pinned local assets",
+      "admission": "G",
+      "selectors": "name allowlist + local pinned bytes",
+      "statusHeaders": "400 query overrides; 404/503; no-store/nosniff/no-referrer",
+      "targetDecision": "G",
+      "source": "clearledger/server/app/routers/docs_portal_router.py",
+      "line": 118,
+      "registryDependencies": [
+        "app.database.get_db",
+        "app.routers.docs_portal_router.docs_session"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S42",
+      "method": "GET",
+      "path": "/api/developer/docs/ui",
+      "endpoint": "app.routers.docs_portal_router.ui",
+      "registryOrder": [
+        1014
+      ],
+      "protocol": "http",
+      "kind": "HTML",
+      "transport": "text/html; generated Swagger document",
+      "admission": "G",
+      "selectors": "live docs session; configured product schema/metadata",
+      "statusHeaders": "400/503; no-store/nosniff/no-referrer; CSP self",
+      "targetDecision": "G",
+      "source": "clearledger/server/app/routers/docs_portal_router.py",
+      "line": 125,
+      "registryDependencies": [
+        "app.database.get_db",
+        "app.routers.docs_portal_router.docs_session"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S43",
+      "method": "GET",
+      "path": "/api/developer/docs/oauth2-redirect",
+      "endpoint": "app.routers.docs_portal_router.oauth_redirect",
+      "registryOrder": [
+        1015
+      ],
+      "protocol": "http",
+      "kind": "HTML",
+      "transport": "text/html; fixed callback shell",
+      "admission": "G",
+      "selectors": "live docs session; code/state parsed by external local script",
+      "statusHeaders": "401; no-store/nosniff/no-referrer; CSP default none",
+      "targetDecision": "G",
+      "source": "clearledger/server/app/routers/docs_portal_router.py",
+      "line": 151,
+      "registryDependencies": [
+        "app.database.get_db",
+        "app.routers.docs_portal_router.docs_session"
+      ],
+      "policy": null
+    },
+    {
+      "id": "S44",
+      "method": "GET",
+      "path": "/api/oauth2/authorize",
+      "endpoint": "app.routers.partner_oauth_router.authorize",
+      "registryOrder": [
+        1000
+      ],
+      "protocol": "http",
+      "kind": "REDIRECT",
+      "transport": "302 fixed SPA location; OAuth failure JSON",
+      "admission": "O",
+      "selectors": "validated OAuth params; state/nonce/PKCE; 5min pending request",
+      "statusHeaders": "302 Location/no-store; invalid request OAuth error without redirect",
+      "targetDecision": "O",
+      "source": "clearledger/server/app/routers/partner_oauth_router.py",
+      "line": 104,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "policy": null
+    }
+  ],
+  "sourceHashes": {
+    "clearledger/server/app/api_access_logging.py": "df516433e176b2c103b78b4685cd9eda16390b8c0402495acca54ec08be387e6",
+    "clearledger/server/app/auth.py": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+    "clearledger/server/app/deps.py": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c",
+    "clearledger/server/app/http_cache.py": "3aa801f2ef6541d6ca973b6e3103fb96f2e27ec2b6e9ec45216fcdaef602df50",
+    "clearledger/server/app/main.py": "6311430edbdc2f642f18698e5e841e2807d53ec95f5cc25e7b7990962b8e1a17",
+    "clearledger/server/app/product_api/access.py": "9edd931485539ffd23e696c4a37efad2e1060d1f69f434ce6b592ea1b1f85ebc",
+    "clearledger/server/app/product_api/app.py": "f6c4e3950d6365b087cf92addc82e9c039d3b0425b389283ff7596e02862f526",
+    "clearledger/server/app/product_api/files.py": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958",
+    "clearledger/server/app/product_api/queries.py": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+    "clearledger/server/app/routers/auth_router.py": "8fb6150f37ade973a4e0322539da709152e979238c7bf8fdb699156b5c28cc0c",
+    "clearledger/server/app/routers/charge_sessions_router.py": "62042ad5e4d910f46d53c15bedfe4d56334760832bf5bae6149fe21f68235f6f",
+    "clearledger/server/app/routers/chat_router.py": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6",
+    "clearledger/server/app/routers/conf_router.py": "26e23816acd0da74284e7f92b2e54f6a1d505fee1367d0d36f9d1e0d1a7e0557",
+    "clearledger/server/app/routers/corporate_router.py": "bf57f39a160d2546c3ad4b271ce89ec81d29218301ca45462cf01337548f35d8",
+    "clearledger/server/app/routers/doc_share_router.py": "96e897a4b1f9759cfe2043817c770c9fb1c3bd484343aa0d504d7bcb4e2c8adb",
+    "clearledger/server/app/routers/docs_portal_router.py": "1c73b96b371de984a1e748de7fe2fe99a16f1098eececa958c1278cc7dd6d86b",
+    "clearledger/server/app/routers/docs_router.py": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+    "clearledger/server/app/routers/edge_router.py": "415bd7dcd784507af286c04d84d3e7c4481e7b285d56c1dc32c63591145823c8",
+    "clearledger/server/app/routers/export_router.py": "63c371965d4954eabe2db1f35ea684ca473b56aa2da956d0ef11a8ef2896e3db",
+    "clearledger/server/app/routers/intake_router.py": "10d357efc0eefb47375cd1e4d1090693c29ad7085209c511ec269faaf35a749c",
+    "clearledger/server/app/routers/invite_router.py": "eddb6c12e7927241e92685451d42c2f49e505c8419f052ac1090aaeb1b33b824",
+    "clearledger/server/app/routers/mail_router.py": "c7d5965f0afe0391a78fd1441e16f615d57d2147ace659e1fbb105cd797cd013",
+    "clearledger/server/app/routers/management_router.py": "138f6a0bb9d4aa12e6dca6d77abe242e0012db7aff6e4f6d693da86c40008cee",
+    "clearledger/server/app/routers/partner_oauth_router.py": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3",
+    "clearledger/server/app/routers/pulse_router.py": "042c09b7e8b5be35b5f56fa5390ef0ac3ae7912cc9a1deda8c98b2e8f07edf82",
+    "clearledger/server/app/routers/reconciliation_proxy_router.py": "3f7facd24f5dc88c4b22608833d9aaa4850be55f16672ee92b69752935d95e97",
+    "clearledger/server/app/routers/reconciliation_router.py": "a7dce178c4b7c4a5d15b996c6b137e0c3b17af7013eb6bfa8f05681fe3cbf952",
+    "clearledger/server/app/routers/site_router.py": "4c44b3dd4de547474163e4fdd40361c4cd557cd5bc6347b1796eef983a6b7298",
+    "clearledger/server/app/routers/sites_router.py": "806fa73096f7e83ceb0f59e52b54c7a0e60d5845baec0d2e0a3aa9ebaf728fc7",
+    "clearledger/server/app/routers/space_bridge_router.py": "f3b153dcd548ca23f83786503a22ca50040c79c72b15e096953ad5d481b033da",
+    "clearledger/server/app/routers/speech_router.py": "f8650dae14a85e3a47c041f61d4d8fedc6c894c4a3581cc2b08ebbe62c5879e9",
+    "clearledger/server/app/routers/station_console_router.py": "5e7e2c6c5c9461d3f41e4900f2d72e823ed7ed5833bf111d98961095ce625869",
+    "clearledger/server/app/routers/store_documents_router.py": "80723319a9b9a39ae3ccb2990cbb0530e85fa4cf8421ef67b920409deb91b841",
+    "clearledger/server/app/routers/store_router.py": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6",
+    "clearledger/server/app/routers/tasks_router.py": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758",
+    "clearledger/server/app/routers/users_router.py": "84cbfac5c5a57b0d2416fbb05e4f1c5ef7a9adf7f0e1fcfc61675f5696c80593",
+    "clearledger/server/app/routers/vendor_router.py": "874678ca71cf1b55edff78c89725ec053bb51799b5320a23584d7805c73ed3cb",
+    "clearledger/server/app/routers/voice_connections_router.py": "0214c0112755500978e2271f8d891f9a253615c522a709e0903b8fd0c723bf0d",
+    "clearledger/server/app/routers/voice_router.py": "b511bdf2cfa8588316d17ebdf0883bca237c5ad42498b39ef50de509e0879548",
+    "clearledger/server/app/routers/work_router.py": "cd597a0d2a5dc30c4475dc8778a226352961ff889cfb986f009cc6068c62a8c9",
+    "clearledger/server/app/services/chat_ws.py": "e714938f6386c7d72c600af1f46cf5ede770f4edf63356941794aeac88554aa4",
+    "clearledger/server/app/services/doc_access.py": "b2f8c364edf7fd84474faf7b49b3e6a4a64c4148123cb9610c2e5a36dfe3fcbd",
+    "clearledger/server/app/services/docs_portal.py": "2d073a7036fd59f85d1334a54516de183654016097f2d55e715a58ca29a15532",
+    "clearledger/server/app/services/export_files.py": "3b548f26d37605da6e2050f4fb6c67d31dc3cc42c247d914119788d8adf78b3a",
+    "clearledger/server/app/services/link_preview.py": "a2ac82bceb8bc6434c3da96aef58dd8d6f24fd58c6094a52d23c4407391a10b4",
+    "clearledger/server/app/services/managed_connectors.py": "38af6ba46bca9857580f92a203168e0ad0d952590b97c8fbfff9b7e2f31ff508",
+    "clearledger/server/app/services/management_overview.py": "1ac4ff375de1ea387c3c518a7eacb6750edb681f0c3e516d6ba92b081f4fca68",
+    "clearledger/server/app/services/partner_bridge.py": "8dc0140735e70ef6dbe89658fb7a2a99ec1d25c332675a297eae4898568301a5",
+    "clearledger/server/app/services/projects_process.py": "aa38aa92b15a12291710bab8eb52f4e61bfc35062530c18b5d6ccaa8fd1fe216",
+    "clearledger/server/app/services/reconciliation_proxy.py": "d4497f617ff1d9d6b96775ab46af52fbebe6223e5c8113f425bfb7c3c010b0fb",
+    "clearledger/server/app/services/space_connectors.py": "ff9bc6793f7e5c029e35d20a876b69204215a7031cde932e53c86535fc9543bc",
+    "clearledger/server/app/services/space_desk.py": "19afbd94057bae108b271df977146827c5263926bd9985a846e2181c2d1f3146",
+    "clearledger/server/app/services/space_events.py": "1a272f55e87505be2a9ef2e573211cd0c1c769fcc43687d3ae6bee2c44a7d749",
+    "clearledger/server/app/services/space_projection.py": "75565ae26fe2ad186f3f6f9d9bbca83278b277286b166abd48d60de627d20508",
+    "clearledger/server/app/services/support_context.py": "535157ab0dab2362b9e1a3c23116b12268ee0c4602139da73045e13f45be2ea9",
+    "clearledger/server/app/services/support_mirror.py": "d6bc931b225b48f31ed9486f04332776c9d063c60aed902780d9584386568f82",
+    "clearledger/server/app/services/task_access.py": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53",
+    "clearledger/server/app/services/ticket_communications.py": "fdc06eac74125be9dc554637804ba82f35a0511b26ce916a9823ba13aca3f01d",
+    "clearledger/server/app/services/voice_support_context.py": "e612a35ac4d5af553d50dbe1d1dcca0224f994567c64ade6695716500099ee2a",
+    "clearledger/src/hooks/useChatWs.ts": "9f92132f270dcface8f2918dda185703ea63185daee20a167e7f2ddbe4d92da9",
+    "clearledger/server/requirements.txt": "f1ce1401ba8d014e2b861b1404d9b9cfecf21c73f8047b85090b9d0275e8eba0",
+    "clearledger/server/Dockerfile": "a34cfbbefe26f0864f7bfce33df844fffea75023947d0d85536646da1f26ae09"
+  },
+  "integrationComparators": [
+    {
+      "id": "I01",
+      "method": "POST",
+      "path": "/api/tradecorp/transactions",
+      "endpoint": "app.routers.reconciliation_proxy_router.tradecorp_transactions",
+      "registryOrder": [
+        568
+      ],
+      "protocol": "http",
+      "group": "R",
+      "chain": "services.reconciliation_proxy company connection → HTTPX → raise_for_status/json/domain transformation",
+      "admissionSelectors": "JWT + scope_company_id; company connection; date/stationIds or query filters",
+      "statusHeaders": "400 missing company connection; upstream HTTP→502/network→503/other→500; health differs 503",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/reconciliation_proxy_router.py",
+      "line": 75,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I02",
+      "method": "POST",
+      "path": "/api/tradecorp/transactions/summary",
+      "endpoint": "app.routers.reconciliation_proxy_router.tradecorp_summary",
+      "registryOrder": [
+        569
+      ],
+      "protocol": "http",
+      "group": "R",
+      "chain": "services.reconciliation_proxy company connection → HTTPX → raise_for_status/json/domain transformation",
+      "admissionSelectors": "JWT + scope_company_id; company connection; date/stationIds or query filters",
+      "statusHeaders": "400 missing company connection; upstream HTTP→502/network→503/other→500; health differs 503",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/reconciliation_proxy_router.py",
+      "line": 88,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I03",
+      "method": "GET",
+      "path": "/api/tradecorp/health",
+      "endpoint": "app.routers.reconciliation_proxy_router.tradecorp_health",
+      "registryOrder": [
+        570
+      ],
+      "protocol": "http",
+      "group": "R",
+      "chain": "services.reconciliation_proxy company connection → HTTPX → raise_for_status/json/domain transformation",
+      "admissionSelectors": "JWT + scope_company_id; company connection; date/stationIds or query filters",
+      "statusHeaders": "400 missing company connection; upstream HTTP→502/network→503/other→500; health differs 503",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/reconciliation_proxy_router.py",
+      "line": 100,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I04",
+      "method": "GET",
+      "path": "/api/msto/servicePoints",
+      "endpoint": "app.routers.reconciliation_proxy_router.msto_service_points",
+      "registryOrder": [
+        571
+      ],
+      "protocol": "http",
+      "group": "R",
+      "chain": "services.reconciliation_proxy company connection → HTTPX → raise_for_status/json/domain transformation",
+      "admissionSelectors": "JWT + scope_company_id; company connection; date/stationIds or query filters",
+      "statusHeaders": "400 missing company connection; upstream HTTP→502/network→503/other→500; health differs 503",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/reconciliation_proxy_router.py",
+      "line": 114,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I05",
+      "method": "GET",
+      "path": "/api/msto/transactions",
+      "endpoint": "app.routers.reconciliation_proxy_router.msto_transactions",
+      "registryOrder": [
+        572
+      ],
+      "protocol": "http",
+      "group": "R",
+      "chain": "services.reconciliation_proxy company connection → HTTPX → raise_for_status/json/domain transformation",
+      "admissionSelectors": "JWT + scope_company_id; company connection; date/stationIds or query filters",
+      "statusHeaders": "400 missing company connection; upstream HTTP→502/network→503/other→500; health differs 503",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/reconciliation_proxy_router.py",
+      "line": 125,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I06",
+      "method": "GET",
+      "path": "/api/msto/tariffs",
+      "endpoint": "app.routers.reconciliation_proxy_router.msto_tariffs",
+      "registryOrder": [
+        573
+      ],
+      "protocol": "http",
+      "group": "R",
+      "chain": "services.reconciliation_proxy company connection → HTTPX → raise_for_status/json/domain transformation",
+      "admissionSelectors": "JWT + scope_company_id; company connection; date/stationIds or query filters",
+      "statusHeaders": "400 missing company connection; upstream HTTP→502/network→503/other→500; health differs 503",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/reconciliation_proxy_router.py",
+      "line": 136,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I07",
+      "method": "GET",
+      "path": "/api/site/requests",
+      "endpoint": "app.routers.site_router.site_requests",
+      "registryOrder": [
+        259
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 143,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I08",
+      "method": "GET",
+      "path": "/api/site/cabinets",
+      "endpoint": "app.routers.site_router.site_cabinets",
+      "registryOrder": [
+        260
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 154,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I09",
+      "method": "GET",
+      "path": "/api/site/demos",
+      "endpoint": "app.routers.site_router.site_demos",
+      "registryOrder": [
+        261
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 165,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I10",
+      "method": "GET",
+      "path": "/api/site/summary",
+      "endpoint": "app.routers.site_router.site_summary",
+      "registryOrder": [
+        262
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 176,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I11",
+      "method": "GET",
+      "path": "/api/site/leads",
+      "endpoint": "app.routers.site_router.site_leads",
+      "registryOrder": [
+        263
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 205,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I12",
+      "method": "POST",
+      "path": "/api/site/leads/{lead_id}/status",
+      "endpoint": "app.routers.site_router.site_lead_status",
+      "registryOrder": [
+        264
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 216,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I13",
+      "method": "GET",
+      "path": "/api/site/content",
+      "endpoint": "app.routers.site_router.site_content",
+      "registryOrder": [
+        265
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 243,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I14",
+      "method": "PUT",
+      "path": "/api/site/content/{key}",
+      "endpoint": "app.routers.site_router.site_content_save",
+      "registryOrder": [
+        266
+      ],
+      "protocol": "http",
+      "group": "SI",
+      "chain": "_read/_call company connector → HTTPX → JSON envelope or data",
+      "admissionSelectors": "JWT + assert_company_product(site); company_id; allowlisted remote path or lead/key",
+      "statusHeaders": "timeout/upstream errors→connected:false; mutations may 502; no byte/status/header passthrough",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 259,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I15",
+      "method": "POST",
+      "path": "/api/site/push/message",
+      "endpoint": "app.routers.site_router.push_message",
+      "registryOrder": [
+        276
+      ],
+      "protocol": "http",
+      "group": "SS",
+      "chain": "_pull_company → _support_call → SSO target → HTTPX JSON",
+      "admissionSelectors": "X-Space-Token comparison; configured connector company; email/topic/body",
+      "statusHeaders": "400/403/404/409/503; _support_call retains upstream error status with extracted detail; thread catches503; HTTPX errors are not explicitly caught in helper",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 686,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I16",
+      "method": "GET",
+      "path": "/api/site/pull/thread",
+      "endpoint": "app.routers.site_router.pull_thread",
+      "registryOrder": [
+        277
+      ],
+      "protocol": "http",
+      "group": "SS",
+      "chain": "_pull_company → _support_call → SSO target → HTTPX JSON",
+      "admissionSelectors": "X-Space-Token comparison; configured connector company; email/topic/body",
+      "statusHeaders": "400/403/404/409/503; _support_call retains upstream error status with extracted detail; thread catches503; HTTPX errors are not explicitly caught in helper",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 708,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I17",
+      "method": "GET",
+      "path": "/api/site/pull/topics",
+      "endpoint": "app.routers.site_router.pull_topics",
+      "registryOrder": [
+        278
+      ],
+      "protocol": "http",
+      "group": "SS",
+      "chain": "_pull_company → _support_call → SSO target → HTTPX JSON",
+      "admissionSelectors": "X-Space-Token comparison; configured connector company; email/topic/body",
+      "statusHeaders": "400/403/404/409/503; _support_call retains upstream error status with extracted detail; thread catches503; HTTPX errors are not explicitly caught in helper",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/site_router.py",
+      "line": 733,
+      "registryDependencies": [
+        "app.database.get_db"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I18",
+      "method": "GET",
+      "path": "/api/vendor/{code}/catalog",
+      "endpoint": "app.routers.vendor_router.catalog",
+      "registryOrder": [
+        279
+      ],
+      "protocol": "http",
+      "group": "V",
+      "chain": "_vendor → _remote → signed vendor request → HTTPX → JSON",
+      "admissionSelectors": "JWT + elsy product + enabled company app + vendor link/key; company/code/demo_id",
+      "statusHeaders": "403/404/409 or 503; upstream 403/404/409 retained; invalid JSON 502",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/vendor_router.py",
+      "line": 98,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I19",
+      "method": "POST",
+      "path": "/api/vendor/{code}/demo",
+      "endpoint": "app.routers.vendor_router.launch_demo",
+      "registryOrder": [
+        280
+      ],
+      "protocol": "http",
+      "group": "V",
+      "chain": "_vendor → _remote → signed vendor request → HTTPX → JSON",
+      "admissionSelectors": "JWT + elsy product + enabled company app + vendor link/key; company/code/demo_id",
+      "statusHeaders": "403/404/409 or 503; upstream 403/404/409 retained; invalid JSON 502",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/vendor_router.py",
+      "line": 105,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I20",
+      "method": "POST",
+      "path": "/api/eco/vendor/catalog",
+      "endpoint": "app.routers.vendor_router.provide_catalog",
+      "registryOrder": [
+        281
+      ],
+      "protocol": "http",
+      "group": "VI",
+      "chain": "_client + site_router._call → transformed product/demo JSON",
+      "admissionSelectors": "machine company key + signed vendor payload; company/site partner/demo identity",
+      "statusHeaders": "403/503; demo URL validates path then returns JSON; no redirect/bytes",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/vendor_router.py",
+      "line": 115,
+      "registryDependencies": [
+        "app.auth.get_company_by_api_key",
+        "app.database.get_db"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I21",
+      "method": "POST",
+      "path": "/api/eco/vendor/demo",
+      "endpoint": "app.routers.vendor_router.provide_demo",
+      "registryOrder": [
+        282
+      ],
+      "protocol": "http",
+      "group": "VI",
+      "chain": "_client + site_router._call → transformed product/demo JSON",
+      "admissionSelectors": "machine company key + signed vendor payload; company/site partner/demo identity",
+      "statusHeaders": "403/503; demo URL validates path then returns JSON; no redirect/bytes",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/vendor_router.py",
+      "line": 137,
+      "registryDependencies": [
+        "app.auth.get_company_by_api_key",
+        "app.database.get_db"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I22",
+      "method": "GET",
+      "path": "/api/voice/connections",
+      "endpoint": "app.routers.voice_connections_router.connections",
+      "registryOrder": [
+        623
+      ],
+      "protocol": "http",
+      "group": "VC",
+      "chain": "scope → support_request → client.stream reads max128000 bytes → JSON/schema",
+      "admissionSelectors": "JWT; X-Company-Id or default; _voice_admin; support-company mapping; connector_id",
+      "statusHeaders": "404 selected check; other upstream/oversize/invalid→503; no-store/no-referrer",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/voice_connections_router.py",
+      "line": 138,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.routers.voice_connections_router.no_store",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I23",
+      "method": "POST",
+      "path": "/api/voice/connections/check",
+      "endpoint": "app.routers.voice_connections_router.check",
+      "registryOrder": [
+        624
+      ],
+      "protocol": "http",
+      "group": "VC",
+      "chain": "scope → support_request → client.stream reads max128000 bytes → JSON/schema",
+      "admissionSelectors": "JWT; X-Company-Id or default; _voice_admin; support-company mapping; connector_id",
+      "statusHeaders": "404 selected check; other upstream/oversize/invalid→503; no-store/no-referrer",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/voice_connections_router.py",
+      "line": 152,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.routers.voice_connections_router.no_store",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I24",
+      "method": "GET",
+      "path": "/api/speech/health",
+      "endpoint": "app.routers.speech_router.speech_health",
+      "registryOrder": [
+        238
+      ],
+      "protocol": "http",
+      "group": "ASR",
+      "chain": "HTTPX ASR health or multipart file request → JSON",
+      "admissionSelectors": "JWT; ASR configured per stack; file<=10MiB; no company selector in signature",
+      "statusHeaders": "health ready:false on upstream/network; dictate 400/413/503/422",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/speech_router.py",
+      "line": 25,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I25",
+      "method": "POST",
+      "path": "/api/speech/dictate",
+      "endpoint": "app.routers.speech_router.speech_dictate",
+      "registryOrder": [
+        239
+      ],
+      "protocol": "http",
+      "group": "ASR",
+      "chain": "HTTPX ASR health or multipart file request → JSON",
+      "admissionSelectors": "JWT; ASR configured per stack; file<=10MiB; no company selector in signature",
+      "statusHeaders": "health ready:false on upstream/network; dictate 400/413/503/422",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/speech_router.py",
+      "line": 36,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I26",
+      "method": "GET",
+      "path": "/api/store/station/{station_id}/state",
+      "endpoint": "app.routers.station_console_router.station_state",
+      "registryOrder": [
+        27
+      ],
+      "protocol": "http",
+      "group": "CS",
+      "chain": "fixed Hub GET → online/reason/url JSON",
+      "admissionSelectors": "JWT + scope_company_id; station_id; no console grant gate here",
+      "statusHeaders": "200 online:false on missing key/HTTPError/upstream non200",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/station_console_router.py",
+      "line": 357,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I27",
+      "method": "POST",
+      "path": "/api/conf/sessions/{session_id}/end",
+      "endpoint": "app.routers.conf_router.session_end",
+      "registryOrder": [
+        246
+      ],
+      "protocol": "http",
+      "group": "CF",
+      "chain": "_company/session/calendar management → _закрыть_комнату → bool",
+      "admissionSelectors": "JWT; company/session; calendar organizer/delegate for meeting-linked sessions",
+      "statusHeaders": "403/404; closer failure bool false; JSON; no upstream status propagation",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/conf_router.py",
+      "line": 759,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I28",
+      "method": "POST",
+      "path": "/api/pulse/my-line/action",
+      "endpoint": "app.routers.pulse_router.pulse_my_line_action",
+      "registryOrder": [
+        330
+      ],
+      "protocol": "http",
+      "group": "PA",
+      "chain": "product/visible-items → support target desk SSO → HTTPX JSON",
+      "admissionSelectors": "JWT + pulse product + business.myline visibility; company/user email/action",
+      "statusHeaders": "upstream status retained on failure but detail extracted into HTTPException; network503; JSON on success",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/pulse_router.py",
+      "line": 3421,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I29",
+      "method": "POST",
+      "path": "/api/store/marking/integrations/{system}/check",
+      "endpoint": "app.routers.store_router.store_marking_integration_check",
+      "registryOrder": [
+        1292
+      ],
+      "protocol": "http",
+      "group": "MC",
+      "chain": "configured integration URL → HTTPX status → check metadata",
+      "admissionSelectors": "JWT + router store module gate + scope_company_id; system allowlist; company config",
+      "statusHeaders": "400/404; arbitrary upstream status becomes ok/note metadata; TLS verify true",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/store_router.py",
+      "line": 3665,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "app.routers.store_router._require_store_module",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I30",
+      "method": "GET",
+      "path": "/api/chat/link-preview",
+      "endpoint": "app.routers.chat_router.link_preview",
+      "registryOrder": [
+        1452
+      ],
+      "protocol": "http",
+      "group": "LP",
+      "chain": "services.link_preview.fetch_preview → limited HTML fetch → metadata JSON",
+      "admissionSelectors": "JWT; url max2000; scheme/public-host and each redirect gate",
+      "statusHeaders": "returns metadata or empty object; no original HTML/status/headers",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/chat_router.py",
+      "line": 2260,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "app.deps.capture_company_header",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    },
+    {
+      "id": "I31",
+      "method": "GET",
+      "path": "/api/management/overview",
+      "endpoint": "app.routers.management_router.management_overview",
+      "registryOrder": [
+        2
+      ],
+      "protocol": "http",
+      "group": "MG",
+      "chain": "services.management_overview._fetch_remote → bounded stream → validated JSON records",
+      "admissionSelectors": "JWT + required X-Company-Id membership; query/kind/space/limit; scoped visit disables remote",
+      "statusHeaders": "local JSON source states forbidden/error; no raw remote response",
+      "transport": "application/json; integration adapter, not transparent byte stream",
+      "source": "clearledger/server/app/routers/management_router.py",
+      "line": 57,
+      "registryDependencies": [
+        "app.auth.get_current_user",
+        "app.database.get_db",
+        "fastapi.security.http.HTTPBearer.__call__"
+      ],
+      "targetDecision": "Keep explicit JSON integration adapter; company/DTO/error contract; do not publish as SSE or byte proxy"
+    }
+  ],
+  "externalTemplateEvidence": {
+    "path": "/srv/projects/ecosystem-deploy/stacks/_template/nginx.conf",
+    "repositoryHead": "ec22e16483b3a980cc85905ae647377cdd03a230",
+    "sha256": "3af87573f87e6f512f7891c175528177fbac8e2646409168b3d1d536e3b49cad",
+    "limitation": "Read-only template; dirty-state/application to production not established"
+  },
+  "dependencySourceEvidence": {
+    "package": "uvicorn",
+    "version": "0.34.0",
+    "origin": "local installed package source matching requirements pin; not a deployed/runtime verification",
+    "root": "/tmp/cc-info-python-20261020/lib/python3.13/site-packages/uvicorn",
+    "sha256": {
+      "protocols/websockets/websockets_impl.py": "d32e2493ecd1fae3dd9a98eaf4e62ecc993b83d6a6962b2952633dd65caa45d6",
+      "protocols/websockets/wsproto_impl.py": "81af09cc3514d90ad0b2381076022295f6e604722b1f8cdbc8633899aa2f4d1a",
+      "protocols/utils.py": "ac28d82dde3fbb03de6646d15d0e9b7827f1c88fe8629bc90b0cf78c418d3a21",
+      "workers.py": "eca1a01806a9c4690679751c046ba73a348d748f51e38282a164c6100a8075fb"
+    }
+  },
+  "candidateTemplateEvidence": {
+    "path": "/home/mag/orca/workspaces/ecosystem-deploy/partner-api-design-20261029/stacks/_template/nginx.conf",
+    "repositoryHead": "ec620dfa82b0f4b7a6a7a509ccd194f8116a2688",
+    "sha256": "f946e672627bc7942d3d70190805937e7795d11d1eaa556b216db31e8d25fde9",
+    "lines": {
+      "logFormat": 71,
+      "chatWsLocation": 112,
+      "accessLog": 113
+    },
+    "limitation": "candidate source template; application on deployed stack unverified"
+  },
+  "coverage": {
+    "primaryOperations": 44,
+    "primaryEndpointFunctions": 40,
+    "integrationComparatorOperations": 31,
+    "unionRegisteredOperationKeys": 75,
+    "websocketReviewed": 1,
+    "websocketRegistryDenominator": 1,
+    "curatedSpecialOperationsReviewed": 1,
+    "curatedRegistryDenominator": 12,
+    "streamingResponseOperations": 4,
+    "declaredSseFound": 0,
+    "dynamicSse": "unknown",
+    "all1703AclReviewed": false
+  }
+}

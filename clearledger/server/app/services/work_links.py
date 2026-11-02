@@ -10,14 +10,14 @@ from app.services import work_state
 def subject_clause(model, cid, ref):
     if model is Task:
         return Task.subject_ref == ref
-    return or_(DocCard.subject_ref == ref, select(DocRelation.id).where(
-        DocRelation.company_id == cid, DocRelation.doc_id == DocCard.id,
-        DocRelation.target_ref == ref).correlate(DocCard).exists())
+    from app.services.doc_subject_links import subject_documents_clause
+    return subject_documents_clause(cid, ref, correlate_doc=True)
 
 
 async def visible_work(db, cid, user, *, ref=None, object_id=None, unlinked_prefix=None):
-    from app.routers.docs_router import _readable_doc_clause
-    from app.routers.tasks_router import _is_admin, _not_personal, _visible_to
+    from app.services.doc_access import _readable_doc_clause
+    from app.services.task_queries import not_personal as _not_personal
+    from app.services.task_access import is_admin as _is_admin, visible_to as _visible_to
 
     doc_acl = await _readable_doc_clause(db, cid, user)
     task_acl = _visible_to(user, await _is_admin(db, cid, user))
@@ -48,8 +48,9 @@ async def visible_work(db, cid, user, *, ref=None, object_id=None, unlinked_pref
 
 
 async def readable_entity(db, cid, user, kind, entity_id, *, edit=False):
-    from app.routers.docs_router import _assert_doc_permission
-    from app.routers.tasks_router import _assert_actor, _can_view_task
+    from app.services.doc_access import _assert_doc_permission
+    from app.services.task_access import assert_actor as _assert_actor
+    from app.services.task_access import can_view_task as _can_view_task
 
     model = DocCard if kind == "doc" else Task
     row = await db.get(model, entity_id)
@@ -80,7 +81,7 @@ async def origin(db, cid, user, kind, entity_id):
         msg = await db.get(ChatMessage, mid)
         if msg and not msg.deleted_at and await db.scalar(select(ChatParticipant.id).where(
                 ChatParticipant.room_id == msg.room_id, ChatParticipant.user_id == user.id)):
-            from app.routers.chat_router import _history_from
+            from app.services.chat_access import history_from as _history_from
             since = await _history_from(msg.room_id, user, db)
             if since is None or msg.created_at >= since:
                 return {"room_id": str(msg.room_id), "message_id": str(mid)}

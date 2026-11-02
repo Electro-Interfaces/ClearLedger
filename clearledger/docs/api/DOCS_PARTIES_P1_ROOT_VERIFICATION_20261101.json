@@ -1,0 +1,100 @@
+{
+  "status": "ROOT_TWO_BOUNDED_SOURCE_RAW_PROFILES_ACCEPTED_NOT_OVERALL_GO",
+  "asOfUTC": "2026-11-01 04:04 UTC",
+  "sourceIntegrations": {
+    "parties8": "9596b558d2a7cc8bf189a5de95751c8d1c3917fb",
+    "memberScope": "55c96a441a08cc3daa83bb85c1e16acd7d783fee",
+    "RootExact12Integration": "5dc6e00b37e26a44b027b1f35807cda229c32531",
+    "DocsLogout": "7a84b3de85a996336b198016cd4abcc71508d801",
+    "ASTStableFormat": "7fa9af393b94f6c698380c4bc65ade59079ef4fd",
+    "ContactUUID": "56a911478b9007b038e0cf20798151f255c198b0",
+    "explicitContactOverlay": "1abe51cf193ccee31aaaa2a3faed2a8c2271ee64",
+    "testOracleSeedFix": "6214630687e7ac09b0b083433501e8cf0b09ac0f",
+    "correctedDocumentationAndJointRuntime": "ca672dd7a03b7370f3162c9ff6562811b97c1779"
+  },
+  "joint232": {
+    "source": "ca672dd7a03b7370f3162c9ff6562811b97c1779",
+    "cases": 232,
+    "definitions": 59,
+    "phases": 696,
+    "seconds": 312.44412745162845,
+    "groups": {
+      "tests/test_docs_portal_logout_scoped_locks.py": 8,
+      "tests/test_docs_portal_logout_scoped_locks_pg.py": 57,
+      "tests/test_native_party_locks_unit.py": 25,
+      "tests/test_native_party_locks_pg.py": 142
+    },
+    "resultSHA256": "c41361272fd21b1304c46f31f195392b5854a615ee2744bfb8ffdb572d066d9d",
+    "executionSHA256": "7dbbe9f06e7009f73af97718dadee113636ebf60c3603aa5f2087a260324d3f4",
+    "sourceFiles": 567,
+    "sourceBytes": 18128463,
+    "profile": "full native schema341models/347tables; actualDocsASGIHTTP/OAuth/cookie/CSRF/publicverifier+8nativepartyrouterroots usingprogrammaticclaims",
+    "schema": {
+      "models": 341,
+      "tablesBeforeRevision4": 341,
+      "tablesAfterRevision4": 347,
+      "columns": 4720,
+      "validatedFK": 803,
+      "enabledRITriggers": 3212
+    },
+    "independentReview": {
+      "verdict": "PASS_BOUNDED_SOURCE_RAW",
+      "markdownSHA256": "fd6e9fc983d7ba89364e30ebbe0879640028412635a2f569e0587ca068305c9c",
+      "JSON_SHA256": "d4f8e807aa76cbcbfe8339b8c8ceb6567abcdcb6fbca4f5f5448c3ec9f65df74",
+      "findings": []
+    },
+    "PGCases": 199,
+    "sourceUnitCases": 33
+  },
+  "memberScope96": {
+    "source": "6214630687e7ac09b0b083433501e8cf0b09ac0f",
+    "cases": 96,
+    "unit": 31,
+    "PG": 65,
+    "definitions": 28,
+    "phases": 288,
+    "seconds": 26.278807083144784,
+    "resultSHA256": "7f19b7517b130e8419781fa0f9b3938f1307119ddfcba994a03a9e1f9495ab99",
+    "executionSHA256": "bdde511310f6591277e499235a607371abc58e730bb87656e80e6ab8c5e86446",
+    "profile": "original8tableswithallORMcolumnsbutnullableweakenedandselected8FK/2unique; actualscope+legacyOrgDelete/Source8OrgUpdatebothorders; programmaticclaims/noHTTP/fullnative",
+    "independentReviewVerdict": "PASS_BOUNDED_SOURCE_RAW",
+    "independentReviewMD_SHA256": "3b63a3c54c3deab6d4d99022529294edd29685f4eb6c25ec14b86d45051e9599",
+    "independentReviewJSON_SHA256": "367f20e94f8fbe977d0fc733f21bdec4e51035e53884782e2372f58e2fdc2a07"
+  },
+  "boundedCodeChanges": {
+    "CoreUUIDResultColumns": 29,
+    "allUUIDResultColumns": 81,
+    "newField": "CounterpartyContact.company_id only; exactresultadapter/kernelunchanged",
+    "DPLAST": "29oldpolicypins retained, explicitPython3.11compatible AST; all8guards separatelyPASS3.11/3.13",
+    "testOracle": "401 actualinstalledAuthlibstatus confirmed; exactbody/no-store/unchangedrows asserted",
+    "opaqueSeed": "49->39charactersfitsnativeidVARCHAR40, codeVARCHAR100; noUUIDcoercion"
+  },
+  "cleanup": "Eachacceptedprofile2Rootownednormalremoved; PostgreSQLclientslocks0/0; live-loop pool0/0/noerrors; foreign41safeprojectionsId/Image/Running/StartedAtmatch, notfullTCB attestation",
+  "historyPreserved": [
+    "DPL39014 incomplete49PASS2FAIL/13missing; obsoleteRootexceptiondeadline",
+    "DPL7fa9 full64PASS1FAIL wrong400oracle",
+    "nativeParty1abe166PASS1FAIL invalid49charseedbeforehandler",
+    "P1V1invalidRootfixture/testloop mismatch+missingasyncio/result; noSIGNALsent, notapplicationverdict"
+  ],
+  "standardsGap": {
+    "RFC": "https://www.rfc-editor.org/rfc/rfc7009.html#section-2.2",
+    "observed": "unknown token_type_hint ->401exacterrorunsupported_token_type/cache-controlno-store",
+    "required": "Invalidhintmustbeignored; separateproduction/relatedtests/OpenAPIchange mandatory",
+    "status": "OPEN",
+    "alreadyCapturedIn": "NATIVE_PARTY_DOCS_RUNTIME_ORACLES_20261101.md",
+    "nextTask": "One peer author, exact6files fromca672, RevokeEndpoint.check_params+realHTTP regression+auth.md; runtime0 whileSourceonly"
+  },
+  "next": [
+    "PartnerContractCreateadminprofile exact8/source59757724/draft111 peerSOURCE_PASS; Root integration/runtime pending; flagsFalse/externalPOSTnotimplemented/dedicatedFKwaitnotauthored",
+    "Nativecreate_doc exact6/source36715b3c peerACCEPT_BOUNDED_SOURCE_V2;4unit16PGdefinitionsNOTRUN;5DocCardUserFK resultadapterRootprerequisite; Rootintegration/runtimepending",
+    "Historicalnative0-2sevenvariants and fullcurrentauth/Store/identity/SDK/CI/livepilots remain",
+    "All20originalsections+11gates preserved; theseprofiles do notestablishfullOrgDELETE22FK25producerclosure or overallAPIreadiness"
+  ],
+  "originalScope": {
+    "sections": 20,
+    "gates": 11,
+    "completedAll": false,
+    "overallPercentage": null
+  },
+  "mergeDeployActivation": false
+}

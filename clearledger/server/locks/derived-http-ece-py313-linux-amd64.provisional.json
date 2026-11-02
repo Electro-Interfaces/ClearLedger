@@ -1,0 +1,94 @@
+{
+  "artifact": {
+    "filename": "http_ece-1.2.1-py2.py3-none-any.whl",
+    "inspection": {
+      "declaration_validation": "supported-subset-syntax-only-not-resolution",
+      "kind": "wheel",
+      "metadata_sha256": {
+        "METADATA": "3b8e06fc02362bedcf735facecbd835149af5f339e6827a68496df5f53349d08",
+        "WHEEL": "24d5a1d459b551dc08415d3be609429f8315b8246cd2ca2d248abe27aadbc425"
+      },
+      "name": "http-ece",
+      "provides_extra": [],
+      "requires_dist": [
+        "cryptography>=2.5"
+      ],
+      "requires_python": "",
+      "tags": [
+        "py2-none-any",
+        "py3-none-any"
+      ],
+      "version": "1.2.1"
+    },
+    "name": "http-ece",
+    "sha256": "a89e8aa1521d121dde75250524981f3f3fa3594cc1117da99904f2ba5ac24f9d",
+    "size": 4849,
+    "source_sdist_sha256": "8c6ab23116bbf6affda894acfd5f2ca0fb8facbcbb72121c11c75c33e7ce8cff",
+    "tooling_pins": {
+      "build": "1.3.0",
+      "click": "8.5.0",
+      "packaging": "26.3",
+      "pip": "26.2.2",
+      "pip-tools": "7.6.2",
+      "pyproject-hooks": "1.2.0",
+      "setuptools": "80.9.0",
+      "wheel": "0.45.1"
+    },
+    "version": "1.2.1"
+  },
+  "firstAttemptResultSHA256": "eeb8acd2a0e1780a1264329015af2813f05cf6de8bb243895d2f674806f6cd00",
+  "firstCompilerReceiptSHA256": "005a1a90742847e8006ca4e007fef9e53041040386ef51b007771070d43f2040",
+  "imageDigest": "sha256:812e423c722ae3cbac7780e4d8bd1ac54387b27c013c33f89c9c1fdefb7cae51",
+  "limitations": [
+    "Single derived wheel build; byte reproducibility not proven",
+    "Binary wheel is retained privately and not committed; lock requires that exact wheel",
+    "First offline attempt failed in a live scratch monitor; failure evidence retained",
+    "Stable published comments replace sandbox paths; executed requirement/hash lines preserved"
+  ],
+  "locks": {
+    "bootstrap-py313-linux-amd64.provisional.txt": {
+      "rawExecutedLockSHA256": "f409e9c999da22f4920b4724c68adadb416a515f38d760dfd34ae6382d43df04",
+      "sha256": "551e3fb88d8fda035c0d8a2f38c7b08e29b4798d9bad0bfc8d42f5a3c3a8200f",
+      "transform": "remove comment-only/blank lines; prepend stable provisional comments; requirement/hash lines unchanged"
+    },
+    "runtime-py313-linux-amd64.provisional.txt": {
+      "rawExecutedLockSHA256": "4ab76335c77cb2647e1fc8add8744e2ad65ff4d0203896e6ef0557e31bfcb4ef",
+      "sha256": "3b17a7566f0519b7f056697975ed2216e01de5d99972cc882b678be2696cd3d1",
+      "transform": "remove comment-only/blank lines; prepend stable provisional comments; requirement/hash lines unchanged"
+    },
+    "tooling-py313-linux-amd64.provisional.txt": {
+      "rawExecutedLockSHA256": "5909b28d651743c2b3167223be15140bcafd7dda95625700e3775d7755942985",
+      "sha256": "9e9d2d3d92273c607c2acba679d1d08b3cefa3102583718eade5f665a1c99d80",
+      "transform": "remove comment-only/blank lines; prepend stable provisional comments; requirement/hash lines unchanged"
+    }
+  },
+  "offlineResultSHA256": "ce247256563019d55c05f3d3bfb4f6f8c5ba821dac32c369671fb140d62a6e90",
+  "sourceManifestSHA256": "3390cbfaa680b9bb970ce43e8d3e32014230908c46fd9e7b1d4464c7cf7365ee",
+  "status": "provisional-not-activated",
+  "target": {
+    "cache_tag": "cpython-313",
+    "gil_enabled": true,
+    "glibc": "glibc 2.41",
+    "glibc_numeric": [
+      2,
+      41,
+      0
+    ],
+    "implementation": "cpython",
+    "machine": "x86_64",
+    "python": "3.13.18",
+    "soabi": "cpython-313-x86_64-linux-gnu",
+    "system": "Linux"
+  },
+  "verification": {
+    "SQL": false,
+    "appImports": false,
+    "bootstrapPip": "26.2.2",
+    "cleanOfflineInstall": true,
+    "dockerfileActivated": false,
+    "independentRebuildProven": false,
+    "newWheelBuildInOfflineAttempt": false,
+    "pipCheck": true,
+    "runtimeDistributions": 59
+  }
+}

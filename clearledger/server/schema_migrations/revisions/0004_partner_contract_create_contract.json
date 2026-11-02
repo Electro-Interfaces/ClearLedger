@@ -1,0 +1,1015 @@
+{
+  "format": 1,
+  "namespace": "core",
+  "revision": "0004_partner_contract_create",
+  "tables": {
+    "partner_contract_create_profiles": {
+      "name": "partner_contract_create_profiles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "user_enabled",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "false"
+        },
+        {
+          "name": "service_enabled",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "false"
+        },
+        {
+          "name": "revoked",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "false"
+        },
+        {
+          "name": "policy_generation",
+          "type": "int8",
+          "typmod": -1,
+          "not_null": true,
+          "default": "1"
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "checks": {
+        "ck_pc_profile_generation": "policy_generation > 0"
+      },
+      "foreign_keys": {
+        "fk_pc_profile_installation": {
+          "columns": [
+            "installation_id",
+            "client_id",
+            "company_id"
+          ],
+          "table": "partner_installations",
+          "target_columns": [
+            "id",
+            "client_id",
+            "company_id"
+          ],
+          "delete": "c"
+        }
+      },
+      "unique": {
+        "uq_pc_profile_installation": [
+          "installation_id"
+        ]
+      },
+      "indexes": {
+        "ix_pc_profile_company": {
+          "columns": [
+            "company_id",
+            "installation_id"
+          ],
+          "unique": false,
+          "predicate": null,
+          "primary": false
+        },
+        "partner_contract_create_profiles_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        },
+        "uq_pc_profile_installation": {
+          "columns": [
+            "installation_id"
+          ],
+          "unique": true,
+          "primary": false,
+          "predicate": null
+        }
+      }
+    },
+    "partner_contract_create_principals": {
+      "name": "partner_contract_create_principals",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "profile_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "actor_kind",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "machine_grant_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "checks": {
+        "ck_pc_principal_actor": "(actor_kind = 'user' AND user_id IS NOT NULL AND machine_grant_id IS NULL) OR (actor_kind = 'machine' AND user_id IS NULL AND machine_grant_id IS NOT NULL)"
+      },
+      "foreign_keys": {
+        "fk_pc_principal_profile": {
+          "columns": [
+            "profile_id"
+          ],
+          "table": "partner_contract_create_profiles",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_pc_principal_user": {
+          "columns": [
+            "user_id"
+          ],
+          "table": "users",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_pc_principal_grant": {
+          "columns": [
+            "machine_grant_id"
+          ],
+          "table": "partner_grants",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        }
+      },
+      "unique": {},
+      "indexes": {
+        "uq_pc_principal_user": {
+          "columns": [
+            "profile_id",
+            "user_id"
+          ],
+          "unique": true,
+          "predicate": "user_id IS NOT NULL",
+          "primary": false
+        },
+        "uq_pc_principal_grant": {
+          "columns": [
+            "profile_id",
+            "machine_grant_id"
+          ],
+          "unique": true,
+          "predicate": "machine_grant_id IS NOT NULL",
+          "primary": false
+        },
+        "partner_contract_create_principals_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    },
+    "partner_contract_create_refs": {
+      "name": "partner_contract_create_refs",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "profile_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "organization_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "counterparty_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "location_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "checks": {
+        "ck_pc_ref_typed": "(kind = 'organization' AND organization_id IS NOT NULL AND counterparty_id IS NULL AND location_id IS NULL) OR (kind = 'counterparty' AND organization_id IS NULL AND counterparty_id IS NOT NULL AND location_id IS NULL) OR (kind = 'location' AND organization_id IS NULL AND counterparty_id IS NULL AND location_id IS NOT NULL)",
+        "ck_pc_ref_location": "location_id IS NULL OR location_id ~ '[^[:space:]]'"
+      },
+      "foreign_keys": {
+        "fk_pc_ref_profile": {
+          "columns": [
+            "profile_id"
+          ],
+          "table": "partner_contract_create_profiles",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_pc_ref_org": {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_pc_ref_cp": {
+          "columns": [
+            "counterparty_id"
+          ],
+          "table": "counterparties",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_pc_ref_location": {
+          "columns": [
+            "location_id"
+          ],
+          "table": "service_locations",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        }
+      },
+      "unique": {},
+      "indexes": {
+        "uq_pc_ref_org": {
+          "columns": [
+            "profile_id",
+            "organization_id"
+          ],
+          "unique": true,
+          "predicate": "organization_id IS NOT NULL",
+          "primary": false
+        },
+        "uq_pc_ref_cp": {
+          "columns": [
+            "profile_id",
+            "counterparty_id"
+          ],
+          "unique": true,
+          "predicate": "counterparty_id IS NOT NULL",
+          "primary": false
+        },
+        "uq_pc_ref_location": {
+          "columns": [
+            "profile_id",
+            "location_id"
+          ],
+          "unique": true,
+          "predicate": "location_id IS NOT NULL",
+          "primary": false
+        },
+        "partner_contract_create_refs_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    },
+    "partner_contract_create_types": {
+      "name": "partner_contract_create_types",
+      "columns": [
+        {
+          "name": "profile_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "type_code",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "profile_id",
+        "type_code"
+      ],
+      "checks": {
+        "ck_pc_type_code": "type_code ~ '[^[:space:]]'"
+      },
+      "foreign_keys": {
+        "fk_pc_type_profile": {
+          "columns": [
+            "profile_id"
+          ],
+          "table": "partner_contract_create_profiles",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        },
+        "fk_pc_type_code": {
+          "columns": [
+            "type_code"
+          ],
+          "table": "contract_types",
+          "target_columns": [
+            "code"
+          ],
+          "delete": "c"
+        }
+      },
+      "unique": {},
+      "indexes": {
+        "partner_contract_create_types_pkey": {
+          "columns": [
+            "profile_id",
+            "type_code"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    },
+    "partner_contract_success_intents": {
+      "name": "partner_contract_success_intents",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "app_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "original_grant_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "create_profile_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "operation",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "creation_key",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "actor_kind",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "actor_key",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "current_user_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "newborn_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "current_contract_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "request_hash",
+          "type": "bpchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "hash_version",
+          "type": "int4",
+          "typmod": -1,
+          "not_null": true,
+          "default": "1"
+        },
+        {
+          "name": "created_organization_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "created_counterparty_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "created_type_code",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "succeeded",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "true"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "typmod": -1,
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "created_txid",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": "(pg_current_xact_id())::text"
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "checks": {
+        "ck_pc_intent_operation": "operation = 'createContract'",
+        "ck_pc_intent_success": "succeeded",
+        "ck_pc_intent_hash_version": "hash_version = 1",
+        "ck_pc_intent_hash": "request_hash ~ '^[0-9a-f]{64}$'",
+        "ck_pc_intent_text": "client_id ~ '[^[:space:]]' AND created_type_code ~ '[^[:space:]]'",
+        "ck_pc_intent_actor": "(actor_kind = 'user' AND actor_key ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND (current_user_id IS NULL OR actor_key = current_user_id::text)) OR (actor_kind = 'machine' AND actor_key = client_id AND current_user_id IS NULL)",
+        "ck_pc_intent_contract": "current_contract_id IS NULL OR current_contract_id = newborn_id"
+      },
+      "foreign_keys": {
+        "fk_pc_intent_user": {
+          "columns": [
+            "current_user_id"
+          ],
+          "table": "users",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "n"
+        },
+        "fk_pc_intent_contract": {
+          "columns": [
+            "current_contract_id"
+          ],
+          "table": "contracts",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "n"
+        }
+      },
+      "unique": {
+        "uq_pc_intent_namespace": [
+          "company_id",
+          "app_id",
+          "installation_id",
+          "operation",
+          "creation_key"
+        ]
+      },
+      "indexes": {
+        "ix_pc_success_principal_contract": {
+          "columns": [
+            "company_id",
+            "installation_id",
+            "app_id",
+            "client_id",
+            "original_grant_id",
+            "actor_kind",
+            "actor_key",
+            "current_contract_id"
+          ],
+          "unique": false,
+          "predicate": "succeeded AND current_contract_id IS NOT NULL",
+          "primary": false
+        },
+        "ix_pc_success_profile": {
+          "columns": [
+            "create_profile_id",
+            "company_id"
+          ],
+          "unique": false,
+          "predicate": null,
+          "primary": false
+        },
+        "partner_contract_success_intents_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        },
+        "uq_pc_intent_namespace": {
+          "columns": [
+            "company_id",
+            "app_id",
+            "installation_id",
+            "operation",
+            "creation_key"
+          ],
+          "unique": true,
+          "primary": false,
+          "predicate": null
+        }
+      }
+    },
+    "partner_contract_intent_locations": {
+      "name": "partner_contract_intent_locations",
+      "columns": [
+        {
+          "name": "intent_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "location_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "intent_id",
+        "location_id"
+      ],
+      "checks": {
+        "ck_pc_intent_location": "location_id ~ '[^[:space:]]'"
+      },
+      "foreign_keys": {
+        "fk_pc_intent_location": {
+          "columns": [
+            "intent_id"
+          ],
+          "table": "partner_contract_success_intents",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "c"
+        }
+      },
+      "unique": {},
+      "indexes": {
+        "partner_contract_intent_locations_pkey": {
+          "columns": [
+            "intent_id",
+            "location_id"
+          ],
+          "unique": true,
+          "primary": true,
+          "predicate": null
+        }
+      }
+    }
+  },
+  "prerequisites": {
+    "companies": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "users": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "organizations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "counterparties": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "contracts": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "service_locations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "partner_clients": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "app_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "partner_installations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ],
+      "unique": {
+        "name": "uq_partner_install_client_company",
+        "columns": [
+          "id",
+          "client_id",
+          "company_id"
+        ]
+      }
+    },
+    "partner_grants": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "client_id",
+          "type": "varchar",
+          "typmod": 68,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "installation_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "kind",
+          "type": "varchar",
+          "typmod": 14,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "eco_apps": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "eco_company_apps": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        }
+      ],
+      "primary": [
+        "id"
+      ]
+    },
+    "contract_types": {
+      "columns": [
+        {
+          "name": "code",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "is_active",
+          "type": "bool",
+          "typmod": -1,
+          "not_null": true,
+          "default": "true"
+        }
+      ],
+      "primary": [
+        "code"
+      ]
+    }
+  },
+  "functions": {
+    "pc_contract_success_immutable": "\nBEGIN\n    IF TG_OP = 'INSERT' THEN\n        IF NEW.current_contract_id IS NULL OR (NEW.actor_kind = 'user' AND NEW.current_user_id IS NULL) THEN\n            RAISE EXCEPTION 'partner contract success requires current result and actor at insert' USING ERRCODE = '23514';\n        END IF;\n        NEW.created_txid := pg_catalog.pg_current_xact_id()::text;\n        RETURN NEW;\n    END IF;\n    IF (pg_catalog.to_jsonb(NEW) - 'current_user_id' - 'current_contract_id')\n        IS DISTINCT FROM (pg_catalog.to_jsonb(OLD) - 'current_user_id' - 'current_contract_id')\n        OR (NEW.current_user_id IS DISTINCT FROM OLD.current_user_id AND NEW.current_user_id IS NOT NULL)\n        OR (NEW.current_contract_id IS DISTINCT FROM OLD.current_contract_id AND NEW.current_contract_id IS NOT NULL) THEN\n        RAISE EXCEPTION 'immutable partner contract success' USING ERRCODE = '23514';\n    END IF;\n    RETURN NEW;\nEND;\n",
+    "pc_contract_locations_immutable": "\nDECLARE\n    parent_txid text;\nBEGIN\n    IF TG_OP = 'DELETE' THEN\n        IF EXISTS (SELECT 1 FROM core.partner_contract_success_intents WHERE id = OLD.intent_id) THEN\n            RAISE EXCEPTION 'immutable partner contract locations' USING ERRCODE = '23514';\n        END IF;\n        RETURN OLD;\n    END IF;\n    IF TG_OP = 'UPDATE' THEN\n        RAISE EXCEPTION 'immutable partner contract locations' USING ERRCODE = '23514';\n    END IF;\n    SELECT created_txid INTO parent_txid FROM core.partner_contract_success_intents WHERE id = NEW.intent_id;\n    IF parent_txid IS DISTINCT FROM pg_catalog.pg_current_xact_id()::text THEN\n        RAISE EXCEPTION 'partner contract locations must be inserted with success' USING ERRCODE = '23514';\n    END IF;\n    RETURN NEW;\nEND;\n"
+  },
+  "triggers": {
+    "tr_pc_success_immutable": {
+      "table": "partner_contract_success_intents",
+      "function": "pc_contract_success_immutable",
+      "type": 23,
+      "events": "INSERT OR UPDATE"
+    },
+    "tr_pc_locations_immutable": {
+      "table": "partner_contract_intent_locations",
+      "function": "pc_contract_locations_immutable",
+      "type": 31,
+      "events": "INSERT OR UPDATE OR DELETE"
+    }
+  }
+}

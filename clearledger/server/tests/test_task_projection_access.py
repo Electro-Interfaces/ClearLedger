@@ -151,6 +151,9 @@ class Socket:
     async def accept(self):
         pass
 
+    async def close(self, code=1000, reason=""):
+        return None
+
     async def send_json(self, payload):
         self.messages.append(payload)
 
@@ -237,54 +240,59 @@ async def test_preexisting_room_rechecks_acl_for_rest_subscribe_delivery_and_sea
     # Сокет подписан ДО отзыва: свежая подписка сама по себе этот случай не ловит.
     manager = ChatConnectionManager()
     sockets = {name: Socket() for name in (role, "author")}
-    for name, sock in sockets.items():
-        await manager.connect(sock, str(users[name].id), str(task.company_id))
-        manager.subscribe(sock, channel)
-        manager.subscribe(sock, f"user:{users[name].id}")
-    if revocation in ("watcher", "participant"):
-        model = TaskWatcher if revocation == "watcher" else TaskParticipant
-        row = await db.scalar(select(model).where(model.task_id == task.id,
-                                                  model.user_id == users[role].id))
-        await db.delete(row)
-    elif revocation == "assignee":
-        task.assignee_id = users["author"].id
-    else:
-        task.visibility = "personal"
-    await db.commit()
-    assert await db.scalar(select(ChatParticipant.id).where(
-        ChatParticipant.room_id == rid, ChatParticipant.user_id == users[role].id)) is not None
-    before = await room_snapshot(db, task)
-    for path in ("", "/messages", "/messages?q=syntheticneedle", "/media"):
-        response = await clients[role].get(f"/api/chat/rooms/{rid}{path}")
-        assert response.status_code == 404, (path, response.text)
-    assert (await ensure(actors, task, role)).status_code == 404
-    assert (await clients[role].post(f"/api/chat/rooms/{rid}/messages", json={
-        "content": "Тест · Запрещённая запись"})).status_code == 404
-    assert await room_snapshot(db, task) == before
-    assert await db.scalar(select(func.count()).select_from(ChatMessage).where(
-        ChatMessage.room_id == rid)) == 1
-    assert not await _ws_can_subscribe(users[role], channel, db)
-    assert not await recipient_allowed(db, room, users[role].id)
-    assert not await delivery_allowed(channel, event, str(users[role].id))
-    assert await delivery_allowed(channel, event, str(users["author"].id))
-    for payload in (event, {"type": "room:updated", "name": "Скрытое имя"}):
-        await manager._broadcast_local(channel, payload)
-    mention = {"type": "chat:mention", "roomId": str(rid), "preview": "Скрытый текст"}
-    for name in sockets:
-        await manager._broadcast_local(f"user:{users[name].id}", mention)
-    assert sockets[role].messages == []
-    assert len(sockets["author"].messages) == 3
-    for name in (role, "author"):
-        # Поиск скрытого обсуждения остаётся внутри карточки даже у автора.
-        search = await clients[name].get("/api/chat/search", params={"q": "syntheticneedle"})
-        assert search.status_code == 200, search.text
-        assert search.json() == []
-        listed = await clients[name].get("/api/chat/rooms")
-        assert listed.status_code == 200, listed.text
-        assert str(rid) not in listed.text
-    assert (await clients["author"].get(f"/api/chat/rooms/{rid}/messages")).status_code == 200
-    for sock in sockets.values():
-        await manager.disconnect(sock)
+    try:
+        from app.auth import decode_token, token_for
+        for name, sock in sockets.items():
+            identity, proof = await manager.admit(decode_token(token_for(users[name])), str(task.company_id))
+            await manager.connect(sock, str(users[name].id), str(task.company_id), session=identity, proof=proof)
+            manager.subscribe(sock, channel)
+            manager.subscribe(sock, f"user:{users[name].id}")
+        if revocation in ("watcher", "participant"):
+            model = TaskWatcher if revocation == "watcher" else TaskParticipant
+            row = await db.scalar(select(model).where(model.task_id == task.id,
+                                                      model.user_id == users[role].id))
+            await db.delete(row)
+        elif revocation == "assignee":
+            task.assignee_id = users["author"].id
+        else:
+            task.visibility = "personal"
+        await db.commit()
+        assert await db.scalar(select(ChatParticipant.id).where(
+            ChatParticipant.room_id == rid, ChatParticipant.user_id == users[role].id)) is not None
+        before = await room_snapshot(db, task)
+        for path in ("", "/messages", "/messages?q=syntheticneedle", "/media"):
+            response = await clients[role].get(f"/api/chat/rooms/{rid}{path}")
+            assert response.status_code == 404, (path, response.text)
+        assert (await ensure(actors, task, role)).status_code == 404
+        assert (await clients[role].post(f"/api/chat/rooms/{rid}/messages", json={
+            "content": "Тест · Запрещённая запись"})).status_code == 404
+        assert await room_snapshot(db, task) == before
+        assert await db.scalar(select(func.count()).select_from(ChatMessage).where(
+            ChatMessage.room_id == rid)) == 1
+        assert not await _ws_can_subscribe(users[role], channel, db)
+        assert not await recipient_allowed(db, room, users[role].id)
+        assert not await delivery_allowed(channel, event, str(users[role].id))
+        assert await delivery_allowed(channel, event, str(users["author"].id))
+        for payload in (event, {"type": "room:updated", "name": "Скрытое имя"}):
+            await manager._broadcast_local(channel, payload)
+        mention = {"type": "chat:mention", "roomId": str(rid), "preview": "Скрытый текст"}
+        for name in sockets:
+            await manager._broadcast_local(f"user:{users[name].id}", mention)
+        assert sockets[role].messages == []
+        assert len(sockets["author"].messages) == 3
+        for name in (role, "author"):
+            # Поиск скрытого обсуждения остаётся внутри карточки даже у автора.
+            search = await clients[name].get("/api/chat/search", params={"q": "syntheticneedle"})
+            assert search.status_code == 200, search.text
+            assert search.json() == []
+            listed = await clients[name].get("/api/chat/rooms")
+            assert listed.status_code == 200, listed.text
+            assert str(rid) not in listed.text
+        assert (await clients["author"].get(f"/api/chat/rooms/{rid}/messages")).status_code == 200
+        for sock in sockets.values():
+            await manager.disconnect(sock)
+    finally:
+        await manager.stop()
 
 
 @pytest.mark.parametrize("visibility,role,allowed", [

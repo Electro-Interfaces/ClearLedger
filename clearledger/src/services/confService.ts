@@ -1,7 +1,7 @@
 // Приложение «Конференции»: журнал конференций поверх календаря пространства.
 // Встречу заводит и хранит календарь, здесь — свой экран, вход ведущим и то,
 // что осталось после конференции: кто пришёл, сколько шло, о чём договорились.
-import { downloadBlob, get, getToken, post } from './apiClient'
+import { captureApiContextGuard, downloadBlob, get, getToken, post } from './apiClient'
 import { сказатьОВходе, type MeetingUrls } from './conferenceService'
 
 export interface ConfAttendee {
@@ -131,8 +131,20 @@ export async function createMeeting(companyId: string, data: NewMeeting) {
  * (замечание Маркова 11.09.2026).
  */
 export function следитьЗаВкладкой(companyId: string, sessionId: string, вкладка: Window | null) {
+  const проверитьКонтекст = captureApiContextGuard()
+  let остановлен = false
   const адрес = (действие: string) =>
     `/api/conf/sessions/${sessionId}/${действие}?company_id=${encodeURIComponent(companyId)}`
+
+  const остановить = () => {
+    остановлен = true
+    window.clearInterval(таймер)
+    window.removeEventListener('pagehide', скрылиПространство)
+  }
+  const актуален = () => {
+    if (остановлен) return false
+    try { проверитьКонтекст(); return true } catch { остановить(); return false }
+  }
 
   // Выход шлём запросом с `keepalive`, а не `sendBeacon`: пропуск лежит в
   // заголовке, а маячок заголовков не несёт — сервер отвечал ему 401, и человек
@@ -147,37 +159,47 @@ export function следитьЗаВкладкой(companyId: string, sessionId:
   }
 
   const таймер = window.setInterval(() => {
+    if (!актуален()) return
     if (!вкладка || вкладка.closed) {
       window.clearInterval(таймер)
       выйти()
       return
     }
-    void post(адрес('ping')).catch(() => {})
+    void post(адрес('ping'), undefined, { contextGuard: проверитьКонтекст }).catch(() => {})
   }, 30_000)
 
   // Закрыли вкладку пространства, не выходя из конференции: сигнал уходит сразу,
   // иначе человек числился бы в комнате ещё полторы минуты.
-  window.addEventListener('pagehide', () => {
-    window.clearInterval(таймер)
+  function скрылиПространство() {
+    if (!актуален()) return
+    остановить()
     выйти()
-  }, { once: true })
+  }
+  window.addEventListener('pagehide', скрылиПространство, { once: true })
 }
 
 // `вкладка` передаёт тот, кто до входа сам ждёт ответа (создать и войти): открыть её
 // он обязан синхронно по клику, иначе она будет заблокирована как попап.
 export async function joinMeeting(companyId: string, eventId: string,
   вкладка: Window | null = window.open('about:blank', '_blank')): Promise<MeetingUrls> {
+  const проверитьКонтекст = captureApiContextGuard()
   if (вкладка) вкладка.opener = null
   try {
     const m = await post<MeetingUrls & { session_id: string; moderator: boolean }>(
-      `/api/conf/meetings/${eventId}/join?company_id=${encodeURIComponent(companyId)}`)
+      `/api/conf/meetings/${eventId}/join?company_id=${encodeURIComponent(companyId)}`,
+      undefined, { contextGuard: проверитьКонтекст })
+    проверитьКонтекст()
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    проверитьКонтекст()
     следитьЗаВкладкой(companyId, m.session_id, вкладка)
+    проверитьКонтекст()
     сказатьОВходе(m)
+    проверитьКонтекст()
     return m
   } catch (e) {
-    вкладка?.close()
+    // Поздний ответ не закрывает уже открытую человеком конференцию.
+    try { if (вкладка?.location.href === 'about:blank') вкладка.close() } catch { /* чужой origin */ }
     throw e
   }
 }
@@ -337,16 +359,21 @@ export async function archiveRoom(companyId: string, roomId: string) {
 /** Войти в постоянную комнату. Ведущим входит каждый: организатора у места нет. */
 export async function joinRoom(companyId: string, roomId: string): Promise<MeetingUrls> {
   const вкладка = window.open('about:blank', '_blank')
+  const проверитьКонтекст = captureApiContextGuard()
   if (вкладка) вкладка.opener = null
   try {
     const m = await post<MeetingUrls & { session_id: string }>(
-      `/api/conf/rooms/${roomId}/join?company_id=${encodeURIComponent(companyId)}`)
+      `/api/conf/rooms/${roomId}/join?company_id=${encodeURIComponent(companyId)}`,
+      undefined, { contextGuard: проверитьКонтекст })
+    проверитьКонтекст()
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    проверитьКонтекст()
     следитьЗаВкладкой(companyId, m.session_id, вкладка)
+    проверитьКонтекст()
     return m
   } catch (e) {
-    вкладка?.close()
+    try { if (вкладка?.location.href === 'about:blank') вкладка.close() } catch { /* чужой origin */ }
     throw e
   }
 }

@@ -1,0 +1,5 @@
+# ROOT-only harness correction. Application/schema/runtime/test sources are inherited unchanged.
+ARG ACCEPTANCE_IMAGE
+FROM ${ACCEPTANCE_IMAGE}
+COPY tools/backend_image_acceptance_20261030/ /app/tools/backend_image_acceptance_20261030/
+LABEL api-modernization.owner="ctx_b4e579b3aef1" api-modernization.scope="local-affected6-harness-only"

@@ -1,0 +1,112 @@
+{
+  "state": "ROOT_DX_CURRENT15_CLIENT_PURE_CHECKS_ACCEPTED_SCOPE_ONLY",
+  "changedSourceSHA256": {
+    "clearledger/tools/partner-pilots/clients/guards.ts": "e6ad8dfbfcd894bf59ef66c736406f1cf6c01b92bc3250015bd5aa55c16bdba0",
+    "clearledger/tools/partner-pilots/clients/guards.test.ts": "21ec7b63017b59a6b7f9570551ef1be0d22316f471c1323999f0db58ba6b1b25",
+    "clearledger/tools/partner-pilots/clients/scenarios.ts": "3ee82e6b3caf8062a3897438d397b24d124512bed4f6f7a6f4c7eaff7e16b437",
+    "clearledger/docs/PARTNER_QUICKSTART.md": "c889d88e9e3ccdfcfadcda8dc433bc471aaf4116aed404fcb34e71c16474f8f9",
+    "clearledger/docs/PARTNER_SDK_TYPES.md": "a4f6f5c6794b53465c97ca5c2772f847981df04f923ab713b124364926b9f6f8"
+  },
+  "unchangedGeneratedWireSHA256": "570c4f648a31626a83bfcb79f74c4995e761b5ba12f17ae161a8ec158c959abb",
+  "original5CasesRetained": true,
+  "newPureCases": 2,
+  "currentPrimaryPureTests": 7,
+  "curatedPathsInTypeCheckedManifest": 15,
+  "baseline": {
+    "passed": 6,
+    "failedExpected": 1,
+    "meaning": "oldHEADguards reject currentGET, regression proof only"
+  },
+  "current": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0
+  },
+  "typecheck": true,
+  "sourceAfterSame": true,
+  "commands": [
+    {
+      "name": "baseline",
+      "argv": [
+        "node",
+        "--disable-wasm-trap-handler",
+        "--max-old-space-size=256",
+        "--experimental-strip-types",
+        "--experimental-test-isolation=none",
+        "--test-reporter=tap",
+        "--test",
+        "guards.test.ts"
+      ],
+      "cwd": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/dx-current15-client-20261031/regression-baseline",
+      "exit": 1,
+      "reaped": true,
+      "seconds": 0.2597859101369977,
+      "stdoutSHA256": "1911d546d0be31f83e63b55b1a3781c182d8e63887401dc39ceb52970b3bc795",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "current",
+      "argv": [
+        "node",
+        "--disable-wasm-trap-handler",
+        "--max-old-space-size=256",
+        "--experimental-strip-types",
+        "--experimental-test-isolation=none",
+        "--test-reporter=tap",
+        "--test",
+        "guards.test.ts"
+      ],
+      "cwd": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/clearledger/tools/partner-pilots/clients",
+      "exit": 0,
+      "reaped": true,
+      "seconds": 0.267208406701684,
+      "stdoutSHA256": "cccc6f3423fd4061a9b382a7847b68841774da52bd73bcd552552efc2b712a3d",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "typecheck",
+      "argv": [
+        "node",
+        "--disable-wasm-trap-handler",
+        "--max-old-space-size=512",
+        "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/clearledger/tools/partner-pilots/clients/node_modules/typescript/bin/tsc",
+        "-p",
+        "tsconfig.json"
+      ],
+      "cwd": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/clearledger/tools/partner-pilots/clients",
+      "exit": 0,
+      "reaped": true,
+      "seconds": 5.304284851066768,
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "WasmRuntimeOptionSource": "https://nodejs.org/download/release/v22.17.0/docs/api/cli.html#--disable-wasm-trap-handler",
+  "boundsUnchanged": true,
+  "initialHarnessFailureRetained": true,
+  "backendHTTP_SQL_PilotExecuted": false,
+  "coreSourceSchemaGeneratedWireChanged": false,
+  "all20M11GatesRemain": true,
+  "runtimeSnapshotSHA256": {
+    "clearledger/tools/partner-pilots/clients/guards.ts": "e6ad8dfbfcd894bf59ef66c736406f1cf6c01b92bc3250015bd5aa55c16bdba0",
+    "clearledger/tools/partner-pilots/clients/guards.test.ts": "21ec7b63017b59a6b7f9570551ef1be0d22316f471c1323999f0db58ba6b1b25",
+    "clearledger/tools/partner-pilots/clients/scenarios.ts": "3ee82e6b3caf8062a3897438d397b24d124512bed4f6f7a6f4c7eaff7e16b437",
+    "clearledger/docs/PARTNER_QUICKSTART.md": "7e14a21155249fb962f9ebb47db116eec536903914f6c2ff42aad73f2b60193a",
+    "clearledger/docs/PARTNER_SDK_TYPES.md": "4d6aae38845e0865442b210efb863535397339843645228e28a54482ded9f7a6"
+  },
+  "postVerificationDocumentationChange": [
+    {
+      "path": "clearledger/docs/PARTNER_QUICKSTART.md",
+      "beforeSHA256": "7e14a21155249fb962f9ebb47db116eec536903914f6c2ff42aad73f2b60193a",
+      "afterSHA256": "c889d88e9e3ccdfcfadcda8dc433bc471aaf4116aed404fcb34e71c16474f8f9",
+      "change": "remove only trailing blank lines"
+    },
+    {
+      "path": "clearledger/docs/PARTNER_SDK_TYPES.md",
+      "beforeSHA256": "4d6aae38845e0865442b210efb863535397339843645228e28a54482ded9f7a6",
+      "afterSHA256": "a4f6f5c6794b53465c97ca5c2772f847981df04f923ab713b124364926b9f6f8",
+      "change": "remove only trailing blank lines"
+    }
+  ],
+  "verifiedExecutableSourcesStillExact": true
+}

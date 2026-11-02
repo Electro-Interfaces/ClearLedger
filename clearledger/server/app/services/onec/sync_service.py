@@ -23,6 +23,7 @@ from app.models import (
     Warehouse,
 )
 from app.services.onec.com_client import OneCComClient
+from app.services.onec.catalog_root_locks import prepare_catalog_root, require_catalog_root
 from app.services.onec.crypto import decrypt_password
 from app.services.onec.exceptions import OneCError
 from app.services.reference_overrides import apply_import_values
@@ -288,17 +289,29 @@ class OneCSyncService:
             return {"available": False, "catalogs": [], "error": f"{type(exc).__name__}: {exc}"}
 
     async def sync_catalogs(self, connection: OneCConnection) -> OneCSyncLog:
+        prepared = await prepare_catalog_root(self.session, connection)
+        connection = prepared.connection
+        require_catalog_root(self.session, prepared)
         log = await self._start_log(connection, sync_type="catalogs")
+        require_catalog_root(self.session, prepared)
         details: dict[str, Any] = {}
         try:
             async with await self._open_client(connection) as client:
+                require_catalog_root(self.session, prepared)
                 details["organizations"] = await self._sync_organizations(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["counterparties"] = await self._sync_counterparties(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["contracts"] = await self._sync_contracts(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["warehouses"] = await self._sync_warehouses(client, connection, log)
+                require_catalog_root(self.session, prepared)
                 details["nomenclature"] = await self._sync_nomenclature(client, connection, log)
+                require_catalog_root(self.session, prepared)
+            require_catalog_root(self.session, prepared)
             await self._finish_log(log, "completed", details)
         except Exception as exc:
+            require_catalog_root(self.session, prepared)
             await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
             raise
         return log
@@ -1149,8 +1162,12 @@ class OneCSyncService:
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
         await lock_manual_creation(self.session, connection.company_id, "counterparty")
+        # После чужого PATCH identity map может хранить прежние поля и markers.
+        # Под общим барьером перечитываем БД; обычный autoflush сохраняет свои
+        # pending edits перед SELECT, commit остаётся у вызывающего кода.
         rows = (await self.session.execute(select(Counterparty).where(
-            Counterparty.company_id == connection.company_id))).scalars().all()
+            Counterparty.company_id == connection.company_id)
+            .execution_options(populate_existing=True))).scalars().all()
         cp_index = CounterpartyIndex(rows)
         by_ref = {}
         for cp in rows:
@@ -1254,8 +1271,12 @@ class OneCSyncService:
             Counterparty, connection.company_id, by="id")
         local_org = await self._build_local_index(
             Organization, connection.company_id, by="id")
+        # PATCH другой сессии мог изменить реквизиты и manual_overrides после
+        # прежнего commit. Свои правки уже сохранены flush выше; перечитываем
+        # свежие значения перед matcher и применением импортных полей.
         rows = (await self.session.execute(select(Contract).where(
-            Contract.company_id == connection.company_id))).scalars().all()
+            Contract.company_id == connection.company_id)
+            .execution_options(populate_existing=True))).scalars().all()
         contract_index = ContractIndex(rows)
         by_ref = {}
         for contract in rows:

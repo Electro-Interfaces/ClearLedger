@@ -1,0 +1,300 @@
+{
+  "state": "SOURCE_ONLY_NOTRUN",
+  "human_notification": {
+    "action": "doc.register",
+    "opt_in": "trusted immutable company_id + doc_id UUID reference at register log_audit",
+    "timing": "after successful owned physical business root commit; in-memory best effort",
+    "recipients": "current existing User with current email, explicit current UserCompany, existing assert_company_product docs, existing _can_doc read with record_break_glass_use=False",
+    "freshness": "new Session per recipient; reread current rule/enabled/via_email/category/selection/admins-only and native admission immediately before each handoff",
+    "content": [
+      "fixed doc.register label",
+      "current authorized DocCard.reg_number",
+      "current authorized DocCard.title[:200]"
+    ],
+    "email_to_count": 1,
+    "shared_chat": false,
+    "derived_push": false,
+    "new_inbox": false,
+    "identity_context": "no JWT impersonation; public native_claims_context plus scope/org save/reset on all paths",
+    "read_not_download": true,
+    "new_doc_org_object_policy": false
+  },
+  "compatibility": {
+    "legacy_audit_fields": [
+      "company_id",
+      "action",
+      "who",
+      "details"
+    ],
+    "other_immediate_audit_calls": 105,
+    "existing_company_uuid_guard": "unchanged exact type guard",
+    "doc_uuid": "native UUID subclasses admitted then canonical UUID value snapshotted",
+    "business_register": "only one opt-in log_audit keyword; counter/order/outbox/final check/seal/commit unchanged",
+    "queue": "existing ownership guards, physical root/SAVEPOINT poison and retirement-before-callback semantics retained",
+    "publisher": "URL/internal-app publisher byte-unchanged, separate residual OPEN"
+  },
+  "limits": [
+    "READ COMMITTED multi-query eligibility is not a single atomic policy snapshot",
+    "A revoke committed before the fresh check begins suppresses; concurrent changes during its separate reads can race",
+    "No lease or locks through SMTP; in-flight handoff cannot be recalled",
+    "Candidate IDs bound a batch; newly added recipients after candidate selection wait for a future event",
+    "No durable retry, exactly-once, transport success guarantee or rollback of committed registration",
+    "Direct handler PG definitions do not prove HTTP ingress, production delivery or full CI"
+  ],
+  "verification": {
+    "runtime": 0,
+    "imports_collection_tests_sql_network": 0,
+    "static": "Python 3.13 AST and memory compile, source/hash comparison only",
+    "pg_definitions": [
+      "test_doc_register_notice_policy_pg.py",
+      "test_doc_register_notice_lifetime_pg.py"
+    ],
+    "bootstrap": "runtime owner must isolate ancestor conftest before imports, provide full native schema/codecs/constraints and root-owned disposable cleanup; no old world fixture"
+  },
+  "remaining_open": [
+    "full independent whole-nine-file review",
+    "future owner-run synthetic PG acceptance",
+    "URL/HMAC/internal-app delegation and PartnerGrant policy",
+    "native Doc object/org policy",
+    "runtime/CI/release"
+  ],
+  "original_program_sha256": "84f8dd31e6e047bf6fc647f4e601c1c89783dc8ebbeb4fe324814d51a7fb2ba1",
+  "original_program": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "programme_status": {
+    "M00": "OPEN",
+    "M01": "OPEN",
+    "M02": "OPEN",
+    "M03": "OPEN",
+    "M04": "OPEN",
+    "M05": "OPEN",
+    "M06": "OPEN",
+    "M07": "OPEN",
+    "M08": "OPEN",
+    "M09": "OPEN",
+    "M10": "OPEN",
+    "M11": "OPEN",
+    "M12": "OPEN",
+    "M13": "OPEN",
+    "M14": "OPEN",
+    "M15": "OPEN",
+    "M16": "OPEN",
+    "M17": "OPEN",
+    "M18": "OPEN",
+    "M19": "OPEN",
+    "FULL-SCOPE": "OPEN",
+    "SOURCE": "OPEN",
+    "DOMAIN": "OPEN",
+    "CONTRACT": "OPEN",
+    "CHARACTERIZATION": "OPEN",
+    "MIGRATION": "OPEN",
+    "CONSUMERS": "OPEN",
+    "MEASUREMENTS": "OPEN",
+    "FINAL-COMPOSITION": "OPEN",
+    "LIVE-PILOT": "OPEN",
+    "RELEASE": "OPEN"
+  },
+  "completion_asserted": false
+}

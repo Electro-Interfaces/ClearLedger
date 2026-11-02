@@ -12,32 +12,20 @@ from app.models import (ApprovalRequest, ChatMessage, ChatParticipant, ChatRoom,
     DocKind, DocRelation, DocVersion, EzsSite, EzsSiteDoc, EzsSiteEvent, EzsSiteParticipant,
     TaskEvent, User, UserCompany, WorkContextResult)
 from app.services import ezs_site_work, track_files, project_scenarios, project_work
+from app.services import project_workspace_commands as commands
+from app.schemas_project_workspace import LinkBody, DecisionBody, FileBody
 
 router = APIRouter(prefix="/project-workspace", tags=["Работа проекта"])
 
 
 async def owned(db, cid, sid, *, lock=False):
-    query = select(EzsSite).where(EzsSite.id == sid, EzsSite.company_id == cid)
-    if lock:
-        query = query.with_for_update()
-    row = await db.scalar(query)
-    if row is None:
-        raise HTTPException(404, "Проект не найден")
-    return row
+    return await commands.owned(db, cid, sid, lock=lock)
 
 
 async def source_message(db, cid, user, mid):
     from app.routers.chat_router import _assert_participant, _history_from
-    msg = await db.get(ChatMessage, mid)
-    if msg is None or msg.deleted_at:
-        raise HTTPException(404, "Сообщение не найдено")
-    room = await _assert_participant(msg.room_id, user, db)
-    since = await _history_from(msg.room_id, user, db)
-    if since and msg.created_at < since:
-        raise HTTPException(404, "Сообщение не найдено")
-    if room.company_id != cid:
-        raise HTTPException(404, "Сообщение не найдено")
-    return msg
+    return await commands.source_message(db, cid, user, mid,
+        participant_check=_assert_participant, history_lookup=_history_from)
 
 
 @router.get("/unlinked")
@@ -101,41 +89,14 @@ async def overview(sid: uuid.UUID, company_id: str, user=Depends(get_current_use
                     "at": e.created_at, "changes": e.changes} for e, name in events]}
 
 
-class LinkBody(BaseModel):
-    kind: Literal["doc", "task", "message"]
-    id: uuid.UUID
+
 
 
 @router.post("/{sid}/link")
 async def link(sid: uuid.UUID, body: LinkBody, company_id: str,
                user=Depends(get_current_user), db=Depends(get_db)):
-    cid = await assert_company_member(company_id, user, db)
-    site = await owned(db, cid, sid, lock=True)
-    ref = f"site:{sid}"
-    if body.kind == "message":
-        msg = await source_message(db, cid, user, body.id)
-        previous = await db.scalar(select(EzsSiteEvent.id).where(
-            EzsSiteEvent.site_id == sid, EzsSiteEvent.kind == "discussion",
-            EzsSiteEvent.changes.contains([{"message_id": str(msg.id)}])))
-        if previous is None:
-            await ezs_site_work.log_event(db, site, "discussion", text="Привязано обсуждение", user=user,
-                changes=[{"room_id": str(msg.room_id), "message_id": str(msg.id)}])
-    else:
-        row = await project_work.readable_entity(db, cid, user, body.kind, body.id, edit=True)
-        if body.kind == "task":
-            if row.subject_ref and row.subject_ref != ref:
-                raise HTTPException(409, "У поручения уже есть предмет. Измените его в карточке поручения")
-            if row.subject_ref != ref:
-                row.subject_ref = ref
-                db.add(TaskEvent(task_id=row.id, kind="edit", user_id=user.id,
-                                  to_value=ref, note="Привязано к проекту"))
-        elif not await db.scalar(select(DocRelation.id).where(DocRelation.company_id == cid,
-                DocRelation.doc_id == row.id, DocRelation.target_ref == ref, DocRelation.kind == "basis")):
-            db.add(DocRelation(company_id=cid, doc_id=row.id, target_ref=ref, kind="basis", created_by=user.id))
-        await ezs_site_work.log_event(db, site, "note", text="Связана работа Трека", user=user,
-                                      changes=[{"work_ref": f"{body.kind}:{body.id}"}])
-    await db.commit()
-    return {"ok": True}
+    return await commands.link_work(db, company_id, user, sid, body,
+        member_check=assert_company_member, site_lookup=owned, message_lookup=source_message)
 
 
 class NextBody(BaseModel):
@@ -179,43 +140,14 @@ async def next_action(sid: uuid.UUID, body: NextBody, company_id: str,
     return {"ok": True}
 
 
-class DecisionBody(BaseModel):
-    text: str = Field(min_length=3, max_length=4000)
-    source_message_id: uuid.UUID | None = None
-    work: LinkBody | None = None
-    deadline: date | None = None
-    budget: float | None = Field(None, ge=0, allow_inf_nan=False)
+
 
 
 @router.post("/{sid}/decision", status_code=201)
 async def decision(sid: uuid.UUID, body: DecisionBody, company_id: str,
                    user=Depends(get_current_user), db=Depends(get_db)):
-    cid = await assert_company_member(company_id, user, db)
-    site = await owned(db, cid, sid, lock=True)
-    details = {}
-    if body.source_message_id:
-        msg = await source_message(db, cid, user, body.source_message_id)
-        details.update(room_id=str(msg.room_id), message_id=str(msg.id))
-    if body.work:
-        if body.work.kind == "message":
-            raise HTTPException(400, "Укажите поручение или документ")
-        row = await project_work.readable_entity(db, cid, user, body.work.kind, body.work.id)
-        if not await db.scalar(select(row.__class__.id).where(row.__class__.id == row.id,
-                project_work.project_clause(row.__class__, cid, f"site:{sid}"))):
-            raise HTTPException(400, "Сначала свяжите работу с проектом")
-        details["work_ref"] = f"{body.work.kind}:{body.work.id}"
-    if body.deadline or body.budget is not None:
-        data = dict(site.workspace_data or {})
-        if body.deadline:
-            details["deadline"] = {"from": data.get("target_date"), "to": body.deadline.isoformat()}
-            data["target_date"] = body.deadline.isoformat()
-        if body.budget is not None:
-            details["budget"] = {"from": data.get("budget"), "to": body.budget}
-            data["budget"] = body.budget
-        site.workspace_data = data
-    event = await ezs_site_work.log_event(db, site, "decision", text=body.text.strip(), user=user, changes=[details])
-    await db.commit()
-    return {"id": str(event.id)}
+    return await commands.record_decision(db, company_id, user, sid, body,
+        member_check=assert_company_member, site_lookup=owned, message_lookup=source_message)
 
 
 @router.post("/{sid}/chat")
@@ -228,30 +160,14 @@ async def main_chat(sid: uuid.UUID, company_id: str, user=Depends(get_current_us
     return {"room_id": str(room.id)}
 
 
-class FileBody(BaseModel):
-    message_id: uuid.UUID
-    kind: str = Field("other", max_length=24)
+
 
 
 @router.post("/{sid}/file", status_code=201)
 async def attach_file(sid: uuid.UUID, body: FileBody, company_id: str,
                       user=Depends(get_current_user), db=Depends(get_db)):
-    cid = await assert_company_member(company_id, user, db)
-    site = await owned(db, cid, sid, lock=True)
-    msg = await source_message(db, cid, user, body.message_id)
-    source = await track_files.message_file(db, cid, msg)
-    if source is None:
-        raise HTTPException(400, "В сообщении нет файла")
-    row = await db.scalar(select(EzsSiteDoc).where(EzsSiteDoc.site_id == sid, EzsSiteDoc.file_id == source.id))
-    if row is None:
-        row = EzsSiteDoc(company_id=cid, site_id=sid, file_id=source.id, kind=body.kind,
-                        title=source.file_name[:300], stage=site.stage, uploaded_by=user.id,
-                        note=f"chat:{msg.id}")
-        db.add(row)
-        await ezs_site_work.log_event(db, site, "note", text="Добавлен файл из обсуждения", user=user,
-            changes=[{"room_id": str(msg.room_id), "message_id": str(msg.id)}])
-    await db.commit()
-    return {"id": str(row.id)}
+    return await commands.attach_message_file(db, company_id, user, sid, body,
+        member_check=assert_company_member, site_lookup=owned, message_lookup=source_message)
 
 
 class PromoteBody(BaseModel):

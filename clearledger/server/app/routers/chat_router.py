@@ -33,7 +33,7 @@ from app.models import (
     ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, CompanyRole, Counterparty,
     DocRelation, ServiceLocation, SourceFile, User, UserCompany,
 )
-from app.services import chat_mail, process_templates, web_push
+from app.services import chat_access, chat_mail, process_templates, web_push
 from app.services import link_preview as link_preview_service
 from app.services.space_projection import ProjectionError, create_object_ticket
 from app.services.chat_ws import manager
@@ -110,13 +110,8 @@ async def _is_space_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> bool:
 
 
 async def _is_insider(user: User, cid: uuid.UUID) -> bool:
-    """Свой сотрудник пространства — тот, для кого эта организация ОСНОВНАЯ.
-
-    Партнёры и клиенты входят в пространство членством (`user_companies`), но их
-    основная компания другая. Создавать чаты им пока нельзя (решение МАГа 30.07.2026):
-    разговор в пространстве инициирует хозяин пространства.
-    """
-    return user.company_id == cid
+    """Совместимый async адаптер правила основной компании."""
+    return await chat_access.is_insider(user, cid)
 
 
 async def _party_types(db: AsyncSession, cid: uuid.UUID,
@@ -162,68 +157,21 @@ async def _company_titles(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UU
 # памяти процесса, а не запрос к журналу — `_assert_participant` зовётся на каждое
 # действие в чате, и без него листание ленты писало бы в аудит десятки строк подряд.
 # ponytail: словарь растёт, пока живёт процесс; чистить, если суперадминов станет много.
-_FOREIGN_SEEN: dict[tuple[uuid.UUID, uuid.UUID], datetime] = {}
-_FOREIGN_QUIET = timedelta(hours=1)
+_FOREIGN_SEEN = chat_access.FOREIGN_SEEN
+_FOREIGN_QUIET = chat_access.FOREIGN_QUIET
 
 
 async def _audit_foreign_access(room: ChatRoom, user: User, db: AsyncSession) -> None:
-    """Записать в журнал заход в разговор, участником которого человек не является.
-
-    Право суперадмина войти в любой чат остаётся (без него не разобрать инцидент),
-    но остаётся и след: «кто заходил» видно в журнале действий пространства.
-    """
-    key = (user.id, room.id)
-    now = datetime.now(timezone.utc)
-    seen = _FOREIGN_SEEN.get(key)
-    if seen and now - seen < _FOREIGN_QUIET:
-        return
-    _FOREIGN_SEEN[key] = now
-    await log_audit(db, actor=user, company_id=room.company_id, action="chat.foreign_access",
-                    target=room.name or ("личная переписка" if room.type == "direct" else "чат"),
-                    details={"roomId": str(room.id), "type": room.type})
+    """Старые hooks журнала и throttle остаются late-bound."""
+    await chat_access.audit_foreign_access(
+        room, user, db, seen=_FOREIGN_SEEN, quiet=_FOREIGN_QUIET, write=log_audit)
 
 
 async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) -> ChatRoom:
-    """Комната существует, активна, юзер в ней участник и она принадлежит ВЫБРАННОЙ
-    организации — иначе 404 (не палим чужое).
-
-    Организации пространства строго изолированы: у мультиорганизационного человека
-    (наш сотрудник, состоящий во всех) работа идёт в одной организации за раз, и
-    комната соседней недоступна, пока он в неё не переключился. Без этой сверки
-    членства хватало, чтобы прямым запросом достать чат другой организации.
-    """
-    room = await db.get(ChatRoom, room_id)
-    if room is None or not room.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
-    # Личные чаты компании не принадлежат — их изолирует состав участников.
-    if room.company_id is not None and room.type != "direct":
-        if room.company_id != await _company_of(user, db):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
-    if room.scope_ticket_id is not None:
-        from app.services.ticket_communications import assert_staff_room
-        await assert_staff_room(db, room, user)
-    if room.scope_task_id is not None:
-        from app.services.task_access import assert_task_room
-        await assert_task_room(db, room, user)
-    p = (await db.execute(select(ChatParticipant.id).where(
-        ChatParticipant.room_id == room_id, ChatParticipant.user_id == user.id))).scalar_one_or_none()
-    if p is None and not user.is_superadmin:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
-    # Контур — та же изоляция, что между организациями, только внутри одной: членство
-    # в комнате вне своего приложения ничего не открывает. Проверка здесь, а не в
-    # каждой ручке: через эту функцию идут и чтение ленты, и отправка, и вложения.
-    # Комнаты предмета (заявка, задача) контуром не режутся: в список пространства
-    # они не попадают вовсе (см. `list_rooms`), открываются только из карточки, и
-    # границу им держит участие плюс актуальный ACL предмета выше. Иначе
-    # оператор контакт-центра получал 404 на обсуждение СВОЕЙ заявки — комнату
-    # заводят без продукта, и контур не совпадал никогда.
-    if room.company_id is not None and room.type != "direct"             and room.scope_ticket_id is None and room.scope_task_id is None:
-        scope = await _chat_scope(user, room.company_id, db)
-        if scope and room.scope_product != scope:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
-    if p is None:
-        await _audit_foreign_access(room, user, db)
-    return room
+    """Совместимый вход: hooks разрешаются при каждом вызове."""
+    return await chat_access.assert_participant(
+        room_id, user, db, company_of=_company_of, chat_scope=_chat_scope,
+        audit_foreign=_audit_foreign_access)
 
 
 def _событие(kind: str, message: dict) -> dict:
@@ -239,17 +187,7 @@ def _событие(kind: str, message: dict) -> dict:
 
 
 async def _history_from(room_id: uuid.UUID, user: User, db: AsyncSession) -> datetime | None:
-    """С какого момента человеку видна переписка комнаты.
-
-    None — с самого начала (так у всех, кого добавили обычным порядком). Время —
-    его позвали «с чистого листа»: прошлое группы закрыто, и закрыто везде, где
-    история отдаётся, — в ленте, поиске, счётчике непрочитанного, превью в списке
-    и закреплённом сообщении. Достаточно одной незакрытой двери, чтобы правило
-    перестало существовать.
-    """
-    return (await db.execute(select(ChatParticipant.history_from).where(
-        ChatParticipant.room_id == room_id,
-        ChatParticipant.user_id == user.id))).scalar_one_or_none()
+    return await chat_access.history_from(room_id, user, db)
 
 
 async def _assert_ticket_message_visible(room, message, user, db):
@@ -3242,32 +3180,28 @@ async def presence(
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
-async def _ws_user(token: str) -> User | None:
-    """Аутентификация WS по JWT из query (WS не шлёт заголовки).
-
-    Причина отказа пишется в журнал. Без неё отвергнутый апгрейд виден только как
-    403 в nginx: 25.10.2026 так разбирали 15 тыс. отказов в сутки с одного
-    браузера и причину нашли чтением кода, а не журнала. Токен в запись не
-    попадает — только почему он не принят.
-    """
-    from app.auth import session_valid
-    журнал = logging.getLogger("clearledger.chat")
+async def _ws_user(token: str, company_id: str | None = None, *, ws: WebSocket | None = None):
+    """Decode once; the manager retains only native claims/proofs, never Bearer."""
+    from app.services.chat_ws_session import SessionDenied
+    denied = None
     try:
+        if ws is not None and len(ws.query_params.getlist("company_id")) > 1:
+            raise SessionDenied("access_changed")
         payload = decode_token(token)
-        uid = uuid.UUID(payload.get("sub"))
-    except Exception:  # noqa: BLE001
-        журнал.info("WS чата отклонён: токен не разобран или просрочен")
-        return None
-    async with async_session_factory() as db:
-        user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
-    if user is None:
-        журнал.info("WS чата отклонён: пользователя %s больше нет", uid)
-        return None
-    # Отозванный вход (смена пароля, «выйти со всех устройств») гасит и чат.
-    if not session_valid(payload, user):
-        журнал.info("WS чата отклонён: сеанс %s отозван", uid)
-        return None
-    return user
+    except HTTPException as exc:
+        denied = SessionDenied("session_expired" if exc.detail == "Токен истёк" else "session_revoked")
+    except (ValueError, TypeError, OverflowError):
+        # JWT numeric-claim conversion can fail before native shape validation.
+        # Keep this boundary WS-only; the HTTP verifier keeps its old behavior.
+        denied = SessionDenied()
+    except SessionDenied as exc:
+        denied = exc
+    if denied is not None:
+        if ws is not None:
+            await manager.reject(ws, denied.code, denied.reason)
+        raise denied from None
+    token = ""
+    return await manager.admit(payload, company_id, ws=ws)
 
 
 async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
@@ -3293,55 +3227,45 @@ async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
 
 
 @router.websocket("/ws")
-async def chat_ws(ws: WebSocket, token: str = Query(...)):
-    user = await _ws_user(token)
-    if user is None:
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    cid = str(user.company_id) if user.company_id else None
-    became_online = await manager.connect(ws, str(user.id), cid)
-    await ws.send_json({"type": "connected", "userId": str(user.id)})
-    if became_online and cid:
-        await manager.broadcast(f"company:{cid}",
-                                {"type": "presence", "userId": str(user.id),
-                                 "userName": user.name, "online": True})
+async def chat_ws(ws: WebSocket, token: str = Query(...), company_id: str | None = Query(None)):
+    from app.services.chat_ws_session import SessionDenied
+    started = False
     try:
+        session, proof = await _ws_user(token, company_id, ws=ws)
+        token = ""  # no raw credential retained in application session metadata
+        cid = str(proof.company_id) if proof.company_id is not None else None
+        started = True
+        became_online = await manager.connect(ws, str(proof.user_id), cid,
+                                               session=session, proof=proof)
+        if not await manager.send(ws, {"type": "connected", "userId": str(proof.user_id)}):
+            return
+        if became_online and cid and manager.is_live(ws):
+            await manager.broadcast(f"company:{cid}",
+                {"type": "presence", "userId": str(proof.user_id),
+                 "userName": proof.user_name, "online": True}, actor=ws)
         while True:
             data = await ws.receive_json()
+            await manager.current(ws)
             mtype = data.get("type")
             if mtype == "ping":
-                await ws.send_json({"type": "pong"})
+                if not await manager.send(ws, {"type": "pong"}):
+                    return
             elif mtype == "subscribe":
-                ch = data.get("channel", "")
-                async with async_session_factory() as db:
-                    ok = await _ws_can_subscribe(user, ch, db)
-                if ok:
-                    manager.subscribe(ws, ch)
-                else:
-                    await ws.send_json({"type": "subscribe:denied", "channel": ch})
+                await manager.subscribe_current(ws, data.get("channel", ""), _ws_can_subscribe)
             elif mtype == "unsubscribe":
                 manager.unsubscribe(ws, data.get("channel", ""))
             elif mtype == "typing":
-                ch = data.get("channel", "")
-                if manager.is_subscribed(ws, ch):
-                    async with async_session_factory() as db:
-                        if not await _ws_can_subscribe(user,ch,db):
-                            manager.unsubscribe(ws,ch)
-                            continue
-                    await manager.broadcast(ch, {"type": "chat:typing", "userId": str(user.id),
-                                                 "userName": user.name}, exclude=ws)
+                await manager.typing_current(ws, data.get("channel", ""), _ws_can_subscribe)
+    except SessionDenied as exc:
+        if started:
+            await manager.close(ws, exc.code, exc.reason)
     except WebSocketDisconnect:
-        pass
-    except Exception:  # noqa: BLE001
+        manager.peer_disconnected(ws)
+    except Exception:  # same malformed/binary message boundary; no new error envelope
         pass
     finally:
-        uid, ucid, became_offline = await manager.disconnect(ws)
-        if became_offline and ucid:
-            async with async_session_factory() as db:
-                await db.execute(text("UPDATE users SET last_seen_at = now() WHERE id = :u"), {"u": uid})
-                await db.commit()
-            await manager.broadcast(f"company:{ucid}",
-                                    {"type": "presence", "userId": uid, "online": False})
+        if started:
+            await manager.close(ws)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Приложение «Чаты» — управление чатами пространства (только администраторы)

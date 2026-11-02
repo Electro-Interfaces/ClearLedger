@@ -81,11 +81,9 @@ export interface TokenResponse {
   user: BasicUser
 }
 
-/** Логин по email + пароль */
+/** Логин по email + пароль. AuthProvider сохраняет токен, если попытка ещё актуальна. */
 export async function login(email: string, password: string, otp?: string): Promise<TokenResponse> {
-  const result = await api.post<TokenResponse>('/api/auth/login', otp ? { email, password, otp } : { email, password })
-  api.setToken(result.access_token)
-  return result
+  return api.post<TokenResponse>('/api/auth/login', otp ? { email, password, otp } : { email, password })
 }
 
 /**
@@ -113,8 +111,8 @@ export async function register(data: {
 }
 
 /** Получить текущего пользователя + список доступных компаний по токену */
-export async function getMe(): Promise<AuthUser> {
-  return api.get<AuthUser>('/api/auth/me')
+export async function getMe(options?: { signal?: AbortSignal }): Promise<AuthUser> {
+  return api.get<AuthUser>('/api/auth/me', undefined, options)
 }
 
 /** Продлить токен (выдаёт новый JWT) */

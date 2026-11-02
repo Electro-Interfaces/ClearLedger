@@ -1,0 +1,88 @@
+{
+  "acceptance": {
+    "status": "ACCEPTED_SDK16_WIRE_TYPES_SCOPED_SOURCE_AND_RECORDED_RAW",
+    "head": "fe5048c666a04955615b903506c3b38392172d43",
+    "reviewDir": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/sdk16-root-independent-review-20261101",
+    "reviewHashes": {
+      "REVIEW.md": "62a5854ac51a059934d35bbdf175438f7406445676f42f68f17ee9611db55496",
+      "REVIEW.json": "d69b85601fd21e8bc344ddb8a351225a67cb9ae6c668b13333dd4823b9953b58"
+    },
+    "cases": "6generationtests +5consumercompilation10newnegativecontrols",
+    "limits": [
+      "Ревьюер Runtime0: только чтение FS/Git, Python stdlib AST/hash/JSON и compile в памяти без exec; код приложения, helper, библиотек и тестов не импортировался и не запускался; Node/generator/tsc/pytest/collection/SQL/PG/Docker/network/SSH/browser/install не запускались; subagents/commit/push отсутствуют.",
+      "PASS runtime относится к предоставленным сырым логам root, не к собственному повторному запуску. Совпадение SHA и receipts связывает их с зафиксированными файлами; сам по себе лог не является полным воспроизведением окружения/исполнения.",
+      "TypeScript strings/arrays не проверяют UUID/date syntax, длины/уникальность массивов, byte cap и runtime ACL. Excess-property проверки примеров не равны авторизации или exact-object runtime validation; structural TS допускает дополнительные поля через некоторые переменные.",
+      "Детерминизм, freshness/ref/version/structural negative controls и real Base parity не доказывают HTTP/OAuth/DB/идемпотентность/конкуренцию; прежние принятые HTTP70/SQL122 не пересматривались.",
+      "Прежнее P2 покрытия полных именованных GET/OAS response examples остается отдельной работой; SDK16 не закрывает его и не объявляет все направления формально завершенными.",
+      "Нет production/transport/OAuth/client request implementation изменений; заключение ограничено exact3 SOURCE+RAW, не является CI/GO, приемкой root или разрешением выпуска."
+    ],
+    "inheritedOpenItems": [
+      {
+        "severity": "P2",
+        "area": "GET/OAS named full response examples",
+        "status": "SEPARATE_FIX_NOT_CLOSED_BY_SDK16",
+        "basis": "Граница из задания координатора; повторный аудит и исправление вне exact3."
+      }
+    ],
+    "noFullSDKNetworkClientNoCI": true
+  },
+  "actualRuntime": {
+    "status": "PASS_OFFICIAL_SDK16_GENERATION_CHECK_SIX_TESTS_FOUR_CONSUMERS",
+    "admission": {
+      "source": "aae0e555b507d268f242f360353c04faa2be77fb",
+      "tools": "officialexistinggenerate/check/six generationtests/fourconsumersTSC",
+      "offline": true,
+      "noInstall": true,
+      "nodeModulesVerifiedAgainstHistoricalFileManifest": 2014,
+      "manifestHash": "6438369365446fd11e1c01ceb9fd86c1246e35a6aa1a9db285fb0a1efcc5bd6b",
+      "noServerNoPG": true,
+      "python": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/bin/python"
+    },
+    "operations": [
+      {
+        "operation": "generate",
+        "exit": 0,
+        "seconds": 3.8304344471544027,
+        "stdoutBytes": 90,
+        "stderrBytes": 0
+      },
+      {
+        "operation": "check",
+        "exit": 0,
+        "seconds": 3.6602111039683223,
+        "stdoutBytes": 52,
+        "stderrBytes": 0
+      },
+      {
+        "operation": "generation-six",
+        "exit": 0,
+        "seconds": 27.76423792168498,
+        "stdoutBytes": 1662,
+        "stderrBytes": 0
+      },
+      {
+        "operation": "four-consumers",
+        "exit": 0,
+        "seconds": 1.9938441859558225,
+        "stdoutBytes": 0,
+        "stderrBytes": 0
+      }
+    ],
+    "generatedSHA256": "bab793ef2f30131cbcd8fd5541c8d7275ee5c6a4c9a7217e0ea940dce48c690e",
+    "generatedBytes": 210165,
+    "scope": "offline schema/generatedwiretypes only; notHTTP/OAuth/PG/SDKnetworkclient/fullCI"
+  },
+  "fiveConsumers": {
+    "operation": "five-consumers-tsc-including-create-and-ten-negative-controls",
+    "exit": 0,
+    "seconds": 2.210536398924887,
+    "sourceFiles": {
+      "clearledger/tools/partner-api-types/contract-create-consumer.ts": "60b69d057d4cf3b96c0966dd54efcc7bf941198f7ae86a36f64478468f0b2b2d",
+      "clearledger/tools/partner-api-types/tsconfig.json": "59116c09cb54bb346548f7b875d9d8e566c35cd7abc319de269dbbc4dd267827",
+      "clearledger/src/generated/partner-api.d.ts": "bab793ef2f30131cbcd8fd5541c8d7275ee5c6a4c9a7217e0ea940dce48c690e"
+    },
+    "scope": "compileonly; strings do notvalidateUUID/date/arraylength/authorization; noHTTPrequest"
+  },
+  "originalProgramUnchanged": true,
+  "overallCompletion": false
+}

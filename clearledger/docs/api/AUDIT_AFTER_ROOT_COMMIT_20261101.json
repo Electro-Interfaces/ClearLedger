@@ -1,0 +1,399 @@
+{
+  "schema": "audit-after-root-commit/v1",
+  "language": "ru",
+  "implementation": "G3 exact8",
+  "runtime": "UNKNOWN",
+  "test_definition_state": "AUTHORED/NOTRUN",
+  "completion_asserted": false,
+  "program_ready": false,
+  "paths": [
+    "clearledger/server/app/services/after_root_commit.py",
+    "clearledger/server/app/audit.py",
+    "clearledger/server/app/routers/docs_router.py",
+    "clearledger/server/tests/test_audit_after_root_commit_unit.py",
+    "clearledger/server/tests/test_audit_after_root_commit_pg.py",
+    "clearledger/server/tests/test_doc_register_after_root_commit_pg.py",
+    "clearledger/docs/api/AUDIT_AFTER_ROOT_COMMIT_20261101.md",
+    "clearledger/docs/api/AUDIT_AFTER_ROOT_COMMIT_20261101.json"
+  ],
+  "api": {
+    "notification_timing": {
+      "kind": "keyword-only",
+      "values": [
+        "immediate",
+        "after_root_commit"
+      ],
+      "default": "immediate"
+    },
+    "selected_call": "register_doc/doc.register",
+    "payload": [
+      "company_id: UUID (unchanged value/type)",
+      "action: str",
+      "who: str | None",
+      "details: str | None"
+    ]
+  },
+  "targeted_audit_baseline": {
+    "calls": 106,
+    "paths": 24,
+    "opted_in": 1,
+    "immediate_remaining": 105
+  },
+  "ownership": {
+    "supported": "single actual Engine-bound AsyncSession/Session SQLAlchemy 2.0.36, owned physical RootTransaction, corresponding ORM/Core nested stack",
+    "reject_before_add": [
+      "invalid timing",
+      "Connection-bound/external join",
+      "mapper multibind",
+      "get_bind overrides",
+      "twophase",
+      "unknown session/engine/configuration",
+      "borrowed/foreign current-root connections",
+      "Engine AUTOCOMMIT (case normalized)",
+      "current Connection AUTOCOMMIT",
+      "untracked Core SAVEPOINT/changed ORM nested ownership"
+    ],
+    "later_enlistment": "metadata-only revalidation before_flush/before_commit/after_begin; sticky poisoned queue requires whole-root rollback after late ownership error; no dispatch from poisoned root",
+    "helper_begins_commits_rollbacks": false,
+    "isolation_detection": "cached Engine dialect connect isolation + Engine/Connection execution options + Connection._is_autocommit_isolation; no SQL",
+    "transaction_API_boundary": "SQLAlchemy Session/AsyncSession transaction APIs with matching Connection nested stack; raw transaction SQL/direct driver isolation mutation unsupported"
+  },
+  "events": {
+    "after_commit": "mark exact current scope successful only",
+    "after_transaction_end": "nested merge by enqueue sequence; rollback subtree discard; flush child ignored; exact owned root end detaches before scheduling",
+    "failure": "discard on rollback/flush failure/close/invalidate; no stale root reuse",
+    "scheduler_failure": "log only; committed command stays successful; no retry/requeue",
+    "hook_SQL_ORM_await_network": false,
+    "before_flush": "reject untracked Core nested boundaries before AuditEvent DML; ownership failure poisons queue until root rollback"
+  },
+  "unchanged": [
+    "AuditEvent persistence/serialization/system actor",
+    "notify.dispatch recipients/rules/channels/content/session/error ownership",
+    "space_events transactional outbox",
+    "all register algorithm/body/signature/decorators except selected audit keyword",
+    "all other router roots including create_doc/R1/Auth",
+    "models/codecs/schema/migrations/existing tests/conftest/runner/WS"
+  ],
+  "tests": {
+    "state": "AUTHORED/NOTRUN",
+    "definitions": {
+      "clearledger/server/tests/test_audit_after_root_commit_unit.py": [
+        "test_default_immediate_parity_and_system_actor",
+        "test_legacy_serialization_empty_and_unicode",
+        "test_serialization_error_precedes_add",
+        "test_invalid_mode_rejected_before_add_or_enqueue",
+        "test_payload_freezes_four_primitives_without_uuid_cast",
+        "test_optin_system_actor_snapshot",
+        "test_unsafe_configuration_before_add",
+        "test_engine_autocommit_rejected_before_add_without_connection"
+      ],
+      "clearledger/server/tests/test_audit_after_root_commit_pg.py": [
+        "test_physical_root_visibility_flush_and_dependency_second_commit",
+        "test_abandoned_root_and_same_session_reuse",
+        "test_actual_constraint_flush_failure_clears_root",
+        "test_savepoint_success_merges_and_rollback_discards_only_child",
+        "test_deep_subtree_rollback_and_committed_sibling_order",
+        "test_root_rollback_clears_already_merged_child",
+        "test_cancelled_owner_rolls_back_before_session_reuse",
+        "test_reentrant_new_root_has_no_old_payload",
+        "test_scheduler_failure_is_log_only_after_commit",
+        "test_expiry_and_close_leave_primitive_actor_payload",
+        "test_external_connection_rejected_before_add",
+        "test_scoped_lock_transaction_end_listener_coexists",
+        "test_existing_per_statement_alternate_bind_rejected_before_add",
+        "test_core_savepoint_before_optin_rejects_before_add",
+        "test_late_core_savepoint_blocks_flush_and_poisons_root_until_rollback",
+        "test_autocommit_configuration_has_no_audit_or_notification_effect"
+      ],
+      "clearledger/server/tests/test_doc_register_after_root_commit_pg.py": [
+        "test_native_register_atomic_success_and_repeat_409",
+        "test_native_manual_collision_keeps_counter_and_no_second_notification",
+        "test_native_register_ordinary_acl_denies_without_audit",
+        "test_strict_superadmin_read_breakglass_does_not_authorize_register",
+        "test_actual_register_commit_constraint_failure_rolls_back_all_effects"
+      ]
+    },
+    "preimport_isolation_bootstrap_cleanup_owner": "root harness",
+    "module_guard_is_earlier_conftest_protection": false,
+    "schema": "native; no DDL or FK stripping",
+    "notification_boundary_spy": "dispatch_async only",
+    "physical_visibility": "fresh independent Session checks native committed rows before callback records",
+    "commit_cancellation_ambiguity": "UNKNOWN; no guessed physical result",
+    "callback_oracle": "both PG fixtures record every attempt/failure before independent visibility assertion and assert their ledger at teardown outside production scheduler catch",
+    "new_ownership_families": [
+      "Core SAVEPOINT before opt-in rejects before add",
+      "Core SAVEPOINT after enqueue blocks flush; SAVEPOINT rollback cannot unpoison root; root rollback/reuse no stale",
+      "Engine AUTOCOMMIT rejects before add",
+      "same-Engine Connection AUTOCOMMIT rejects before add",
+      "late Connection AUTOCOMMIT enlistment poisons queue before AuditEvent DML"
+    ]
+  },
+  "validation": {
+    "mode": "SOURCE-ONLY",
+    "allowed": [
+      "stdlib AST",
+      "hash",
+      "JSON",
+      "in-memory compile Python 3.13",
+      "read SQLAlchemy 2.0.36 source"
+    ],
+    "project_imports": 0,
+    "external_library_imports": 0,
+    "test_collection_execution": 0,
+    "runtime_SQL_PG_network_build_install": 0
+  },
+  "delivery": {
+    "best_effort": true,
+    "durable": false,
+    "exactly_once": false,
+    "crash_delivery_guaranteed": false
+  },
+  "original_program": {
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "original_status": {
+    "M00": "OPEN",
+    "M01": "OPEN",
+    "M02": "OPEN",
+    "M03": "OPEN",
+    "M04": "OPEN",
+    "M05": "OPEN",
+    "M06": "OPEN",
+    "M07": "OPEN",
+    "M08": "OPEN",
+    "M09": "OPEN",
+    "M10": "OPEN",
+    "M11": "OPEN",
+    "M12": "OPEN",
+    "M13": "OPEN",
+    "M14": "OPEN",
+    "M15": "OPEN",
+    "M16": "OPEN",
+    "M17": "OPEN",
+    "M18": "OPEN",
+    "M19": "OPEN",
+    "FULL-SCOPE": "OPEN",
+    "SOURCE": "OPEN",
+    "DOMAIN": "OPEN",
+    "CONTRACT": "OPEN",
+    "CHARACTERIZATION": "OPEN",
+    "MIGRATION": "OPEN",
+    "CONSUMERS": "OPEN",
+    "MEASUREMENTS": "OPEN",
+    "FINAL-COMPOSITION": "OPEN",
+    "LIVE-PILOT": "OPEN",
+    "RELEASE": "OPEN"
+  },
+  "open": [
+    "G1 shared numbering/Case/fresh policy/token/lock changes",
+    "FullDocs/register G1",
+    "OrgDELETE closure",
+    "full exact original20+11",
+    "CI",
+    "release",
+    "program GO",
+    "actual events and physical PG runtime acceptance",
+    "recipient/filter runtime characterization",
+    "ambiguous commit cancellation characterization"
+  ]
+}

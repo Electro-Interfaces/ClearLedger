@@ -1,0 +1,110 @@
+{
+  "format": 1,
+  "revisions": [
+    {
+      "artifact_sha256": "301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1",
+      "files": {
+        "revisions/0001_contract.json": "19450cd978b88df859aa6f4d33ad745f48fb4f0b55a17850aa875e75b66a0194",
+        "revisions/0001_product_api_budgets.sql": "98da0597f9e4d6a3d21326a310496b790753a5d9e766cfec8005d84641dd2ac9",
+        "revisions/catalog_v1.py": "ae3c42d51a7e7e37ee293b2c64f73addd421cf792b63af6bed6c36b1ed5f24f5",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0001_product_api_budgets",
+      "namespace": "core",
+      "ordinal": 1,
+      "parent": null,
+      "runner_format": 1,
+      "source_commit": "b55d99597ae0dbd3986e8cde0469f7e117d18177"
+    },
+    {
+      "artifact_sha256": "203ee350a47fb3e12d2e2fb6d292fc0e1a19b4cd3cd348b507551cf233cae2f0",
+      "files": {
+        "revisions/0002_calendar_contract.json": "482e1288effc7eed97eda57ea27f31501b49000090ee65aa607c6e99d98634ad",
+        "revisions/0002_calendar_protocol_sequence.sql": "28d296c60bb1fa04534b2871febf8acd4163253156e6e00871fc6e5bad9b5835",
+        "revisions/catalog_v2.py": "6d60ec4e18b5e3c66808acede434f82641d4f7701ee3867a8cbb9159b0d80dd1",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0002_calendar_protocol_sequence",
+      "namespace": "core",
+      "ordinal": 2,
+      "parent": "0001_product_api_budgets",
+      "runner_format": 1,
+      "source_commit": "ba9fc30be815a554cb0c646a6c75f59e17c19fb0"
+    },
+    {
+      "artifact_sha256": "c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d",
+      "files": {
+        "revisions/0003_pulse_view_role_grants.sql": "cc59ec7b281db6120a81fb01dd5b9b7f1ff44c259b6b8b94993f91dbbd1e583b",
+        "revisions/0003_pulse_view_role_grants_contract.json": "d7e78791a5792c606253f74ee15eca9b70a2baeff28aa56844759e548531846c",
+        "revisions/catalog_pulse_view_role_grants_v1.py": "6b291890dcd02a8ce019e7c1e85306b445b6a3ba0c20d4d05492c33e539b9540",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0003_pulse_view_role_grants",
+      "namespace": "core",
+      "ordinal": 3,
+      "parent": "0002_calendar_protocol_sequence",
+      "runner_format": 1,
+      "source_commit": "875929b3885d98ace8e370a72d62a825bf76960b"
+    },
+    {
+      "artifact_sha256": "58ff7a0cf33f7fb55fa080e4efe60c1a4aece67588cf1bfe8b44bc75e92c7e31",
+      "files": {
+        "revisions/0004_partner_contract_create.sql": "1ef5de696b75f79ca58cd4c32844bb3281dcaa249d4b89e588b0e207fed02ae8",
+        "revisions/0004_partner_contract_create_contract.json": "1ced9ff25109a510bc3c9f2adabfa63537c9956fb549793a0ff5aee4e5a1ea53",
+        "revisions/catalog_partner_contract_create_v1.py": "c020c639316a672eec950d0757f1517c6096e5f522100ab97f37ee853536929d",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0004_partner_contract_create",
+      "namespace": "core",
+      "ordinal": 4,
+      "parent": "0003_pulse_view_role_grants",
+      "runner_format": 1,
+      "source_commit": "d71e4f3754efce7c911cc95cb46eb22707e8efbc"
+    },
+    {
+      "artifact_sha256": "99d6c539f5a5e4962926e6d8978db3a5487bab0d5fb20531b31cd95daf59d42d",
+      "files": {
+        "revisions/0005_partner_contract_cycle_receipts.sql": "8fa567ecb000b348792da84cd5af8885268752a59ebe92117506989d5b370704",
+        "revisions/0005_partner_contract_cycle_receipts_contract.json": "c8107137adf8ad55a5fb5bbcf199e18350b4ea3150387cf56dd89af512841603",
+        "revisions/catalog_partner_contract_cycle_receipts_v1.py": "d92abc00a1fe9cf36b80519560794a49a1e7a6e1292b2596db518da363da69a7",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0005_partner_contract_cycle_receipts",
+      "namespace": "core",
+      "ordinal": 5,
+      "parent": "0004_partner_contract_create",
+      "runner_format": 1,
+      "source_commit": "cfd804c469d203c505b57668af8b57d9b4a866a2"
+    },
+    {
+      "artifact_sha256": "94f830704cee4366dfe9565370aac00de74143691e99b9b8f797d48ff51f4b7d",
+      "files": {
+        "revisions/0006_site_authority.sql": "941411d96992790189cc2153c584282cf322832859686ec922f0d625b4e70387",
+        "revisions/0006_site_authority_contract.json": "475fdcffdb7195996d258d61118880bbaf1a94d3cf5fecbc865fbca2fa315c56",
+        "revisions/catalog_site_authority_v1.py": "4224b64414d354c5081bf1cbbd03af198e15674afb0f199f146bf526216a310e",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0006_site_authority",
+      "namespace": "core",
+      "ordinal": 6,
+      "parent": "0005_partner_contract_cycle_receipts",
+      "runner_format": 1,
+      "source_commit": "0db9a97e2f6b86f2307cfa5abefb1a32982d37ec"
+    },
+    {
+      "artifact_sha256": "e4a5617c770751f019d1d618c8e9edce9de6e0ebae8ed5c0aed2b7b7b991a499",
+      "files": {
+        "revisions/0007_doc_site_business.sql": "ee867c0fd4f790b508ca64749de5a048072978d46873e4d16f39c5665f1dd3bc",
+        "revisions/0007_doc_site_business_contract.json": "3ce780a4c37529e5d96c7e9d74c9a1cff5fee5797aba93beff23d1e5f537e9a6",
+        "revisions/catalog_doc_site_business_v1.py": "59238456571df0d1c86850aaff01ad2df49a5a61f76d3c10ee917c29fe860826",
+        "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+      },
+      "id": "0007_doc_site_business",
+      "namespace": "core",
+      "ordinal": 7,
+      "parent": "0006_site_authority",
+      "runner_format": 1,
+      "source_commit": "46566816f59e0d65f61b5426842d6a496e8fc13c"
+    }
+  ]
+}

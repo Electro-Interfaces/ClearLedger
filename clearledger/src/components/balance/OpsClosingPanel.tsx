@@ -20,13 +20,14 @@ import {
 } from '@/components/ui/table'
 import { AlertTriangle, CalendarClock, Loader2, Lock, RefreshCw } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ApiError } from '@/services/apiClient'
 import { fmtN } from './balanceCalc'
 import { OpsPeriodsScale } from './OpsPeriodsScale'
 import { OpsCalendarBlock } from './OpsCalendarBlock'
 import { OpsDocDialog } from './OpsDocDialog'
 import { formatDate } from '@/lib/formatDate'
 import {
-  closeOpsPeriod, correctOpsCharge, getOpsClosing,
+  closeOpsPeriod, correctOpsCharge, getOpsClosing, materializeOpsClosing,
   type OpsCharge, type OpsChargeBasis, type OpsClosing, type OpsPeriodStatus,
 } from '@/services/opsService'
 
@@ -87,14 +88,32 @@ export function OpsClosingPanel() {
   })
 
   const close = useMutation({
-    mutationFn: (force: boolean) => closeOpsPeriod(companyId!, period, force),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ops-closing', companyId] }),
+    mutationFn: (target: { companyId: string; period: string; force: boolean }) =>
+      closeOpsPeriod(target.companyId, target.period, target.force),
+    onSuccess: (_, target) => invalidate(target.companyId, target.period),
   })
 
   const correct = useMutation({
-    mutationFn: (chargeId: string) => correctOpsCharge(companyId!, chargeId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ops-closing', companyId] }),
+    mutationFn: (target: { companyId: string; period: string; chargeId: string }) =>
+      correctOpsCharge(target.companyId, target.chargeId),
+    onSuccess: (_, target) => invalidate(target.companyId, target.period),
   })
+
+  function invalidate(id: string, targetPeriod: string) {
+    return Promise.all([
+      qc.invalidateQueries({ queryKey: ['ops-closing', id, targetPeriod] }),
+      qc.invalidateQueries({ queryKey: ['ops-periods', id] }),
+      qc.invalidateQueries({ queryKey: ['ops-calendar', id] }),
+    ])
+  }
+
+  const prepare = useMutation({
+    mutationFn: (target: { companyId: string; period: string }) =>
+      materializeOpsClosing(target.companyId, target.period),
+    onSuccess: (_, target) => invalidate(target.companyId, target.period),
+  })
+  const preparingHere = prepare.variables?.companyId === companyId && prepare.variables?.period === period
+  const closingHere = close.variables?.companyId === companyId && close.variables?.period === period
 
   if (q.isLoading) {
     return <div className="flex justify-center py-16">
@@ -103,7 +122,9 @@ export function OpsClosingPanel() {
   }
   if (q.isError) {
     return <div className="p-6 text-sm text-red-600 dark:text-red-400">
-      Не удалось загрузить реестр закрытия. Обновите страницу или смените период.
+      {q.error instanceof ApiError && q.error.status === 403
+        ? 'Для закрытия нужен доступ ко всей компании. Снимите отбор по организации или обратитесь к сотруднику с доступом.'
+        : 'Не удалось загрузить реестр закрытия. Обновите страницу или смените период.'}
     </div>
   }
 
@@ -126,11 +147,28 @@ export function OpsClosingPanel() {
       <PeriodBar period={period} onPeriod={setPeriod} status={d.status}
         closedAt={d.closedAt} isClosed={isClosed}
         blockReason={blockReason}
-        pending={close.isPending}
-        onClose={(force) => close.mutate(force)}
-        onRefresh={() => qc.invalidateQueries({ queryKey: ['ops-closing', companyId] })} />
+        pending={closingHere && close.isPending}
+        preparing={preparingHere && prepare.isPending}
+        onClose={(force) => close.mutate({ companyId: companyId!, period, force })}
+        onRefresh={() => prepare.mutate({ companyId: companyId!, period })} />
 
-      {close.data && !close.data.ok && (
+      {!isClosed && d.preparation?.required && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Расчёт за этот месяц ещё не подготовлен или условия изменились.
+          {' '}Нажмите «Обновить расчёт»: появятся новые ожидания и обновятся расчётные суммы.
+          {' '}Ручные строки и документы сохранятся.
+        </p>
+      )}
+      {preparingHere && prepare.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          Не удалось обновить расчёт. {prepare.error instanceof Error ? prepare.error.message : 'Повторите действие.'}
+        </p>
+      )}
+      {closingHere && close.isError && (
+        <p role="alert" className="text-sm text-destructive">Не удалось закрыть месяц. Повторите действие.</p>
+      )}
+
+      {closingHere && close.data && !close.data.ok && (
         <Card className="border-amber-500/40">
           <CardContent className="space-y-1 pt-4 text-sm">
             <div className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-400">
@@ -161,7 +199,8 @@ export function OpsClosingPanel() {
       </div>
 
       <ChargesTable rows={rows} isClosed={isClosed} period={period}
-        onCorrect={(id) => correct.mutate(id)} correcting={correct.isPending} />
+        onCorrect={(id) => correct.mutate({ companyId: companyId!, period, chargeId: id })}
+        correcting={correct.isPending && correct.variables?.companyId === companyId && correct.variables?.period === period} />
 
       <div className="space-y-2">
         <div className="text-sm font-medium">Что предстоит собрать</div>
@@ -176,10 +215,10 @@ export function OpsClosingPanel() {
 /* ── Шапка периода ─────────────────────────────────────────────────────── */
 
 function PeriodBar({ period, onPeriod, status, closedAt, isClosed, blockReason,
-  pending, onClose, onRefresh }: {
+  pending, preparing, onClose, onRefresh }: {
   period: string; onPeriod: (v: string) => void; status: OpsPeriodStatus
   closedAt: string | null; isClosed: boolean; blockReason: string | null
-  pending: boolean; onClose: (force: boolean) => void; onRefresh: () => void
+  pending: boolean; preparing: boolean; onClose: (force: boolean) => void; onRefresh: () => void
 }) {
   const meta = STATUS_META[status] ?? STATUS_META.open
   return (
@@ -195,8 +234,10 @@ function PeriodBar({ period, onPeriod, status, closedAt, isClosed, blockReason,
         <span className="text-xs text-muted-foreground">закрыт {formatDate(closedAt)}</span>
       )}
       <div className="ml-auto flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onRefresh} title="Пересобрать ожидания">
-          <RefreshCw className="h-3.5 w-3.5" />
+        <Button variant="ghost" size="sm" onClick={onRefresh} disabled={preparing || pending || isClosed}
+          title={isClosed ? 'Закрытый расчёт не меняется' : 'Подготовить и обновить ожидания месяца'}>
+          <RefreshCw className={`mr-1 h-3.5 w-3.5 ${preparing ? 'animate-spin' : ''}`} />
+          {preparing ? 'Обновляем расчёт…' : 'Обновить расчёт'}
         </Button>
         {isClosed ? (
           <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -207,13 +248,13 @@ function PeriodBar({ period, onPeriod, status, closedAt, isClosed, blockReason,
             {blockReason && (
               <span className="max-w-md text-xs text-amber-600 dark:text-amber-400">{blockReason}</span>
             )}
-            <Button size="sm" disabled={pending || !!blockReason}
+            <Button size="sm" disabled={pending || preparing || !!blockReason}
               title={blockReason ?? 'Незакрытое будет доведено расчётом'}
               onClick={() => onClose(false)}>
               {pending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}Закрыть месяц
             </Button>
             {blockReason && (
-              <Button size="sm" variant="outline" disabled={pending}
+              <Button size="sm" variant="outline" disabled={pending || preparing}
                 title="Строки без базы уйдут как «не начисляем» — не нулём"
                 onClick={() => onClose(true)}>Закрыть всё равно</Button>
             )}

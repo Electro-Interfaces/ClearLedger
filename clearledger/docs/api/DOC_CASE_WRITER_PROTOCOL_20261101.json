@@ -1,0 +1,812 @@
+{
+  "protocol": "doc-case-writer-v1",
+  "date": "2026-11-01",
+  "status": "SOURCE_ONLY",
+  "runtime": "NOTRUN",
+  "manifest": [
+    "clearledger/server/app/services/doc_case_locks.py",
+    "clearledger/server/app/routers/docs_router.py",
+    "clearledger/server/app/seed.py",
+    "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+    "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+    "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+    "clearledger/docs/api/DOC_CASE_WRITER_PROTOCOL_20261101.md",
+    "clearledger/docs/api/DOC_CASE_WRITER_PROTOCOL_20261101.json"
+  ],
+  "scope": {
+    "kind": "Case prerequisite only",
+    "schema_delta": 0,
+    "model_delta": 0,
+    "inherited_canonical_user_references": 5,
+    "new_namespaces": 0
+  },
+  "advisory": {
+    "namespace": 435223,
+    "key": "company_id.int % (2**31)",
+    "modes": [
+      "S",
+      "X"
+    ],
+    "order": "sorted deduplicated PHYSICAL keys",
+    "lifetime": "caller transaction",
+    "supported_composition": "complete company set and strongest needed mode initially; no S-to-X late upgrade or late key extension"
+  },
+  "roots": {
+    "S": [
+      "register_doc",
+      "assign_doc_case",
+      "bulk_docs:assign_case"
+    ],
+    "X": [
+      "create_kind",
+      "update_kind:including default None",
+      "create_starter_kinds",
+      "contract_kinds",
+      "create_case",
+      "close_case",
+      "rollover_cases",
+      "_seed_doc_kinds"
+    ],
+    "delegates": [
+      "_lock_case_catalog",
+      "_default_case_id:including None"
+    ]
+  },
+  "preserved": [
+    "native ACL/errors/responses/commits",
+    "DocCard before Case; sorted bulk DocCard locks",
+    "non-assign_case bulk bodies",
+    "manual/counter/token/retention/registration logic",
+    "registration audit notification keyword",
+    "seed_data/main/startup ownership and atomicity",
+    "other seed functions",
+    "ordinary-member idempotent contract-kind GET"
+  ],
+  "intentional_changes": [
+    "earlier catalog wait",
+    "all catalog writers participate, including NULL defaults",
+    "seed new Kind closed match -> None",
+    "seed existing None backfill closed match -> skip"
+  ],
+  "seed_order": [
+    "first Company SELECT including pending Role/User autoflush",
+    "all sorted deduplicated physical Company X keys",
+    "Case reads/flush/Kind predicates/default setters"
+  ],
+  "acceptance": {
+    "definition_status": "AUTHORED/NOTRUN; not imported, collected or executed",
+    "definitions": 26,
+    "static_literal_cases": 84,
+    "inventory": [
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_native_reader_shared_admission_and_doc_before_case",
+        "parameters": [
+          {
+            "names": "root",
+            "literal_values": [
+              "register",
+              "assign",
+              "bulk"
+            ]
+          },
+          {
+            "names": "catalog_mode",
+            "literal_values": [
+              "S",
+              "X"
+            ]
+          }
+        ],
+        "static_literal_case_count": 6,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_native_writers_wait_for_shared_catalog_before_predicates",
+        "parameters": [
+          {
+            "names": "root",
+            "literal_values": [
+              "create_kind",
+              "update_kind",
+              "clear_default",
+              "starter",
+              "contract",
+              "create_case",
+              "close",
+              "rollover"
+            ]
+          },
+          {
+            "names": "completion",
+            "literal_values": [
+              "commit",
+              "rollback"
+            ]
+          }
+        ],
+        "static_literal_case_count": 16,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_native_writer_first_blocks_shared_admission_until_real_completion",
+        "parameters": [
+          {
+            "names": "root",
+            "literal_values": [
+              "create_kind",
+              "update_kind",
+              "clear_default",
+              "starter",
+              "contract",
+              "create_case",
+              "close",
+              "rollover"
+            ]
+          }
+        ],
+        "static_literal_case_count": 8,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_actual_reader_first_retains_shared_catalog_across_doc_wait",
+        "parameters": [
+          {
+            "names": "root",
+            "literal_values": [
+              "register",
+              "assign",
+              "bulk"
+            ]
+          }
+        ],
+        "static_literal_case_count": 3,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_physical_collision_dedup_sorted_keys_and_transaction_lifetime",
+        "parameters": [
+          {
+            "names": "mode",
+            "literal_values": [
+              "S",
+              "X"
+            ]
+          },
+          {
+            "names": "completion",
+            "literal_values": [
+              "commit",
+              "rollback"
+            ]
+          }
+        ],
+        "static_literal_case_count": 4,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_cross_company_does_not_block_and_noop_return_keeps_caller_lease",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_default_set_versus_close_has_no_phantom",
+        "parameters": [
+          {
+            "names": "first",
+            "literal_values": [
+              "set",
+              "close"
+            ]
+          }
+        ],
+        "static_literal_case_count": 2,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_default_clear_then_close_and_rollover_open_admission",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_bulk_sorted_doc_locks_precede_case_and_preserve_deduplicated_result",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_pg.py",
+        "definition": "test_rollover_new_case_is_open_for_native_registration_admission",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_concurrent_default_set_close_observed_wait_and_no_closed_default",
+        "parameters": [
+          {
+            "names": "first",
+            "literal_values": [
+              "set",
+              "close"
+            ]
+          }
+        ],
+        "static_literal_case_count": 2,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_concurrent_default_none_clear_waits_before_setters_then_close_succeeds",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_register_none_case_waits_for_new_kind_default_and_snapshots_retention",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_native_number_completion_counter_and_repeat_409",
+        "parameters": [
+          {
+            "names": "manual",
+            "literal_values": [
+              false,
+              true
+            ]
+          }
+        ],
+        "static_literal_case_count": 2,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_native_register_error_precedence_and_whole_root_rollback",
+        "parameters": [
+          {
+            "names": "scenario, expected, detail",
+            "literal_values": [
+              [
+                "blank",
+                400,
+                "Ручной регистрационный номер не может быть пустым"
+              ],
+              [
+                "reason",
+                409,
+                "Укажите причину переноса номера из прежнего журнала"
+              ],
+              [
+                "future",
+                400,
+                "Дата регистрации не может быть в будущем"
+              ],
+              [
+                "pending",
+                409,
+                "Во время согласования реквизиты зафиксированы. Сначала отмените круг"
+              ],
+              [
+                "required",
+                409,
+                "Заполните обязательный реквизит «Synthetic required»"
+              ],
+              [
+                "closed_case",
+                409,
+                "Закрытое дело не принимает новые документы"
+              ]
+            ]
+          }
+        ],
+        "static_literal_case_count": 6,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_manual_ordinary_user_denied_and_busy_number_preserves_counter",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_ordinary_contract_kind_get_repeats_without_admin_or_duplicates",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_default_delegate_native_errors_and_nil_clear",
+        "parameters": [
+          {
+            "names": "default",
+            "literal_values": [
+              null,
+              "closed",
+              "foreign"
+            ]
+          }
+        ],
+        "static_literal_case_count": 3,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_writer_protocol_contract.py",
+        "definition": "test_bulk_other_action_has_no_catalog_lock_and_keeps_native_result",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_seed_pending_role_user_autoflush_precedes_all_sorted_catalog_keys",
+        "parameters": [
+          {
+            "names": "completion",
+            "literal_values": [
+              "commit",
+              "rollback"
+            ]
+          }
+        ],
+        "static_literal_case_count": 2,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_seed_new_kind_uses_open_match_and_preserves_nil_on_closed_match",
+        "parameters": [
+          {
+            "names": "closed",
+            "literal_values": [
+              false,
+              true
+            ]
+          }
+        ],
+        "static_literal_case_count": 2,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_seed_backfill_closed_skips_none_and_existing_nonnull_stays",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_seed_open_backfill_and_root_rollback_restore_catalog",
+        "parameters": [],
+        "static_literal_case_count": 1,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_native_nil_default_kind_writer_first_then_seed_no_kinds_predicate",
+        "parameters": [
+          {
+            "names": "root",
+            "literal_values": [
+              "create_kind",
+              "update_kind",
+              "clear_default",
+              "starter",
+              "contract"
+            ]
+          }
+        ],
+        "static_literal_case_count": 5,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_seed_first_blocks_native_nil_writers_until_real_root_completion",
+        "parameters": [
+          {
+            "names": "root",
+            "literal_values": [
+              "create_kind",
+              "update_kind",
+              "clear_default",
+              "starter",
+              "contract"
+            ]
+          },
+          {
+            "names": "completion",
+            "literal_values": [
+              "commit",
+              "rollback"
+            ]
+          }
+        ],
+        "static_literal_case_count": 10,
+        "status": "AUTHORED/NOTRUN"
+      },
+      {
+        "file": "clearledger/server/tests/test_doc_case_seed_protocol_pg.py",
+        "definition": "test_seed_waits_on_company_catalog_before_any_case_predicate",
+        "parameters": [
+          {
+            "names": "mode",
+            "literal_values": [
+              "S",
+              "X"
+            ]
+          }
+        ],
+        "static_literal_case_count": 2,
+        "status": "AUTHORED/NOTRUN"
+      }
+    ],
+    "mandatory_runtime_composition": [
+      "owner isolation of ancestor conftest BEFORE any import",
+      "full native schema/bootstrap/codecs/constraints",
+      "disposable synthetic database and owner cleanup",
+      "independent runtime approval; module guard is insufficient"
+    ],
+    "instrumentation": "real before_cursor_execute, pg_blocking_pids/pg_locks; native handlers and actual transactions; only notify.dispatch_async suppressed"
+  },
+  "limitations": {
+    "complete_registration_barrier": "OPEN",
+    "post_UPSERT_policy_checker": "OPEN",
+    "retained_pending_and_last_wait": "OPEN",
+    "full_docs": "OPEN",
+    "organization_delete": "OPEN",
+    "CI": "OPEN",
+    "release_readiness": "OPEN",
+    "runtime_absence_of_case_patch_delete": "UNKNOWN",
+    "dynamic_external_writers": "UNKNOWN"
+  },
+  "original_programme_sha256": "84f8dd31e6e047bf6fc647f4e601c1c89783dc8ebbeb4fe324814d51a7fb2ba1",
+  "original_programme": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "original_31_statuses": [
+    {
+      "id": "M00",
+      "status": "OPEN"
+    },
+    {
+      "id": "M01",
+      "status": "OPEN"
+    },
+    {
+      "id": "M02",
+      "status": "OPEN"
+    },
+    {
+      "id": "M03",
+      "status": "OPEN"
+    },
+    {
+      "id": "M04",
+      "status": "OPEN"
+    },
+    {
+      "id": "M05",
+      "status": "OPEN"
+    },
+    {
+      "id": "M06",
+      "status": "OPEN"
+    },
+    {
+      "id": "M07",
+      "status": "OPEN"
+    },
+    {
+      "id": "M08",
+      "status": "OPEN"
+    },
+    {
+      "id": "M09",
+      "status": "OPEN"
+    },
+    {
+      "id": "M10",
+      "status": "OPEN"
+    },
+    {
+      "id": "M11",
+      "status": "OPEN"
+    },
+    {
+      "id": "M12",
+      "status": "OPEN"
+    },
+    {
+      "id": "M13",
+      "status": "OPEN"
+    },
+    {
+      "id": "M14",
+      "status": "OPEN"
+    },
+    {
+      "id": "M15",
+      "status": "OPEN"
+    },
+    {
+      "id": "M16",
+      "status": "OPEN"
+    },
+    {
+      "id": "M17",
+      "status": "OPEN"
+    },
+    {
+      "id": "M18",
+      "status": "OPEN"
+    },
+    {
+      "id": "M19",
+      "status": "OPEN"
+    },
+    {
+      "id": "FULL-SCOPE",
+      "status": "OPEN"
+    },
+    {
+      "id": "SOURCE",
+      "status": "OPEN"
+    },
+    {
+      "id": "DOMAIN",
+      "status": "OPEN"
+    },
+    {
+      "id": "CONTRACT",
+      "status": "OPEN"
+    },
+    {
+      "id": "CHARACTERIZATION",
+      "status": "OPEN"
+    },
+    {
+      "id": "MIGRATION",
+      "status": "OPEN"
+    },
+    {
+      "id": "CONSUMERS",
+      "status": "OPEN"
+    },
+    {
+      "id": "MEASUREMENTS",
+      "status": "OPEN"
+    },
+    {
+      "id": "FINAL-COMPOSITION",
+      "status": "OPEN"
+    },
+    {
+      "id": "LIVE-PILOT",
+      "status": "OPEN"
+    },
+    {
+      "id": "RELEASE",
+      "status": "OPEN"
+    }
+  ],
+  "completion_asserted": false
+}

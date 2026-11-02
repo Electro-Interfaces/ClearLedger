@@ -1,0 +1,40 @@
+{
+  "status": "ROOT_VERIFIED_PASS_JOINT75",
+  "source": "24af3535565381d46f9e51c2841c2feb80b1c8f3",
+  "authorSource": "c03efdb38bb96c8ae0d874bfe048eb8c5151e86a",
+  "previousRead25Source": "2da44d38684349a14f46d92176f11e8a1da74f33",
+  "oldReadCases": 25,
+  "networkCases": 50,
+  "testDefs": 16,
+  "passedPhases": 225,
+  "secondsIncludingBootstrap": 69.5939892558381,
+  "sourceBlobs": 566,
+  "sqlEvents": 11721,
+  "models": 341,
+  "nativeTables": 347,
+  "allOwnedRemoved": true,
+  "foreignProjectionUnchanged": true,
+  "clients": 0,
+  "locks": 0,
+  "hashes": {
+    "source-manifest.json": "252e334013124e68a91cf77d170c709ad5e279ad282cd0696e4a11ae0d1105ab",
+    "driver-manifest.json": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+    "evidence/result.json": "2cbd19bedfdd07595bbc8d44548b208fd53c890d08aeded0d2f0735cba10948d",
+    "evidence/full-native-bootstrap.json": "4a1e2223fdcdcef70e637eb411acf08ee0f1e515558c5e855b9d417d980cd58e",
+    "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+    "evidence/profile-factory-cleanup.json": "40aa3ca0f1d63dd65034e8ecccc3842b20e3250b9ccb548c9efce600487b40ed",
+    "evidence/actual-sql-classes.json": "82ffc90b481248eea2d384c228b9fe154ea12ba8fa3b3d439348435b99a5bd6a",
+    "database-after.json": "2ad0513260f927e09cf4f0741bb1c11fb8d7e45c5c5a3dfdc6ba5f94e630a965",
+    "foreign-before.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+    "foreign-after.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+    "execution.json": "9a0e96a45e9933450649bb0f0118579baad28545cd5f41f416462953cad1e9d4"
+  },
+  "limits": [
+    "In-process real Authlib/PostgreSQL only; no browser/ingress/SSO/CORS/partner pilot/deploy",
+    "10000 candidates/5s are engineering admission, not measured production capacity/SLA",
+    "Native financial report unchanged except shared exact mismatch helper; full native report not executed here",
+    "Swagger/SDK/generated bundles still17; next task must update selected new method18",
+    "No all API/current CI/contract writers acceptance",
+    "First joint attempt25PASS+50setup errors retained; test-only memoized real world fixed alias reseeding"
+  ]
+}

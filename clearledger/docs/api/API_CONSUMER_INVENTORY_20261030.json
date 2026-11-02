@@ -1,0 +1,380 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "06e02207c29651682530309bea1a4157f48b3168",
+  "sourceRevisionProvenance": "explicit-label; verify Git externally; manifest fingerprints actual bytes",
+  "pinnedBase": "06e02207c29651682530309bea1a4157f48b3168",
+  "typescriptVersion": "5.9.3",
+  "generator": {
+    "file": "scripts/inventory-api-consumers.mjs",
+    "sha256": "a197d4788dda5502884b276dda71b0f61ef82538d20cabd9adcdae00a962cd05"
+  },
+  "scope": "production src ts/tsx/js/jsx; no tests/declarations/generated/build/symlinks; AST only",
+  "source": {
+    "files": 1147,
+    "lines": 304567,
+    "manifestSha256": "74c8e02a5a6a5664ff9641f852f3766404a71094c1254dda5e090bebe06faa4e"
+  },
+  "counts": {
+    "records": 5271,
+    "shared": 1459,
+    "direct": 43,
+    "streamConstructors": 2,
+    "unresolvedWrappers": 3769,
+    "omittedWrappers": 0,
+    "syntacticDiagnostics": 0,
+    "staticTransportPaths": 692,
+    "dynamicTransportPaths": 773,
+    "unknownTransportPaths": 37,
+    "unknownTransportMethods": 10
+  },
+  "exclusions": {
+    "excluded-directory": 2,
+    "test-or-declaration-file": 53
+  },
+  "transports": {
+    "native:WebSocket": 2,
+    "native:XMLHttpRequest": 1,
+    "native:XMLHttpRequest.open": 1,
+    "native:fetch": 39,
+    "shared:del": 92,
+    "shared:downloadBlob": 14,
+    "shared:downloadFile": 7,
+    "shared:get": 762,
+    "shared:patch": 63,
+    "shared:post": 426,
+    "shared:put": 65,
+    "shared:upload": 30
+  },
+  "protocols": {
+    "http-or-unknown": 1500,
+    "websocket": 2
+  },
+  "methods": {
+    "DELETE": 94,
+    "GET": 795,
+    "PATCH": 64,
+    "POST": 472,
+    "PUT": 67,
+    "unknown": 10
+  },
+  "unknownMethodReasons": {
+    "constructor": 3,
+    "dynamic-or-nonstandard-method": 1,
+    "input-may-be-request": 2,
+    "spread-or-computed-options": 4
+  },
+  "unknownPathExpressionKinds": {
+    "CallExpression": 23,
+    "Identifier": 12,
+    "PropertyAccessExpression": 1,
+    "missing": 1
+  },
+  "heuristicDomains": {
+    "objects": {
+      "shared": 141,
+      "direct": 0,
+      "unresolvedWrappers": 330
+    },
+    "equipment": {
+      "shared": 66,
+      "direct": 0,
+      "unresolvedWrappers": 102
+    },
+    "counterparties": {
+      "shared": 26,
+      "direct": 0,
+      "unresolvedWrappers": 24
+    },
+    "contracts": {
+      "shared": 29,
+      "direct": 0,
+      "unresolvedWrappers": 48
+    },
+    "documents": {
+      "shared": 175,
+      "direct": 3,
+      "unresolvedWrappers": 421
+    },
+    "monitoring": {
+      "shared": 67,
+      "direct": 0,
+      "unresolvedWrappers": 124
+    },
+    "unknown": {
+      "shared": 998,
+      "direct": 40,
+      "unresolvedWrappers": 2790
+    }
+  },
+  "wrapperFamilies": [
+    {
+      "module": "src/services/analyticsService",
+      "calls": 649
+    },
+    {
+      "module": "src/services/tasksService",
+      "calls": 198
+    },
+    {
+      "module": "src/services/storeService",
+      "calls": 150
+    },
+    {
+      "module": "src/services/storage",
+      "calls": 144
+    },
+    {
+      "module": "src/services/sitesService",
+      "calls": 130
+    },
+    {
+      "module": "src/services/workService",
+      "calls": 127
+    },
+    {
+      "module": "src/services/docsService",
+      "calls": 113
+    },
+    {
+      "module": "src/services/referenceService",
+      "calls": 113
+    },
+    {
+      "module": "src/services/voiceService",
+      "calls": 102
+    },
+    {
+      "module": "src/services/fuelSalesService",
+      "calls": 97
+    },
+    {
+      "module": "src/services/mstoReconciliation/utils",
+      "calls": 97
+    },
+    {
+      "module": "src/services/equipmentService",
+      "calls": 83
+    },
+    {
+      "module": "src/services/chatService",
+      "calls": 82
+    },
+    {
+      "module": "src/services/dataEntryService",
+      "calls": 81
+    },
+    {
+      "module": "src/services/marketService",
+      "calls": 74
+    },
+    {
+      "module": "src/services/booksService",
+      "calls": 72
+    },
+    {
+      "module": "src/services/channelService",
+      "calls": 68
+    },
+    {
+      "module": "src/services/fuel/fuelMappingService",
+      "calls": 62
+    },
+    {
+      "module": "src/services/opsService",
+      "calls": 56
+    },
+    {
+      "module": "src/services/sourceService",
+      "calls": 53
+    },
+    {
+      "module": "src/services/locationService",
+      "calls": 51
+    },
+    {
+      "module": "src/services/perimeterService",
+      "calls": 48
+    },
+    {
+      "module": "src/services/booksExport",
+      "calls": 45
+    },
+    {
+      "module": "src/services/reconciliation/utils",
+      "calls": 39
+    }
+  ],
+  "wrapperFamiliesTotal": 166,
+  "directFamilies": [
+    {
+      "file": "src/services/spaceAuditorService.ts",
+      "calls": 15
+    },
+    {
+      "file": "src/services/apiClient.ts",
+      "calls": 9
+    },
+    {
+      "file": "src/services/developerDocsService.ts",
+      "calls": 3
+    },
+    {
+      "file": "src/services/voiceService.ts",
+      "calls": 3
+    },
+    {
+      "file": "src/components/auditor/AuditorTerminal.tsx",
+      "calls": 1
+    },
+    {
+      "file": "src/components/map/MapLayers.tsx",
+      "calls": 1
+    },
+    {
+      "file": "src/hooks/useChatWs.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/lib/appUpdate.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/lib/reportClientError.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/public/main.tsx",
+      "calls": 1
+    },
+    {
+      "file": "src/services/auditorService.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/services/authService.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/services/chargeExport.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/services/confService.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/services/fuel/stsApiClient.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/services/msto/mstoApiClient.ts",
+      "calls": 1
+    },
+    {
+      "file": "src/services/tradecorp/tradecorpApiClient.ts",
+      "calls": 1
+    }
+  ],
+  "directFamiliesTotal": 17,
+  "familySources": [
+    {
+      "file": "src/services/apiClient.ts",
+      "sha256": "72db95aeb56c1a613579def4c444593e1f1bde550b3c8c172c38533a4f7cc34c",
+      "lines": 429
+    },
+    {
+      "file": "src/services/developerDocsService.ts",
+      "sha256": "31de1e129b377b014d3227a1900a83cbaee20b693e9d700b39ebf1840acdb082",
+      "lines": 139
+    },
+    {
+      "file": "src/services/docsService.ts",
+      "sha256": "b6c056d7047fc5536cb462e6943f703667d62596c14fba4e2c7fa3ce6f8907c5",
+      "lines": 1320
+    },
+    {
+      "file": "src/services/equipmentService.ts",
+      "sha256": "9d0819b78767cff62c2cfec83655163a594cc3beb552d32a184b2d9a5733656a",
+      "lines": 982
+    },
+    {
+      "file": "src/services/fuel/stsApiClient.ts",
+      "sha256": "9e75bdc815fbda461a42bc26b199d0c3531318845e052aebff848b33b05ccba5",
+      "lines": 358
+    },
+    {
+      "file": "src/services/intakeDocsService.ts",
+      "sha256": "6c9d87bc307d583e10b61c70b25bd25ce09dce43899994cbb54d4ab75ef4c439",
+      "lines": 74
+    },
+    {
+      "file": "src/services/megafonVoiceService.ts",
+      "sha256": "e2ffa6d8c00a9f7b4ad885d150656573e033297e1ad2e2f4804f12fac4d8cacc",
+      "lines": 129
+    },
+    {
+      "file": "src/services/msto/mstoApiClient.ts",
+      "sha256": "fda25d1b56fc61a4b8a2a18c73868e20516d39719513c07a0bb32d00b89124f2",
+      "lines": 194
+    },
+    {
+      "file": "src/services/opsService.ts",
+      "sha256": "8179c6b40a59bc3b3503f4c2d225b452de03b645c986db5d1f4cff47714a1b78",
+      "lines": 1508
+    },
+    {
+      "file": "src/services/referenceService.ts",
+      "sha256": "6806e980eda69f60371a473ba4175501a5c55b2484591b6fb0b29d6b3050fd9e",
+      "lines": 1035
+    },
+    {
+      "file": "src/services/siteService.ts",
+      "sha256": "274180a8863fdbc19772f3f553b4b3dfff3c10207b2db0b817e649d00cf2ef25",
+      "lines": 289
+    },
+    {
+      "file": "src/services/sitesService.ts",
+      "sha256": "bd5ba693569ef2bca890f66e7f5fb81a197307894dccbfcf56dba7e5e9f7d5b1",
+      "lines": 1347
+    },
+    {
+      "file": "src/services/spaceAuditorService.ts",
+      "sha256": "5c785e0beda4d5c798cd3e6ae925d4c0d1c68c1467f39a90f3d3ffb0bcb7c08c",
+      "lines": 479
+    },
+    {
+      "file": "src/services/spaceObjectsService.ts",
+      "sha256": "8298b42308f3900c7171a4af1c4efa13e98fcecb064d02603840bc6c61063550",
+      "lines": 433
+    },
+    {
+      "file": "src/services/storageMonitor.ts",
+      "sha256": "9669d4f1a0677ce184e99f79e81db9fb935bd928de60160c7d801afa6b861d4b",
+      "lines": 110
+    },
+    {
+      "file": "src/services/tradecorp/tradecorpApiClient.ts",
+      "sha256": "38b045399a0689bb08d6ca73d9b69b13e3eb6d2ea7843a335aa33f61bf8e43bb",
+      "lines": 275
+    },
+    {
+      "file": "src/services/voiceService.ts",
+      "sha256": "989b09cbc7f376f5e8fa056b393dec6de9cff49718dd01330fa55241dba7d6d8",
+      "lines": 1228
+    }
+  ],
+  "limits": {
+    "wrapperRecords": 5000,
+    "publicWrapperFamilies": 24,
+    "publicDirectFamilies": 24,
+    "publicFamilySources": 32
+  },
+  "limitations": [
+    "Callsites are source evidence, not runtime requests or ownership.",
+    "Service/local wrapper candidates may be helpers; unresolved is not a defect.",
+    "No backend-route validation, partners inventory, dataflow, re-export or runtime dispatch proof.",
+    "Domains are nonexclusive filename/sanitized-path heuristics; unknown remains unknown.",
+    "Native construction/open is not proof of send; XHR open is linked only to a direct const constructor binding.",
+    "No semantic/type diagnostics; only syntactic diagnostics under a closed compiler host."
+  ]
+}

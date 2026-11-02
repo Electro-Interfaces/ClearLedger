@@ -1,0 +1,277 @@
+{
+  "status": "ACCEPT_G352_COMPONENT_SOURCE_RAW",
+  "acceptedAt": "2026-11-01T11:02:13.227320+00:00",
+  "sut": "a011e947f4fea9b61f63558e4055968470fd734f",
+  "cases": 52,
+  "definitions": 30,
+  "phases": 156,
+  "separateWorlds": 1,
+  "secondsIncludingBootstrap": 34.00552360434085,
+  "actualCapturedEngines": 47,
+  "reviewPath": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/g352-root-independent-review-20261101",
+  "review": {
+    "REVIEW.md": "ed51a7dfaefe54531e2096fe9951f60e4bc36b7dcdd3b7af49c172934ea3ed4d",
+    "REVIEW.json": "70f80b9c9bdf33b82c234f3b065ed3cd1050532ae3e02f23d4e847a0549d0070",
+    "static-proof.json": "6befb09b834b3cfefb963d9b31806847982f2d3a96e8d66827151b10ca75f2b4"
+  },
+  "findings": [
+    {
+      "id": "G352-INFO-01",
+      "severity": "informational",
+      "blocking": false,
+      "kind": "metadata-wording",
+      "location": "execution.json:physicalSchemaProfile",
+      "finding": "Historical NativeRegister89DisjointSlice/programmaticNativeClaims wording is broader than G352 direct-User handler calls. No Native89, HTTP JWT or programmatic token-claims coverage should be inferred.",
+      "action": "Use exact 52-case scope and preserve auth boundaries; no RAW/source edit performed."
+    }
+  ],
+  "limitations": [
+    "This review independently evaluates supplied historical ROOT execution; no own app, test, helper, SQL or Docker execution.",
+    "Private control/run.py/contract.json/dsn and env were not read; actual execution provenance remains bounded by public controller and ROOT RAW attestation.",
+    "Only psycopg driver subtree has 115 complete file pins; this is not a manifest of the complete venv.",
+    "Scheduler intercepted; no actual SMTP, delivery authorization Human77, durable delivery/retry or crash guarantee.",
+    "Direct handler User calls do not exercise HTTP/JWT/dependencies/middleware.",
+    "Cancellation before commit only; mid-commit cancellation not covered.",
+    "Card/late Case/kernel traced in source; no transfer of full Native89/Case43 or full concurrency matrix.",
+    "Registry parity validates model names/tables, mapped-column inclusion, PK/FK set/delete actions and RI trigger counts; it is not complete type/default/nullability/index/check/trigger/function/privilege equivalence.",
+    "Foreign equality only covers 41 safe projections, not data/volumes/internal state.",
+    "Pool JSON has stats, not per-engine historical connection identities; 47 derives from original-constructor observer and 35+2+10 source cases.",
+    "Seal protects ORM flush within participating kernel protocol; arbitrary Core DML/raw transaction SQL/direct driver excluded.",
+    "SQLAlchemy internals pinned to 2.0.36; no permission inferred for upgrades.",
+    "One pytest deprecation warning plus two existing SyntaxWarnings recorded; not warning-free or full CI."
+  ],
+  "all31Open": true,
+  "overallCompletion": false,
+  "observation": {
+    "status": "ROOT_OBSERVED_ACTUAL52_PASS_PENDING_INDEPENDENT_SOURCE_RAW",
+    "sut": "a011e947f4fea9b61f63558e4055968470fd734f",
+    "at": "2026-11-01T10:49:12.779857+00:00",
+    "hostSession": 98006,
+    "exit": 0,
+    "reaped": true,
+    "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/g352-a011e947-fullnative-pg-20261101-a41eab2ebeb2",
+    "cases": 52,
+    "definitions": 30,
+    "phases": 156,
+    "secondsIncludingBootstrap": 34.00552360434085,
+    "actualCapturedEngines": 47,
+    "ownedRemoved": true,
+    "scope": "17unit+25legacyPG+10nativeRegister; noHuman77transfer/HTTPJWT/SMTP/activation139/currentCI",
+    "files": {
+      "source-manifest.json": "a33c015b545b06156d94ff7deea73b88195c75dc5bff52df623fa221c41e7f01",
+      "execution.json": "3b217b677be483a5a19440cb0e32cdcd155631b1b41508b42ca6ad7c51bb4f6e",
+      "evidence/result.json": "5db4e4b5f2b9ba09baeea98a0a95d8f60ecd77aac1e3aa87f2f57461a8067648",
+      "evidence/full-collection.json": "3ea04f15d3fd423a976cce2773b8f9efff73f4a6f1fffdbf768a0681acd151a8",
+      "evidence/native-fixture-pools.json": "6a7e220b831720f4a088c4f48112e5891aad364bd78ef7bd3b9eec1896fa00f8",
+      "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+      "role-identity-before-imports.json": "26268fd70dca6292321866f5d18ef2979cbc832b8d5b366d79f3f4051ee34787"
+    }
+  },
+  "originalProgram": {
+    "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+    "sections": [
+      {
+        "id": "M00",
+        "title": "P0: актуальный совместимый source/runtime baseline",
+        "owner": "Выпуск + Core/Support",
+        "dependencies": "Нет",
+        "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+      },
+      {
+        "id": "M01",
+        "title": "P0: завершить реестр поверхностей и владельцев",
+        "owner": "API + владельцы доменов",
+        "dependencies": "M00",
+        "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+      },
+      {
+        "id": "M02",
+        "title": "P0: characterization и измеряемые сценарии",
+        "owner": "Домены + проверка",
+        "dependencies": "M00, уточнения M01",
+        "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+      },
+      {
+        "id": "M03",
+        "title": "P0: общий проверенный контекст/route policy",
+        "owner": "Identity + домены",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+      },
+      {
+        "id": "M04",
+        "title": "P0: границы слоёв и владение транзакцией",
+        "owner": "Core/Support architecture",
+        "dependencies": "M02, M03 skeleton",
+        "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+      },
+      {
+        "id": "M05",
+        "title": "P0: объекты, scopes, population и temporal identity",
+        "owner": "Core objects/equipment",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+      },
+      {
+        "id": "M06",
+        "title": "P0: контрагенты, договоры и идентичность",
+        "owner": "Core references/contracts",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+      },
+      {
+        "id": "M07",
+        "title": "P0: документы и файлы",
+        "owner": "Core documents/files",
+        "dependencies": "M03, M04",
+        "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+      },
+      {
+        "id": "M08",
+        "title": "P0: энергия, начисления и мониторинг",
+        "owner": "Core energy/ops",
+        "dependencies": "M05, M06",
+        "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+      },
+      {
+        "id": "M09",
+        "title": "P0: протокольный профиль и product OpenAPI",
+        "owner": "API contracts + домены",
+        "dependencies": "M01, M03, соответствующие M05–M08",
+        "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+      },
+      {
+        "id": "M10",
+        "title": "P0: OAuth/OIDC и developer access",
+        "owner": "Identity + integrations",
+        "dependencies": "M03, M09 profile",
+        "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+      },
+      {
+        "id": "M11",
+        "title": "P0: защищённый Swagger и quickstart",
+        "owner": "API docs + Identity",
+        "dependencies": "M09, M10, sandbox",
+        "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+      },
+      {
+        "id": "M12",
+        "title": "P1: клиентские transports и typed operations",
+        "owner": "Core/Support frontend",
+        "dependencies": "M02, M09",
+        "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+      },
+      {
+        "id": "M13",
+        "title": "P1: Support factories и service adapters",
+        "owner": "Support + Core integration",
+        "dependencies": "M03, M04, M06",
+        "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+      },
+      {
+        "id": "M14",
+        "title": "P1: доставка событий и change feed",
+        "owner": "Domain owners + integrations",
+        "dependencies": "M03, M04, применимые M13",
+        "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+      },
+      {
+        "id": "M15",
+        "title": "P1: ограничение нагрузки и оптимизация",
+        "owner": "Backend/DB + домены",
+        "dependencies": "M02 и зрелые queries",
+        "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+      },
+      {
+        "id": "M16",
+        "title": "P1/P2: migration/schema ownership",
+        "owner": "Persistence + выпуск",
+        "dependencies": "M00, M02",
+        "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+      },
+      {
+        "id": "M17",
+        "title": "P1: перевести собственные приложения",
+        "owner": "Владельцы продуктов",
+        "dependencies": "M05–M13 по домену",
+        "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+      },
+      {
+        "id": "M18",
+        "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+        "owner": "Партнёрский пилот + проверка",
+        "dependencies": "M09–M17 применимо",
+        "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+      },
+      {
+        "id": "M19",
+        "title": "P2: deprecation и удаление дублей",
+        "owner": "Домены + выпуск",
+        "dependencies": "M17, M18, usage evidence",
+        "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+      }
+    ],
+    "cross_cutting_requirements": [
+      {
+        "id": "FULL-SCOPE",
+        "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+        "completion": "unproven"
+      },
+      {
+        "id": "SOURCE",
+        "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+        "completion": "unproven"
+      },
+      {
+        "id": "DOMAIN",
+        "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONTRACT",
+        "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CHARACTERIZATION",
+        "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MIGRATION",
+        "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+        "completion": "unproven"
+      },
+      {
+        "id": "CONSUMERS",
+        "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+        "completion": "unproven"
+      },
+      {
+        "id": "MEASUREMENTS",
+        "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+        "completion": "unproven"
+      },
+      {
+        "id": "FINAL-COMPOSITION",
+        "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+        "completion": "unproven"
+      },
+      {
+        "id": "LIVE-PILOT",
+        "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+        "completion": "unproven"
+      },
+      {
+        "id": "RELEASE",
+        "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+        "completion": "unproven"
+      }
+    ],
+    "completion_asserted": false,
+    "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+  },
+  "reviewerReleasedBeforeAck": true,
+  "release": false,
+  "fullCI": false
+}

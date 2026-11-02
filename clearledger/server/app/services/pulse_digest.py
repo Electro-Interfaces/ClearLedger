@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.database import async_session_factory
 from app.services.email_service import send_notice
@@ -31,6 +33,7 @@ TICK_SECONDS = 300           # проверяем раз в пять минут:
 DEFAULT_HOUR = 9             # утро по Москве, до начала разбора
 TZ = ZoneInfo("Europe/Moscow")
 LOCK_KEY = 0x50554C53        # 'PULS' — свой лок, чужие прогоны не блокируем
+LOCK_CLEANUP_SECONDS = 10.0  # абсолютный срок cleanup, отмены его не продлевают
 
 
 async def _companies_due(db) -> list[tuple[str, str]]:
@@ -121,43 +124,152 @@ def _render(company: str, cards: list[dict], as_of: str | None) -> tuple[str, st
     return subject, "\n".join(lines)
 
 
+async def _finish_digest_session(db, conn, acquired, failure, same_lease, driver, key, deadline):
+    """Освободить только свою lease; при сомнении не возвращать её живой в pool."""
+    try:
+        async with asyncio.timeout_at(deadline):
+            if failure is not None:
+                if acquired:
+                    # Ошибка SQL могла оставить transaction aborted. Session
+                    # rollback больше не отдаёт внешнюю Connection обратно в pool.
+                    await db.rollback()
+                else:
+                    # Сервер мог взять lock до обрыва ответа на acquisition.
+                    conn.sync_connection.invalidate(failure)
+            if acquired:
+                if conn.closed or conn.invalidated:
+                    raise RuntimeError("digest lock physical connection lost")
+                unlocked = (await db.execute(text(
+                    "select pg_advisory_unlock(:k)"), {"k": key})).scalar_one()
+                if unlocked is not True:
+                    raise RuntimeError("digest advisory unlock did not own lock")
+                await db.commit()
+            if db is not None:
+                await db.close()
+            await conn.close()
+    except BaseException as exc:
+        # Public sync invalidate вне greenlet: pinned asyncpg dialect немедленно
+        # terminate-ит эту DBAPI lease, без graceful await и нового checkout.
+        try:
+            try:
+                if not conn.closed and not conn.invalidated:
+                    conn.sync_connection.invalidate(exc)
+            except BaseException:
+                # Сторонний invalidate hook мог упасть до driver termination.
+                # Только исходный captured driver, никаких PID/new checkout.
+                driver.terminate()
+                if not conn.closed and not conn.invalidated:
+                    conn.sync_connection.invalidate(exc)  # один bookkeeping retry
+            if not driver.is_closed():
+                driver.terminate()
+        finally:
+            try:
+                if db is not None:
+                    db.sync_session.close()
+            finally:
+                conn.sync_connection.close()
+        raise
+    finally:
+        event.remove(conn.sync_connection, "before_cursor_execute", same_lease)
+
+
+async def _await_digest_cleanup(cleanup):
+    """Shield принадлежит этому вызову: ждать/reap, затем вернуть отмену caller."""
+    task = asyncio.create_task(cleanup, name="pulse-digest-lock-cleanup")
+    cancelled = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+        except BaseException:
+            break
+    try:
+        task.result()
+    except BaseException:
+        if cancelled is not None:
+            log.error("cleanup lock дайджеста завершился ошибкой при отмене", exc_info=True)
+            raise cancelled
+        raise
+    if cancelled is not None:
+        raise cancelled
+
+
+@asynccontextmanager
+async def _locked_digest_session():
+    """Session-level advisory lock и domain SQL владеют одной physical lease."""
+    factory = async_session_factory
+    engine = factory.kw.get("bind") if isinstance(factory, async_sessionmaker) else None
+    if (not isinstance(engine, AsyncEngine) or engine.dialect.name != "postgresql"
+            or engine.dialect.driver != "asyncpg" or factory.kw.get("binds")):
+        raise RuntimeError("digest lock requires an asyncpg AsyncEngine session factory")
+    key = LOCK_KEY
+    conn = await engine.connect()
+    physical = conn.sync_connection.connection.dbapi_connection
+    driver = conn.sync_connection.connection.driver_connection
+
+    def same_lease(connection, cursor, statement, parameters, context, executemany):
+        # Invalidation может породить новый backend у той же logical Connection.
+        # Не повторять lock и не выполнять на нём ни одного domain/unlock SQL.
+        if connection.connection.dbapi_connection is not physical:
+            raise RuntimeError("digest lock physical connection changed")
+
+    event.listen(conn.sync_connection, "before_cursor_execute", same_lease)
+    db = None
+    acquired = False
+    failure = None
+    try:
+        db = factory(bind=conn)
+        acquired = (await db.execute(text(
+            "select pg_try_advisory_lock(:k)"), {"k": key})).scalar_one()
+        yield db if acquired else None
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        deadline = asyncio.get_running_loop().time() + LOCK_CLEANUP_SECONDS
+        try:
+            await _await_digest_cleanup(_finish_digest_session(
+                db, conn, acquired, failure, same_lease, driver, key, deadline))
+        except BaseException:
+            if failure is None:
+                raise
+            # Business exception / CancelledError остаётся первичной причиной.
+            log.error("cleanup lock дайджеста завершился ошибкой", exc_info=True)
+
+
 async def run_once() -> int:
     """Один проход по компаниям. Возвращает число отправленных писем."""
     sent = 0
-    async with async_session_factory() as db:
-        if not (await db.execute(text(
-            "select pg_try_advisory_lock(:k)"), {"k": LOCK_KEY})).scalar_one():
+    async with _locked_digest_session() as db:
+        if db is None:
             return 0
-        try:
-            for cid, name in await _companies_due(db):
-                # Импорт здесь: роутер тянет за собой пол-приложения, а модуль
-                # должен подниматься даже когда «Пульс» в стеке не включён.
-                # Считаем ровно тот же экран, что видит человек, — второй набор
-                # правил для писем разошёлся бы с экраном за месяц.
-                from app.routers.pulse_router import pulse_day_data
+        for cid, name in await _companies_due(db):
+            # Локальный импорт общего query owner: модуль должен подниматься
+            # даже когда «Пульс» в стеке не включён.
+            # Считаем ровно тот же экран, что видит человек, — второй набор
+            # правил для писем разошёлся бы с экраном за месяц.
+            from app.services.pulse_day import pulse_day_data
 
-                day = await pulse_day_data(db, cid)
-                cards, as_of = day["cards"], day["as_of"]
-                if not cards:
-                    continue        # спокойный день — письма нет
-                emails = await _recipients(db, cid)
-                if not emails:
-                    continue
-                subject, body = _render(name, cards, as_of)
-                await send_notice(emails, subject, body)
-                await db.execute(text("""
+            day = await pulse_day_data(db, cid)
+            cards, as_of = day["cards"], day["as_of"]
+            if not cards:
+                continue        # спокойный день — письма нет
+            emails = await _recipients(db, cid)
+            if not emails:
+                continue
+            subject, body = _render(name, cards, as_of)
+            await send_notice(emails, subject, body)
+            await db.execute(text("""
                     insert into audit_events (id, company_id, user_id, user_name,
                                               action, details, timestamp)
                     values (gen_random_uuid(), :cid, 'system', 'Пульс',
                             'pulse.digest', :det, now())
                 """), {"cid": cid, "det": f"карточек: {len(cards)}, адресатов: {len(emails)}"})
-                await db.commit()
-                sent += 1
-                log.info("дайджест «Пульса» отправлен: %s, карточек %d, адресатов %d",
-                         name, len(cards), len(emails))
-        finally:
-            await db.execute(text("select pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
             await db.commit()
+            sent += 1
+            log.info("дайджест «Пульса» отправлен: %s, карточек %d, адресатов %d",
+                     name, len(cards), len(emails))
     return sent
 
 

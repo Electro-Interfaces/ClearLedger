@@ -1,0 +1,83 @@
+{
+  "status": "ROOT_ACCEPTED_FINITE_NATIVE_47",
+  "source": "46566816f59e0d65f61b5426842d6a496e8fc13c",
+  "predecessor": "0db9a97e2f6b86f2307cfa5abefb1a32982d37ec",
+  "postgres": "16.15",
+  "mappedModels": {
+    "predecessor": 343,
+    "candidate": 345
+  },
+  "physicalRelations": {
+    "prefix3": 341,
+    "prefix4": 347,
+    "prefix5": 349,
+    "prefix6": 351
+  },
+  "tests": {
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0,
+    "definitions": 13,
+    "phases": 141,
+    "originalFunctionIdentity": true,
+    "fixtureBaselineCalls": 48,
+    "startupProbesSeparate": 6,
+    "pytestSeconds": 499.18
+  },
+  "lifecycle": {
+    "candidateIPC": 110,
+    "predecessorIPC": 2,
+    "ownContainersRemoved": 3,
+    "cleanupErrors": [],
+    "foreignUnchanged": true,
+    "remainingTrackedResources": 0,
+    "sameSessionAndLoopCleanup": true
+  },
+  "cumulativeChildWallSeconds": 552.6879767272621,
+  "historicalData": {
+    "oldPhysicalRelations": 349,
+    "unchangedOldRowsAndJournal1to5": true,
+    "oldFiveSETExact": true,
+    "newSitesEMPTY": true,
+    "old1to5PayloadsFrozen": 16
+  },
+  "startup": {
+    "core5OffOn": "refused before metadata",
+    "core6OffOn": "original metadata; managed catalogue/data unchanged",
+    "freshPublicOff": "original bootstrap excludes Site authority tables",
+    "freshPublicOn": "original managed guard refuses before metadata"
+  },
+  "priorAttempts": [
+    {
+      "result": "0 phases",
+      "cause": "controller registry before actual versioned model imports",
+      "fixed": "import native modules, no metadata projection"
+    },
+    {
+      "result": "47 setup errors,0 calls",
+      "cause": "draft6 verifier connoinherit expectedfalse for normal p/u/f",
+      "fixed": "actual ordinary PG16 probe and scoped Source4656; prior0001..0005 frozen"
+    },
+    {
+      "result": "41 passed,6 failed",
+      "cause": "controller AsyncSession.get_transaction proxy NotImplementedError before actual canonical partner issuer",
+      "fixed": "only observe actual sync SessionTransaction identity; no issuer/test changes"
+    }
+  ],
+  "controller": {
+    "path": ".artifacts/site-authority-root-controller-runtime-v4-20261102.py",
+    "sha256": "70e2161b5460275b03eb8ac032d1adfed244a3c05ad7203903bdd5671794559c",
+    "constraints": "Root only; no app listener, no foreign network; read-only sources/dependencies; actual original ORM, Authlib, SQL and PostgreSQL"
+  },
+  "evidence": {
+    "privateDirectory": ".artifacts/site-authority-root-runtime-20261102-bad5d191fca7594c",
+    "executionSHA256": "5581e5c489a1ae5e2ff3b777b3695d5c8b10621c1067e5a9c0998b752aee6c0e",
+    "candidateResultSHA256": "d1aaa5f554feed46aa7eacb39ee11daa15cc19176aabb81c347dbdc471a0c985"
+  },
+  "limits": [
+    "Native DocCard/file Site ACL7 is not covered by these47 tests",
+    "No birth policy or new V2 HTTP writers published",
+    "18 current external operations unchanged",
+    "Full final CI,partner pilot and release remain separate"
+  ]
+}

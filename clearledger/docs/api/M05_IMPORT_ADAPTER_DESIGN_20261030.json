@@ -1,0 +1,1078 @@
+{
+  "schema": "m05-import-adapter-design/v1",
+  "date": "2026-10-30",
+  "status": "design_only_not_implemented",
+  "baseline": {
+    "integration_head": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+    "commands_origin": "5c0deb220ab328eacad6c098121a46c8fcfb94ad",
+    "no_pull_reason": "immutable baseline and network/runtime prohibition; only requested Git artifact push"
+  },
+  "artifacts": {
+    "design_path": "clearledger/docs/api/M05_IMPORT_ADAPTER_DESIGN_20261030.md",
+    "design_sha256": "d9744d56d93d4ff16aa1624fa89a3340fdeb68d15cb1c7b9050d6921e9f0619d",
+    "companion_path": "clearledger/docs/api/M05_IMPORT_ADAPTER_DESIGN_20261030.json"
+  },
+  "bounds": {
+    "source_manifest_max_entries": 29,
+    "facts_max_entries": 26,
+    "sql_plan_max_cases": 14,
+    "serialized_bytes_max": 65536,
+    "raw_inventory_embedded": false,
+    "customer_data_embedded": false,
+    "source_content_embedded": false
+  },
+  "verification": {
+    "source_hash_line_caller_review": true,
+    "runtime_edits": false,
+    "test_edits": false,
+    "models_ddl_auth_edits": false,
+    "old_map_edits": false,
+    "sql_executed": false,
+    "http_acceptance": false,
+    "ssh_realenv_access": false,
+    "full_security_scan": false,
+    "runtime_race_proven": false,
+    "docs_validation": "JSON parse, source hashes/anchors, diff whitespace only"
+  },
+  "dependency": {
+    "source_commit": "0b215a1e285328fda46e76efe59b9008ac06a2df",
+    "coordinator_reported_integration_copy": "1f0cf49a",
+    "status": "immutable source only; no merge/deploy claim",
+    "source_ids": [
+      "H19",
+      "H20"
+    ],
+    "contract": {
+      "typed_history": "identifierHistory",
+      "domains": [
+        "code",
+        "station_number"
+      ],
+      "fields": [
+        "domain",
+        "old",
+        "new",
+        "field",
+        "actor",
+        "source",
+        "recordedAt"
+      ],
+      "station_alias_history": "numberHistory: station_number only; compatible key было",
+      "reservation": "both typed domains plus legacy numberHistory; company-wide Core read",
+      "supplied_identifierHistory": "create422; update ignores echo/forgery preserving stored",
+      "malformed_history": "identity change fails409; no implicit repair",
+      "readers_changed_by_dependency": false
+    },
+    "test_results_from_other_worker_reused_as_own": false
+  },
+  "source_manifest": [
+    {
+      "id": "H01",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/stations_normalize.py",
+      "git_blob": "bc1c32cdb33947402ace7a1e1a3275e4d0499a15",
+      "sha256": "468869d96705e6a3627f24c909c46ef240c615c950c053874e417ffbda3fa2e9",
+      "bytes": 72063,
+      "lines": 1117,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H02",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/location_commands.py",
+      "git_blob": "edcebf8f2789e78923ab3f4781a7ee7e1c757faf",
+      "sha256": "8287fcac52c37b6356951c39162620914d681f495fcded3acd49329d1bf1ccf9",
+      "bytes": 16127,
+      "lines": 308,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H03",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/routers/channels_router.py",
+      "git_blob": "a8a6d348912e3aa00c7067b2638eb9feb4df630c",
+      "sha256": "027df4a863a9f730b45e05ed8d283acf298b6835fa6cf42786222b3b8daf91a4",
+      "bytes": 29858,
+      "lines": 621,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H04",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/channel_orchestrator.py",
+      "git_blob": "c01b679d1cf95dd3a5f8cd748d6e6aeec025f9d1",
+      "sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+      "bytes": 43191,
+      "lines": 743,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H05",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/asuim_normalize.py",
+      "git_blob": "0dd39e0c4c5baf5d61360a63172fcf48607adc3d",
+      "sha256": "0a5b8ba629468ccaf11abe662265ff4de63b456171d13e09670f91db162e3fae",
+      "bytes": 77247,
+      "lines": 1242,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H06",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/charge_sessions_normalize.py",
+      "git_blob": "7ab6791e1b7c7ab26ec6d2e8f3d02fb73d6a4f14",
+      "sha256": "8e1ab95758054b85df13bfae478f40aca37ccc1b36cc3d95f8c91bc55772ec59",
+      "bytes": 53686,
+      "lines": 872,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H07",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/routers/locations_router.py",
+      "git_blob": "82517622a7857cdf0285f61a6f5cd42d3a89dda9",
+      "sha256": "8ad9fa597212a71ef0cbc08ea9f36ae8b0fa120862fd7726e0c89e7a8cdca894",
+      "bytes": 20770,
+      "lines": 387,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H08",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/space_registry.py",
+      "git_blob": "4f7d239f46046727bad8a8bf6162ab7c835c538a",
+      "sha256": "bdf7dbecd3ec34a11e5e7eacf4a2ad092d40f575dae9b47481a232b59ddf0c6c",
+      "bytes": 16691,
+      "lines": 316,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H09",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/station_mapping.py",
+      "git_blob": "25c991dcd4f1ed94fc79f8db194d9cdbda7d2489",
+      "sha256": "8496d4e366751ab15edbe39a3696882aa9c9cbee02c2ffcd463ba8cb52c5d25d",
+      "bytes": 14089,
+      "lines": 257,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H10",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "git_blob": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "sha256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "bytes": 55655,
+      "lines": 1139,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H11",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/station_passport.py",
+      "git_blob": "71dec5c241b0f7a2fd3ec4b737cb55ac14284b39",
+      "sha256": "d00dd17269736074a234f76a88ce0269702317ff023c5af7a5640ef30070c80e",
+      "bytes": 8314,
+      "lines": 150,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H12",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/ezs_equipment.py",
+      "git_blob": "921f360626b44b84dd7c21ed22bb6f106f14134f",
+      "sha256": "8cfa7902dbed0ced07e6c50c04e27ed2e6ae64fc2f64127f9d7fb4e03c9ef5be",
+      "bytes": 66103,
+      "lines": 1179,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H13",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/ezs_equipment_docs.py",
+      "git_blob": "0e5ceebcec8af9a9a49a85e74bf0ffb77e344fd1",
+      "sha256": "413c4109fa3b52ce81011acf593d3059c5721b814254083b2d2478f98978ddc5",
+      "bytes": 56725,
+      "lines": 835,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H14",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/routers/equipment_router.py",
+      "git_blob": "53fbc2bfa385c6d0e7a52ebdf6ba8526068a0e7c",
+      "sha256": "5992759b387be39603a3effc0bca474b09ae279dfe39ce3ce31417469b996aab",
+      "bytes": 88429,
+      "lines": 1780,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H15",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/object_freeze.py",
+      "git_blob": "50cd31ef975a83e70857a91ffe0f3c823b7afd49",
+      "sha256": "72aa8f516631b661f33b0c28efeaa91ee4ec9d53749e407387cdb2fcb8987118",
+      "bytes": 6936,
+      "lines": 123,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H16",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/scope.py",
+      "git_blob": "051048b6d1e9c459ff17f5e8b4e02227997c612c",
+      "sha256": "72e6b51c042fb6fe0b7762893eda79c2fb6aaaec2107b7dc6ff5614ecea9099b",
+      "bytes": 12361,
+      "lines": 212,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H17",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/database.py",
+      "git_blob": "1dce096449a0a567304b38e2addf5654b9f9f4c0",
+      "sha256": "be856862b369d89da8c7993fd974b70481260f37f07b7ca5a6d20db6ac077c3c",
+      "bytes": 385027,
+      "lines": 5551,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H18",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/session_scope.py",
+      "git_blob": "7240849b77d34566434aa3109b29e3ceb51df18b",
+      "sha256": "87df5f6a422680208faaaea051cf134cc3c4d141b1262a6bfc4bbb96227c2a04",
+      "bytes": 6386,
+      "lines": 99,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H19",
+      "revision": "0b215a1e285328fda46e76efe59b9008ac06a2df",
+      "path": "clearledger/server/app/services/location_commands.py",
+      "git_blob": "874a5771d6e0cc0ba93695dd7748f580508cf17e",
+      "sha256": "e581d0ec265de072a9b9c547b689efe300adf179ea845cab4cc246dae759dc70",
+      "bytes": 18441,
+      "lines": 345,
+      "scope": "dependency_source_not_merged_or_deployed"
+    },
+    {
+      "id": "H20",
+      "revision": "0b215a1e285328fda46e76efe59b9008ac06a2df",
+      "path": "clearledger/docs/api/location-identifier-history-20261030.md",
+      "git_blob": "033c485be421065c8b14fdbca59ce92792a7765b",
+      "sha256": "3a715665c7f1ab12782fbb6a9ef35a54b0d3c54c8437c1d7382b2d1eca476a17",
+      "bytes": 14114,
+      "lines": 166,
+      "scope": "dependency_source_not_merged_or_deployed"
+    },
+    {
+      "id": "H21",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/services/analytics_cache.py",
+      "git_blob": "fcc8334441a3a61dc8560422d930ef07c38678a3",
+      "sha256": "5aab7525e9be422cfe19a357a739b60b2119ed7657627cf7be2d8a28e57d2986",
+      "bytes": 10820,
+      "lines": 192,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H22",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/models.py",
+      "git_blob": "a15774861492af92567f545e5b5b9426468512df",
+      "sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "bytes": 965563,
+      "lines": 14434,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H23",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/docs/api/OBJECT_LIFECYCLE_WRITERS_20261030.md",
+      "git_blob": "70340b82eab4d445067414d17b3b87b3ce74ffa0",
+      "sha256": "54cddf1779731119b0d0364a24048efb4129bf6dc77f3d20fc9c989bc629457e",
+      "bytes": 63684,
+      "lines": 401,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H24",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/routers/space_registry_router.py",
+      "git_blob": "7435731c42baf329d222021e214a2ebffe1cc31a",
+      "sha256": "2b06a57f45b73a70ca736eb0b2782ec88f65736615b90f3e68b65c8c244707d7",
+      "bytes": 36175,
+      "lines": 665,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H25",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/deps.py",
+      "git_blob": "d210d6b1766d34260a9ee00948cde69f1d2ed259",
+      "sha256": "990fe38521618324aa0daf100ef75da4c685ca1f93b7af52f8e9b0f53c28ca4c",
+      "bytes": 7194,
+      "lines": 129,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H26",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/server/app/auth.py",
+      "git_blob": "9c79caf49a51d6b6f731e5e1ccbc82cad8fa4ae2",
+      "sha256": "95f398e84e9002cc7bc248ddd900e5016e91d859a60fcd202910a7e7e3720cf7",
+      "bytes": 37575,
+      "lines": 707,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H27",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/src/services/channelService.ts",
+      "git_blob": "aa62fe2dab310c885e472b5fda48e911e91aa24b",
+      "sha256": "2ac4ffc3193ed8344d7dad14cbdec92540892f53ffbaa314218b1f40cf78a0ad",
+      "bytes": 18270,
+      "lines": 432,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H28",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/src/pages/ChannelDetailPage.tsx",
+      "git_blob": "960cf9a72551aa7df581cef9f6b9bd9fdcdca643",
+      "sha256": "c6151b7b864ba8d38579cb76e7d7bfb787fea7799c4140e02db762f8f31e6b63",
+      "bytes": 131680,
+      "lines": 2588,
+      "scope": "immutable_baseline_source"
+    },
+    {
+      "id": "H29",
+      "revision": "73086a5d54fadc623ae61031057eec55ff28bf6b",
+      "path": "clearledger/src/components/workspace/raw-panel/useRawPanelTree.ts",
+      "git_blob": "793665e940572d38c5942594fbbb6185f5e24b00",
+      "sha256": "0f6764db18dd87e6af0935466df5849a7a3ec5614157ffb45bbf1f43ed27d572",
+      "bytes": 21402,
+      "lines": 444,
+      "scope": "immutable_baseline_source"
+    }
+  ],
+  "source_facts": [
+    {
+      "id": "F01",
+      "source_anchors": "H03 `channels_router.py:456–489,327–405`",
+      "source_ids": [
+        "H03"
+      ],
+      "caller_and_claim": "`POST /channels/{id}/run`: `get_owned(Channel)`; создаёт/коммитит running log, запускает background с отдельной session. Company берётся из channel; actor/ACL не передаются явным аргументом в normalizer",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F02",
+      "source_anchors": "H04 `channel_orchestrator.py:557–585,713–734`",
+      "source_ids": [
+        "H04"
+      ],
+      "caller_and_claim": "`_dispatch → _run_stations`: SourceFile → `ingest_asuim_book`; при None `parse_stations_xlsx → ingest_stations(...mode,log_id)`",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F03",
+      "source_anchors": "H05 `asuim_normalize.py:1006–1069,1137–1152`",
+      "source_ids": [
+        "H05"
+      ],
+      "caller_and_claim": "Книга идёт в `VIEW_ORDER`; stations → `map_stations → ingest_stations(mode=\"replace\")` независимо от запрошенного append, с `partial=True`. Затем `_invalidate`",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F04",
+      "source_anchors": "H01 `stations_normalize.py:154–252,562–568`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "Parser full: ext_id/name/number/serial, address/geo, station passport, stage/status, source link hints. Parser compact: number/name/ocpp_id/address/region/protocol/brand/connectors/status_dev/owner, compact marker → W07",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F05",
+      "source_anchors": "H01 `333–370,382–417`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "W07 `_ingest_compact`: ORM cache ev_charging; OCPP → mixed source/code/serial index → unique number fallback; touched и deterministic `_loc_id(company,\"ocpp:...\")` fallback через `db.get`. Индексы `setdefault`, не доказательство уникальности",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F06",
+      "source_anchors": "H01 `425–495,497–559`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "W07 existing append всегда skip; replace пишет point, metadata и через `write_value` unit. New ID детерминирован, code=ocpp or number. Каждый обработанный row в SAVEPOINT, ошибки считаются, return может остаться success",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F07",
+      "source_anchors": "H01 `574–657,671–674`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "W08 full/partial `ingest_stations`: ext/source/code → serial → number, test/non-network только source; serial допускает иной source ID; foreign number и multiple number возвращают None. Append пропускает existing только если serial_number **не None**, даже пустая строка считается обогащённой",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F08",
+      "source_anchors": "H01 `697–817`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "W08 existing: typed setattr непосредственно loc, metadata merge, CPO name/history; не меняет id/code/source_bindings. New ветка выбирает number/serial/ext code и создаёт deterministic ID; None resolver может попасть сюда после ambiguity",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F09",
+      "source_anchors": "H01 `255–265,370,535–548,661,815–832`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "`_bump` коммитит ту же db только если log_id не None. Начальный bump происходит после загрузки caches; промежуточный idx+1 кратен200, но continue/exception до него пропускает checkpoint; финальный flush/bump. Это не гарантированные chunks по200 успешных строк",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F10",
+      "source_anchors": "H06 `charge_sessions_normalize.py:203–260,275–292,378–427,458–469`",
+      "source_ids": [
+        "H06"
+      ],
+      "caller_and_claim": "`_run_charge_sessions` / asuim sessions → ingest: индексы point, replace DELETE и pending session FOR UPDATE, batched inserts/flush, backfill(auto_create=False), W10, enrichment/visits/mart/bump_version; прогресс отдельной session, основная T едина до финального bump",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F11",
+      "source_anchors": "H01 `1087–1117`",
+      "source_ids": [
+        "H01"
+      ],
+      "caller_and_claim": "W10 `refresh_location_names` из H06:416: raw SQL latest session by location, btrim name, append old nameHistory; исключает только nameSource=cpo_registry. Нет ACL fragment, command/advisory lock или manual marker проверки",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F12",
+      "source_anchors": "H02 `69–116,287–308`",
+      "source_ids": [
+        "H02"
+      ],
+      "caller_and_claim": "Native/registry/mapping → `_barrier(ID→company)` → tenant-qualified FOR UPDATE + populate_existing → O/G; command не коммитит. Cached admission row не является актуальным mutation snapshot",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F13",
+      "source_anchors": "H07 `locations_router.py:216–273`; H08 `space_registry.py:126–157`; H17 `database.py:5543–5551`",
+      "source_ids": [
+        "H07",
+        "H08",
+        "H17"
+      ],
+      "caller_and_claim": "Native POST upsert/PATCH flush+refresh+project_object, commit dependency; registry create/update audit+собственный commit. Проекция native внутри прежнего lifetime T; adapter не добавляет её в import",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F14",
+      "source_anchors": "H09 `station_mapping.py:204–256`; H10 `ops_router.py:237–276`",
+      "source_ids": [
+        "H09",
+        "H10"
+      ],
+      "caller_and_claim": "Уже исправленный mapping add/close вызывает locked_visible; close фильтрует company+parent(path)+relation. Сервис коммитит сам; это участник ID→company, не прежний незащищённый W16 из старой карты",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F15",
+      "source_anchors": "H11 `station_passport.py:58–99,100–150`",
+      "source_ids": [
+        "H11"
+      ],
+      "caller_and_claim": "W07 `stations_by_location(None)` загружает current placement/unit без row locks; write_value пишет unit при наличии, иначе loc. FEED_OWNED пуст; W08 typed loop всё ещё пишет loc вопреки комментарию helper",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F16",
+      "source_anchors": "H12 `ezs_equipment.py:344–357,494–574`; H13 `ezs_equipment_docs.py:328–343,352–405`",
+      "source_ids": [
+        "H12",
+        "H13"
+      ],
+      "caller_and_claim": "Movement route → post_document → apply_movement unit FOR UPDATE, далее sync_placement и optional _sync_passport loc UPDATE. Документ обходит unit_ids в порядке payload; post_draft уже держит document row до вызова. Общего point barrier здесь нет",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F17",
+      "source_anchors": "H14 `equipment_router.py:467–535,568–613`; H12 `614–630,806–1024`",
+      "source_ids": [
+        "H14",
+        "H12"
+      ],
+      "caller_and_claim": "Manual unit patch inventory и import_units/dismantle также меняют unit; номер inventory freeze producer. Нельзя чинить только apply_movement и объявлять inventory сериализованным",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F18",
+      "source_anchors": "H15 `object_freeze.py:40–100`; H07 `204–212`",
+      "source_ids": [
+        "H15",
+        "H07"
+      ],
+      "caller_and_claim": "Freeze читает contract/session, исторические placed_at→inventory, external links и company-wide external export log. Экспорт вставляет ObjectExportLog, общего advisory не берёт",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F19",
+      "source_anchors": "H02 `129–184,187–248`; H01 `476–494,697–791`",
+      "source_ids": [
+        "H02",
+        "H01"
+      ],
+      "caller_and_claim": "Command охраняет code, station_number и metadata.number, историю и occupancy; W07/W08 напрямую обходят эти guards, W10 меняет только name/history. Текущая _prepare manual allowlist недостаточна для passport adapter",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F20",
+      "source_anchors": "H16 `scope.py:138–167`; H02 `91–103,119–153`",
+      "source_ids": [
+        "H16",
+        "H02"
+      ],
+      "caller_and_claim": "ORM listener не охватывает raw SQL; explicit _assert_visible различает O=None/EMPTY и G. Occupancy Core company-wide без загрузки hidden ORM rows; перенос импорта не должен превращать внутреннее чтение в ACL bypass",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F21",
+      "source_anchors": "H01 `865–940,999–1084`; H18 `session_scope.py:24–53`",
+      "source_ids": [
+        "H01",
+        "H18"
+      ],
+      "caller_and_claim": "Station readers используют actual number/numberHistory, backfill может rebind closed shadow. Домен code туда не добавлять; E остаётся отдельной обязательной защитой перед retirement",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F22",
+      "source_anchors": "H21 `analytics_cache.py:168–181`; H05 `850–859`; H04 `658–709`",
+      "source_ids": [
+        "H21",
+        "H05",
+        "H04"
+      ],
+      "caller_and_claim": "bump_version действительно commit. Книга может коммитить через _invalidate помимо station _bump; run_channel rollback только незавершённой T, публикация sync fact коммитит отдельно. Ошибка после прошлого chunk не возвращает его назад",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F23",
+      "source_anchors": "H22 `models.py:5880–5881,6304–6313`; H13 `ezs_equipment_docs.py:480–547`",
+      "source_ids": [
+        "H22",
+        "H13"
+      ],
+      "caller_and_claim": "Session/unit location FK дают дополнительные lock edges; cancel берёт document, movements+units, восстанавливает поля, вызывает sync_placement; receipt cancel удаляет unit и placed_at. Это отдельный обход сохранения inventory/history, не действие W07/W08",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F24",
+      "source_anchors": "H24 `space_registry_router.py:68–86,135–147,177–215`; H25 `deps.py:83–129`; H26 `auth.py:294–345`",
+      "source_ids": [
+        "H24",
+        "H25",
+        "H26"
+      ],
+      "caller_and_claim": "Registry route требует admin, валидирует enums и confirm409, model_dump(exclude_none=True); native/channel get_owned проверяет членство, current scope задаётся отдельно assert_company_member. Нельзя унифицировать эти admissions ради import adapter",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F25",
+      "source_anchors": "H27 `channelService.ts:334–348,367–387`; H28 `ChannelDetailPage.tsx:404–455,682–687,2212–2254`; H29 `useRawPanelTree.ts:131–133`",
+      "source_ids": [
+        "H27",
+        "H28",
+        "H29"
+      ],
+      "caller_and_claim": "API status:string уже допускает partial, run history его документирует; upload polling и handleSync показывают toast.success для всего кроме error. Badge/raw-panel умеют Частично, но это не исправляет toast. Source observation, браузер не запускался",
+      "evidence": "source_review_only"
+    },
+    {
+      "id": "F26",
+      "source_anchors": "H03 `channels_router.py:353–386,494–520,554–600`",
+      "source_ids": [
+        "H03"
+      ],
+      "caller_and_claim": "Background сохраняет выбранные result fields в events, run_status/channel_runs сериализуют выбранные поля; arbitrary reconciliation из result автоматически до клиента не доезжает. Нужны явные bounded sanitized count/list и приёмка consumers",
+      "evidence": "source_review_only"
+    }
+  ],
+  "invariants": [
+    "opaque existing IDs and company remain stable",
+    "no-reuse is canonical",
+    "inventory preserved; no automatic disposal",
+    "unchanged shared AC/DC number is not a new assignment",
+    "source raw retained via SourceFile and allowed snapshots",
+    "legacy commit/chunk/projection ownership retained",
+    "current O/G admission preserved; no global scope bypass",
+    "ambiguous/new unguarded identity requires reconciliation, not duplicate creation"
+  ],
+  "input_contracts": {
+    "compact": {
+      "parser": "parse_stations_xlsx -> _parse_compact",
+      "fields": [
+        "compact",
+        "number",
+        "name",
+        "ocpp_id",
+        "address",
+        "region",
+        "ocpp_protocol",
+        "brand",
+        "connector_types",
+        "status_dev",
+        "owner",
+        "num_class",
+        "is_test"
+      ],
+      "existing_append": "skip all existing",
+      "existing_replace": "allowlisted patch after reload",
+      "number": "fill-empty column and metadata.setdefault are separate presence-aware changes"
+    },
+    "full": {
+      "fields": [
+        "ext_id",
+        "name",
+        "number",
+        "serial_number",
+        "owner_id",
+        "owner",
+        "region",
+        "city",
+        "street",
+        "house",
+        "address",
+        "latitude",
+        "longitude",
+        "model",
+        "brand",
+        "connectors_count",
+        "connector_types",
+        "power_kwt",
+        "ocpp_protocol",
+        "firmware",
+        "status_dev",
+        "stage",
+        "is_published",
+        "is_hidden",
+        "access_type",
+        "location_type",
+        "subsidy",
+        "always_on",
+        "rating",
+        "success_pct",
+        "is_test",
+        "hubex_asset_id",
+        "hubex_name",
+        "hubex_link_status",
+        "hubex_note"
+      ],
+      "existing_append": "skip iff loc.serial_number is not None",
+      "existing_replace": "typed L2 fields and metadata snapshot; nullable clears characterized",
+      "existing_identity": "does not change id/code/source_bindings"
+    },
+    "partial": {
+      "mapper": "asuim_normalize.map_stations",
+      "forced_mode": "replace",
+      "rules": [
+        "non-None typed and extra",
+        "missing status_dev omits operational_status",
+        "false is_test omitted",
+        "existing nonempty loc.owner preserved",
+        "decommissioned closes; otherwise previous point.status"
+      ],
+      "extra_allowlist": [
+        "asuimStationId",
+        "asuimOwnerId",
+        "asuimOwnerName",
+        "asuimTransferring",
+        "cadastralNumber",
+        "meterNumber",
+        "ocppUrl",
+        "mobileLink",
+        "installedOn",
+        "startedOn",
+        "lastActivityAt",
+        "timezoneOffset",
+        "source"
+      ]
+    },
+    "sessions_name": {
+      "caller": "ingest_charge_sessions -> backfill(auto_create=False) -> refresh_location_names",
+      "incoming": "charge_sessions.location_id/station_name/started_at",
+      "legacy": "latest trimmed name except cpo_registry; int renamed; raw SQL",
+      "candidate": "prepared whole-T set; manual/CPO preservation and unknown provenance reconciliation"
+    }
+  },
+  "lock_design": {
+    "recommended": "S",
+    "current": "global I(id) -> C(company) -> tenant R(id) + populate_existing",
+    "forbidden_cycle": {
+      "t1": [
+        "I(P)",
+        "C",
+        "R(P)",
+        "wait I(Q)"
+      ],
+      "t2": [
+        "I(Q)",
+        "wait C"
+      ],
+      "participants": [
+        "native POST upsert/PATCH",
+        "registry create/update",
+        "mapping add/close"
+      ],
+      "evidence": "potential wait graph inferred from source, not runtime deadlock"
+    },
+    "S": {
+      "order": [
+        "all sorted global legacy I keys",
+        "legacy C",
+        "point rows by opaque ID",
+        "unit rows by UUID bytes",
+        "document rows by UUID bytes",
+        "movement rows by UUID bytes",
+        "ObjectLink rows by UUID bytes"
+      ],
+      "discovery": "MVCC scalar tenant-qualified no-autoflush before any blocking row/FK/dirty flush",
+      "set_scope": "superset of whole real root transaction, not fixed 200 rows or just one sheet",
+      "capability": "db+company+root_transaction+frozenset; invalidated by real commit/rollback",
+      "revalidation": [
+        "identity evidence and cardinality",
+        "existing admission O/G",
+        "populate_existing tenant reload",
+        "placement/unit set"
+      ],
+      "unknown_target": "reject affected promotion with reconciliation; no late I, no implicit create or mid-import commit",
+      "single_writer_compatibility": "preserves namespace/key/order I->C",
+      "not_a_proof_of": "all row/FK/document/unit concurrency until producers coordinated and SQL evidence exists"
+    },
+    "M": {
+      "recommendation": "separate coordinated project; too broad for minimal B",
+      "order": "whole known global create-ID claim set before company; existing-only company-first; no late new ID claims",
+      "cutover": "drain all old writer transactions/jobs then switch cohort; no mixed epochs",
+      "coverage": [
+        "native upsert existing/new",
+        "registry",
+        "mapping",
+        "all import branches",
+        "session W10 entry",
+        "unit patch/import/movement/dismantle",
+        "post/cancel documents",
+        "placement/external bulk links",
+        "contract associations",
+        "external export"
+      ],
+      "forbidden": [
+        "namespace rename as substitute",
+        "partial C->I migration",
+        "existing-to-create intent switch after C"
+      ]
+    },
+    "unit_session_edges": [
+      "candidate import C+R -> U vs current movement U -> passport R",
+      "post_draft/cancel D -> U -> placement/point; must prepare before D",
+      "session pending rows/FK writes -> late W10 I/R would invert acquisition",
+      "inventory historic placements and external export lack common barrier in baseline"
+    ],
+    "commit_rules": [
+      "station _bump log_id None does not commit",
+      "continue/error may skip index200 checkpoint",
+      "initial _bump remains before acquisition for next station T",
+      "row SAVEPOINT below root acquisition",
+      "analytics bump and book invalidate end context",
+      "no extra mid-import commit; no row locking foreign tenant"
+    ]
+  },
+  "source_mutation": {
+    "proposed_functions": [
+      "plan_location_set",
+      "acquire_location_set",
+      "locked_visible_in_set",
+      "apply_existing_source_patch"
+    ],
+    "separate_domains": [
+      "server ID/code no import changes",
+      "station_number and metadata.number assignments",
+      "name/nameHistory",
+      "protected typed histories",
+      "source metadata",
+      "passport owner writes",
+      "operational observation",
+      "legacy point status projection"
+    ],
+    "changed_assignments": "only genuinely changed nonempty new code/column/metadata numbers enter occupancy; clear still freeze/history; no rechecking unchanged shared duplicate",
+    "protected_keys": [
+      "identifierHistory",
+      "numberHistory",
+      "nameHistory",
+      "passportHistory",
+      "fieldProvenance"
+    ],
+    "manual_provenance": {
+      "status": "proposed additive server metadata, absent from baseline",
+      "authorities": [
+        "manual",
+        "cpo_registry",
+        "sessions"
+      ],
+      "fields": [
+        "authority",
+        "source",
+        "actor",
+        "recordedAt"
+      ],
+      "supplied": "create422/update ignore; preserve stored even scalar",
+      "unknown_old_name": "reconciliation without guessing provenance",
+      "full_unmarked_passport": "legacy full-source authority characterized; cannot promise retrospective manual protection"
+    },
+    "conflict_atomicity": "reject whole promotion row including unit/audit; keep raw SourceFile; W10 name conflict does not split session T",
+    "reason_codes": [
+      "ambiguous_identity",
+      "source_identity_mismatch",
+      "unknown_target",
+      "stale_expected_value",
+      "number_frozen",
+      "number_reserved",
+      "malformed_history",
+      "manual_value_protected",
+      "admission_denied",
+      "new_identity_requires_reconciliation"
+    ],
+    "bounded_result": {
+      "list_max": 50,
+      "fields": [
+        "rowOrdinal",
+        "sourceKind",
+        "reasonCode",
+        "retryable"
+      ],
+      "legacy_stats_preserved": [
+        "created",
+        "updated",
+        "skipped",
+        "errors",
+        "tests",
+        "pair_split",
+        "ambiguous",
+        "mode",
+        "message"
+      ],
+      "conflicts": "errors+1; no updated/created; partial carried through background log, fact and book",
+      "leak_policy": "no hidden ID/name/history/value in user error",
+      "delivery": "explicit ChannelSyncLog.events -> run_status/channel_runs -> typed optional fields -> separate partial warning in upload polling/handleSync; current raw-panel label already supports partial"
+    },
+    "admission": "Preserve registry admin/enums/confirm, native membership/get_owned, channel get_owned; explicit server-derived job context, never reset O/G to None; actual background entrypoint acceptance required",
+    "changed_assignments_scope": "New independent SourcePatch requirement; current public _prepare synchronizes metadata.number -> station_number. Existing public endpoint metadata-only defect not established."
+  },
+  "pr_order": [
+    {
+      "order": "0. Dependency",
+      "files_and_functions": "`location_commands.py:_history_entries,_with_identifier_history,_assert_numbers_free`; immutable H19",
+      "boundary": "Интегрировать domain-separated history и повторить tests на выбранной integration SHA. Readers numberHistory остаются station-only; ни нового DDL, ни repair old aliases"
+    },
+    {
+      "order": "1. Expand",
+      "files_and_functions": "`location_commands.py:_barrier,_locked,locked_visible,_apply,merge_metadata` + proposed set/context/provenance helpers",
+      "boundary": "Сохранить single-path I→C; добавить set primitive+changed_assignments+protected provenance, без подключения импорта. Capability tests на root T/commit/SAVEPOINT"
+    },
+    {
+      "order": "2. Readers/admission",
+      "files_and_functions": "`stations_normalize.py` resolution helpers/`_ingest_compact`/`ingest_stations`; `locations_router.py:create_location,update_location`; `space_registry.py:create_object,update_object`",
+      "boundary": "Pure plan/revalidation, presence-aware family patches, provenance read/stamp. Сохранить native upsert и registry create/error semantics, не менять auth. Unknown old label policy явно в tests"
+    },
+    {
+      "order": "3. Protocol prerequisites",
+      "files_and_functions": "`charge_sessions_normalize.py:ingest_charge_sessions` **до** replace DELETE/pending lock; `asuim_normalize.py:ingest_asuim_book,_ingest_view`; `station_mapping.py:add_external_id,close_external_id`",
+      "boundary": "Session entry получает полный set для всей T до writes; mapping сохраняет existing admission/path+commit и single barrier. Book plan должен охватить оставшиеся feeders до действительного commit; планировать по одному листу после предыдущих writes нельзя"
+    },
+    {
+      "order": "4. Unit/freeze prerequisite",
+      "files_and_functions": "`ezs_equipment.py:apply_movement,sync_placement,_sync_passport,dismantle_from_site,import_units_xlsx`; `ezs_equipment_docs.py:post_document,post_draft,cancel_document`; `equipment_router.py:patch_unit`; `locations_router.py:export_locations`",
+      "boundary": "Предварительно полный affected point set, затем C, sorted resources, reload. Inventory учитывает historical placements. Вынесенный common link adapter из M05-D сохраняет caller commit ownership. Даты/cancel semantics не чинить попутно; без этого gate W07 unit writes/full freeze acceptance заблокированы"
+    },
+    {
+      "order": "5. Writers B",
+      "files_and_functions": "`stations_normalize.py:_ingest_compact,ingest_stations,refresh_location_names,_bump`; `charge_sessions_normalize.py` call W10",
+      "boundary": "Только existing updates через SourceMutation, current `_bump` locations и log_id semantics. W10 получает prepared context; standalone helper без предварительной T preparation fail closed, не поздний acquire. Не внедрять commit в domain commands"
+    },
+    {
+      "order": "6. Results",
+      "files_and_functions": "`channels_router.py:_run_channel_background,run_status,channel_runs,_run_summary`; `channel_orchestrator.py:_publish_sync_fact`; `asuim_normalize.py:ingest_asuim_book,_invalidate`; `src/services/channelService.ts:ChannelRunStatus,ChannelRun`; `src/pages/ChannelDetailPage.tsx:ManualTableCard.uploadAndRun,handleSync`",
+      "boundary": "Доставить bounded sanitized partial/reconciliation до toast/log/raw-panel, с old-response fallback, без скрытого изменения атомарности/cache behavior. Ни outbox, ни per-row native projection"
+    },
+    {
+      "order": "7. Evidence",
+      "files_and_functions": "новые `server/tests/test_station_import_adapters.py`, `test_location_lock_sets.py`, `test_station_import_concurrency.py` + необходимая fixture инфраструктура",
+      "boundary": "Baseline/candidate одинаковые fixtures и реальные PostgreSQL/ORM listener; только отдельным разрешённым тестовым запуском. Документы acceptance на final SHA"
+    }
+  ],
+  "sql_concurrency_plan": [
+    {
+      "id": "T01",
+      "baseline": "W07/W08 family fields: full/partial/compact, append/replace, null/omitted, aliases/name/status/passport. Числа счётчиков и audit transitions",
+      "candidate_acceptance": "Тот же accepted-state/result, кроме перечисленных reconciliation/provenance guards; two unchanged shared N1 both update, no new alias/code history",
+      "execution": "not_run"
+    },
+    {
+      "id": "T02",
+      "baseline": "Native manual number/history write между initial import cache и mutation; ещё раз между chunks",
+      "candidate_acceptance": "Source reload видит новое; stale import number конфликтует/не переписывает, protected history полностью сохранена, raw file доступен; no double audit",
+      "execution": "not_run"
+    },
+    {
+      "id": "T03",
+      "baseline": "Naive two-ID schedule только в отдельной baseline reproduction adapter harness: T1 I(P)+C, T2 I(Q)→C, T1→I(Q)",
+      "candidate_acceptance": "Actual S importer берёт I(P),I(Q) до C; native POST/PATCH, registry CREATE/UPDATE и mapping ADD/CLOSE на Q завершаются без deadlock, state линейно объясним. Harness не выдавать за доказательство deadlock старого importer, который commands не вызывает",
+      "execution": "not_run"
+    },
+    {
+      "id": "T04",
+      "baseline": "Two imports: reverse row order, shared/partially overlapping sets, same/different C, concurrent global opaque ID claim",
+      "candidate_acceptance": "Одинаковый sorted I set order, different-tenant row не FOR UPDATE; чужой занятой row не вызывает ожидания его row lock; same ID не переносится между tenants",
+      "execution": "not_run"
+    },
+    {
+      "id": "T05",
+      "baseline": "После discovery создан/изменён source match вне set, несколько cands/setdefault duplicates, touched, deterministic fallback",
+      "candidate_acceptance": "revalidation→unknown/ambiguous reconciliation, никакого нового I после C и duplicate create; correct P/Q identity preserved",
+      "execution": "not_run"
+    },
+    {
+      "id": "T06",
+      "baseline": "inventory patch / import_units / movement+passport / post_draft / multi-unit post+cancel interleave W07; ввести остановку после U и перед R",
+      "candidate_acceptance": "Подготовленные callers locks до U/D, sorted resource order, переместившийся unit повторно разрешён; atomic unit+point+audit, inventory не обнуляется. Не принятый prerequisite = blocked, а не skip как успех",
+      "execution": "not_run"
+    },
+    {
+      "id": "T07",
+      "baseline": "ContractLocation/ChargeSession insert key-share против manual number edit; W10 после session flush, backfill touched old rows",
+      "candidate_acceptance": "Вся session T preplanned до FK/DELETE/row locks; freeze после вставки видит факт, prior rename остаётся последовательным. Sessions+visits+mart+cache версия прежне атомарны, нет нового mid-import commit",
+      "execution": "not_run"
+    },
+    {
+      "id": "T08",
+      "baseline": "External mapping, closed mapping, historical placed_at inventory, company-wide external export racing import number",
+      "candidate_acceptance": "Общий protocol обеспечивает serialized decision; internal projection не freeze. External export C-only не делает поздних I. Company-wide скрытый conflict generic без утечки",
+      "execution": "not_run"
+    },
+    {
+      "id": "T09",
+      "baseline": "W07/W08 errors/continue на индексах199/200/201/400, initial/final bump; log_id None/present; row/savepoint failure после diff/audit/region",
+      "candidate_acceptance": "Реальные прежние commit checkpoints; rollback одной строки без leaked indexes/touched/counters, ранее committed chunks сохраняются, active context инвалиден строго после настоящего commit",
+      "execution": "not_run"
+    },
+    {
+      "id": "T10",
+      "baseline": "W10 cpo_registry/manual/no-provenance/session, trim equality, null nameHistory и shape variants, tie latest timestamp",
+      "candidate_acceptance": "Только допускаемое переименование, preserved manual/CPO, int count, history once; неизвестный label reconciliation. Все имена/metadata исходные intact после отказа",
+      "execution": "not_run"
+    },
+    {
+      "id": "T11",
+      "baseline": "metadata.number-only, station_number-only, divergent/clear, malformed and hidden history; stale row.extra с forged keys",
+      "candidate_acceptance": "Все реально новые assignments проверены; unchanged legacy duplicate не новый conflict; typed station aliases/number reader positive controls, code-only не становится station alias, no repair unknown JSON",
+      "execution": "not_run"
+    },
+    {
+      "id": "T12",
+      "baseline": "O=None/O=EMPTY/O subset + G mismatch, background channel invocation/ContextVar inheritance, foreign target; replay exact same file/lost response",
+      "candidate_acceptance": "Ни source context, ни Core occupancy не расширяют ACL; hidden no entity serialization. Идемпотентные изменения/истории, ожидаемые old counters; partial в UI/run fact/book, raw retained; UI upload/sync acceptance отдельно от SQL, без ложного success и hidden values",
+      "execution": "not_run"
+    },
+    {
+      "id": "T13",
+      "baseline": "Native projection skipped/failed/raised после flush, registry audit и import downstream exception",
+      "candidate_acceptance": "Старые commit/error contracts сохранены, command без commit, rollback снимает mutation+history. Не перемещать native projection за commit без отдельного outbox проекта",
+      "execution": "not_run"
+    },
+    {
+      "id": "T14",
+      "baseline": "Книга stations→connectors→sessions с промежуточными _bump/_invalidate и caller cache commit",
+      "candidate_acceptance": "Новая T каждый раз получает свежий полный set; в T, продолжающей другой feeder, нет поздних I и stale unit maps; cache invalidation не пропадает от partial",
+      "execution": "not_run"
+    }
+  ],
+  "rollback": {
+    "pre_activation": "revert additive helpers before new protected-state writes",
+    "post_activation": "disable old imports/mutators, drain; keep readers; use runtime understanding typed reservation/protected provenance",
+    "S": "old single I->C lock-compatible only; old bypass writers not data-compatible",
+    "M": "whole drained cohort epoch rollback",
+    "forbidden": [
+      "destructive down migration",
+      "alias cleanup",
+      "clearing inventory",
+      "hidden mid-import commits"
+    ]
+  },
+  "implementation_blockers": [
+    {
+      "id": "B1",
+      "condition": "whole transaction preplanning, including book feeders and early session writes"
+    },
+    {
+      "id": "B2",
+      "condition": "unit/document-first producers and inventory/export must join coordinated prerequisites"
+    },
+    {
+      "id": "B3",
+      "condition": "unknown historic manual provenance cannot be inferred from labels"
+    },
+    {
+      "id": "B4",
+      "condition": "new import identity guard/admission/reservation wave absent; reconcile until ready"
+    },
+    {
+      "id": "B5",
+      "condition": "persistent no-reuse ledger and deletion/cancel bypasses remain separate canonical wave"
+    },
+    {
+      "id": "B6",
+      "condition": "no SQL/HTTP/runtime/load/constraint evidence in this design-only task"
+    }
+  ],
+  "out_of_scope": [
+    "public retirement API",
+    "auth changes",
+    "models/DDL",
+    "old writer map edits",
+    "financial remap",
+    "mass history repair",
+    "W08 passport-to-unit rewrite",
+    "deterministic ID rewrite",
+    "production acceptance/deploy"
+  ],
+  "ui_acceptance_plan": {
+    "execution": "not_run",
+    "paths": [
+      "upload polling",
+      "manual handleSync",
+      "history badge/raw-panel"
+    ],
+    "checks": [
+      "partial warning never success toast",
+      "reconciliation count and at most50 generic entries",
+      "old response optional-fields fallback",
+      "no raw/hidden IDs/names/values"
+    ],
+    "source_ids": [
+      "H03",
+      "H27",
+      "H28",
+      "H29"
+    ]
+  }
+}

@@ -24,11 +24,16 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ops_term_period_guard import lock_term_period_company
+
 from app.models import OpsCounterpartyDoc, OpsPeriodCharge, OpsPeriodClose
 from app.services.ops_expectations import (
     build_ctx,
+    contracts_without_terms,
     estimate,
     expand,
+    lock_period,
+    plan_expectations,
     month_bounds,
     month_range,
     shift_month,
@@ -93,15 +98,48 @@ def auto_status(period: str, today: str, max_due_day: int | None = None) -> str:
 
 async def get_or_create(db: AsyncSession, company_id: uuid.UUID,
                         period: str) -> OpsPeriodClose:
+    await lock_period(db, company_id, period)
     row = (await db.execute(select(OpsPeriodClose).where(
         OpsPeriodClose.company_id == company_id,
         OpsPeriodClose.period == period,
-    ))).scalar_one_or_none()
+    ).execution_options(populate_existing=True))).scalar_one_or_none()
     if row is None:
         row = OpsPeriodClose(company_id=company_id, period=period, status="open")
         db.add(row)
         await db.flush()
     return row
+
+
+async def closing_projection(db: AsyncSession, company_id: uuid.UUID, period: str,
+                             scope: str = "location", status: str | None = None) -> dict[str, Any]:
+    """Persisted projection and pure preparation hints; reading never prepares."""
+    with db.no_autoflush:
+        period_row = await db.scalar(select(OpsPeriodClose).where(
+            OpsPeriodClose.company_id == company_id, OpsPeriodClose.period == period)
+            .execution_options(populate_existing=True))
+        closed = period_row is not None and period_row.status in CLOSED_STATUSES
+        plan = await plan_expectations(db, company_id, period)
+        return {
+            "period": period,
+            "status": (period_row.status if period_row is not None and period_row.status != "open"
+                       else auto_status(period, date.today().isoformat())),
+            "closedAt": period_row.closed_at.isoformat() if period_row and period_row.closed_at else None,
+            "counters": await counters(db, company_id, period),
+            "charges": await charges(db, company_id, period, scope=scope, status=status),
+            "blocked": list(plan.blocked),
+            "contractsWithoutTerms": await contracts_without_terms(db, company_id, period),
+            "preparation": {"required": not closed and bool(plan.missing or plan.stale),
+                            "missing": plan.missing if not closed else 0,
+                            "stale": plan.stale if not closed else 0},
+        }
+
+
+async def materialize_period(db: AsyncSession, company_id: uuid.UUID, period: str) -> dict[str, Any]:
+    await lock_period(db, company_id, period)
+    row = await get_or_create(db, company_id, period)
+    if row.status in CLOSED_STATUSES:
+        raise ValueError(f"Период {period[:7]} уже закрыт")
+    return await expand(db, company_id, period)
 
 
 async def counters(db: AsyncSession, company_id: uuid.UUID,
@@ -277,6 +315,7 @@ async def close_period(db: AsyncSession, company_id: uuid.UUID, period: str,
     Без `force` закрытие останавливается и называет, сколько таких строк; с
     `force` они уходят в `waived` — «за месяц не начисляем», а не «начисляем 0».
     """
+    await lock_term_period_company(db, company_id, exclusive=True)
     period_row = await get_or_create(db, company_id, period)
     if period_row.status in CLOSED_STATUSES:
         raise ValueError(f"Период {period[:7]} уже закрыт")
@@ -301,7 +340,7 @@ async def close_period(db: AsyncSession, company_id: uuid.UUID, period: str,
         if row.doc_id is not None:
             continue
         # Корректировка уже несёт готовую сумму — пересчитывать её нечем и незачем.
-        if row.seq == 0 and row.term_id is not None:
+        if row.seq == 0 and row.term_id is not None and row.expected_basis != "manual":
             term = await _term(db, row.term_id)
             if term is not None:
                 est = estimate(ctx, term, period, row.location_id)
@@ -355,6 +394,7 @@ async def close_period(db: AsyncSession, company_id: uuid.UUID, period: str,
 async def reopen_period(db: AsyncSession, company_id: uuid.UUID, period: str,
                         reason: str, user_id: uuid.UUID | None = None) -> dict[str, Any]:
     """Открыть закрытый месяц заново. Только с причиной — она остаётся навсегда."""
+    await lock_term_period_company(db, company_id, exclusive=True)
     if not (reason or "").strip():
         raise ValueError("Открытие закрытого периода требует причины")
     period_row = await get_or_create(db, company_id, period)

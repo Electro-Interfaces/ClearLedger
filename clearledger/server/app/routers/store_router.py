@@ -62,6 +62,10 @@ from app.services.goods_dashboard import GoodsDashboardService
 from app.services.onec.crypto import encrypt_password
 from app.services.closing_date import get_closing_date, set_closing_date
 from app.services.store_document_contract import PROJECTION_DOCUMENT_KINDS
+from app.services.store_contract_commands import (
+    create_store_partner_contract, prepare_store_partner_contract, save_store_contract,
+    prepare_store_contract, reject_store_pending_writes, require_store_contract_write,
+)
 from app.services.store_documents import (
     cheque_lines_from_catalog,
     cheque_lines_with_legacy_provenance,
@@ -9498,7 +9502,9 @@ async def store_partner_create(
     Юрлицо или ИП определяется длиной ИНН (12 знаков — физлицо/ИП): так же
     решает приёмник, и расхождения между центром и бухгалтерией не будет.
     """
-    access = await _receipt_access(user, db)
+    reject_store_pending_writes(db)
+    with db.no_autoflush:
+        access = await _receipt_access(user, db)
     if not access.network:
         raise HTTPException(403, "Контрагентов сети ведёт товаровед сети")
     name = str(payload.get("name") or "").strip()
@@ -9514,14 +9520,19 @@ async def store_partner_create(
     # плодим двойника: справочник сети один на все станции, и дубли по ИНН
     # разбираются потом руками.
     if inn:
-        было = (await db.execute(text(r"""
-            SELECT id, name FROM edge.partner
-             WHERE company_id = :cid
-               AND regexp_replace(coalesce(inn,''), '\D', '', 'g') = :inn
-             LIMIT 1
-        """), {"cid": cid, "inn": inn})).mappings().first()
+        with db.no_autoflush:
+            было = (await db.execute(text(r"""
+                SELECT id, name FROM edge.partner
+                 WHERE company_id = :cid
+                   AND regexp_replace(coalesce(inn,''), '\D', '', 'g') = :inn
+                 LIMIT 1
+            """), {"cid": cid, "inn": inn})).mappings().first()
         if было:
             return {"id": было["id"], "name": было["name"], "created": False}
+
+    # Вход mixed command: оба барьера и проверка org до первого CP/edge write.
+    договор = payload.get("contract") or {}
+    contract_plan = await prepare_store_partner_contract(db, cid, договор)
 
     канон = Counterparty(
         id=uuid.uuid4(), company_id=cid, inn=inn or None, kpp=kpp or None,
@@ -9529,8 +9540,12 @@ async def store_partner_create(
         type="ИП" if len(inn) == 12 else "ЮЛ", aliases=[], kind="external",
         raw={"source": "center_manual"},
     )
+    if contract_plan is not None:
+        require_store_contract_write(db, cid, contract_plan.prepared)
     db.add(канон)
     await db.flush()
+    if contract_plan is not None:
+        require_store_contract_write(db, cid, contract_plan.prepared)
     partner_id = (await db.execute(text("""
         INSERT INTO edge.partner
             (company_id, external_uuid, name, name_full, inn, kpp, role, source, comment)
@@ -9544,6 +9559,8 @@ async def store_partner_create(
     # Станции, с которыми он работает: без этой связи справочник ему не уедет
     # (обычная отправка шлёт только «своих»).
     for st in payload.get("stations") or []:
+        if contract_plan is not None:
+            require_store_contract_write(db, cid, contract_plan.prepared)
         await db.execute(text("""
             INSERT INTO edge.partner_station (partner_id, station_id)
             VALUES (:p, :s) ON CONFLICT DO NOTHING
@@ -9554,33 +9571,12 @@ async def store_partner_create(
     # (`contracts`), из которого договор берёт выгрузка в бухгалтерию: вторая
     # таблица договоров означала бы, что документ уедет с UUID, которого в БП
     # никто не найдёт.
-    договор = payload.get("contract") or {}
     contract_id = None
-    if договор:
-        organization_id = договор.get("organization_id")
-        if not organization_id:
-            raise HTTPException(400, "у договора должна быть организация")
-        имя = str(договор.get("name") or договор.get("title") or "Основной договор").strip()
-        номер = str(договор.get("number") or "").strip()
-        contract_id = str(uuid.uuid4())
-        await db.execute(text("""
-            INSERT INTO contracts
-                (id, company_id, number, date, title, counterparty_id, organization_id,
-                 type, kind, currency, raw)
-            VALUES (:id, :cid, :number, :date, :title, :cp, :org,
-                    'поставка', 'СПоставщиком', 'RUB',
-                    -- Имя договора идёт ОТДЕЛЬНЫМ параметром, хотя значение то же:
-                    -- один плейсхолдер в колонке varchar и внутри jsonb asyncpg
-                    -- вывести не может — сначала «could not determine data type
-                    -- of parameter», после приведения «inconsistent types
-                    -- deduced: text versus character varying». Поймано 10.09.2026
-                    -- на заведении поставщика МАРР для АЗС 8: ручка с договором
-                    -- до того ни разу не отрабатывала.
-                    jsonb_build_object('source', 'center_manual',
-                                       'name', CAST(:title_json AS text)))
-        """), {"id": contract_id, "cid": cid, "number": номер or имя,
-               "date": str(договор.get("signed_on") or договор.get("date") or "")[:10],
-               "title": имя, "title_json": имя, "cp": канон.id, "org": organization_id})
+    if contract_plan is not None:
+        contract = await create_store_partner_contract(db, cid, канон.id, contract_plan)
+        contract_id = str(contract.id)
+    if contract_plan is not None:
+        require_store_contract_write(db, cid, contract_plan.prepared)
     await db.commit()
     return {"id": partner_id, "supplier_id": str(канон.id), "name": name,
             "created": True, "contract_id": contract_id}
@@ -9632,48 +9628,16 @@ async def store_contract_save(
     хотя бы одно из «наименование» или «номер», плюс дата и вид договора.
     Валюту приёмник ставит сам рублёвую, если её не передали.
     """
-    access = await _receipt_access(user, db)
+    reject_store_pending_writes(db)
+    with db.no_autoflush:
+        access = await _receipt_access(user, db)
     if not access.network:
         raise HTTPException(403, "Договоры ведёт товаровед сети")
-    counterparty_id = payload.get("counterparty_id")
-    organization_id = payload.get("organization_id")
-    title = str(payload.get("title") or payload.get("name") or "").strip()
-    number = str(payload.get("number") or "").strip()
-    if not counterparty_id or not organization_id:
-        raise HTTPException(400, "нужны контрагент и организация")
-    if not title and not number:
-        raise HTTPException(400, "нужно наименование договора или его номер")
-    args = {
-        "cid": access.company_id, "cp": counterparty_id, "org": organization_id,
-        "number": number or title, "date": str(payload.get("date") or "")[:10],
-        "title": title or f"Договор {number}",
-        "kind": str(payload.get("kind") or "СПоставщиком"),
-        "currency": str(payload.get("currency") or "RUB"),
-        "type": str(payload.get("type") or "поставка"),
-        "comment": str(payload.get("comment") or "").strip() or None,
-    }
-    if payload.get("id"):
-        args["id"] = payload["id"]
-        await db.execute(text("""
-            UPDATE contracts
-               SET number = :number, date = :date, title = :title, kind = :kind,
-                   currency = :currency, comment = :comment
-             WHERE id = :id AND company_id = :cid
-        """), args)
-        новый = payload["id"]
-    else:
-        новый = str(uuid.uuid4())
-        args["id"] = новый
-        await db.execute(text("""
-            INSERT INTO contracts
-                (id, company_id, number, date, title, counterparty_id, organization_id,
-                 type, kind, currency, comment, raw)
-            VALUES (:id, :cid, :number, :date, :title, :cp, :org,
-                    :type, :kind, :currency, :comment,
-                    jsonb_build_object('source', 'center_manual', 'name', :title))
-        """), args)
+    prepared = await prepare_store_contract(db, access.company_id, payload)
+    contract = await save_store_contract(db, access.company_id, payload, prepared=prepared)
+    require_store_contract_write(db, access.company_id, prepared)
     await db.commit()
-    return {"id": str(новый), "title": args["title"], "number": args["number"]}
+    return {"id": str(contract.id), "title": contract.title, "number": contract.number}
 
 
 @router.post("/contracts/push/{station_id}")

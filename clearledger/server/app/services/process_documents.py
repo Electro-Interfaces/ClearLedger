@@ -67,7 +67,7 @@ async def listing(db: AsyncSession, company_id: uuid.UUID,
     if doc_ids:
         conditions = [DocCard.company_id == company_id, DocCard.id.in_(doc_ids)]
         if user is not None:
-            from app.routers.docs_router import _readable_doc_clause
+            from app.services.doc_access import _readable_doc_clause
             conditions.append(await _readable_doc_clause(db, company_id, user))
         found = (await db.execute(select(DocCard).where(*conditions))).scalars().all()
         docs = {doc.id: doc for doc in found}

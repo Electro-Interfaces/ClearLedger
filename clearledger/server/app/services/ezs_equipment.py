@@ -210,11 +210,8 @@ async def get_or_create_warehouse(db: AsyncSession, company_id, name: str) -> Se
     )).scalar_one_or_none()
     if row is not None:
         return row
-    loc = ServiceLocation(
-        id=_wh_loc_id(company_id, nm), company_id=company_id,
-        code=nm, name=nm, type="warehouse", status="active",
-    )
-    db.add(loc)
+    from app.services import location_commands
+    loc = await location_commands.create_warehouse(db, company_id, _wh_loc_id(company_id, nm), nm)
     await db.flush()
     return loc
 

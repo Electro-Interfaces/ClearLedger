@@ -56,7 +56,8 @@ async def _document(db: AsyncSession, company_id: uuid.UUID, process_id: str,
     raw = _uuid_or_none(data.get("doc_id") or data.get("docId"))
     if raw is not None:
         doc = (await db.execute(select(DocCard).where(
-            DocCard.id == raw, DocCard.company_id == company_id))).scalar_one_or_none()
+            DocCard.id == raw, DocCard.company_id == company_id)
+            .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
         if doc is None:
             raise AcquaintRequestError("Документ не найден в этой компании")
         return doc
@@ -70,7 +71,8 @@ async def _document(db: AsyncSession, company_id: uuid.UUID, process_id: str,
     if doc_id is None:
         raise AcquaintRequestError(
             "В просьбе не назван документ, а процесс ни одного не заводил")
-    doc = await db.get(DocCard, doc_id)
+    doc = (await db.execute(select(DocCard).where(DocCard.id == doc_id)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if doc is None:
         raise AcquaintRequestError("Документ процесса больше не существует")
     return doc
@@ -89,7 +91,7 @@ async def _people(db: AsyncSession, company_id: uuid.UUID,
     не может открыть «Трек», в лист не попадает — иначе лист врал бы о том, что
     документ доведён.
     """
-    from app.routers.docs_router import _docs_members  # локальный импорт: цикл
+    from app.services.doc_access import _docs_members
 
     named = {u for u in (_uuid_or_none(x) for x in (
         data.get("user_ids") or data.get("userIds") or [])) if u is not None}
@@ -146,7 +148,7 @@ def _due(data: dict[str, Any]) -> datetime | None:
 async def request(db: AsyncSession, company_id: uuid.UUID, request_id: str,
                   data: dict[str, Any]) -> ApprovalRequest:
     """Направить документ на ознакомление и запомнить, ждёт ли процесс исхода."""
-    from app.routers.docs_router import _acquaint_snapshot  # локальный импорт: цикл
+    from app.services.doc_approvals import _document_snapshot as _acquaint_snapshot
 
     if company_id is None:
         raise AcquaintRequestError("Событие пришло без компании")

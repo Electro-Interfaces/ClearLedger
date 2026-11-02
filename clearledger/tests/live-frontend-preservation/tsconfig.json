@@ -1,0 +1,4 @@
+{
+  "extends": "../../tsconfig.app.json",
+  "include": ["../../src", "browser-entry.tsx", "support.ts", "consumer.types.ts"]
+}

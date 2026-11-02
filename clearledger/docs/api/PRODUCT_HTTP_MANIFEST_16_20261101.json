@@ -1,0 +1,591 @@
+{
+  "kind": "product-http-manifest16-source",
+  "date": "2026-11-01",
+  "status": "WRITTEN_NOTRUN_AUTHOR_STATIC_EVIDENCE",
+  "baseCommit": "47da804bb075e5d627cf6064db039185f5ca9c0b",
+  "sourceTestCommit": "9a29ce1e3a4c814499da500f4faf93c97720d5d5",
+  "sourceTestTree": "6d613ff92bf0890ea3ad1579ab473c20bcd3283d",
+  "scope": "Текущий product child application /api/v1: 15 GET + существующий POST /contracts createContract. Общая цель API M00–M19+11 сохраняется без сокращения; этот manifest не является отчётом готовности всего API.",
+  "counts": {
+    "operations": 16,
+    "GET": 15,
+    "POST": 1,
+    "paths": 15,
+    "serviceGET": 11,
+    "userOnlyGET": 4,
+    "POSTUserAndService": 1
+  },
+  "operations": [
+    {
+      "method": "GET",
+      "path": "/contract-types",
+      "operationId": "getContractTypeMetadata",
+      "owner": "contracts",
+      "scopes": [
+        "contracts:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts",
+      "operationId": "listContracts",
+      "owner": "contracts",
+      "scopes": [
+        "contracts:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "POST",
+      "path": "/contracts",
+      "operationId": "createContract",
+      "owner": "contracts",
+      "scopes": [
+        "contracts:create"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "create-newborn",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/{contractId}",
+      "operationId": "getContract",
+      "owner": "contracts",
+      "scopes": [
+        "contracts:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/{contractId}/documents",
+      "operationId": "listContractDocuments",
+      "owner": "documents",
+      "scopes": [
+        "contracts:read",
+        "documents:read"
+      ],
+      "principalKinds": [
+        "partner"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/contracts/{contractId}/objects",
+      "operationId": "listContractObjects",
+      "owner": "contracts",
+      "scopes": [
+        "contracts:read",
+        "objects:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/counterparties",
+      "operationId": "listCounterparties",
+      "owner": "counterparties",
+      "scopes": [
+        "counterparties:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/counterparties/{counterpartyId}",
+      "operationId": "getCounterparty",
+      "owner": "counterparties",
+      "scopes": [
+        "counterparties:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/documents",
+      "operationId": "listDocuments",
+      "owner": "documents",
+      "scopes": [
+        "documents:read"
+      ],
+      "principalKinds": [
+        "partner"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/documents/{docId}",
+      "operationId": "getDocument",
+      "owner": "documents",
+      "scopes": [
+        "documents:read"
+      ],
+      "principalKinds": [
+        "partner"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/documents/{docId}/versions/{versionId}/content",
+      "operationId": "downloadDocumentVersion",
+      "owner": "documents",
+      "scopes": [
+        "documents.files:download",
+        "documents:read"
+      ],
+      "principalKinds": [
+        "partner"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/equipment",
+      "operationId": "listEquipment",
+      "owner": "equipment",
+      "scopes": [
+        "equipment:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/equipment/{equipmentId}",
+      "operationId": "getEquipment",
+      "owner": "equipment",
+      "scopes": [
+        "equipment:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/objects",
+      "operationId": "listObjects",
+      "owner": "objects",
+      "scopes": [
+        "objects:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/objects/{objectId}",
+      "operationId": "getObject",
+      "owner": "objects",
+      "scopes": [
+        "objects:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    },
+    {
+      "method": "GET",
+      "path": "/objects/{objectId}/monitoring",
+      "operationId": "getObjectMonitoring",
+      "owner": "objects",
+      "scopes": [
+        "monitoring:read",
+        "objects:read"
+      ],
+      "principalKinds": [
+        "partner",
+        "service"
+      ],
+      "resourceStage": "existing",
+      "readiness": "candidate"
+    }
+  ],
+  "principals": "partner означает пользовательский партнёрский grant (ProductOAuth); service означает machine grant (ProductServiceOAuth). GET: 11 partner+service и 4 только partner; POST отдельно partner+service.",
+  "postStage": {
+    "method": "POST",
+    "path": "/contracts",
+    "operationId": "createContract",
+    "scope": "contracts:create",
+    "principalKinds": [
+      "partner",
+      "service"
+    ],
+    "resourceStage": "create-newborn",
+    "databaseAuthorityKinds": "absent",
+    "meaning": "Отдельный CREATE-newborn policy stage; metadata проверяется без SQL и без позитивного вызова через старый GET fake verifier. Это не обещание, что реальный CREATE не использует SQL.",
+    "responses": [
+      "200",
+      "201",
+      "401",
+      "403",
+      "409",
+      "413",
+      "415",
+      "422",
+      "429",
+      "500",
+      "503"
+    ],
+    "runtime": "NOTRUN; отдельный real HTTP POST suite и SQL-проверки принадлежат ROOT"
+  },
+  "allow": {
+    "component": "ProductAllow",
+    "schema": {
+      "type": "string",
+      "const": "GET"
+    },
+    "example": "GET",
+    "contractsComponent": "ProductContractsAllow",
+    "contractsSchema": {
+      "type": "string",
+      "const": "GET, POST"
+    },
+    "contractsExample": "GET, POST",
+    "defaultDictionaryExact47da": true,
+    "perPath": {
+      "/contracts": "GET, POST",
+      "allOtherKnownProductPaths": "GET"
+    },
+    "unsupportedProbeMethod": "DELETE",
+    "knownPathCount": 15,
+    "preservedAliases": [
+      "ProductContractsAllow",
+      "ProductContractsMethodNotAllowed",
+      "ProductMethodNotAllowed"
+    ],
+    "mapping": "ProductMethodNotAllowed ссылается на ProductAllow const GET; existing knownPaths.methodOverrides[/contracts] ссылается на ProductContractsMethodNotAllowed с ProductContractsAllow const GET, POST. Все определения и mapping точны исходной базе, нового mapping и общего enum нет.",
+    "strictOracle": "Default GET отвергает GET, POST; contracts GET, POST отвергает GET; оба отвергают malformed values; полное default dictionary равно EXACT47da.",
+    "unknownPaths": "Не расширяются; прежние 404 assertions сохранены."
+  },
+  "tests": {
+    "sharedOracle": "test_product_http_profile.py: literal EXPECTED_GET_MANIFEST из 15 tuple(method,path,id), EXPECTED_PRODUCT_MANIFEST добавляет ровно существующий POST; assert_product_manifest проверяет registry и canonical schema целиком, длину и уникальность IDs.",
+    "policyOracle": "assert_product_policy_manifest фиксирует whole16, точный GET15, serviceGET11/user-onlyGET4, principalKinds и отдельный create-newborn POST со scope contracts:create без databaseAuthorityKinds.",
+    "transport": "Старые positive/negative GET loops фильтруются по actual methods GET, сохраняют все прежние проверки body/header/schema/denial/no-domain-effect. Позитивный POST не передаётся старому fake verifier. DELETE проверяется на всех 15 известных paths с точным Allow и соответствующим response alias.",
+    "metadata": "Проверка policy/security/readiness проходит по объявленным methods всех 16 операций; response examples metadata проверяется для всех методов. Новый точный oracle test_allow_path_consts_and_contracts_description_remain_strict проверяет оба per-path const, перекрёстные отказы, malformed values, неизменные ref aliases и строку listContracts description Allow: GET, POST без устаревшего Allow: GET.",
+    "historicalNames": "Существующие test-def names с 12/fifteen/fourteen сохранены для истории: их GET scope равен исходным 15 GET, whole scope теперь точный 16. Имена не являются count oracle.",
+    "execution": "Все изменённые тесты WRITTEN_NOTRUN; ни collection, ни pytest, ни вызовы helper не выполнялись."
+  },
+  "sourceProof": {
+    "changedSourceTestFiles": 7,
+    "finalOwnedFiles": 9,
+    "inverseAST": {
+      "allSevenModulesEqualAfterExactWhitelistInverse": true,
+      "unchangedDefinitionCount": 210,
+      "changedDefinitionCount": 15,
+      "addedDefinitionCount": 4,
+      "fixturesChanged": false,
+      "productionChange": "ONLY listContracts GET decorator description: Allow: GET -> Allow: GET, POST; ProductAllow EXACT47da constGET/exampleGET",
+      "productionSourceBytesEqualAfterSingleDescriptionInverse": true,
+      "otherFourteenGETBytesIdentical": {
+        "listObjects": {
+          "sha256": "e54a1e07f74b91fb521e472b9fcd8e55128895e0cd2dfba3de694a77073d90f0",
+          "bytesIdenticalToExactBase": true
+        },
+        "getObject": {
+          "sha256": "9353d729cadc923930d6e876888d6d88fdd1299e865d040e941538decc0fbed5",
+          "bytesIdenticalToExactBase": true
+        },
+        "getObjectMonitoring": {
+          "sha256": "79dbbb94826e52487672188ee692269a1a25c9a60c3d4a9bea32490e48f37fe6",
+          "bytesIdenticalToExactBase": true
+        },
+        "listEquipment": {
+          "sha256": "861bef631745372ab06a9c6bec8e7b52aa82a05f7180a87b3c5bcf32ebc0bc64",
+          "bytesIdenticalToExactBase": true
+        },
+        "getEquipment": {
+          "sha256": "ad26be559939a0b5d53caa0ed690d738aee936b3604dca9769265deaa8367709",
+          "bytesIdenticalToExactBase": true
+        },
+        "listCounterparties": {
+          "sha256": "9908e1a37cd8652189a933a727cbbf46b94a69f276e6e4ee054f27ab9c7b63e6",
+          "bytesIdenticalToExactBase": true
+        },
+        "getCounterparty": {
+          "sha256": "6bcaf09714fe0ab4f86c75d597e41ae722fb9a1ba82366038b92fd6422cee6a5",
+          "bytesIdenticalToExactBase": true
+        },
+        "getContractTypeMetadata": {
+          "sha256": "c240ecbfaddd9fe82c1f4b94918a11664b76cdb46ad6ea09e27d6bba5d3f3b7c",
+          "bytesIdenticalToExactBase": true
+        },
+        "getContract": {
+          "sha256": "2ba5b2dc2d4d0df57cb29c80347507f877b6e081ed1e1bc4e197c7ac67137bb1",
+          "bytesIdenticalToExactBase": true
+        },
+        "listContractObjects": {
+          "sha256": "ce7e1309421d1ead7ef443eadd6cea31ca8d588b788f3b10150a1cb13053ae52",
+          "bytesIdenticalToExactBase": true
+        },
+        "listContractDocuments": {
+          "sha256": "d3f95e4e7a268ea722a04493db75ed8ab78c146b9b07d8229473cd58f6a213db",
+          "bytesIdenticalToExactBase": true
+        },
+        "listDocuments": {
+          "sha256": "5225c72a09bb63ba4dd000d6535cd45a9dc9af8029da16b7591832b603acc045",
+          "bytesIdenticalToExactBase": true
+        },
+        "getDocument": {
+          "sha256": "1ba02e0b1619cbda2b93c098d0b26e82de478df6727300bf177208c4739c3c91",
+          "bytesIdenticalToExactBase": true
+        },
+        "downloadDocumentVersion": {
+          "sha256": "2e771da940fffe4fb2b21f2c8d983421c2ad65ac41f90429c83d5c4898c8323e",
+          "bytesIdenticalToExactBase": true
+        }
+      },
+      "listContractsHandlerBytesIdentical": true,
+      "allOtherListContractsDecoratorKeysASTEqual": true,
+      "describeHTTPResponsesBytesIdentical": true
+    },
+    "files": {
+      "clearledger/server/app/product_api/app.py": {
+        "baseSha256": "5d648e5ba7d30de2dd6076c7e04546571d335cd25303fa3169d4ce871855c87d",
+        "currentSha256": "cff583e1dc7bb66c7b6d4107379185c893214bd2938a347b790adc6bfbc5da93",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "create_product_api",
+          "create_product_api.contracts"
+        ],
+        "addedDefinitions": [],
+        "inverseASTEqual": true,
+        "inverseSha256": "314b41f521c9d5500243e99445b5bd311c169dbac3a38928098d47a5c46c90d8"
+      },
+      "clearledger/server/tests/test_product_api.py": {
+        "baseSha256": "47462fcb24e899bcfc4f8f4e3c4f5b5ed42e5b428f9cb603fc6feb2fd3af3899",
+        "currentSha256": "97dfe4b486566c63a70b26662ab1ff298700054193db3a93d41d6f2943e05e09",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "test_schema_and_registry_match_actual_child_routes_without_public_docs"
+        ],
+        "addedDefinitions": [],
+        "inverseASTEqual": true,
+        "inverseSha256": "feedba10255576f31459ed5b4de747cc48a8ee37e81aee4cc3dbd92659edfef6"
+      },
+      "clearledger/server/tests/test_product_contract_classification.py": {
+        "baseSha256": "eea384bc4604370db1d882ea824410c28505127012c4e3b6fbd631f139c51cf0",
+        "currentSha256": "0d3b2897ca277ad5511e7f2c9caa20e6fd2ca4e18228b51c4582e723969d9a7c",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "test_schema_required_nullability_format_and_fifteen_auth_profiles"
+        ],
+        "addedDefinitions": [],
+        "inverseASTEqual": true,
+        "inverseSha256": "f07b7e97e5f45542fc39cc867684312376e2a31ce646286e84da2a1956e7ef07"
+      },
+      "clearledger/server/tests/test_product_contract_documents.py": {
+        "baseSha256": "c471fc18d8fa36aed48714675da54e2c5c3367ce03a2f380200ee8ba1f4b7107",
+        "currentSha256": "58b1d5283ff50951610cc7456cfda4d71f3732fbb679f59a406a6e6fe561bca0",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "test_schema_has_fourteen_routes_and_user_only_document_relation"
+        ],
+        "addedDefinitions": [],
+        "inverseASTEqual": true,
+        "inverseSha256": "a949c53b55cddd5f16f6bb6a6246f1537514a99cb223d7c8e5724e12f72f099b"
+      },
+      "clearledger/server/tests/test_product_contract_objects.py": {
+        "baseSha256": "49d390a12062f40246f44b3e61be26591dcf650553eae6f28e3b4b47fc386311",
+        "currentSha256": "839accbf35ccfa0c075b04bd0d9334ac731f7c714a031f6deb0ed6ea4e9217e1",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "test_canonical_and_browser_profiles_and_old_object_id_refs"
+        ],
+        "addedDefinitions": [],
+        "inverseASTEqual": true,
+        "inverseSha256": "01ceb2dddb5b592ab1626ea6f840f677e7f19008e1a3a3bf77f0d828c2ae7cb3"
+      },
+      "clearledger/server/tests/test_product_http_profile.py": {
+        "baseSha256": "e3d65e63b583af099d89905dc9a2e9c552ed529599435a788e5adc109d65efad",
+        "currentSha256": "ee748e5c922d387431a641b64956f7c55a9be19cc34b87c7cadf6d03d794de82",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "ProductHTTPProfile.test_405_preserves_framework_allow_without_executing_handler",
+          "ProductHTTPProfile.test_all_json_handlers_have_typed_success_media_and_correlated_headers",
+          "ProductHTTPProfile.test_curated_handlers_and_and_scopes_match_runtime_denials"
+        ],
+        "addedDefinitions": [
+          "ProductHTTPProfile.test_create_contract_metadata_is_separate_from_get_transport_fixtures",
+          "assert_product_manifest",
+          "assert_product_policy_manifest"
+        ],
+        "inverseASTEqual": true,
+        "inverseSha256": "22bfb7c98316b3eb40407cec78d3ee8019c36e8041eb89f7891f3c1d36eaef62"
+      },
+      "clearledger/server/tests/test_product_openapi_http_contract.py": {
+        "baseSha256": "1ca40b0a51a7b6d5331f8a76a2505aa7b40f0aeed001ed9b4554094db484b66e",
+        "currentSha256": "31eccd5f96428af65341ce89a7b56839e9d3971ee507154d07e01cb52a5affeb",
+        "compileInMemory": true,
+        "changedDefinitions": [
+          "ProductOpenAPIHTTPContract.test_405_profile_and_injected_429_are_application_only_not_new_operations",
+          "ProductOpenAPIHTTPContract.test_actual_400_404_500_all_handlers_match_problem_contract",
+          "ProductOpenAPIHTTPContract.test_actual_negative_12_handlers_match_problem_contract_and_have_no_domain_effect",
+          "ProductOpenAPIHTTPContract.test_actual_positive_12_handlers_match_response_headers_and_schemas",
+          "ProductOpenAPIHTTPContract.test_formal_oas_local_refs_formats_and_examples",
+          "ProductOpenAPIHTTPContract.test_registry_policy_security_and_readiness_unchanged"
+        ],
+        "addedDefinitions": [
+          "ProductOpenAPIHTTPContract.test_allow_path_consts_and_contracts_description_remain_strict"
+        ],
+        "inverseASTEqual": true,
+        "inverseSha256": "1ed52b02b81a78cbeeff9c703f0377c94912556dce9a677c292843c15d2ddc33"
+      }
+    },
+    "method": "stdlib ast/hash/json и compile в памяти без exec; весь app.py побайтно и AST равен базе после возврата только listContracts.description. ProductAllow и весь _describe_http_responses равны EXACT47da. Другие 14 GET decorators+handlers побайтно равны базе; listContracts handler и все прочие decorator keys неизменны. Для tests full module AST равен базе после возврата перечисленных изменённых defs и удаления только новых defs/constants; неизменны 210 определений, изменено 15, добавлено 4; fixtures неизменны."
+  },
+  "residuals": [
+    {
+      "path": "clearledger/server/tests/test_partner_dx_metadata_20261031.py",
+      "sha256": "70d9d6bdaaeb0d7ef2d8fdfe88dc8016e603715307cbe6ef190ec682dea60463",
+      "unchangedFromExactBase": true,
+      "execution": "NOTRUN",
+      "claimedGreen": false,
+      "scope": "Исторический общий DX metadata oracle от 31.10.2026",
+      "currentVsHistorical": "normalize_app сравнивает полный AST исторической базы после узкого удаления GET summary/description и success examples; замена одного count 15 на 16 не согласует новый POST и остальные интегрированные изменения.",
+      "action": "Оставлен неизменным; текущая совместимость не доказана; отдельная работа после решения ROOT."
+    },
+    {
+      "path": "clearledger/server/tests/test_partner_dx_examples_20261031.py",
+      "sha256": "ed7caa5eeeb38d4ce4cde41557bda5216224fe12217f3e9b366d2f40bd039019",
+      "unchangedFromExactBase": true,
+      "execution": "NOTRUN",
+      "claimedGreen": false,
+      "scope": "Исторический и текущий GET-only scope: 15 GET, из них 14 JSON success examples и один binary",
+      "currentVsHistorical": "Выборка method == get и прямых декораторов operation корректно сохраняет GET subset; число 15 не означает полный manifest после добавления POST. Полный запуск валидаторов/DTO в этой задаче запрещён.",
+      "action": "Оставлен неизменным; не объявлен зелёным и не расширен на POST."
+    },
+    {
+      "path": "clearledger/server/tests/model_declaration_ownership_approved.py",
+      "sha256": "786daada5c33583281613d74e400fc694d9f0a1f192dffa979e634210e4cd7bb",
+      "unchangedFromExactBase": true,
+      "execution": "NOTRUN",
+      "claimedGreen": false,
+      "scope": "Исторический M16-C1 frozen witness деклараций моделей, metadata/PG DDL и API export",
+      "currentVsHistorical": "Ожидание operations=15 связано с историческим frozen source/runtime/pins и собственной approval boundary; это не live whole-manifest oracle этой задачи.",
+      "action": "Не менять, не запускать, не репинить; историческое свидетельство не доказывает текущую зелёную проверку."
+    },
+    {
+      "path": "clearledger/scripts/verify_partner_dx_metadata_20261031.py",
+      "sha256": "5f0a5b9c6ebca6aee437d060ac4558eb890be4e9f1cf0de6f6bd05510f8a728b",
+      "unchangedFromExactBase": true,
+      "execution": "NOTRUN",
+      "claimedGreen": false,
+      "scope": "Исторический source-only DX checker с BASE cec2c9845431a0bc07e4b4f115eb21eed8d5caa9",
+      "currentVsHistorical": "EXPECTED_OPERATIONS и operations() описывают ровно 15 прямых GET decorators; normalize_app затем требует равенства полного AST базы вне узкого whitelist документации. Новый router.operation POST не попадает в GET inventory, но остаётся в полном AST guard.",
+      "action": "Только чтение; модуль не импортирован и helper не вызван; SDK/examples/exporter/pins не изменены."
+    }
+  ],
+  "boundaries": {
+    "production": "Итоговый production diff к EXACT47da состоит только из одной строки listContracts.description с Allow: GET, POST. ProductAllow dictionary восстановлен точно к базе; runtime/auth/routes/transactions/identity/authority/consumer/kernel/schema/config не менялись.",
+    "protected": "test_partner_contract_http_create.py/current70, RootPGfix91ed, SDK/exporter/examples/scripts/pins/fixtures не менялись.",
+    "noNewPromises": "Новые операции, runtime методы и 206 не добавлялись. Существующий POST документирован как candidate; активация и готовность generated SDK не заявлены.",
+    "execution": {
+      "appImports": 0,
+      "libraryImports": 0,
+      "testImports": 0,
+      "helperImportsOrCalls": 0,
+      "execOrEvalSource": 0,
+      "pytestCollectionOrExecution": 0,
+      "SQL": 0,
+      "PG": 0,
+      "HTTP": 0,
+      "SSH": 0,
+      "Docker": 0,
+      "Node": 0,
+      "browser": 0,
+      "networkCalls": 0,
+      "install": 0,
+      "exporter": 0,
+      "SDK": 0,
+      "build": 0,
+      "inMemoryCompilationFiles": 7,
+      "exceptions": "Git and mandated Orca lifecycle CLI only; inline Python uses stdlib with -I -S -B"
+    },
+    "independentReview": "Fresh independent SOURCE review назначает ROOT после immutable freeze; автор не выдаёт SOURCE_PASS.",
+    "git": "История b1c5fcec/93ba8131 сохранена без переписывания; добавлены SOURCE/test metadata correction и ровно двухфайловый docs-only child; hooks OFF, русские сообщения [skip ci]; без push/PR/merge/rebase."
+  },
+  "artifact": "Локальные .artifacts/product-manifest16-author-20261101/REPORT.md и REPORT.json фиксируют окончательные HEAD/tree после docs-only child. Их хеши не записываются в этот коммит; циклического хеширования самодокумента нет.",
+  "previousRevisions": [
+    {
+      "sourceTestCommit": "b1c5fcecd3958fc69b43d29adf8d53679661d94d",
+      "docsOnlyChild": "93ba8131274eea39ad965a574dc2c771ba329bcc",
+      "docsOnlyTree": "6ee257f210cdc8977aeab4e7e9e6bf5b86cfb67b",
+      "integrationStatus": "Историческая авторская enum-ревизия не была интегрирована; текущая корректировка ROOT сохраняет строгие per-path consts."
+    }
+  ],
+  "rootCorrection": {
+    "dispatchId": "ctx_f9ec21354304",
+    "messageId": "msg_49de52a093a0",
+    "instruction": "Supersedes original enum2 request: restore ProductAllow dictionary EXACT47da constGET/exampleGET, preserve contracts const GET, POST and per-path mapping; production delta only listContracts description.",
+    "implemented": true,
+    "previousEnumIntegrated": false,
+    "headerOracle": "Current strict test asserts exact default ProductAllow dictionary, contracts const GET, POST, accepts only the respective string, rejects cross-path value and malformed values; exact listContracts description fragment asserted."
+  },
+  "resolvedDescriptor": {
+    "operationId": "listContracts",
+    "method": "GET",
+    "path": "/contracts",
+    "correction": "Allow: GET. -> Allow: GET, POST.",
+    "allOtherProductionBytesExactBaseAfterInverse": true,
+    "handlerBytesUnchanged": true,
+    "otherDecoratorKeysUnchanged": true,
+    "other14GETBytesUnchanged": true
+  }
+}

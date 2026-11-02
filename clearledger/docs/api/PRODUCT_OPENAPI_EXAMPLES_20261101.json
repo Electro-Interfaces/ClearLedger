@@ -1,0 +1,1408 @@
+{
+  "status": "AUTHORED_NOT_RUN",
+  "baseCommit": "9a6abac9c6887fb41ca726e1df20304269bcaf5d",
+  "rootComparedCommit": "b0aa31e2d9e8da8890bff53fcfebc6c5a157d416",
+  "sha256": {
+    "base_app.py": "cff583e1dc7bb66c7b6d4107379185c893214bd2938a347b790adc6bfbc5da93",
+    "authored_app.py": "f9b4fa21c862359109cd28fed508c4b43013a5e5886a5151316abe85a57e3b3c",
+    "dto.py": "5d7d5de4cb95a80b8f5cf4cfe34bbf03a779b11b1cef27b19c8e81b374739ea8",
+    "authored_test_product_openapi_http_contract.py": "c1b71be1f49474f18210c3ea3379ed25c99e7565cfd36f9a522189cd7d9c5778"
+  },
+  "appRootByteEquality": "Base app.py is byte-identical to b0aa31e2; authored app.py adds only the helper and its one call",
+  "dtoRootGitDiffEmpty": true,
+  "namedFictionalJSON200Count": 14,
+  "explicitPOST200201Examples": "ABSENT in declared route responses; no examples invented; ContractCreateResult still requires contractId UUID and replayed bool",
+  "dtoRules": {
+    "extra": "forbid",
+    "allow_inf_nan": false,
+    "alias_generator": "to_camel",
+    "requiredNullable": "Nullable annotations without default remain required; explicit None is present in all relevant examples"
+  },
+  "examples": [
+    {
+      "examplePath": "GET /objects / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Page[Object]",
+      "sourceLine": 190,
+      "topLevelKeys": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "corrections": [
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "sourceLiteralSHA256": "def2dea60347dbf56ce0fe707dd71c92f96df52335399958f91945961740ba88"
+    },
+    {
+      "examplePath": "GET /objects/{objectId} / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Object",
+      "sourceLine": 241,
+      "topLevelKeys": [
+        "id",
+        "level",
+        "code",
+        "name",
+        "type",
+        "status",
+        "address",
+        "latitude",
+        "longitude"
+      ],
+      "corrections": [],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "id",
+        "code",
+        "name",
+        "type",
+        "status",
+        "address",
+        "latitude",
+        "longitude"
+      ],
+      "sourceLiteralSHA256": "eb8ec53c25b3359b1fd4079325a8b5b470d6df00a51f9c2cdede57fa0d48de2d"
+    },
+    {
+      "examplePath": "GET /objects/{objectId}/monitoring / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Monitoring",
+      "sourceLine": 296,
+      "topLevelKeys": [
+        "pointId",
+        "status",
+        "window",
+        "totals",
+        "lastSeenAt",
+        "provenance"
+      ],
+      "corrections": [],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "pointId",
+        "status",
+        "window",
+        "totals",
+        "lastSeenAt",
+        "provenance"
+      ],
+      "sourceLiteralSHA256": "c5ea66e1ed8a05d7b5abc30550fd27ea408ce9fc258c8d633f7abe016fa3133d"
+    },
+    {
+      "examplePath": "GET /equipment / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Page[Equipment]",
+      "sourceLine": 368,
+      "topLevelKeys": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "corrections": [
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "sourceLiteralSHA256": "661df8ede5b502e94d846cee794e6eef67b6093dc9aba02d04803b68c5ac72ff"
+    },
+    {
+      "examplePath": "GET /equipment/{equipmentId} / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Equipment",
+      "sourceLine": 419,
+      "topLevelKeys": [
+        "id",
+        "level",
+        "vendor",
+        "model",
+        "serialNumber",
+        "powerKw",
+        "state",
+        "objectId"
+      ],
+      "corrections": [],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "id",
+        "vendor",
+        "model",
+        "serialNumber",
+        "powerKw",
+        "state",
+        "objectId"
+      ],
+      "sourceLiteralSHA256": "b44b8ff16dd62cb505df28fb6091b0133831a8b52146e5d8bdf9ce5f0bbe3b94"
+    },
+    {
+      "examplePath": "GET /counterparties / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Page[Counterparty]",
+      "sourceLine": 467,
+      "topLevelKeys": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "corrections": [
+        {
+          "path": "/items/0/inn",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/items/0/kpp",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "sourceLiteralSHA256": "1dc2faab2ab0dc3dbdb254c53e0559c507ba87b7b81dc13ab992432dd2573ddd"
+    },
+    {
+      "examplePath": "GET /counterparties/{counterpartyId} / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Counterparty",
+      "sourceLine": 511,
+      "topLevelKeys": [
+        "id",
+        "name",
+        "inn",
+        "kpp"
+      ],
+      "corrections": [
+        {
+          "path": "/inn",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/kpp",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "id",
+        "name",
+        "inn",
+        "kpp"
+      ],
+      "sourceLiteralSHA256": "6432d54e0318eeb8442b0b273a3659a52db5af562d6bff95ef99a4e6275ce1c7"
+    },
+    {
+      "examplePath": "GET /contracts / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Page[Contract]",
+      "sourceLine": 589,
+      "topLevelKeys": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "corrections": [
+        {
+          "path": "/items/0/validUntil",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "sourceLiteralSHA256": "c7afccdce999b302897c3ff8ea97a542a8ebe7b351fb34600cd182239c718617"
+    },
+    {
+      "examplePath": "GET /contract-types / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "ContractTypeMetadata",
+      "sourceLine": 642,
+      "topLevelKeys": [
+        "typeCode",
+        "label",
+        "gkBasis",
+        "direction",
+        "isActive"
+      ],
+      "corrections": [
+        {
+          "path": "/label",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/gkBasis",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/direction",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/isActive",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "typeCode",
+        "label",
+        "gkBasis",
+        "direction",
+        "isActive"
+      ],
+      "sourceLiteralSHA256": "216677a68d619215811fb9349bfc5f0c5990b383c6897a3e465f076549b74f18"
+    },
+    {
+      "examplePath": "GET /contracts/{contractId} / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Contract",
+      "sourceLine": 690,
+      "topLevelKeys": [
+        "typeCode",
+        "validUntil",
+        "id",
+        "number",
+        "date",
+        "title",
+        "isClosed",
+        "scopeType",
+        "counterpartyId"
+      ],
+      "corrections": [
+        {
+          "path": "/validUntil",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "typeCode",
+        "validUntil",
+        "id",
+        "number",
+        "date",
+        "title",
+        "isClosed",
+        "scopeType",
+        "counterpartyId"
+      ],
+      "sourceLiteralSHA256": "999d0ff5c8dc71e662c071615f7124c5c5facfc1a80f29229ec7151ac255ed3d"
+    },
+    {
+      "examplePath": "GET /contracts/{contractId}/objects / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "ContractObjects",
+      "sourceLine": 739,
+      "topLevelKeys": [
+        "contractId",
+        "scopeType",
+        "items",
+        "total",
+        "nextCursor"
+      ],
+      "corrections": [
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "contractId",
+        "scopeType",
+        "items",
+        "total",
+        "nextCursor"
+      ],
+      "sourceLiteralSHA256": "4c0a93e9aa8cd8d017abf110fbd6faf96f66a8c0e0de7eaa12d6f03003d667c5"
+    },
+    {
+      "examplePath": "GET /contracts/{contractId}/documents / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "ContractDocuments",
+      "sourceLine": 793,
+      "topLevelKeys": [
+        "contractId",
+        "items",
+        "total",
+        "nextCursor"
+      ],
+      "corrections": [
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "contractId",
+        "items",
+        "total",
+        "nextCursor"
+      ],
+      "sourceLiteralSHA256": "b836a23d40c4425a41d49e9eed88c78b6831151b4dc75973c458a09aeb43768b"
+    },
+    {
+      "examplePath": "GET /documents / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "Page[Document]",
+      "sourceLine": 847,
+      "topLevelKeys": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "corrections": [
+        {
+          "path": "/items/0/registrationNumber",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/items/0/registrationDate",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/items/0/objectId",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/items/0/counterpartyId",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/nextCursor",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "sourceLiteralSHA256": "7837dc0b9173c780168c4dd20c3a1e5305f5878daf8f384f2444250f7e72bec6"
+    },
+    {
+      "examplePath": "GET /documents/{docId} / responses/200/content/application~1json/examples/fictional/value",
+      "dto": "DocumentDetail",
+      "sourceLine": 901,
+      "topLevelKeys": [
+        "id",
+        "title",
+        "status",
+        "registrationNumber",
+        "registrationDate",
+        "currentRevision",
+        "objectId",
+        "counterpartyId",
+        "versions",
+        "versionsTruncated"
+      ],
+      "corrections": [
+        {
+          "path": "/registrationNumber",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/registrationDate",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/objectId",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        },
+        {
+          "path": "/counterpartyId",
+          "oldGenerated": "missing after exclude_none dictionary encoding (source-derived)",
+          "newGenerated": null,
+          "declaredLiteralChanged": false
+        }
+      ],
+      "sourceObservation": "Declared literal remains byte-identical; restore its exact deepcopy after get_openapi in both canonical/public projections",
+      "requiredFields": [
+        "id",
+        "title",
+        "status",
+        "registrationNumber",
+        "registrationDate",
+        "currentRevision",
+        "objectId",
+        "counterpartyId",
+        "versions",
+        "versionsTruncated"
+      ],
+      "sourceLiteralSHA256": "7f987d683e918d2ce8c727983faec188b3cd66223143feca2044920d11ef7a49"
+    }
+  ],
+  "dtoSourceDeclarations": {
+    "ContractTypeMetadata": {
+      "line": 145,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "typeCode",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "label",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "gkBasis",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "direction",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "isActive",
+          "type": "bool | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "ContractObject": {
+      "line": 209,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "objectId",
+          "type": "ObjectId",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "ContractObjects": {
+      "line": 217,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "contractId",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "scopeType",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "items",
+          "type": "list[ContractObject]",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "total",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 0
+          }
+        },
+        {
+          "name": "nextCursor",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "ContractDocument": {
+      "line": 286,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "documentId",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "ContractDocuments": {
+      "line": 294,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "contractId",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "items",
+          "type": "list[ContractDocument]",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "total",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 0
+          }
+        },
+        {
+          "name": "nextCursor",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "MonitoringWindow": {
+      "line": 352,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "days",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 1,
+            "le": 366
+          }
+        },
+        {
+          "name": "start",
+          "type": "datetime",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "end",
+          "type": "datetime",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "timeZone",
+          "type": "Literal['Europe/Moscow']",
+          "required": false,
+          "constraints": {
+            "default": "Europe/Moscow"
+          }
+        },
+        {
+          "name": "interval",
+          "type": "Literal['inclusive']",
+          "required": false,
+          "constraints": {
+            "default": "inclusive"
+          }
+        }
+      ]
+    },
+    "MonitoringTotals": {
+      "line": 385,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "sessions",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 0
+          }
+        },
+        {
+          "name": "visits",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 0
+          }
+        },
+        {
+          "name": "successfulVisits",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 0
+          }
+        },
+        {
+          "name": "unsuccessfulVisits",
+          "type": "int",
+          "required": true,
+          "constraints": {
+            "ge": 0
+          }
+        },
+        {
+          "name": "energyKwh",
+          "type": "float",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "MonitoringProvenance": {
+      "line": 418,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "asOf",
+          "type": "datetime",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "dataThrough",
+          "type": "datetime | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "dataLagHours",
+          "type": "float | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "requestedDate",
+          "type": "date | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "catalogMode",
+          "type": "Literal['current']",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "snapshotNote",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "boundaryScope",
+          "type": "Literal['object']",
+          "required": false,
+          "constraints": {
+            "default": "object"
+          }
+        },
+        {
+          "name": "source",
+          "type": "Literal['charge_sessions']",
+          "required": false,
+          "constraints": {
+            "default": "charge_sessions"
+          }
+        },
+        {
+          "name": "visitSuccess",
+          "type": "Literal['any attempt energy_kwh > 0']",
+          "required": false,
+          "constraints": {
+            "default": "any attempt energy_kwh > 0"
+          }
+        }
+      ]
+    },
+    "Monitoring": {
+      "line": 472,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "pointId",
+          "type": "ObjectId",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "status",
+          "type": "Literal['working', 'no_link', 'disabled', 'decommissioned', 'on_repair', 'maintenance', 'not_working', 'unknown']",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "window",
+          "type": "MonitoringWindow",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "totals",
+          "type": "MonitoringTotals",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "lastSeenAt",
+          "type": "datetime | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "provenance",
+          "type": "MonitoringProvenance",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Object": {
+      "line": 535,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "ObjectId",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "level",
+          "type": "Literal['servicePoint']",
+          "required": false,
+          "constraints": {
+            "default": "servicePoint"
+          }
+        },
+        {
+          "name": "code",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "type",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "status",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "address",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "latitude",
+          "type": "float | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "longitude",
+          "type": "float | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Equipment": {
+      "line": 586,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "level",
+          "type": "Literal['station']",
+          "required": false,
+          "constraints": {
+            "default": "station"
+          }
+        },
+        {
+          "name": "vendor",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "model",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "serialNumber",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "powerKw",
+          "type": "float | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "state",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "objectId",
+          "type": "ObjectId | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Counterparty": {
+      "line": 632,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "name",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "inn",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "kpp",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Contract": {
+      "line": 655,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "typeCode",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "validUntil",
+          "type": "str | None",
+          "required": true,
+          "constraints": {
+            "max_length": 20
+          }
+        },
+        {
+          "name": "id",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "number",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "date",
+          "type": "_datetime.date | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "title",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "isClosed",
+          "type": "bool",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "scopeType",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "counterpartyId",
+          "type": "Id | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Document": {
+      "line": 708,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "title",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "status",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "registrationNumber",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "registrationDate",
+          "type": "date | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "currentRevision",
+          "type": "int",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "objectId",
+          "type": "ObjectId | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "counterpartyId",
+          "type": "Id | None",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Version": {
+      "line": 753,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "Id",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "revision",
+          "type": "int",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "role",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "fileName",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "mimeType",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "sizeBytes",
+          "type": "int",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "DocumentDetail": {
+      "line": 786,
+      "bases": [
+        "Document"
+      ],
+      "fields": [
+        {
+          "name": "versions",
+          "type": "list[Version]",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "versionsTruncated",
+          "type": "bool",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Page": {
+      "line": 815,
+      "bases": [
+        "DTO",
+        "Generic[T]"
+      ],
+      "fields": [
+        {
+          "name": "items",
+          "type": "list[T]",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "nextCursor",
+          "type": "str | None",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "total",
+          "type": "int",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "Problem": {
+      "line": 838,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "type",
+          "type": "str",
+          "required": false,
+          "constraints": {
+            "default": "about:blank"
+          }
+        },
+        {
+          "name": "title",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "status",
+          "type": "int",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "code",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "requestId",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "detail",
+          "type": "str",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    },
+    "ContractCreateResult": {
+      "line": 872,
+      "bases": [
+        "DTO"
+      ],
+      "fields": [
+        {
+          "name": "contractId",
+          "type": "UUID",
+          "required": true,
+          "constraints": {}
+        },
+        {
+          "name": "replayed",
+          "type": "bool",
+          "required": true,
+          "constraints": {}
+        }
+      ]
+    }
+  },
+  "errorExamples": {
+    "singleProblem": "problem_content creates type/title/status/code/requestId/detail; HTTPStatus(status).phrase and dynamic fields were read only, never invoked",
+    "named429": [
+      "quotaExhausted retains full generic payload and changes code/detail",
+      "injectedHTTP429 retains full generic payload"
+    ],
+    "componentSingle429": "ProductInjectedRateLimit uses complete problem_content(429)",
+    "headerExamples": "Read complete _describe_http_responses; example strings match declared const/pattern and UUID form; formal validation NOT RUN"
+  },
+  "testsFrozen": {
+    "clearledger/server/tests/test_product_http_profile.py": {
+      "sha256": "ee748e5c922d387431a641b64956f7c55a9be19cc34b87c7cadf6d03d794de82",
+      "testFunctions": 13
+    },
+    "clearledger/server/tests/test_product_openapi_http_contract.py": {
+      "sha256": "83bd471cfcf0969bc72d3b975cf189c36df4b0eeab3226c5ee84be96f6b2c29b",
+      "testFunctions": 9,
+      "note": "Base SHA; only existing formal-test body changed under expanded authorization; all other content exact by whole inverse"
+    }
+  },
+  "inverse": {
+    "baseCommit": "9a6abac9c6887fb41ca726e1df20304269bcaf5d",
+    "app": "Remove only the new helper including its two separator blank lines and the single helper-call statement; reconstructed entire module bytes and AST equal base",
+    "test": "Replace only the existing formal test function source span with its base source; reconstructed entire test module bytes and AST equal base",
+    "appWholeInverseBytes": true,
+    "appWholeInverseAST": true,
+    "testWholeInverseBytes": true,
+    "testWholeInverseAST": true,
+    "validatorAndNegativeBodyByteEquality": true,
+    "memoryCompileWithoutExec": true,
+    "sourceLiteralsChanged": 0
+  },
+  "bounds": [
+    "Worker runtime 0: only filesystem/Git/stdlib AST/hash/json and memory compile without exec; no app/test/library/helper imported or called",
+    "No pytest/collection/SQL/PG/Docker/network/Node/browser/install/subagents",
+    "Root owns fresh independent source review and actual 22 primary +152 subtests and SDK generation/freshness after integration",
+    "Original SDK16/HTTP70 remain accepted immutable evidence; no new PASS claimed",
+    "Current source has 14 named JSON200 response values and no declared POST200/201 examples or response-header example values; generic singleton/header/reference handling follows the same narrow copy path, but has no new runtime coverage here",
+    "Current _describe_http_responses builds complete singleton Problem and named429 payloads after encoder; it remains byte-identical",
+    "No deployment, push or PR; hooks disabled for the exact four-file commit"
+  ],
+  "scopeRevision": {
+    "question": "msg_ca750ceeb4dd",
+    "coordinatorAnswer": "msg_3dbaf307c667",
+    "acceptedCause": "Source literals and level are correct; expanded authorization permits compact metadata helper plus a single curated_openapi call and additions only to the existing formal test body",
+    "files": [
+      "clearledger/server/app/product_api/app.py",
+      "clearledger/server/tests/test_product_openapi_http_contract.py",
+      "clearledger/docs/api/PRODUCT_OPENAPI_EXAMPLES_20261101.md",
+      "clearledger/docs/api/PRODUCT_OPENAPI_EXAMPLES_20261101.json"
+    ]
+  },
+  "installedSource": {
+    "fastapiVersion": "0.133.0",
+    "files": [
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/fastapi/openapi/utils.py",
+        "sha256": "16f9adb21f0398af545e744976da8932c165803df60d679efe6bdcf2e7380db6",
+        "readOnlySource": true
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/fastapi/encoders.py",
+        "sha256": "5cfb185964b4018bf3ef0ff05cfb225ed53c3af3f7f19bef21cc12c3d5b38c56",
+        "readOnlySource": true
+      },
+      {
+        "path": "/srv/projects/api-modernization-upgrade-test-env-20261030/.venv/lib/python3.13/site-packages/fastapi/openapi/models.py",
+        "sha256": "e2c633f7f4e05dc34459e12b11b37cedc709fb65ed5c82005a7c8e7d080b7353",
+        "readOnlySource": true
+      }
+    ],
+    "sourceCause": [
+      "utils.py get_openapi: route.responses is deep-copied; additional status keys use str(status).upper() with DEFAULT mapped to default; routes are indexed by path_format and method.lower()",
+      "utils.py:571 final jsonable_encoder(OpenAPI(**output), by_alias=True, exclude_none=True)",
+      "encoders.py:226-241 BaseModel model_dump propagates exclude_none; 264-299 dictionary recursion drops value is None; nested dictionaries in lists are traversed too",
+      "False and zero are not None; restoration uses membership rather than truthiness and deepcopy preserves their literal types",
+      "openapi/models.py:212-219 Example.value allows Any | None; media/header example and examples declarations support these literal payloads"
+    ]
+  },
+  "implementation": {
+    "helper": "_restore_declared_response_examples(schema, routes)",
+    "inputs": "Actual APIRoute.responses, route.include_in_schema, path_format, methods; no DTO/value duplication",
+    "writtenKeys": [
+      "content/<media>/example",
+      "content/<media>/examples",
+      "headers/<name>/example",
+      "headers/<name>/examples"
+    ],
+    "method": "deepcopy only if keyword is declared; preserves singleton null, named payload nulls, False/0 and local Example reference/metadata dictionaries without following refs",
+    "callOrder": [
+      "get_openapi",
+      "_restore_declared_response_examples",
+      "existing ContractCreateBody schema injection",
+      "_canonical_object_id_paths",
+      "remaining existing curated metadata",
+      "_describe_http_responses",
+      "return canonical schema",
+      "public_client_openapi: deepcopy canonical schema without another jsonable_encoder"
+    ],
+    "nonGoals": "No changes to schema/response model/handler body/components/security/policy/decorator literals/flags/exporter/generator/SDK/identity/DPL; POST examples remain absent"
+  },
+  "testAuthorship": {
+    "existingNode": "ProductOpenAPIHTTPContract.test_formal_oas_local_refs_formats_and_examples",
+    "newAssertions": [
+      "Existing strict local_examples_gate(self.schema) retained; same gate also checks public projection",
+      "Every included APIRoute response declaration with content/header example/examples equals the produced value at path/method/status/media or header in both projections",
+      "Sorted JSON equality additionally distinguishes False from numeric zero; explicit count 14 per projection prevents empty traversal",
+      "Nested mutation of public example leaves canonical intact; canonical mutation leaves all route.responses intact"
+    ],
+    "primaryFunctionsBeforeAfter": 22,
+    "newTestFunctions": 0,
+    "newSubtests": 0,
+    "existingValidatorNegativeBodies": "byte-identical",
+    "execution": "NOT RUN"
+  },
+  "historicalRootEvidence": {
+    "receipt": {
+      "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/get-oas-transport-v3-real-example-failure-20261101.json",
+      "sha256": "852b01ae684700ca431c3189a1075175c37926b4ae654b458a4ec6523d7b3304"
+    },
+    "raw": {
+      "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/get-oas-transport-v3-b0aa31e2-fullnative-pg-20261101-578c9e264e6c/evidence/result.json",
+      "sha256": "0f8193bb006646d6006f2a61959b440f6d8ac7a50274b5ef0036cdaf8468700a"
+    },
+    "sut": "b0aa31e2d9e8da8890bff53fcfebc6c5a157d416",
+    "primary": 22,
+    "passedPrimary": 20,
+    "failedPrimary": 2,
+    "passedSubtests": 152,
+    "meaning": "Pre-fix evidence read only, never presented as a new pass; first formal failure missing required nextCursor; negative window.start failed before target because original object example was already incomplete"
+  },
+  "freeze": "Final commit/tree and SHA-256 of all four final files are sent in the Orca completion receipt; self-referential documentation hashes are not embedded in this JSON"
+}

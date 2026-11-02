@@ -1,0 +1,273 @@
+{
+  "budget": {
+    "checks": {
+      "ck_product_budget_limit": "request_limit >= 1 AND request_limit <= 1000000",
+      "ck_product_budget_used": "used >= 1 AND used <= request_limit + 1",
+      "ck_product_budget_window": "window_seconds >= 1 AND window_seconds <= 3600"
+    },
+    "columns": [
+      {
+        "default": null,
+        "name": "company_id",
+        "not_null": true,
+        "type": "uuid",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "installation_id",
+        "not_null": true,
+        "type": "uuid",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "client_id",
+        "not_null": true,
+        "type": "varchar",
+        "typmod": 68
+      },
+      {
+        "default": null,
+        "name": "used",
+        "not_null": true,
+        "type": "int4",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "reset_at",
+        "not_null": true,
+        "type": "timestamptz",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "request_limit",
+        "not_null": true,
+        "type": "int4",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "window_seconds",
+        "not_null": true,
+        "type": "int4",
+        "typmod": -1
+      }
+    ],
+    "constraint_counts": {
+      "c": 3,
+      "f": 1,
+      "p": 1
+    },
+    "foreign_key": {
+      "columns": [
+        "installation_id",
+        "client_id",
+        "company_id"
+      ],
+      "target_columns": [
+        "id",
+        "client_id",
+        "company_id"
+      ]
+    },
+    "indexes": [
+      {
+        "columns": [
+          "company_id",
+          "installation_id",
+          "client_id"
+        ],
+        "name": null,
+        "opclasses": [
+          "pg_catalog.uuid_ops",
+          "pg_catalog.uuid_ops",
+          "pg_catalog.text_ops"
+        ],
+        "primary": true,
+        "unique": true
+      },
+      {
+        "columns": [
+          "reset_at"
+        ],
+        "name": "ix_product_api_budgets_reset",
+        "opclasses": [
+          "pg_catalog.timestamptz_ops"
+        ],
+        "primary": false,
+        "unique": false
+      }
+    ],
+    "name": "product_api_budgets",
+    "primary": [
+      "company_id",
+      "installation_id",
+      "client_id"
+    ]
+  },
+  "format": 1,
+  "journal": {
+    "checks": {
+      "ck_core_schema_action": "action = 'created'::text OR action = 'adopted'::text"
+    },
+    "columns": [
+      {
+        "default": null,
+        "name": "revision",
+        "not_null": true,
+        "type": "text",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "ordinal",
+        "not_null": true,
+        "type": "int4",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "parent_revision",
+        "not_null": false,
+        "type": "text",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "artifact_sha256",
+        "not_null": true,
+        "type": "bpchar",
+        "typmod": 68
+      },
+      {
+        "default": null,
+        "name": "contract_sha256",
+        "not_null": true,
+        "type": "bpchar",
+        "typmod": 68
+      },
+      {
+        "default": null,
+        "name": "predecessor_sha256",
+        "not_null": false,
+        "type": "bpchar",
+        "typmod": 68
+      },
+      {
+        "default": null,
+        "name": "action",
+        "not_null": true,
+        "type": "text",
+        "typmod": -1
+      },
+      {
+        "default": "now()",
+        "name": "applied_at",
+        "not_null": true,
+        "type": "timestamptz",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "applied_by",
+        "not_null": true,
+        "type": "text",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "app_commit",
+        "not_null": true,
+        "type": "bpchar",
+        "typmod": 44
+      },
+      {
+        "default": null,
+        "name": "runner_format",
+        "not_null": true,
+        "type": "int4",
+        "typmod": -1
+      }
+    ],
+    "constraint_counts": {
+      "c": 1,
+      "p": 1,
+      "u": 1
+    },
+    "indexes": [
+      {
+        "columns": [
+          "revision"
+        ],
+        "name": null,
+        "opclasses": [
+          "pg_catalog.text_ops"
+        ],
+        "primary": true,
+        "unique": true
+      },
+      {
+        "columns": [
+          "ordinal"
+        ],
+        "name": null,
+        "opclasses": [
+          "pg_catalog.int4_ops"
+        ],
+        "primary": false,
+        "unique": true
+      }
+    ],
+    "name": "core_schema_versions",
+    "primary": [
+      "revision"
+    ],
+    "unique": [
+      "ordinal"
+    ]
+  },
+  "namespace": "core",
+  "parent": {
+    "columns": [
+      {
+        "default": null,
+        "name": "id",
+        "not_null": true,
+        "type": "uuid",
+        "typmod": -1
+      },
+      {
+        "default": null,
+        "name": "client_id",
+        "not_null": true,
+        "type": "varchar",
+        "typmod": 68
+      },
+      {
+        "default": null,
+        "name": "company_id",
+        "not_null": true,
+        "type": "uuid",
+        "typmod": -1
+      }
+    ],
+    "unique": {
+      "columns": [
+        "id",
+        "client_id",
+        "company_id"
+      ],
+      "name": null,
+      "opclasses": [
+        "pg_catalog.uuid_ops",
+        "pg_catalog.text_ops",
+        "pg_catalog.uuid_ops"
+      ],
+      "primary": false,
+      "unique": true
+    }
+  }
+}

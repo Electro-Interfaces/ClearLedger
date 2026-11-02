@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.services.ezs_accounting import cost_details
 from app.services.ezs_equipment import OP_LABELS, STATE_LABELS, TRANSITIONS, apply_movement, check_period
+from app.services import location_commands
 
 # Префикс номера и название документа по операции.
 DOC_KINDS: dict[str, tuple[str, str]] = {
@@ -620,9 +621,7 @@ async def warehouse_card(db: AsyncSession, company_id, loc: ServiceLocation) -> 
 async def save_warehouse(db: AsyncSession, company_id, loc_id: str | None, p: dict[str, Any]) -> dict[str, Any]:
     from app.services.ezs_equipment import get_or_create_warehouse
     if loc_id:
-        loc = await db.get(ServiceLocation, loc_id)
-        if loc is None or loc.company_id != company_id or loc.type != "warehouse":
-            raise HTTPException(404, "Склад не найден")
+        loc = await _own_warehouse(db, company_id, loc_id)
     else:
         name = (p.get("name") or "").strip()
         if not name:
@@ -652,9 +651,13 @@ async def save_warehouse(db: AsyncSession, company_id, loc_id: str | None, p: di
                 ServiceLocation.id != loc.id,
                 func.lower(func.btrim(ServiceLocation.name)) == new_name.lower()))).first():
             raise HTTPException(409, f"Склад «{new_name}» уже есть")
-        loc.name = new_name
-    if "address" in p:
-        loc.address = (p.get("address") or "").strip()[:500] or None
+    address = ((p.get("address") or "").strip()[:500] or None) if "address" in p else None
+    try:
+        await location_commands.update_warehouse_details(
+            db, company_id, loc, name=new_name if loc_id and new_name != loc.name else None,
+            address=address, address_given="address" in p)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
     # МОЛ — участник пространства (в 1С — физическое лицо); имя хранится снимком.
     resp_user = old.get("responsibleUserId") if "responsibleUserId" not in p else p.get("responsibleUserId")
     responsible = (p.get("responsible") if "responsible" in p else old.get("responsible")) or ""
@@ -664,7 +667,7 @@ async def save_warehouse(db: AsyncSession, company_id, loc_id: str | None, p: di
             raise HTTPException(400, "МОЛ не найден среди участников пространства")
         responsible = u.name or u.email
     take = lambda k, n: ((p.get(k) if k in p else old.get(k)) or "").strip()[:n] or None  # noqa: E731
-    meta["warehouse"] = {
+    warehouse = {
         "ownership": ownership, "counterpartyId": str(cp.id) if cp else None,
         "contractId": str(contract.id) if contract else None,
         "responsible": responsible.strip()[:200] or None,
@@ -674,7 +677,10 @@ async def save_warehouse(db: AsyncSession, company_id, loc_id: str | None, p: di
         "bpCode": take("bpCode", 30), "bpRef": take("bpRef", 60),
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
-    loc.extra_metadata = meta
+    try:
+        await location_commands.update_warehouse_card(db, company_id, loc, warehouse=warehouse)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
     await db.flush()
     return await warehouse_card(db, company_id, loc)
 
@@ -709,10 +715,10 @@ async def _warehouse_usage(db: AsyncSession, company_id, loc_id: str) -> dict[st
 
 
 async def _own_warehouse(db: AsyncSession, company_id, loc_id: str) -> ServiceLocation:
-    loc = await db.get(ServiceLocation, loc_id)
-    if loc is None or loc.company_id != company_id or loc.type != "warehouse":
-        raise HTTPException(404, "Склад не найден")
-    return loc
+    try:
+        return await location_commands.warehouse_for_mutation(db, company_id, loc_id)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
 
 
 async def set_warehouse_status(db: AsyncSession, company_id, loc_id: str, close: bool) -> dict[str, Any]:
@@ -727,7 +733,10 @@ async def set_warehouse_status(db: AsyncSession, company_id, loc_id: str, close:
         if used["units"] or used["spares"]:
             raise HTTPException(409, f"На складе «{loc.name}» числится: единиц {used['units']}, позиций ЗИП "
                                      f"{used['spares']} — сначала переместите их на другой склад")
-    loc.status = "closed" if close else "active"
+    try:
+        await location_commands.set_warehouse_status(db, company_id, loc, close)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
     await db.flush()
     return await warehouse_card(db, company_id, loc)
 
@@ -738,15 +747,25 @@ async def delete_warehouse(db: AsyncSession, company_id, loc_id: str) -> dict[st
     Склад с историей не удаляется — его закрывают: иначе прошлые документы и
     остатки на дату ссылались бы в пустоту.
     """
-    from app.models import EzsSparePartStock
+    from app.models import EzsSparePartStock, ObjectLink
     loc = await _own_warehouse(db, company_id, loc_id)
     used = await _warehouse_usage(db, company_id, loc_id)
     if used["units"] or used["spares"]:
         raise HTTPException(409, f"На складе «{loc.name}» числятся единицы или ЗИП — удалить нельзя")
     if used["history"]:
         raise HTTPException(409, f"По складу «{loc.name}» есть движения и документы — его можно закрыть, но не удалить")
+    linked = await db.scalar(select(ObjectLink.id).where(
+        ObjectLink.company_id == company_id,
+        ((ObjectLink.parent_type == "point_of_service") & (ObjectLink.parent_id == loc.id)) |
+        ((ObjectLink.child_type == "point_of_service") & (ObjectLink.child_id == loc.id)),
+    ).limit(1))
+    if linked is not None:
+        raise HTTPException(409, "Склад используется — удалить нельзя")
     await db.execute(delete(EzsSparePartStock).where(EzsSparePartStock.location_id == loc.id))
-    await db.delete(loc)
+    try:
+        await location_commands.delete_unused_warehouse(db, company_id, loc)
+    except location_commands.LocationConflict as exc:
+        raise HTTPException(exc.status, exc.detail) from exc
     return {"deleted": loc_id, "name": loc.name}
 
 

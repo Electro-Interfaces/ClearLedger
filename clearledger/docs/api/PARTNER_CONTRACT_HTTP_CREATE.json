@@ -1,0 +1,357 @@
+{
+  "classification": "AUTHOR_TEST_ONLY_NEGATIVE_OBSERVER_FIX_NOT_RUNTIME_ACCEPTANCE",
+  "source_base": "cdb65361f3207f82283c88da8b431625a5b1804c",
+  "source_commit": "2aef5f8abb6f2ff7f1202eee997c56427ae136f2",
+  "ratifications": [
+    "msg_dc2f907bf07e",
+    "msg_85a4864d991c",
+    "msg_243863d23160",
+    "msg_a0b500c56fd9",
+    "msg_8b65b5c01830",
+    "msg_3fe7c1c9e78a",
+    "msg_fa5aae8ffbf3"
+  ],
+  "operation": {
+    "method": "POST",
+    "path": "/api/v1/contracts",
+    "child_path": "/contracts",
+    "operationId": "createContract",
+    "api_version": "v1",
+    "info_version": "1.1.0",
+    "tag": "Договоры",
+    "scope": "contracts:create",
+    "stage": "CREATE_NEWBORN"
+  },
+  "principals": {
+    "user": "actual delegated user grant + current profile user flag/principal + canonical current permissions",
+    "machine": "actual confidential client_secret_basic + exact machine grant/principal + user_id NULL + service flag"
+  },
+  "request": {
+    "model": "app.product_api.contract_create_body.ContractCreateBody",
+    "parser": "app.product_api.contract_create_body.parse_contract_create_body",
+    "max_actual_bytes_inclusive": 16384,
+    "wire_reader_count": 1,
+    "content_length_authority": false,
+    "automatic_fastapi_body": false,
+    "openapi_source": "exact $ref #/components/schemas/ContractCreateBody; curated_openapi injects full canonical model_json_schema(by_alias=True,mode=validation,ref_template=#/components/schemas/{model}) and ALL defs unchanged",
+    "new_model_schema_hash": false,
+    "requestBody_schema": {
+      "$ref": "#/components/schemas/ContractCreateBody"
+    },
+    "schema_oracle": "exact reference, dereference, full canonical component equality including comment.default:null, ALL defs equality; protected/public/405 retained"
+  },
+  "success": {
+    "201": "new",
+    "200": "current authorized original-grant/actor/reference replay",
+    "allowlist": [
+      "contractId",
+      "replayed"
+    ],
+    "Location": false,
+    "read_permission_promise": false
+  },
+  "problems": {
+    "401": "invalid_credentials",
+    "403": "access_denied",
+    "409": "conflict",
+    "413": "request_too_large",
+    "415": "unsupported_media_type",
+    "422": "invalid_request",
+    "429_quota": "rate_limited",
+    "429_generic": "internal_error",
+    "500": "internal_error",
+    "503": "api_unavailable"
+  },
+  "metadata": {
+    "content_type": "application/problem+json",
+    "cache_control": "no-store",
+    "request_id": "X-Request-Id = Problem.requestId",
+    "bearer_challenge": [
+      401,
+      403
+    ],
+    "quota_retry_after": true,
+    "generic_retry_after": "only trusted supplied header for 429/503",
+    "collection_allow": "GET, POST",
+    "other_existing_allow": "GET",
+    "implementation": "pure ASGI wrapper; trusted current_security_context or uuid into same scope.state; MutableHeaders only response.start; original scope/receive/messages/bytes; nonHTTP passthrough; no receive calls/tasks/catches/auth/transaction changes; _problem unchanged"
+  },
+  "lifecycle": [
+    "short canonical read Session + shared coarse gate",
+    "close read Session",
+    "independent configured quota transaction/commit",
+    "new actual request Session/root",
+    "canonical Bearer reauth + shared coarse gate",
+    "request-bound non-SQL descriptor and guard",
+    "sole bounded strict stream parser",
+    "real create_partner_contract on same Session/root/Connection",
+    "allowlist DTO serialization",
+    "caller commit",
+    "Session close",
+    "response escapes"
+  ],
+  "rollback": [
+    "handler denial",
+    "parse/validation failure",
+    "serialization failure",
+    "cancellation with shielded HTTP rollback",
+    "commit failure including unknown acknowledgement"
+  ],
+  "unknown_commit": "new request/new root/same key/current auth/original grant+actor+refs; no old stamp or automatic retry",
+  "preserved": {
+    "GET_endpoint_AST_with_decorators": 15,
+    "read_resolver": "inverse AST projection identical",
+    "authority": "complete module inverse AST projection identical to source base",
+    "contracts_EMPTY": "unchanged; neither CREATE authority nor newborn veto",
+    "atomic_business_parts": 5,
+    "canonical_B": "one original complete composition",
+    "actual_flags_defaults_adminPUT": "unchanged; no activation",
+    "CREATE_context_permissions": [],
+    "canonical_token_resource_scopes": "unchanged/lossless; no projection or normalization in CREATE preflight",
+    "authority_raw_sha256": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18"
+  },
+  "openapi": {
+    "advertised_code_operations": 16,
+    "exact_manifest": "15 GET + POST method/path/operationId; source app/exporter/generator agree statically",
+    "canonical_profiles": [
+      "ProductOAuth",
+      "ProductServiceOAuth"
+    ],
+    "browser_execution_profiles": [
+      "ProductOAuth"
+    ],
+    "browser_service_credential_widgets": false,
+    "offline_import_guards": "unchanged; runtime identity/authority/consumer imports lazy"
+  },
+  "tests": {
+    "definitions": 27,
+    "parameterized_cases": 70,
+    "fixture": "tests.partner_contract_issuer_fixture.issuer_world",
+    "factory": "ROOT-owned external partner_contract_issuer_factory",
+    "positive_auth_or_authority_mocks": false,
+    "runtime_status": "NOTRUN_INCLUDING_IMPORTS_COLLECTION",
+    "count_method": "stdlib AST only; literal parametrization products; loops count once; NOT collection",
+    "old_HTTP_definitions_preserved": 21,
+    "issuer_unit_definitions": 13,
+    "issuer_unit_oracles_updated": 1,
+    "regression": "actual same-company extra space ID parent + installation/object grants; membership retains it for user; confidential machine has no native-member intersection; original verifier confirms both ceilings; real CREATE/replay and five-part SQL deltas, contracts EMPTY",
+    "coverage_limits": [
+      "current definitions NOTRUN; real streaming download and complete GET runtime compatibility remain unverified"
+    ],
+    "prior_R01_R02_counts": {
+      "definitions": 22,
+      "static_variants": 58
+    },
+    "prior_coverage_limits": [
+      "no dedicated Session-close-fault definition",
+      "no dedicated parser-disconnect definition"
+    ],
+    "close_observer": "delegates original AsyncSession.close, appends closed only after successful await for tracked Session; no success marker on negative close fault; separate real cleanup",
+    "external_cancel": "ASGI2.3/2.4; real consumer ready then cancel; test readiness30s per ROOT prior5.9–6.3s; original atomic/noRoot/closed/CancelledError assertions retained",
+    "new_definitions": [
+      "negative actual Session.close failure after real consumer and denial before commit",
+      "receive-disconnect on actual request root for ASGI2.3/2.4",
+      "actual prebody401/GET405/CREATE/500 metadata for ASGI2.3/2.4",
+      "protocol-only trusted context/generated UUID and streaming messages/header identity for ASGI2.3/2.4; synthetic206 is not Range API promise",
+      "nonHTTP lifespan/websocket identity passthrough"
+    ],
+    "prior22_definitions": "historical state at 92b425fbff8ad235c5b4c845c97b8f9014440bf6: all retained; schema exact ref + full equality; external cancel ASGI2.3/2.4/readiness30s; other20 unchanged AST to correction_base; current observer delta described separately",
+    "unchanged_HTTP_definitions_in_negative_observer_fix": 26,
+    "negative_observer": "original create_preflight; permissions==(); fallback UNINITIALIZED; original canonical token contracts.mode==EMPTY; no database permissions/receipt; real descriptor copy/other_request; first other_request201; exact403/access_denied/noBody/noSQLstate retained",
+    "old_HTTP_definitions_preserved_provenance": "historical count before the current negative observer fix; current base35e other26 byte+AST preserved"
+  },
+  "deferred": [
+    "GET create-options",
+    "OPTIONS",
+    "activation",
+    "generated SDK refresh",
+    "controlled runtime HTTP/SQL/auth/body/quota/replay/cancel verification",
+    "independent source review",
+    "FK/foreign/wait/parity gaps"
+  ],
+  "acceptance": {
+    "independent_source_review": "PENDING_FRESH_RECHECK",
+    "runtime0": true,
+    "HTTP": false,
+    "whole_SQL_issuer": false,
+    "API": false,
+    "B": false,
+    "full_partner": false,
+    "pilot": false,
+    "release": false,
+    "CI_pass": false,
+    "SDK_fresh": false,
+    "SOURCE_PASS": false
+  },
+  "original_program": {
+    "ref": "/srv/projects/preview/contract-create-workflow-20261101/report.json#/original_program",
+    "semantic": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345",
+    "sections": 20,
+    "criteria": 11,
+    "completion": false,
+    "copied": false
+  },
+  "source_scope": {
+    "cumulative_paths": 14,
+    "source_test_paths": 12,
+    "docs_paths": 2,
+    "repair_source_test_paths": [
+      "clearledger/server/tests/test_partner_contract_http_create.py"
+    ],
+    "commits": "historical schema source/test and middleware+test commits retained; test-only negative observer commit then exact2 docs-only child; hooks OFF, skip ci; no push/PR/merge/rebase",
+    "prior_repair_source_test_paths": [
+      "clearledger/server/app/product_api/access.py",
+      "clearledger/server/tests/test_partner_contract_http_create.py",
+      "clearledger/server/tests/test_partner_contract_issuer_unit.py"
+    ],
+    "prior_schema_middleware_repair_source_test_paths": [
+      "clearledger/server/app/product_api/app.py",
+      "clearledger/server/tests/test_partner_contract_http_create.py"
+    ],
+    "negative_observer_exact_delta_paths": [
+      "clearledger/server/tests/test_partner_contract_http_create.py",
+      "clearledger/docs/PARTNER_CONTRACT_HTTP_CREATE.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_HTTP_CREATE.json"
+    ]
+  },
+  "history": {
+    "original_source": "0e0cc68ab702e73695b3b0a48325e6fc52e7d8a3",
+    "reviewed_docs_head": "0106a022c876fa8cbfb0e68df0a92429152af705",
+    "previous_verdict": "CHANGES_REQUESTED_SOURCE",
+    "author_report": {
+      "path": "/srv/projects/preview/partner-contract-http-post-author-20261101/report.json",
+      "sha256": "e36851f55757dd0e13cea56455b5258bc40d508b3ad823ddbc3553cebd02eca6"
+    },
+    "review_report": {
+      "path": "/srv/projects/preview/partner-contract-http-post-review-20261101/review.json",
+      "sha256": "84a680f607bc9680c9f9449b1c0e970b9311a67b8980b4f4903f34fc97b619db"
+    },
+    "historical_reports_overwritten": false,
+    "fresh_independent_review": "PENDING",
+    "author_SOURCE_PASS": false,
+    "prior_R01_R02_source": "0b873aba12265075c40b7c32e786401bc741449a",
+    "prior_R01_R02_docs_head": "68322c9c3c9885a49de47369f364ac1642b59080",
+    "ROOT_observations_provenance": "coordinator messages only; private .artifacts not read; prior results not transferred to latest code",
+    "initial17": {
+      "integrated_pin_abbreviated": "8cda",
+      "diagnosticPASS": 16,
+      "schemaFAIL": 1,
+      "failure": "inline body loses canonical comment.default:null",
+      "ROOT_authority": "msg_a0b500c56fd9"
+    },
+    "actualfault6": {
+      "ROOT_message": "msg_8b65b5c01830",
+      "delivery": "msg_edde37721876",
+      "calls": 6,
+      "diagnosticPASS": 1,
+      "FAIL": 5,
+      "seconds": 86.128,
+      "host": "exit1/reaped",
+      "cleanup": "normal PG/factory/global0/0; foreign41same",
+      "close_marker_FAIL": 3,
+      "inner_CancelledError": "DIDNOTRAISE",
+      "external_task_cancel": "timeout5 before ready; actual consumer5.9–6.3s; cancelpointNOTREACHED",
+      "unknown_commit_new_root_same_key_current_auth_replay": "diagnosticPASS"
+    },
+    "negative_observer_base": "35e3fac1c2d33b91ef5d0fbb12dbf632b8c102c7",
+    "prior_source_test_commit": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
+    "prior_docs_head": "35e3fac1c2d33b91ef5d0fbb12dbf632b8c102c7",
+    "actual47da_secondary_dispatch": {
+      "integrated_pin_abbreviated": "47da",
+      "provenance": "dispatch task_5126594507ca / ROOT msg_fa5aae8ffbf3 only; no private RAW read",
+      "first_two_slices": {
+        "diagnosticPASS": 40
+      },
+      "third20": {
+        "cases": 20,
+        "diagnosticPASS": 18,
+        "FAIL": 2,
+        "seconds": 90.718
+      },
+      "last10": "NOTSTARTED",
+      "failures": "both negative observer cases before descriptor forgery",
+      "production_bypass_proven": false,
+      "applies_to_corrected_test": false
+    }
+  },
+  "fixes": {
+    "R01": {
+      "finding": "HTTP-P2-01",
+      "classification": "SOURCE_CORRECTNESS_CONDITIONAL_DATA_EDGE; no auth bypass asserted",
+      "trigger": "normal requested/profile location plus extra same-company ServiceLocation id exactly one ASCII space in actual installation/object SET grants, absent from ProfileRef/body",
+      "before": "unnecessary CREATE read projection via scope_of/ResourceScope.selected/_names raises ValueError; generic 500 before parser",
+      "after": "CREATE permissions=(); verified principal/company/scopes and request-bound non-SQL descriptor preserved; original canonical token/resource_scopes and full SQL issuer/consumer unchanged",
+      "blank_requested_profile_location": "not a valid schema4 regression: ck_pc_ref_location forbids whitespace-only ProfileRef",
+      "target_data_and_installed_schema": "UNKNOWN",
+      "no_common_validator_or_GET_change": true
+    },
+    "R02": {
+      "file": "clearledger/server/tests/test_partner_contract_issuer_unit.py",
+      "only_definition": "test_empty_scopes_and_every_location_have_explicit_intersections",
+      "oracle": "single exact first _require_coarse_create(db,current,self.expected_profile) call binds refs/types; WRITE_SCOPE/flags stay asserted on shared helper; ALL old body-aware intersections and _permits checks retained",
+      "other_definitions_fixtures_locks_replay_atomic_assertions": "unchanged",
+      "production_issuer_changed_for_oracle": false
+    },
+    "R03": {
+      "source_commit": "b8ce04764f35914898d6e769adf713f1f8876db4",
+      "finding": "inline canonical default loss",
+      "change": "exact requestBody component ref and strict dereference/full component/ALL defs equality oracle",
+      "curated_component_defs_injection": "unchanged"
+    },
+    "R04": {
+      "source_commit": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
+      "ROOT_ratification": "msg_3fe7c1c9e78a",
+      "change": "pure ASGI requestId/noStore middleware only; no catch/read/task/auth/transaction changes; GET15 and _problem unchanged",
+      "test_changes": "faithful close observer, bounded readiness30s, negative close/disconnect and metadata ASGI2.3/2.4 definitions",
+      "runtime": "UNKNOWN/NOTRUN"
+    }
+  },
+  "correction_base": "68322c9c3c9885a49de47369f364ac1642b59080",
+  "schema_ref_commit": "b8ce04764f35914898d6e769adf713f1f8876db4",
+  "static_checks": {
+    "schema_commit_inverse_app_AST": true,
+    "middleware_commit_inverse_app_AST": true,
+    "GET15_decorators_registry_and_problem_preserved": true,
+    "compile_without_exec": 2,
+    "diff_check": "clean",
+    "imports_collection_tests_exporter_generator": "NOTRUN",
+    "independent_fresh_whole14_source_review": "PENDING",
+    "negative_observer_other26_byte_AST_and_exact_assertion_delta": true,
+    "negative_observer_compile_without_exec": 1
+  },
+  "negative_observer_fix": {
+    "authority": "msg_fa5aae8ffbf3",
+    "base": "35e3fac1c2d33b91ef5d0fbb12dbf632b8c102c7",
+    "test_only_commit": "2aef5f8abb6f2ff7f1202eee997c56427ae136f2",
+    "only_definition": "test_request_bound_preflight_cannot_be_copied_or_reused",
+    "imports_changed": false,
+    "other_26_definitions_byte_and_AST_preserved": true,
+    "fixtures_helpers_unchanged": true,
+    "production_changed": false,
+    "app_py_owner": "ROOT ctxf9ec",
+    "definitions": 27,
+    "static_variants": 70,
+    "runtime": "NOTRUN_INCLUDING_IMPORTS_COLLECTION",
+    "source_test_pins": {
+      "clearledger/scripts/export-partner-openapi.py": "afc546c88a579387fed8942f8feaada01d88c525b2b9a28927215d648ebba786",
+      "clearledger/server/app/api_contracts/context.py": "b480ddd2e13ae8d2534e30acf8ff484ac8a7d8a9f6de3549e6fd7f11e8d4e1c1",
+      "clearledger/server/app/api_contracts/routing.py": "20efc42527e9a08f1b9ff92abb8b76bbad9327d0c298611c5d97e375e9550b0b",
+      "clearledger/server/app/product_api/access.py": "d8e357635a8420a614c211edc43ef8bd425e8ddab2843bdbac01e3fa57956475",
+      "clearledger/server/app/product_api/app.py": "5d648e5ba7d30de2dd6076c7e04546571d335cd25303fa3169d4ce871855c87d",
+      "clearledger/server/app/product_api/contract_create.py": "c51e10000f789c10220f41620a8467f4683096e2df9da51ee2971dd089510806",
+      "clearledger/server/app/product_api/dto.py": "5d7d5de4cb95a80b8f5cf4cfe34bbf03a779b11b1cef27b19c8e81b374739ea8",
+      "clearledger/server/app/services/partner_contract_authority.py": "92beb9c24d6d8e30d58414c00190618ab6f1265aece0ab0b20880250bfd98c18",
+      "clearledger/server/tests/test_docs_portal_logout_scoped_locks.py": "bf02c9e03dba1665a65ba06cebca7460baa3659b1ad8ba7d44b94de54aa5b928",
+      "clearledger/server/tests/test_partner_contract_http_create.py": "d4f1843141c8658a1547a60b2346fc4da2593379e9f5ec777c8e5f6012f248b4",
+      "clearledger/server/tests/test_partner_contract_issuer_unit.py": "e3c008a93886dc295f9db88db9940bd87f0c678391eea0d107834e901d49bdc8",
+      "clearledger/tools/partner-api-types/generate.mjs": "53481c3053e781712c5e12c9b76038589e7f0c996180132c66721e0f3dded1ee"
+    },
+    "final14_pins_and_exact3_delta_report": "/srv/projects/preview/partner-contract-http-negative-observer-fix-20261101/report.json",
+    "docs_child_exact_paths": [
+      "clearledger/docs/PARTNER_CONTRACT_HTTP_CREATE.md",
+      "clearledger/docs/api/PARTNER_CONTRACT_HTTP_CREATE.json"
+    ],
+    "independent_focused_review": "PENDING_COORDINATOR_FINAL3_AND_ALL14_PINS",
+    "SOURCE_PASS": false
+  }
+}

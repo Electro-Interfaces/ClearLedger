@@ -360,6 +360,8 @@ export interface DocAccessRules {
 }
 
 export interface DocFilters {
+  /** Предмет карточки или цель связи, например contract:<opaque id>. */
+  ref?: string
   family?: string
   direction?: string
   status?: string

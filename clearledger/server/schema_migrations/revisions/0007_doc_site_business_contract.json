@@ -1,0 +1,977 @@
+{
+  "format": 1,
+  "namespace": "core",
+  "revision": "0007_doc_site_business",
+  "predecessor_source": "46566816f59e0d65f61b5426842d6a496e8fc13c",
+  "inherited6_artifact_sha256": "94f830704cee4366dfe9565370aac00de74143691e99b9b8f797d48ff51f4b7d",
+  "inherited_site": {
+    "format": 1,
+    "namespace": "core",
+    "revision": "0007_doc_site_business",
+    "actions": [
+      "site.read",
+      "site.link_edit",
+      "contract.create",
+      "document.create",
+      "document.read",
+      "document.edit",
+      "document.download",
+      "document.print",
+      "document.export",
+      "document.send",
+      "document.approve",
+      "document.sign",
+      "document.archive",
+      "document.manage_acl"
+    ],
+    "prerequisites": {
+      "companies": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "users": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "organizations": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "ezs_sites": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "location_id",
+            "type": "varchar",
+            "typmod": 44,
+            "not_null": false,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "service_locations": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "varchar",
+            "typmod": 44,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "ezs_equipment_units": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "counterparties": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "contracts": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "doc_cards": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "partner_installations": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      },
+      "user_companies": {
+        "columns": [
+          {
+            "name": "user_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "own_organization_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          },
+          {
+            "name": "object_scope",
+            "type": "jsonb",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          }
+        ],
+        "primary": [
+          "user_id",
+          "company_id"
+        ]
+      },
+      "ezs_projects": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "site_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "location_id",
+            "type": "varchar",
+            "typmod": 44,
+            "not_null": false,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ]
+      }
+    },
+    "tenant_keys": {
+      "ezs_sites": {
+        "name": "uq_site_authority_site_company",
+        "columns": [
+          "company_id",
+          "id"
+        ]
+      },
+      "organizations": {
+        "name": "uq_site_authority_org_company",
+        "columns": [
+          "company_id",
+          "id"
+        ]
+      }
+    },
+    "tables": {
+      "site_authority_contexts": {
+        "name": "site_authority_contexts",
+        "columns": [
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "site_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "organization_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "approved",
+            "type": "bool",
+            "typmod": -1,
+            "not_null": true,
+            "default": "false"
+          },
+          {
+            "name": "revoked",
+            "type": "bool",
+            "typmod": -1,
+            "not_null": true,
+            "default": "true"
+          },
+          {
+            "name": "policy_generation",
+            "type": "int4",
+            "typmod": -1,
+            "not_null": true,
+            "default": "1"
+          }
+        ],
+        "primary": [
+          "company_id",
+          "site_id"
+        ],
+        "unique": {
+          "uq_site_context_organization": [
+            "company_id",
+            "site_id",
+            "organization_id"
+          ]
+        },
+        "checks": {
+          "ck_site_context_generation": "policy_generation > 0"
+        },
+        "foreign_keys": {
+          "fk_site_context_site": {
+            "columns": [
+              "company_id",
+              "site_id"
+            ],
+            "table": "ezs_sites",
+            "target_columns": [
+              "company_id",
+              "id"
+            ],
+            "delete": "c"
+          },
+          "fk_site_context_organization": {
+            "columns": [
+              "company_id",
+              "organization_id"
+            ],
+            "table": "organizations",
+            "target_columns": [
+              "company_id",
+              "id"
+            ],
+            "delete": "c"
+          }
+        },
+        "indexes": {
+          "site_authority_contexts_pkey": {
+            "columns": [
+              "company_id",
+              "site_id"
+            ],
+            "unique": true,
+            "primary": true,
+            "predicate": null
+          },
+          "uq_site_context_organization": {
+            "columns": [
+              "company_id",
+              "site_id",
+              "organization_id"
+            ],
+            "unique": true,
+            "primary": false,
+            "predicate": null
+          }
+        }
+      },
+      "site_user_permissions": {
+        "name": "site_user_permissions",
+        "columns": [
+          {
+            "name": "company_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "site_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "user_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "action",
+            "type": "varchar",
+            "typmod": 36,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "approved",
+            "type": "bool",
+            "typmod": -1,
+            "not_null": true,
+            "default": "false"
+          }
+        ],
+        "primary": [
+          "company_id",
+          "site_id",
+          "user_id",
+          "action"
+        ],
+        "unique": {},
+        "checks": {
+          "ck_site_permission_action": "action='site.read' OR action='site.link_edit' OR action='contract.create' OR action='document.create' OR action='document.read' OR action='document.edit' OR action='document.download' OR action='document.print' OR action='document.export' OR action='document.send' OR action='document.approve' OR action='document.sign' OR action='document.archive' OR action='document.manage_acl'"
+        },
+        "foreign_keys": {
+          "fk_site_permission_context": {
+            "columns": [
+              "company_id",
+              "site_id"
+            ],
+            "table": "site_authority_contexts",
+            "target_columns": [
+              "company_id",
+              "site_id"
+            ],
+            "delete": "c"
+          },
+          "fk_site_permission_membership": {
+            "columns": [
+              "user_id",
+              "company_id"
+            ],
+            "table": "user_companies",
+            "target_columns": [
+              "user_id",
+              "company_id"
+            ],
+            "delete": "c"
+          }
+        },
+        "indexes": {
+          "site_user_permissions_pkey": {
+            "columns": [
+              "company_id",
+              "site_id",
+              "user_id",
+              "action"
+            ],
+            "unique": true,
+            "primary": true,
+            "predicate": null
+          }
+        }
+      }
+    },
+    "altered_tables": {
+      "partner_resource_scopes": {
+        "name": "partner_resource_scopes",
+        "columns": [
+          {
+            "name": "installation_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "kind",
+            "type": "varchar",
+            "typmod": 24,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "mode",
+            "type": "varchar",
+            "typmod": 9,
+            "not_null": true,
+            "default": null
+          }
+        ],
+        "primary": [
+          "installation_id",
+          "kind"
+        ],
+        "unique": {},
+        "checks": {
+          "ck_partner_resource_kind": "kind='objects' OR kind='equipment' OR kind='counterparties' OR kind='contracts' OR kind='documents' OR kind='sites'",
+          "ck_partner_resource_mode": "mode = ANY (ARRAY['ALL'::text,'SET'::text,'EMPTY'::text])",
+          "ck_partner_sites_mode": "kind <> 'sites' OR mode='SET' OR mode='EMPTY'"
+        },
+        "foreign_keys": {
+          "partner_resource_scopes_installation_id_fkey": {
+            "columns": [
+              "installation_id"
+            ],
+            "table": "partner_installations",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          }
+        },
+        "indexes": {
+          "partner_resource_scopes_pkey": {
+            "columns": [
+              "installation_id",
+              "kind"
+            ],
+            "unique": true,
+            "primary": true,
+            "predicate": null
+          }
+        }
+      },
+      "partner_resource_items": {
+        "name": "partner_resource_items",
+        "columns": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "installation_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "kind",
+            "type": "varchar",
+            "typmod": 24,
+            "not_null": true,
+            "default": null
+          },
+          {
+            "name": "object_id",
+            "type": "varchar",
+            "typmod": 44,
+            "not_null": false,
+            "default": null
+          },
+          {
+            "name": "equipment_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          },
+          {
+            "name": "counterparty_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          },
+          {
+            "name": "contract_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          },
+          {
+            "name": "document_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          },
+          {
+            "name": "site_id",
+            "type": "uuid",
+            "typmod": -1,
+            "not_null": false,
+            "default": null
+          }
+        ],
+        "primary": [
+          "id"
+        ],
+        "unique": {},
+        "checks": {
+          "ck_partner_resource_one_id": "num_nonnulls(object_id,equipment_id,counterparty_id,contract_id,document_id,site_id)=1",
+          "ck_partner_resource_typed_id": "(kind='objects' AND object_id IS NOT NULL) OR (kind='equipment' AND equipment_id IS NOT NULL) OR (kind='counterparties' AND counterparty_id IS NOT NULL) OR (kind='contracts' AND contract_id IS NOT NULL) OR (kind='documents' AND document_id IS NOT NULL) OR (kind='sites' AND site_id IS NOT NULL)"
+        },
+        "foreign_keys": {
+          "partner_resource_items_installation_id_kind_fkey": {
+            "columns": [
+              "installation_id",
+              "kind"
+            ],
+            "table": "partner_resource_scopes",
+            "target_columns": [
+              "installation_id",
+              "kind"
+            ],
+            "delete": "c"
+          },
+          "partner_resource_items_object_id_fkey": {
+            "columns": [
+              "object_id"
+            ],
+            "table": "service_locations",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          },
+          "partner_resource_items_equipment_id_fkey": {
+            "columns": [
+              "equipment_id"
+            ],
+            "table": "ezs_equipment_units",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          },
+          "partner_resource_items_counterparty_id_fkey": {
+            "columns": [
+              "counterparty_id"
+            ],
+            "table": "counterparties",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          },
+          "partner_resource_items_contract_id_fkey": {
+            "columns": [
+              "contract_id"
+            ],
+            "table": "contracts",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          },
+          "partner_resource_items_document_id_fkey": {
+            "columns": [
+              "document_id"
+            ],
+            "table": "doc_cards",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          },
+          "fk_partner_resource_site": {
+            "columns": [
+              "site_id"
+            ],
+            "table": "ezs_sites",
+            "target_columns": [
+              "id"
+            ],
+            "delete": "c"
+          }
+        },
+        "indexes": {
+          "partner_resource_items_pkey": {
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "primary": true,
+            "predicate": null
+          }
+        }
+      }
+    },
+    "before_checks": {
+      "partner_resource_scopes": {
+        "ck_partner_resource_kind": "kind = ANY (ARRAY['objects'::text,'equipment'::text,'counterparties'::text,'contracts'::text,'documents'::text])",
+        "ck_partner_resource_mode": "mode = ANY (ARRAY['ALL'::text,'SET'::text,'EMPTY'::text])"
+      },
+      "partner_resource_items": {
+        "ck_partner_resource_one_id": "num_nonnulls(object_id,equipment_id,counterparty_id,contract_id,document_id)=1",
+        "ck_partner_resource_typed_id": "(kind='objects' AND object_id IS NOT NULL) OR (kind='equipment' AND equipment_id IS NOT NULL) OR (kind='counterparties' AND counterparty_id IS NOT NULL) OR (kind='contracts' AND contract_id IS NOT NULL) OR (kind='documents' AND document_id IS NOT NULL)"
+      }
+    }
+  },
+  "native_tables": {
+    "contracts": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "date",
+          "type": "varchar",
+          "typmod": 24,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "valid_until",
+          "type": "varchar",
+          "typmod": 24,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "validity_kind",
+          "type": "varchar",
+          "typmod": 20,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "new_column": "validity_kind",
+      "checks": {
+        "ck_contract_validity": "CASE WHEN validity_kind IS NULL OR validity_kind = 'unknown' THEN true WHEN validity_kind = 'openEnded' THEN valid_until IS NULL WHEN validity_kind = 'until' THEN CASE WHEN date ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' AND substring(date,1,4) <> '0000' AND valid_until ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' AND substring(valid_until,1,4) <> '0000' THEN CASE WHEN substring(date,9,2)::integer <= EXTRACT(DAY FROM (pg_catalog.make_date(substring(date,1,4)::integer,substring(date,6,2)::integer,1) + interval '1 month - 1 day')) AND substring(valid_until,9,2)::integer <= EXTRACT(DAY FROM (pg_catalog.make_date(substring(valid_until,1,4)::integer,substring(valid_until,6,2)::integer,1) + interval '1 month - 1 day')) THEN valid_until::date >= date::date ELSE false END ELSE false END ELSE false END"
+      },
+      "foreign_keys": {},
+      "indexes": {}
+    },
+    "ops_contract_terms": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "contract_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "cost_item",
+          "type": "text",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "scope_type",
+          "type": "varchar",
+          "typmod": 24,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "location_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "valid_from",
+          "type": "varchar",
+          "typmod": 14,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "site_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "new_column": "site_id",
+      "checks": {
+        "ck_ops_term_site": "site_id IS NULL OR (scope_type = 'site' AND location_id IS NULL)"
+      },
+      "foreign_keys": {
+        "fk_ops_term_site": {
+          "columns": [
+            "company_id",
+            "site_id"
+          ],
+          "table": "ezs_sites",
+          "target_columns": [
+            "company_id",
+            "id"
+          ],
+          "delete": "a"
+        }
+      },
+      "indexes": {
+        "uq_ops_term": {
+          "definition": "CREATE UNIQUE INDEX uq_ops_term ON core.ops_contract_terms USING btree (contract_id, cost_item, COALESCE(location_id, ''::character varying), valid_from) WHERE (site_id IS NULL)",
+          "old_definition": "CREATE UNIQUE INDEX uq_ops_term ON core.ops_contract_terms USING btree (contract_id, cost_item, COALESCE(location_id, ''::character varying), valid_from)",
+          "columns": [
+            "contract_id",
+            "cost_item",
+            null,
+            "valid_from"
+          ],
+          "opclasses": [
+            "pg_catalog.uuid_ops",
+            "pg_catalog.text_ops",
+            "pg_catalog.text_ops",
+            "pg_catalog.text_ops"
+          ]
+        },
+        "uq_ops_term_site": {
+          "definition": "CREATE UNIQUE INDEX uq_ops_term_site ON core.ops_contract_terms USING btree (company_id, contract_id, cost_item, site_id, valid_from) WHERE (site_id IS NOT NULL)",
+          "columns": [
+            "company_id",
+            "contract_id",
+            "cost_item",
+            "site_id",
+            "valid_from"
+          ],
+          "opclasses": [
+            "pg_catalog.uuid_ops",
+            "pg_catalog.uuid_ops",
+            "pg_catalog.text_ops",
+            "pg_catalog.uuid_ops",
+            "pg_catalog.text_ops"
+          ]
+        }
+      }
+    },
+    "doc_cards": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "organization_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "object_id",
+          "type": "varchar",
+          "typmod": 44,
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "site_id",
+          "type": "uuid",
+          "typmod": -1,
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "new_column": "site_id",
+      "checks": {
+        "ck_doc_cards_site": "site_id IS NULL OR (object_id IS NULL AND organization_id IS NOT NULL)"
+      },
+      "foreign_keys": {
+        "fk_doc_cards_site_context": {
+          "columns": [
+            "company_id",
+            "site_id",
+            "organization_id"
+          ],
+          "table": "site_authority_contexts",
+          "target_columns": [
+            "company_id",
+            "site_id",
+            "organization_id"
+          ],
+          "delete": "a"
+        }
+      },
+      "indexes": {}
+    }
+  },
+  "allowed_site_inbound": [
+    {
+      "table": "doc_cards",
+      "constraint": "fk_doc_cards_site_context"
+    }
+  ],
+  "inherited_source_revision": "0006_site_authority"
+}

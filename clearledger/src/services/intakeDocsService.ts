@@ -5,7 +5,7 @@
  * `accept` пишет документы в учёт. Между ними стоит человек, и это не формальность:
  * в разборе видно, чего система не поняла и что её смущает.
  */
-import { get, post } from './apiClient'
+import { get, post, upload } from './apiClient'
 
 export interface IntakeCheck {
   level: 'error' | 'warning' | 'info'
@@ -55,24 +55,7 @@ export async function uploadIntake(
   fd.append('declared_type', declaredType)
   fd.append('source', 'file')
   fd.append('file', file)
-  const res = await fetch('/api/intake-docs/upload', {
-    method: 'POST',
-    body: fd,
-    credentials: 'include',
-    headers: authHeader(),
-  })
-  if (!res.ok) throw new Error(`upload failed: ${res.status}`)
-  return res.json()
-}
-
-/** Токен берём тем же ключом, что apiClient: FormData через `post` не отправить. */
-function authHeader(): Record<string, string> {
-  try {
-    const t = localStorage.getItem('clearledger-token')
-    return t ? { Authorization: `Bearer ${t}` } : {}
-  } catch {
-    return {}
-  }
+  return upload('/api/intake-docs/upload', fd, undefined, { credentials: 'include' })
 }
 
 export const getIntakeBatches = (companyId: string) =>

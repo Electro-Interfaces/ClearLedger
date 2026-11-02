@@ -134,7 +134,8 @@ def sign(secret: str, event_id: str, timestamp: int, body: str) -> str:
 async def publish(db: AsyncSession, company_id: uuid.UUID, event_type: str,
                   subject: str, data: dict[str, Any], *,
                   occurred_at: datetime | None = None,
-                  correlation_id: str | None = None) -> int:
+                  correlation_id: str | None = None,
+                  expected_parents: Any = None) -> int:
     """Поставить событие в очередь — В ТОЙ ЖЕ транзакции, что и само изменение.
 
     Возвращает число адресатов. Ноль — законный исход: никто не подписан, значит
@@ -150,6 +151,10 @@ async def publish(db: AsyncSession, company_id: uuid.UUID, event_type: str,
         EventSubscription.company_id == company_id,
         EventSubscription.enabled.is_(True),
         EventSubscription.event_types.any(event_type)))).scalars().all()
+    if expected_parents is not None:
+        if {row.id: row.company_id for row in rows} != expected_parents.require(db):
+            from fastapi import HTTPException
+            raise HTTPException(409, "Подписки изменились одновременно; повторите запрос")
     if not rows:
         return 0
     event_id = uuid.uuid4()
@@ -214,7 +219,7 @@ def _backoff(attempts: int) -> timedelta:
 
 
 async def _send(db: AsyncSession, sub: EventSubscription,
-                row: OutboxEvent) -> int:
+                row: OutboxEvent, *, now: datetime | None = None) -> int:
     """Отдать событие подписчику. Возвращает код ответа, бросает при обрыве."""
     body_obj = envelope(row.event_id, row.type, row.subject, row.occurred_at,
                         row.data or {})
@@ -240,13 +245,31 @@ async def _send(db: AsyncSession, sub: EventSubscription,
     # Подписываем ровно ту строку, что уйдёт в сеть: пересборка тела на стороне
     # получателя дала бы другой байт и подпись бы не сошлась.
     body = json.dumps(body_obj, ensure_ascii=False, separators=(",", ":"))
-    secret = decrypt_secret(sub.secret_enc)
-    if secret:
-        timestamp = int(row.occurred_at.timestamp())
-        headers["webhook-id"] = str(row.event_id)
-        headers["webhook-timestamp"] = str(timestamp)
-        headers["webhook-signature"] = sign(secret, str(row.event_id),
-                                            timestamp, body)
+    try:
+        secret = decrypt_secret(sub.secret_enc)
+        if sub.target_kind == "url":
+            # URL не защищён служебным Bearer: подпись обязательна до сети.
+            # Legacy секрет без префикса остаётся допустимым; whsec_ должен
+            # содержать корректный Base64 непустого ключа, а не пустой HMAC key.
+            if not secret or (secret.startswith("whsec_") and not base64.b64decode(secret[6:], validate=True)):
+                raise ValueError("ключ подписи недоступен")
+        if secret:
+            # Standard Webhooks подписывает время попытки, CloudEvents.time — факта.
+            # Часы читаем здесь, а не в начале батча: медленные предыдущие доставки
+            # не должны съесть окно свежести этой попытки. Явный now нужен тестам.
+            timestamp = int((now if now is not None else datetime.now(timezone.utc)).timestamp())
+            headers["webhook-id"] = str(row.event_id)
+            headers["webhook-timestamp"] = str(timestamp)
+            headers["webhook-signature"] = sign(secret, str(row.event_id),
+                                                timestamp, body)
+    except Exception:  # noqa: BLE001 — причина криптографического отказа не уходит в историю
+        if sub.target_kind == "url":
+            raise RuntimeError("URL webhook: невозможно сформировать подпись") from None
+        raise
+    if sub.target_kind == "url":
+        from app.services import webhook_delivery
+        return await webhook_delivery.send(url, body=body.encode("utf-8"), headers=headers,
+                                           timeout=DELIVERY_TIMEOUT)
     async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
         resp = await client.post(url, content=body.encode("utf-8"),
                                  headers=headers)

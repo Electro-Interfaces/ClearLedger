@@ -26,6 +26,7 @@ from app.deps import CompanyDep, get_owned
 from app.models import Channel, ChannelStage, ChannelStream, ChannelSyncLog, Source, User
 from app.services.cb_intake import ingest_packages
 from app.services.channel_orchestrator import run_channel as orchestrate_channel
+from app.services import channel_runs as channel_run_service
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -305,23 +306,11 @@ class RunRequest(BaseModel):
 
 
 def _loaded_total(result: dict) -> int:
-    by = result.get("by_station")
-    if isinstance(by, list):
-        return sum(int(r.get("created", 0) or 0) for r in by)
-    return int(result.get("created", 0) or 0)
+    return channel_run_service.loaded_total(result)
 
 
 def _run_summary(result: dict) -> str:
-    n = _loaded_total(result)
-    if result.get("stations_total") is not None:
-        base = f"загружено {n}, станций {result.get('stations_ok', '?')}/{result.get('stations_total', '?')}"
-    else:
-        base = result.get("message") or f"загружено {n}"
-    # ошибки табличных источников (сессии ЭЗС / реестр / ЦБ) иначе не видны в UI
-    err = int(result.get("errors", 0) or 0)
-    if err and "ошиб" not in base:
-        base += f", ошибок {err}"
-    return base
+    return channel_run_service.run_summary(result, loaded_total_fn=_loaded_total)
 
 
 async def _run_channel_background(
@@ -329,96 +318,12 @@ async def _run_channel_background(
     station_codes: list[int] | None = None, all_period: bool = False,
     mode: str = "append",
 ) -> None:
-    """Фоновый прогон: своя сессия, поэтапный commit внутри оркестратора.
-    Запуск НЕ держит HTTP-запрос — UI поллит статус через /run-status."""
-    async with async_session_factory() as db:
-        ch = await db.get(Channel, channel_id)
-        if ch is None:
-            return
-        result: dict = {}
-        status = "success"
-        try:
-            result = await orchestrate_channel(
-                db, ch, date_from=date_from, date_to=date_to, log_id=log_id,
-                station_codes=station_codes, all_period=all_period, mode=mode)
-            status = result.get("status", "success")
-        except Exception as exc:  # noqa: BLE001
-            logging.getLogger("clearledger.channel").exception("Фоновый прогон канала упал")
-            status = "error"
-            result = {"message": f"{type(exc).__name__}: {exc}"}
-            try:
-                await db.rollback()
-            except Exception:  # noqa: BLE001
-                pass
-        # обновить лог-запись (созданную синхронно при запуске)
-        log = await db.get(ChannelSyncLog, log_id)
-        if log is not None:
-            log.status = "success" if status == "success" else (
-                "partial" if status == "skipped" else "error")
-            # Сессии по станциям вне справочника «Объекты» — данные загружены, но
-            # это ошибка (сессия без объекта недопустима) → жёлтый статус прогона.
-            if result.get("unmatched_sessions"):
-                log.status = "partial"
-            log.loaded = _loaded_total(result)
-            # Счётчики и per-station детали для строки прогона в кокпите.
-            by = result.get("by_station") if isinstance(result.get("by_station"), list) else []
-            if by:
-                log.skipped = sum(int(r.get("skipped", 0) or 0) for r in by)
-                log.duplicates = sum(int(r.get("duplicates", 0) or 0) for r in by)
-                log.errors = sum(1 for r in by if "error" in r)
-            else:
-                # Табличные источники (сессии ЭЗС / реестр / ЦБ) не имеют by_station —
-                # берём счётчики с верхнего уровня result, иначе errors/skipped теряются
-                # (лог показывал 0 ошибок при молча дропнутых строках).
-                log.skipped = int(result.get("skipped", 0) or 0)
-                log.duplicates = int(result.get("duplicates", 0) or 0)
-                log.errors = int(result.get("errors", 0) or 0)
-            st_total = result.get("stations_total")
-            log.events = [{
-                "level": ("error" if result.get("unmatched_sessions")
-                          else "info" if status in ("success", "skipped") else "error"),
-                "event": "run",
-                "message": _run_summary(result),
-                "stations_done": len(by),
-                "stations_total": st_total if isinstance(st_total, int) else len(by),
-                "loaded": log.loaded,
-                "by_station": by,
-            }]
-            log.finished_at = datetime.now(timezone.utc)
-        ch2 = await db.get(Channel, channel_id)
-        cid = ch2.company_id if ch2 is not None else None
-        if ch2 is not None:
-            ch2.last_sync_at = datetime.now(timezone.utc)
-            ch2.docs_loaded = (ch2.docs_loaded or 0) + _loaded_total(result)
-        # Итог прогона — событие журнала: на него навешаны подписки «Сбои загрузок» /
-        # «Загрузки данных» (notify_catalog), доставку делает dispatch_async внутри
-        # log_audit. Это минимальная шина событий загрузок (docs/CONNECT.md, В3).
-        if cid is not None:
-            final = log.status if log is not None else status
-            action = {"success": "channel.run.finished",
-                      "skipped": "channel.run.finished",
-                      "partial": "channel.run.partial"}.get(final, "channel.run.failed")
-            from app.audit import log_audit
-            await log_audit(db, actor=None, company_id=cid, action=action,
-                            target=ch2.name if ch2 is not None else None,
-                            details={"итог": _run_summary(result)})
-        await db.commit()
-
-    # Доводка канала продаж топлива — вне сессии прогона, своим соединением.
-    # Приём дедуплицирует смену по натуральному ключу, поэтому смена, снятая
-    # ОТКРЫТОЙ (ночной прогон попадает ровно в неё), навсегда остаётся с нулевой
-    # выручкой; реализации же вообще не имели расписания. Без этого шага дырка в конце
-    # периода появляется снова каждую ночь — при живой сети и «успешных» прогонах.
-    if cid is not None and status != "error" and result.get("kind") == "fuel_shift" \
-            and date_from and date_to:
-        try:
-            from app.services.fuel_shift_refresh import followup_fuel_sales
-            fu = await followup_fuel_sales(cid, date_from, date_to)
-            logging.getLogger("clearledger.channel").info(
-                "Доводка продаж %s…%s: смен дописано %s, реализаций добавлено %s",
-                date_from, date_to, (fu.get("shifts") or {}).get("recovered"), fu.get("tx_created"))
-        except Exception:  # noqa: BLE001 — доводка не меняет статус прогона
-            logging.getLogger("clearledger.channel").exception("Доводка продаж не удалась")
+    """Совместимый native вход с текущими concrete globals на каждом вызове."""
+    await channel_run_service.run_channel_background(
+        channel_id, date_from, date_to, log_id, station_codes, all_period, mode,
+        session_factory=async_session_factory, orchestrate_channel=orchestrate_channel,
+        loaded_total_fn=_loaded_total, run_summary_fn=_run_summary,
+    )
 
 
 @router.post("/{channel_id}/upload")

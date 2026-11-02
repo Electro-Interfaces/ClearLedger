@@ -1,0 +1,31 @@
+{
+  "status": "PASS_ROOT_ORIGINAL_TERM_WINDOWS5",
+  "sourceCommit": "8bd75e4ab17c7d482f3623b19bae7550e4303d0c",
+  "authorCommit": "5b30012e19c4acc6a740bb0120f09cd3f8ce2863",
+  "cases": 5,
+  "definitions": 4,
+  "phases": 15,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "sameOriginalFunctionObjects": true,
+  "originalTestSHA256": "fe8a2321ffbea19439b0107decec13408820396185a35302bd6983bebb80189a",
+  "secondsIncludingBootstrap": 33.46162562444806,
+  "sqlEventsInCallPhases": 110,
+  "sqlShapes": 69,
+  "nativeMappedModels": 341,
+  "nativePhysicalTables": 347,
+  "sameLoopPoolsClosed": true,
+  "clients": 0,
+  "locks": 0,
+  "ownedRemoved": true,
+  "foreignProjectionUnchanged": true,
+  "notCovered": [
+    "HTTP/auth",
+    "new financial formulas",
+    "full original conftest suite",
+    "receipt schema0005",
+    "all final CI",
+    "deployment"
+  ]
+}

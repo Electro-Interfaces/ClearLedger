@@ -935,6 +935,20 @@ export interface OpsClosing {
   charges: OpsCharge[]
   blocked: OpsBlockedTerm[]
   contractsWithoutTerms: OpsContractWithoutTerms[]
+  preparation: { required: boolean; missing: number; stale: number }
+}
+
+export interface OpsMaterializeResult {
+  period: string
+  created: number
+  updated: number
+  skipped: number
+  blocked: OpsBlockedTerm[]
+}
+
+/** Явно подготовить ожидания месяца; GET никогда не создаёт расчётные строки. */
+export async function materializeOpsClosing(companyId: string, period: string): Promise<OpsMaterializeResult> {
+  return post<OpsMaterializeResult>(`/api/ops/closing/${encodeURIComponent(period)}/materialize?company_id=${encodeURIComponent(companyId)}`)
 }
 
 export interface OpsCloseResult {
@@ -1180,6 +1194,7 @@ export async function getOpsPeriods(
 ): Promise<OpsPeriodsScale> {
   return get<OpsPeriodsScale>('/api/ops/periods', {
     company_id: companyId, months: String(months), ahead: String(ahead),
+    expand_all: 'false',
   })
 }
 
@@ -1314,6 +1329,16 @@ export interface OpsPaymentsUploadResult {
   batch_id: string
   saved: number
   counterparties_matched: number
+  /** Additive fields: older backends do not return matching diagnostics. */
+  counterparties_ambiguous?: number
+  counterparties_unmatched?: number
+  counterparties_retained?: number
+  identity_issues?: Array<{
+    external_key: string
+    counterparty_name: string
+    status: 'ambiguous' | 'unmatched' | 'existing_link_retained'
+  }>
+  identity_issues_truncated?: boolean
   unknown_items: string[]
 }
 

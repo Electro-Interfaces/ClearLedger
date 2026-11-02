@@ -33,7 +33,7 @@ from app.database import get_db
 from app.models import (
     CalendarEvent, CalendarGuest, CalendarMaterial, User,
 )
-from app.services import ics, jitsi
+from app.services import calendar_protocol, ics, jitsi
 
 router = APIRouter(prefix="/invite", tags=["Приглашение"])
 
@@ -249,9 +249,8 @@ async def invite_ics(token: str, db: AsyncSession = Depends(get_db)):
         organizer_email=organizer.email if organizer else None,
         organizer_name=organizer.name if organizer else None,
         cancelled=ev.status == "cancelled",
-        # Отменённая уходит с большим номером: тем же UID и большим SEQUENCE
-        # чужой календарь убирает встречу, а новым UID оставил бы обе.
-        sequence=1 if ev.status == "cancelled" else 0)
+        # Та же сохранённая organizer revision, что в письмах и ленте.
+        sequence=calendar_protocol.version(ev))
     return Response(
         content=текст, media_type="text/calendar; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="meeting.ics"'})

@@ -16,7 +16,7 @@
          ломалась бы на вложенных маршрутах вроде /finance/objects. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script>
-      if (!/(^|\/)demo(\/|$)/.test(window.location.pathname)) {
+      if (!/(^|\/)demo(\/|$)/.test(window.location.pathname) && !/^\/developer\/(api|authorize)(\/|$)/.test(window.location.pathname)) {
         var fontPreconnect = document.createElement('link');
         fontPreconnect.rel = 'preconnect';
         fontPreconnect.href = 'https://fonts.googleapis.com';

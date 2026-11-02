@@ -21,7 +21,6 @@ import secrets as _secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -32,7 +31,7 @@ from app.audit import log_audit
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import App, EventSubscription, OutboxEvent, User, UserCompany
-from app.services import space_events
+from app.services import space_events, webhook_delivery
 
 router = APIRouter(prefix="/eco", tags=["Экосистема: исходящие события"])
 
@@ -102,10 +101,10 @@ def _check_shape(kind: str, app_code: str | None, url: str | None,
                 status.HTTP_400_BAD_REQUEST,
                 "Адрес приложения знает реестр — здесь он не задаётся")
         return
-    parsed = urlparse(url or "")
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Нужен адрес вида http://… или https://…")
+    try:
+        webhook_delivery.parse_url(url)
+    except webhook_delivery.WebhookDeliveryError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from None
     if not has_secret:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Внешнему подписчику нужен секрет: подписывать нечем")
@@ -115,6 +114,10 @@ async def _check_target(db: AsyncSession, kind: str, app_code: str | None,
                         url: str | None, has_secret: bool) -> None:
     _check_shape(kind, app_code, url, has_secret)
     if kind != "app":
+        try:
+            await webhook_delivery.approve_url(url)
+        except webhook_delivery.WebhookDeliveryError as error:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from None
         return
     known = (await db.execute(
         select(App.id).where(App.code == app_code))).scalar_one_or_none()
@@ -349,10 +352,17 @@ async def update_subscription(
     url = data["url"] if "url" in data else sub.url
     # Переезд с приложения на внешний адрес: секрета у такой подписки ещё нет,
     # а без него внешнего подписчика не завести — выдаём здесь же.
+    # Compare supplied raw target fields too: normalization must not create an
+    # exception for a changed target. Manual disable does not mint a new secret.
+    disable_unchanged_url = (sub.target_kind == "url" and sub.enabled and kind == "url"
+        and data.get("enabled") is False
+        and all(field not in data or getattr(payload, field) == getattr(sub, field)
+                for field in ("target_kind", "app_code", "url", "path")))
     raw = None
-    if kind == "url" and not sub.secret_enc:
+    if kind == "url" and not sub.secret_enc and not disable_unchanged_url:
         raw, sub.secret_enc, sub.secret_hint = _new_secret()
-    await _check_target(db, kind, app_code, url, has_secret=bool(sub.secret_enc))
+    if not disable_unchanged_url:
+        await _check_target(db, kind, app_code, url, has_secret=bool(sub.secret_enc))
 
     if data.get("enabled") and not sub.enabled:
         # Включили заново — снимаем и след молчания. Иначе фоновой проход увидит

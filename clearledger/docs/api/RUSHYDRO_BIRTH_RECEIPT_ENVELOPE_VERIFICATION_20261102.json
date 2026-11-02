@@ -1,0 +1,43 @@
+{
+  "formatVersion": 1,
+  "status": "PASS_ROOT_RECEIPT_ENVELOPE_PURE32",
+  "source": "ba57204dba203b266319b976a37f8e539152262c",
+  "rootIntegration": "615a3275",
+  "integratedThreeSourceFilesByteIdentical": true,
+  "evidenceId": "c961e050cf07",
+  "runtimeScope": "Pure typed receipt body grammar, serialization and public result projection",
+  "cases": 32,
+  "definitions": 1,
+  "phases": 96,
+  "seconds": 0.698682420887053,
+  "pythonVersion": "3.13.7",
+  "pydanticVersion": "2.14.2",
+  "pytestVersion": "9.2.0",
+  "originalTestFunctionIdentity": true,
+  "sourceUnchanged": true,
+  "forbiddenImports": [],
+  "deniedOperations": [],
+  "sourcePins": {
+    "app/product_api/contract_cycle_receipt_body.py": {
+      "bytes": 9967,
+      "sha256": "8ba0423e6d2413ae1e70cc37dbd0b13e94c4cbe7e9aab55d53332a93de780ebd"
+    },
+    "tests/test_contract_cycle_receipt_body_v2.py": {
+      "bytes": 17996,
+      "sha256": "50fbcb74a2bb2ceab2225bd82a70058e79bfbb56b92ff98814d5fd2df87ca4fc"
+    }
+  },
+  "firstHarnessFailure": {
+    "observedCases": 0,
+    "cause": "Root pytest hook argument name rejected by pluggy before collection",
+    "repair": "Recorder signature only; product and tests unchanged",
+    "evidencePreserved": true
+  },
+  "notVerified": [
+    "PostgreSQL JSONB stored128KiB bound",
+    "SQL receipt storage, immutability or same-root atomicity",
+    "Replay original binding comparison or current authorization",
+    "Newborn permission issuance",
+    "Public HTTP integration or new scopes enablement"
+  ]
+}

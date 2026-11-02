@@ -76,5 +76,6 @@ def xlsx_response(workbook, filename: str) -> Response:
     return Response(
         content=buf.getvalue(),
         media_type=XLSX_MIME,
-        headers={"Content-Disposition": content_disposition(filename)},
+        headers={"Content-Disposition": content_disposition(filename),
+                 "Cache-Control": "private, no-store"},
     )

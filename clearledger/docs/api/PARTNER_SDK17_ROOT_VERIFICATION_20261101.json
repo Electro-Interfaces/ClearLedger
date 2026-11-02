@@ -1,0 +1,831 @@
+{
+  "rootAcceptance": {
+    "status": "ROOT_ACCEPTS_SDK17_EXACT3_SOURCE_AND_RECORDED_GENERATE_CHECK",
+    "source": "6f3f2f875c9c955e233212dbabe7a84ccf7acd83",
+    "dispatch": "ctx_7c059c3a3804",
+    "workerDone": "msg_9afc7f62d492",
+    "reviewMDsha": "b12008f24a59673dc15d5631053835aba3cceebddebd78cc9a6ac4d085f55b95",
+    "reviewJSONsha": "859e4c12573048279eb6f8e950bee167d5dd971de1bed5d3a244de3832d72a99",
+    "publicArtifactsReverified": 14,
+    "sourceFiles": 3,
+    "schemaOperations": 17,
+    "schemaSHA": "89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853",
+    "officialSixTestsAndTscSix": "Root observed tool exits only, no separate persisted full RAW; independentreviewer did not rerun",
+    "notRuntimeSDKClient": true,
+    "HTTPAuthSQL": "not accepted bySDKreview",
+    "fullCI": false,
+    "all31Open": true
+  },
+  "independentReview": {
+    "format": "sdk17-independent-source-recorded-evidence-v1",
+    "verdict": "SOURCE_PASS_RECORDED_GENERATE_CHECK_CONSISTENT_TESTS_TSC_ROOT_OBSERVATIONS",
+    "task_id": "task_e21bdf719b59",
+    "dispatch_id": "ctx_7c059c3a3804",
+    "material_findings": [],
+    "required_code_corrections": [],
+    "identity": {
+      "repo": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029",
+      "base": "2dbc5b4e14aefa87d60343c88723d73d9a213e03",
+      "head": "6f3f2f875c9c955e233212dbabe7a84ccf7acd83",
+      "direct_parent_verified": true,
+      "full_index_no_ext_diff_no_textconv_patch_sha256": "4449b93db18f54f8d87d5694eb6b42515ed5ac11c4accd41041078c59c53f99e",
+      "files": {
+        "clearledger/src/generated/partner-api.d.ts": {
+          "sha256": "07a0b15ac03aaef4455738cc2cdb59367f25554e8fa2a38bd5ed935227a4f87b",
+          "bytes": 221025
+        },
+        "clearledger/tools/partner-api-types/contract-create-options-consumer.ts": {
+          "sha256": "88c8a5eeded7f0c32b23da4f877a2d5dd88ee2407a6a2a59dfef3f68a3239e1f",
+          "bytes": 2779
+        },
+        "clearledger/tools/partner-api-types/tsconfig.json": {
+          "sha256": "a390f0fc0573bdea7ea979f89709b8711644e89585af86a60f11324f913693c1",
+          "bytes": 514
+        }
+      }
+    },
+    "source_checks": {
+      "exact_three_paths": [
+        "clearledger/src/generated/partner-api.d.ts",
+        "clearledger/tools/partner-api-types/contract-create-options-consumer.ts",
+        "clearledger/tools/partner-api-types/tsconfig.json"
+      ],
+      "reverse_projection_exact_parent": true,
+      "parent_generated_sha256": "ef38b9c59780a3286b89e832a2d4d52e0f72dfcb2e223158ea35606467f39d62",
+      "parent_operation_count": 16,
+      "candidate_operation_count": 17,
+      "old_five_consumers_unchanged_sha256": {
+        "consumer.ts": "28b26158dbd0c8e6054cae74db3927210031d0dea695107537cc431bde7bc047",
+        "contract-objects-consumer.ts": "c17746e21cc13a996eca173f6adbe3be7ebc96ad5cddff6511eec1215bfb0ba0",
+        "contract-documents-consumer.ts": "9daeb839e1d163dc5fe42dfeede3b1f6ee63854e16ebde3cdb0ce9f2f2150dfe",
+        "contract-classification-consumer.ts": "2efa77f5787fe94c7d7868ac8b9d4aa95e9444dcdb774e5cc7b2000dadab48d6",
+        "contract-create-consumer.ts": "60b69d057d4cf3b96c0966dd54efcc7bf941198f7ae86a36f64478468f0b2b2d"
+      },
+      "tsconfig_only_appends_sixth": true,
+      "compiler_options": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "lib": [
+          "ES2022",
+          "DOM"
+        ],
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "skipLibCheck": false,
+        "noEmit": true,
+        "types": []
+      },
+      "source_manifest_vs_git": {
+        "2dbc5b4e14aefa87d60343c88723d73d9a213e03": {
+          "entries": 538,
+          "mismatches": [],
+          "missing": []
+        },
+        "6f3f2f875c9c955e233212dbabe7a84ccf7acd83": {
+          "entries": 538,
+          "mismatches": [
+            "clearledger/tools/partner-api-types/tsconfig.json"
+          ],
+          "missing": []
+        }
+      },
+      "official_exporter_and_generator_manifest_equal_recorded_schema": true,
+      "operations": [
+        [
+          "get",
+          "/contract-types",
+          "getContractTypeMetadata"
+        ],
+        [
+          "get",
+          "/contracts",
+          "listContracts"
+        ],
+        [
+          "get",
+          "/contracts/create-options",
+          "getContractCreateOptions"
+        ],
+        [
+          "get",
+          "/contracts/{contractId}",
+          "getContract"
+        ],
+        [
+          "get",
+          "/contracts/{contractId}/documents",
+          "listContractDocuments"
+        ],
+        [
+          "get",
+          "/contracts/{contractId}/objects",
+          "listContractObjects"
+        ],
+        [
+          "get",
+          "/counterparties",
+          "listCounterparties"
+        ],
+        [
+          "get",
+          "/counterparties/{counterpartyId}",
+          "getCounterparty"
+        ],
+        [
+          "get",
+          "/documents",
+          "listDocuments"
+        ],
+        [
+          "get",
+          "/documents/{docId}",
+          "getDocument"
+        ],
+        [
+          "get",
+          "/documents/{docId}/versions/{versionId}/content",
+          "downloadDocumentVersion"
+        ],
+        [
+          "get",
+          "/equipment",
+          "listEquipment"
+        ],
+        [
+          "get",
+          "/equipment/{equipmentId}",
+          "getEquipment"
+        ],
+        [
+          "get",
+          "/objects",
+          "listObjects"
+        ],
+        [
+          "get",
+          "/objects/{objectId}",
+          "getObject"
+        ],
+        [
+          "get",
+          "/objects/{objectId}/monitoring",
+          "getObjectMonitoring"
+        ],
+        [
+          "post",
+          "/contracts",
+          "createContract"
+        ]
+      ],
+      "local_refs_resolved": 583,
+      "schema_sha256": "89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853",
+      "saved_generated_equal_candidate": true,
+      "recorded_diff_reconstructed_candidate_in_memory": true,
+      "recorded_diff_hunks": 4,
+      "git_diff_check_exit": 0,
+      "exporter_sha256": "5051758929045426a0f87d1047e9f8e3294ccd0663b40c36ed7b625238f8bf0c",
+      "generator_sha256": "9b55d2838cb80fa6cc1479d89c0042862bbf508395365d9b0fe9ea9aed018109"
+    },
+    "new_contract": {
+      "path": "/contracts/create-options",
+      "get_operation": "getContractCreateOptions",
+      "schemas": [
+        "ContractCreateOption",
+        "ContractCreateOptions"
+      ],
+      "resource_closed_enum": [
+        "organization",
+        "counterparty",
+        "location",
+        "type"
+      ],
+      "nextCursor": "required string|null",
+      "request_cursor": "optional string|null",
+      "requestBody": false,
+      "POST": false,
+      "item_fields": [
+        "value"
+      ],
+      "response_statuses": [
+        "200",
+        "400",
+        "401",
+        "403",
+        "404",
+        "422",
+        "429",
+        "500",
+        "503"
+      ],
+      "new_negative_controls": [
+        {
+          "name": "missingResource",
+          "directive_line": 20,
+          "reason": "resource обязателен",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "unknownResource",
+          "directive_line": 22,
+          "reason": "contracts вне union четырёх resource",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "textualSize",
+          "directive_line": 24,
+          "reason": "pageSize числовой, строка50 недопустима",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "tenantOverride",
+          "directive_line": 26,
+          "reason": "companyId — excess property свежего query literal",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "missingCursor",
+          "directive_line": 29,
+          "reason": "rest destructuring удаляет обязательный nextCursor",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "numericCursor",
+          "directive_line": 31,
+          "reason": "nextCursor принимает string|null, не number",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "numericValue",
+          "directive_line": 33,
+          "reason": "items[].value принимает string, не number",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "internalId",
+          "directive_line": 35,
+          "reason": "id — excess property свежего nested item literal",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "requestBody",
+          "directive_line": 37,
+          "reason": "optional never под strict допускает undefined, но не {}",
+          "source_review": "valid reason, not independently compiled"
+        },
+        {
+          "name": "unsupportedPost",
+          "directive_line": 39,
+          "reason": "optional never POST под strict допускает undefined, но не {}",
+          "source_review": "valid reason, not independently compiled"
+        }
+      ],
+      "escape_any_as_never_ts_ignore": false
+    },
+    "recorded_evidence": {
+      "artifacts": {
+        "FREEZE.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/FREEZE.json",
+          "bytes": 1665,
+          "sha256": "0d792328e469d739db8a66b6f00ebaf7005a72f996333f70c7d6782b7033d352"
+        },
+        "source-manifest.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/source-manifest.json",
+          "bytes": 66375,
+          "sha256": "96d78221738b291694c8fb6d401d10c84630545dede401b7b4b99a09af9fa1ff"
+        },
+        "node-modules-manifest.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/node-modules-manifest.json",
+          "bytes": 244566,
+          "sha256": "750ddb30ab8e916bf4c9308bedb65514f19ed407629158e9d74ba6a9eb9c1075"
+        },
+        "generate-check-result.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/generate-check-result.json",
+          "bytes": 674,
+          "sha256": "bbb4851ba2822d36b244ff25114540e5225ddba5211c8a2521b373e5661a44d5"
+        },
+        "generate.stdout": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/generate.stdout",
+          "bytes": 122,
+          "sha256": "30956b518588bb3dd63cdd12d3f574f45b9573a97cbd0b69df07db47fd5e4e77"
+        },
+        "generate.stderr": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/generate.stderr",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "check.stdout": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/check.stdout",
+          "bytes": 52,
+          "sha256": "8417e090289f47d72c1815a6eb5bad928620c5432b6951d3fae7f124d1536ce6"
+        },
+        "check.stderr": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/check.stderr",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "generated17.diff": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/generated17.diff",
+          "bytes": 11995,
+          "sha256": "74e31627797f9e03e8d8a05f9589e95bc7c91bdbe2e8e8f3bb25a5f4d813595a"
+        },
+        "partner-api17.d.ts": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/partner-api17.d.ts",
+          "bytes": 221025,
+          "sha256": "07a0b15ac03aaef4455738cc2cdb59367f25554e8fa2a38bd5ed935227a4f87b"
+        },
+        "curated-openapi.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/curated-openapi.json",
+          "bytes": 317647,
+          "sha256": "89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853"
+        },
+        "export-result.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/export-result.json",
+          "bytes": 1647,
+          "sha256": "85f502cd6ec8b8f15917e0bbce80598a1820d66d6f9b2d6574d7e714aaf6f189"
+        },
+        "export.stderr": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/export.stderr",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "six-tests-and-six-consumers-root-observation.json": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sdk17-wire-root-20261101/six-tests-and-six-consumers-root-observation.json",
+          "bytes": 1611,
+          "sha256": "1716024b1755950f35ea2ed6bcb58187034482caad3d7fbf47813088e585a78a"
+        }
+      },
+      "generate_check": {
+        "source": "2dbc5b4e14aefa87d60343c88723d73d9a213e03",
+        "operations": [
+          {
+            "operation": "generate",
+            "exit": 0,
+            "seconds": 3.979071706533432,
+            "stdoutBytes": 122,
+            "stderrBytes": 0
+          },
+          {
+            "operation": "check",
+            "exit": 0,
+            "seconds": 4.213319934904575,
+            "stdoutBytes": 52,
+            "stderrBytes": 0
+          }
+        ],
+        "dependencyFiles": 2014,
+        "dependencyManifestSHA": "750ddb30ab8e916bf4c9308bedb65514f19ed407629158e9d74ba6a9eb9c1075",
+        "sourceFiles": 538,
+        "generatedSHA": "07a0b15ac03aaef4455738cc2cdb59367f25554e8fa2a38bd5ed935227a4f87b",
+        "noInstall": true,
+        "offlineOnly": true,
+        "notRuntimeSDKorHTTP": true
+      },
+      "generate_check_class": "Saved stdout/stderr and exits from Root, hashes/lengths/source/output independently inspected; not independently executed.",
+      "dependencies": {
+        "entries": 2014,
+        "sha256": "750ddb30ab8e916bf4c9308bedb65514f19ed407629158e9d74ba6a9eb9c1075",
+        "hash_and_count_match_result": true,
+        "owned_pre_post_unchanged": "Root reported; only one saved manifest and result supplied, no independent rerun/tree rehash"
+      },
+      "six_tests_and_consumers": {
+        "status": "ROOT_OBSERVED_OFFICIAL_GENERATE_CHECK_SIX_TESTS_SIX_CONSUMERS",
+        "base": "2dbc5b4e14aefa87d60343c88723d73d9a213e03",
+        "files": {
+          "clearledger/src/generated/partner-api.d.ts": {
+            "sha256": "07a0b15ac03aaef4455738cc2cdb59367f25554e8fa2a38bd5ed935227a4f87b",
+            "bytes": 221025
+          },
+          "clearledger/tools/partner-api-types/contract-create-options-consumer.ts": {
+            "sha256": "88c8a5eeded7f0c32b23da4f877a2d5dd88ee2407a6a2a59dfef3f68a3239e1f",
+            "bytes": 2779
+          },
+          "clearledger/tools/partner-api-types/tsconfig.json": {
+            "sha256": "a390f0fc0573bdea7ea979f89709b8711644e89585af86a60f11324f913693c1",
+            "bytes": 514
+          }
+        },
+        "generateCheck": "native captured stdout/stderr and result file in this directory",
+        "sixGenerationTests": {
+          "execSession": 30125,
+          "exit": 0,
+          "pass": 6,
+          "fail": 0,
+          "skip": 0,
+          "seconds": 26.593212907,
+          "scope": "official test file unchanged: real Base parity/determinism/drift/ref+version+validator/noIO controls",
+          "evidenceClass": "Root observed tool-returned TAP; no separate persisted full raw log; not independently rerun"
+        },
+        "sixConsumerTSC": {
+          "execSession": 16331,
+          "exit": 0,
+          "stdoutBytes": 0,
+          "newExpectedErrorControls": 10,
+          "previousFiveConsumersUnchanged": true,
+          "evidenceClass": "Root observed tool-returned exit; no separate raw file"
+        },
+        "sourceCount": 17,
+        "schemaSHA256": "89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853",
+        "runtimeSDKClient": false,
+        "HTTP_OAuth_SQL_acceptance": false,
+        "fullCI": false,
+        "programComplete": false
+      },
+      "tests_tsc_class": "Root tool-returned observations: sessions30125/16331; no separate persisted fullFS RAW; not independent execution proof.",
+      "export_result": {
+        "exit": 0,
+        "seconds": 2.9533887673169374,
+        "schemaSHA": "89bc756e4d2d9e9f236689ce1368078255335c271c12f465992a19ec149e4853",
+        "operations": [
+          [
+            "get",
+            "/contract-types",
+            "getContractTypeMetadata"
+          ],
+          [
+            "get",
+            "/contracts",
+            "listContracts"
+          ],
+          [
+            "post",
+            "/contracts",
+            "createContract"
+          ],
+          [
+            "get",
+            "/contracts/create-options",
+            "getContractCreateOptions"
+          ],
+          [
+            "get",
+            "/contracts/{contractId}",
+            "getContract"
+          ],
+          [
+            "get",
+            "/contracts/{contractId}/documents",
+            "listContractDocuments"
+          ],
+          [
+            "get",
+            "/contracts/{contractId}/objects",
+            "listContractObjects"
+          ],
+          [
+            "get",
+            "/counterparties",
+            "listCounterparties"
+          ],
+          [
+            "get",
+            "/counterparties/{counterpartyId}",
+            "getCounterparty"
+          ],
+          [
+            "get",
+            "/documents",
+            "listDocuments"
+          ],
+          [
+            "get",
+            "/documents/{docId}",
+            "getDocument"
+          ],
+          [
+            "get",
+            "/documents/{docId}/versions/{versionId}/content",
+            "downloadDocumentVersion"
+          ],
+          [
+            "get",
+            "/equipment",
+            "listEquipment"
+          ],
+          [
+            "get",
+            "/equipment/{equipmentId}",
+            "getEquipment"
+          ],
+          [
+            "get",
+            "/objects",
+            "listObjects"
+          ],
+          [
+            "get",
+            "/objects/{objectId}",
+            "getObject"
+          ],
+          [
+            "get",
+            "/objects/{objectId}/monitoring",
+            "getObjectMonitoring"
+          ]
+        ],
+        "wholeSDKHeaderHashMatches": true,
+        "requiredNullableNextCursor": true,
+        "offlineOnly": true
+      },
+      "historical_sdk16_swagger_transferred": false
+    },
+    "necessary_wording_corrections": [
+      "Шесть generator tests PASS6 и TSC6 exit0 — только Root observations sessions30125/16331; отдельных fullFS RAW нет, независимого запуска reviewer нет.",
+      "generated17.diff отличается от Git patch заголовками. Четыре hunks применены в памяти к родителю и дали exact candidate; артефакт не изменён.",
+      "Source manifest относится к parent2dbc:538 совпадений. В candidate единственная изменённая запись — tsconfig; новый consumer отдельно закреплён FREEZE.",
+      "2014 записи и dependencyManifestSHA сверены. Owned/pre/post неизменность сообщена Root; reviewer не исполнял generation и не делал новый hash dependency tree.",
+      "Добавлены два components.schemas DTO, не components.responses. Все прежние declarations и16 operations сохранены побайтово после точной обратной проекции.",
+      "Excess-property controls относятся к свежим object literals; TypeScript структурный, произвольный JSON и переменные с дополнительными полями этим не валидируются.",
+      "Nullable nextCursor обязателен в response; request cursor optional nullable. UUID, pageSize bounds, cursor integrity/TTL, grants, tenant scope, quotas и транзакции требуют runtime validation.",
+      "Описания auth/HTTP/SQL и fictional examples не доказывают runtime acceptance. Исторические SDK16/Swagger suites сюда не переносятся."
+    ],
+    "impact": {
+      "if_wrong": "Misdescribed HTTP wire shape or supported consumer compile failure.",
+      "affected_roots": [
+        "six tool compile consumers",
+        "existing partner-pilot type consumers"
+      ],
+      "runtime_app_changes": false,
+      "network_client_added": false,
+      "source_usage": "Git search found imports in compile fixtures and existing partner-pilot clients; none in clearledger/src runtime code.",
+      "regression_protection": "Recorded generate/check; unchanged official six test source covers real Base parity, determinism/drift/no-overwrite, malformed version/ref/type/parameter and offline guards. Tests/TSC results remain Root observations.",
+      "recoverability": "Source reverse diff of three files without runtime/database migration; no rollback executed.",
+      "confidence": "High for exact source and saved byte consistency; independent execution unavailable by Runtime0 constraint."
+    },
+    "runtime_profile": {
+      "project_helper_library_import_call": 0,
+      "node_codegen_tsc_tests_collection": 0,
+      "sql_pg_docker_network_ssh_browser_install": 0,
+      "methods": [
+        "FS/Git",
+        "Python stdlib AST/hash/JSON/regex",
+        "in-memory diff reconstruction"
+      ],
+      "writes": [
+        "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/sdk17-wire-independent-review-20261101/REVIEW.md",
+        "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/sdk17-wire-independent-review-20261101/REVIEW.json"
+      ],
+      "skill_adaptation": "Direct task Runtime0 and report-only destination override generic skill Node validator, decision labels and managed output destination."
+    },
+    "original_program_source": {
+      "kind": "Immutable tracked Git copy, no external private RAW read",
+      "revision": "6f3f2f875c9c955e233212dbabe7a84ccf7acd83",
+      "path": "clearledger/docs/api/CONTRACT_CARD_CREATION_PREREQUISITE_20261101.json",
+      "file_sha256": "324a459fa5bf191d488c45425a72c7c6f760de6e2e981eb9b12be7b1eda203d0",
+      "semantic_compact_utf8_sha256": "4ac5f8535d2f9f0b3c7fb910cad958165b8ff886eb48edc2c68726d09c005345"
+    },
+    "original_program": {
+      "planSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352",
+      "sections": [
+        {
+          "id": "M00",
+          "title": "P0: актуальный совместимый source/runtime baseline",
+          "owner": "Выпуск + Core/Support",
+          "dependencies": "Нет",
+          "original_acceptance": "Точные версии/хеши/состав, реестр активных потребителей; старый Support не выдан за baseline"
+        },
+        {
+          "id": "M01",
+          "title": "P0: завершить реестр поверхностей и владельцев",
+          "owner": "API + владельцы доменов",
+          "dependencies": "M00",
+          "original_acceptance": "Dynamic/factory/native/WS/SSE/files/proxy разобраны, каждому маршруту назначены class/owner/decision и потребители"
+        },
+        {
+          "id": "M02",
+          "title": "P0: characterization и измеряемые сценарии",
+          "owner": "Домены + проверка",
+          "dependencies": "M00, уточнения M01",
+          "original_acceptance": "Golden outputs/ошибки и отрицательная ACL-матрица на синтетике; исходные SQL/RAM/latency budgets измерены"
+        },
+        {
+          "id": "M03",
+          "title": "P0: общий проверенный контекст/route policy",
+          "owner": "Identity + домены",
+          "dependencies": "M00, M02",
+          "original_acceptance": "Типы токенов/отзыв; ALL/SET/EMPTY/UNINITIALIZED; selector не расширяет доступ; неизвестная новая операция закрыта"
+        },
+        {
+          "id": "M04",
+          "title": "P0: границы слоёв и владение транзакцией",
+          "owner": "Core/Support architecture",
+          "dependencies": "M02, M03 skeleton",
+          "original_acceptance": "Извлечённые services не импортируют routers; старые входы вызывают те же правила без изменения поведения"
+        },
+        {
+          "id": "M05",
+          "title": "P0: объекты, scopes, population и temporal identity",
+          "owner": "Core objects/equipment",
+          "dependencies": "M03, M04",
+          "original_acceptance": "Матрица пяти уровней implemented/gap; одинаковый охват list/detail/count/export; create/upsert/rename/retire проверены отдельно"
+        },
+        {
+          "id": "M06",
+          "title": "P0: контрагенты, договоры и идентичность",
+          "owner": "Core references/contracts",
+          "dependencies": "M03, M04",
+          "original_acceptance": "Один matcher и scope service; ambiguous явно; replay/concurrency/null/связи проверены; старые подтверждённые связи сохранены"
+        },
+        {
+          "id": "M07",
+          "title": "P0: документы и файлы",
+          "owner": "Core documents/files",
+          "dependencies": "M03, M04",
+          "original_acceptance": "Карточка/версия/содержимое/тип связи разделены; один writer, domain ACL, rollback cleanup, register/approve отдельно от edit"
+        },
+        {
+          "id": "M08",
+          "title": "P0: энергия, начисления и мониторинг",
+          "owner": "Core energy/ops",
+          "dependencies": "M05, M06",
+          "original_acceptance": "Общие definitions/provenance; чистый GET closing; материализация командой; исторический срез описан честно"
+        },
+        {
+          "id": "M09",
+          "title": "P0: протокольный профиль и product OpenAPI",
+          "owner": "API contracts + домены",
+          "dependencies": "M01, M03, соответствующие M05–M08",
+          "original_acceptance": "Схемы/ошибки/scopes/examples/operationId совпадают с runtime; описательные x-поля не заменяют guard"
+        },
+        {
+          "id": "M10",
+          "title": "P0: OAuth/OIDC и developer access",
+          "owner": "Identity + integrations",
+          "dependencies": "M03, M09 profile",
+          "original_acceptance": "Code+PKCE, machine grants отдельно; docs portal/spec/API permissions разделены, отзыв действует и протестирован"
+        },
+        {
+          "id": "M11",
+          "title": "P0: защищённый Swagger и quickstart",
+          "owner": "API docs + Identity",
+          "dependencies": "M09, M10, sandbox",
+          "original_acceptance": "UI/raw spec/bundles закрыты; Authorize/Try it out работает на синтетике; нет client secret или общего admin token в браузере"
+        },
+        {
+          "id": "M12",
+          "title": "P1: клиентские transports и typed operations",
+          "owner": "Core/Support frontend",
+          "dependencies": "M02, M09",
+          "original_acceptance": "Один transport на trust boundary; generation/signal, refresh/errors/binary; wire types generated, без `as never`"
+        },
+        {
+          "id": "M13",
+          "title": "P1: Support factories и service adapters",
+          "owner": "Support + Core integration",
+          "dependencies": "M03, M04, M06",
+          "original_acceptance": "Общий ticket lifecycle с параметрами команд; SLA/subject replay/actor и parent SSO ограничения сохранены"
+        },
+        {
+          "id": "M14",
+          "title": "P1: доставка событий и change feed",
+          "owner": "Domain owners + integrations",
+          "dependencies": "M03, M04, применимые M13",
+          "original_acceptance": "Локальные outbox, единый envelope/signature; определены момент подписки, retry/replay/cursor и права перед выдачей"
+        },
+        {
+          "id": "M15",
+          "title": "P1: ограничение нагрузки и оптимизация",
+          "owner": "Backend/DB + домены",
+          "dependencies": "M02 и зрелые queries",
+          "original_acceptance": "Измерены SQL/строки/RAM/pool/cache; достигнут принятый бюджет без изменения результата/ACL; большие выгрузки/jobs ограничены"
+        },
+        {
+          "id": "M16",
+          "title": "P1/P2: migration/schema ownership",
+          "owner": "Persistence + выпуск",
+          "dependencies": "M00, M02",
+          "original_acceptance": "Fresh/restore/upgrade/repeat совпадают; Alembic audit отделён от runner; новый DDL versioned и совместим со старым кодом"
+        },
+        {
+          "id": "M17",
+          "title": "P1: перевести собственные приложения",
+          "owner": "Владельцы продуктов",
+          "dependencies": "M05–M13 по домену",
+          "original_acceptance": "Переведены UI/service consumers, contracts и workflows проходят регрессию; нет silent online→demo fallback"
+        },
+        {
+          "id": "M18",
+          "title": "P0 к внешнему запуску: пилоты и независимая приёмка",
+          "owner": "Партнёрский пилот + проверка",
+          "dependencies": "M09–M17 применимо",
+          "original_acceptance": "Три внешних сценария и общий блок из четырёх доменов реализуются по документации без чтения исходников"
+        },
+        {
+          "id": "M19",
+          "title": "P2: deprecation и удаление дублей",
+          "owner": "Домены + выпуск",
+          "dependencies": "M17, M18, usage evidence",
+          "original_acceptance": "Потребители переведены, срок совместимости окончен; старые key/path/adapter удаляются отдельным PR с откатом"
+        }
+      ],
+      "cross_cutting_requirements": [
+        {
+          "id": "FULL-SCOPE",
+          "requirement": "Все20M и все поверхности Core/Support/Auditor классифицированы; обязательные документы/контрагенты/договоры/ЭЗС/оборудование/accounts не исчерпывают объём.",
+          "completion": "unproven"
+        },
+        {
+          "id": "SOURCE",
+          "requirement": "Точный актуальный source/runtime/consumer baseline; не потерять параллельные live исправления.",
+          "completion": "unproven"
+        },
+        {
+          "id": "DOMAIN",
+          "requirement": "Единственный владелец правила, tenant/object/org/date scope до count/limit/aggregate/export, текущие actor/grants; неизвестная операция fail-closed.",
+          "completion": "unproven"
+        },
+        {
+          "id": "CONTRACT",
+          "requirement": "OpenAPI/Swagger/SDK/runtime совпадают, содержат реальные auth, errors, headers, limits, null-intent, examples; binary/multipart/SSE/WS/webhook/industry profiles проверяются отдельно.",
+          "completion": "unproven"
+        },
+        {
+          "id": "CHARACTERIZATION",
+          "requirement": "Старые golden outputs и отрицательные матрицы двух компаний/пользователей/apps/resources, реальные SQL/bytes там где требуется; metadata count не заменяет ACL assertion.",
+          "completion": "unproven"
+        },
+        {
+          "id": "MIGRATION",
+          "requirement": "Fresh/restore/upgrade/repeat/old-code, checksums, locking и rollback; перед working migration свежая backup и фактическое восстановление.",
+          "completion": "unproven"
+        },
+        {
+          "id": "CONSUMERS",
+          "requirement": "Полный перевод согласованных UI/service consumers, без stale-context effects и silent fallback; usage evidence перед retirement.",
+          "completion": "unproven"
+        },
+        {
+          "id": "MEASUREMENTS",
+          "requirement": "SQL/RAM/latency/pool/cache/exports/jobs на представительном объёме и принятые бюджеты, без необоснованных pool/index changes.",
+          "completion": "unproven"
+        },
+        {
+          "id": "FINAL-COMPOSITION",
+          "requirement": "Единый окончательный состав исходников и соответствующие проверки; разные frozen серии не объявляются общим полным CI.",
+          "completion": "unproven"
+        },
+        {
+          "id": "LIVE-PILOT",
+          "requirement": "Фактическая приёмка выбранного release/ingress/SSO/callback/CORS/ordinary employee и партнёров; synthetic localhost не подменяет её.",
+          "completion": "unproven"
+        },
+        {
+          "id": "RELEASE",
+          "requirement": "Ревью человеком/согласованный состав/откат; merge и рабочая активация отдельны от зелёных тестов.",
+          "completion": "unproven"
+        }
+      ],
+      "completion_asserted": false,
+      "note": "Исходные20 критериев и11 условий сохранены без сокращения; source-only аудит не доказывает их завершение."
+    },
+    "program_status": {
+      "sections": {
+        "M00": "OPEN",
+        "M01": "OPEN",
+        "M02": "OPEN",
+        "M03": "OPEN",
+        "M04": "OPEN",
+        "M05": "OPEN",
+        "M06": "OPEN",
+        "M07": "OPEN",
+        "M08": "OPEN",
+        "M09": "OPEN",
+        "M10": "OPEN",
+        "M11": "OPEN",
+        "M12": "OPEN",
+        "M13": "OPEN",
+        "M14": "OPEN",
+        "M15": "OPEN",
+        "M16": "OPEN",
+        "M17": "OPEN",
+        "M18": "OPEN",
+        "M19": "OPEN"
+      },
+      "cross_cutting_requirements": {
+        "FULL-SCOPE": "OPEN",
+        "SOURCE": "OPEN",
+        "DOMAIN": "OPEN",
+        "CONTRACT": "OPEN",
+        "CHARACTERIZATION": "OPEN",
+        "MIGRATION": "OPEN",
+        "CONSUMERS": "OPEN",
+        "MEASUREMENTS": "OPEN",
+        "FINAL-COMPOSITION": "OPEN",
+        "LIVE-PILOT": "OPEN",
+        "RELEASE": "OPEN"
+      },
+      "completion_asserted": false
+    },
+    "acceptance": {
+      "runtime_auth_HTTP_SQL": false,
+      "full_CI": false,
+      "program_complete": false
+    },
+    "remaining": "No material exact3 Source correction identified. Runtime/auth/HTTP/SQL, full final composition and entire20+11 program remain unproven.",
+    "markdown": {
+      "path": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/sdk17-wire-independent-review-20261101/REVIEW.md",
+      "bytes": 22442,
+      "sha256": "b12008f24a59673dc15d5631053835aba3cceebddebd78cc9a6ac4d085f55b95"
+    }
+  }
+}

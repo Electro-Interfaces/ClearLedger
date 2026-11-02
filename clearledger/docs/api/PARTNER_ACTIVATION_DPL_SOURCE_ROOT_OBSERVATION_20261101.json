@@ -1,0 +1,23 @@
+{
+  "status": "ROOT_OBSERVED_DPL12_PASS_SOURCE_COMPOSITION_CORRECTED",
+  "at": "2026-11-01T11:15:43.388429+00:00",
+  "sut": "9d68516369b0ec75a4f796e2a615ad0124ee8153",
+  "hostSession": 74821,
+  "hostExit": 0,
+  "reaped": true,
+  "cases": 12,
+  "phases": 36,
+  "seconds": 1.1419360367581248,
+  "appOrConftestImports": [],
+  "noSQLorPG": true,
+  "raw": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/dpl12-source-9d685163-root-20261101-2225b5350408",
+  "files": {
+    "source-manifest.json": "394522fa6a425a2c1e1402c43a8cfa96b052cdd623e15bb026aff51dcb16cac8",
+    "runner.py": "10ea673c44995fdde8118ba81363a32a0e95b192f3d9b237b6c917182c82ef5c",
+    "evidence/result.json": "1ff1dcb39a6ad2edd523c532f969bb0388234abbd8a4e4590dbbb49d594f308e"
+  },
+  "sourceFiles": 572,
+  "oldInitial51StillNotAccepted": true,
+  "noAdded49DiagnosticOr139Claims": true,
+  "noTestsOrProductionModified": true
+}

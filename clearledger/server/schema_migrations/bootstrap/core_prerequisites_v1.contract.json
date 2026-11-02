@@ -1,0 +1,1702 @@
+{
+  "format": 1,
+  "name": "core_prerequisites_v1",
+  "namespace": "core",
+  "tables": {
+    "companies": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "name",
+          "sql_type": "character varying(255)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "slug",
+          "sql_type": "character varying(50)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "short_name",
+          "sql_type": "character varying(100)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "profile_id",
+          "sql_type": "character varying(50)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "color",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "inn",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "tz",
+          "sql_type": "character varying(64)",
+          "not_null": true,
+          "default": "'Europe/Moscow'::character varying",
+          "generated": null
+        },
+        {
+          "name": "cloud_api_key",
+          "sql_type": "character varying(128)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        },
+        {
+          "name": "customization",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "u",
+          "columns": [
+            "slug"
+          ],
+          "name": "companies_slug_key"
+        },
+        {
+          "kind": "u",
+          "columns": [
+            "cloud_api_key"
+          ],
+          "name": "companies_cloud_api_key_key"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "companies_pkey"
+        }
+      ],
+      "indexes": [],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          40,
+          75
+        ],
+        "class_sha256": "0c581005263a37dcd585fb24d0c60e123daff4dd0c2e311198f5781b06e5754f"
+      }
+    },
+    "users": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "email",
+          "sql_type": "character varying(255)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "password_hash",
+          "sql_type": "character varying(255)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "station_pin_hash",
+          "sql_type": "character varying(255)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "name",
+          "sql_type": "character varying(255)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "role",
+          "sql_type": "character varying(50)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "is_superadmin",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": "false",
+          "generated": null
+        },
+        {
+          "name": "reset_token_hash",
+          "sql_type": "character varying(64)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "reset_token_expires",
+          "sql_type": "timestamp with time zone",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "last_seen_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "avatar_url",
+          "sql_type": "character varying(300)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "phone_mobile",
+          "sql_type": "character varying(40)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "phone_office",
+          "sql_type": "character varying(40)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "phone_mobile_e164",
+          "sql_type": "character varying(16)",
+          "not_null": false,
+          "default": null,
+          "generated": "phone_to_e164(phone_mobile)"
+        },
+        {
+          "name": "phone_office_e164",
+          "sql_type": "character varying(16)",
+          "not_null": false,
+          "default": null,
+          "generated": "phone_to_e164(phone_office)"
+        },
+        {
+          "name": "mail_only",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": "false",
+          "generated": null
+        },
+        {
+          "name": "task_notify",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "email_notify",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "away_from",
+          "sql_type": "date",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "away_to",
+          "sql_type": "date",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "token_version",
+          "sql_type": "integer",
+          "not_null": true,
+          "default": "0",
+          "generated": null
+        },
+        {
+          "name": "failed_logins",
+          "sql_type": "integer",
+          "not_null": true,
+          "default": "0",
+          "generated": null
+        },
+        {
+          "name": "locked_until",
+          "sql_type": "timestamp with time zone",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "totp_secret",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "totp_enabled",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": "false",
+          "generated": null
+        },
+        {
+          "name": "tz",
+          "sql_type": "character varying(64)",
+          "not_null": true,
+          "default": "'Europe/Moscow'::character varying",
+          "generated": null
+        },
+        {
+          "name": "work_start",
+          "sql_type": "time without time zone",
+          "not_null": true,
+          "default": "'09:00:00'::time without time zone",
+          "generated": null
+        },
+        {
+          "name": "work_end",
+          "sql_type": "time without time zone",
+          "not_null": true,
+          "default": "'18:00:00'::time without time zone",
+          "generated": null
+        },
+        {
+          "name": "calendar_feed_token",
+          "sql_type": "character varying(64)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "NO ACTION"
+        },
+        {
+          "kind": "u",
+          "columns": [
+            "email"
+          ],
+          "name": "users_email_key"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "users_pkey"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ix_users_calendar_feed_token",
+          "columns": [
+            "calendar_feed_token"
+          ],
+          "unique": true,
+          "predicate": null
+        }
+      ],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          81,
+          200
+        ],
+        "class_sha256": "459aad1d68d4ee40b40def4402e6be1a1129a202a153be27cdb262c86fc3afcb"
+      }
+    },
+    "organizations": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "inn",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "kpp",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "ogrn",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "name",
+          "sql_type": "character varying(500)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "bank_account",
+          "sql_type": "character varying(30)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "bank_bik",
+          "sql_type": "character varying(12)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "vid",
+          "sql_type": "character varying(40)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "full_name",
+          "sql_type": "character varying(500)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "prefix",
+          "sql_type": "character varying(10)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "okpo",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "reg_date",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "okved",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "oktmo",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "okato",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "okopf",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "okfs",
+          "sql_type": "character varying(20)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "registration_cert",
+          "sql_type": "character varying(300)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "ifns_code",
+          "sql_type": "character varying(10)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "ifns_name",
+          "sql_type": "character varying(300)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "pfr_reg_number",
+          "sql_type": "character varying(30)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "fss_reg_number",
+          "sql_type": "character varying(30)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "fss_subordination",
+          "sql_type": "character varying(10)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "legal_address",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "actual_address",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "postal_address",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "phone",
+          "sql_type": "character varying(100)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "fax",
+          "sql_type": "character varying(100)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "email",
+          "sql_type": "character varying(255)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "director_name",
+          "sql_type": "character varying(255)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "director_position",
+          "sql_type": "character varying(150)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "accountant_name",
+          "sql_type": "character varying(255)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "cashier_name",
+          "sql_type": "character varying(255)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "external_ref",
+          "sql_type": "character varying(36)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "NO ACTION"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "organizations_pkey"
+        }
+      ],
+      "indexes": [],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          1182,
+          1236
+        ],
+        "class_sha256": "d5064c92534e6c56ea9778e5797b84265e360841caf40b1c875d0fd7e5cafd89"
+      }
+    },
+    "eco_apps": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "code",
+          "sql_type": "character varying(40)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "name",
+          "sql_type": "character varying(120)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "description",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "base_url",
+          "sql_type": "character varying(300)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "icon",
+          "sql_type": "character varying(60)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "kind",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "sort",
+          "sql_type": "integer",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "is_active",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "config",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "u",
+          "columns": [
+            "code"
+          ],
+          "name": "eco_apps_code_key"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "eco_apps_pkey"
+        }
+      ],
+      "indexes": [],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          8226,
+          8242
+        ],
+        "class_sha256": "8f78df89585b95eea9bc45db0d5d387e4a5305115662bac4fc3a6d153180cf6d"
+      }
+    },
+    "eco_company_apps": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "app_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "enabled",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "config",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "app_id"
+          ],
+          "target_table": "eco_apps",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "eco_company_apps_pkey"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ix_eco_company_apps_company_id",
+          "columns": [
+            "company_id"
+          ],
+          "unique": false,
+          "predicate": null
+        },
+        {
+          "name": "uq_eco_company_app",
+          "columns": [
+            "company_id",
+            "app_id"
+          ],
+          "unique": true,
+          "predicate": null
+        }
+      ],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          8263,
+          8278
+        ],
+        "class_sha256": "8df9ffd75b895a0570a18c45df42b5e5adfeff8fc03a3b9cd6ff02dfb46c8a51"
+      }
+    },
+    "partner_clients": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "character varying(64)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "app_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "owner_company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "redirect_uris",
+          "sql_type": "jsonb",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "allowed_scopes",
+          "sql_type": "jsonb",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "auth_method",
+          "sql_type": "character varying(30)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "enabled",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "app_id"
+          ],
+          "target_table": "eco_apps",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "u",
+          "columns": [
+            "app_id"
+          ],
+          "name": "partner_clients_app_id_key"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "owner_company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "partner_clients_pkey"
+        },
+        {
+          "kind": "c",
+          "name": "ck_partner_client_auth",
+          "expression": "auth_method IN ('none','client_secret_basic')"
+        }
+      ],
+      "indexes": [],
+      "source": {
+        "path": "app/models_partner.py",
+        "sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
+        "lines": [
+          19,
+          29
+        ],
+        "class_sha256": "88999bd9a9c277d15ac276e028e672bb209693b711377a9bed0a11dbf89039c9"
+      }
+    },
+    "partner_installations": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "client_id",
+          "sql_type": "character varying(64)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "approved",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "scopes",
+          "sql_type": "jsonb",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "all_locations",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "id"
+          ],
+          "target_table": "eco_company_apps",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "client_id"
+          ],
+          "target_table": "partner_clients",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "partner_installations_pkey"
+        },
+        {
+          "kind": "u",
+          "columns": [
+            "id",
+            "client_id",
+            "company_id"
+          ],
+          "name": "uq_partner_install_client_company"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ix_partner_installations_client_id",
+          "columns": [
+            "client_id"
+          ],
+          "unique": false,
+          "predicate": null
+        }
+      ],
+      "source": {
+        "path": "app/models_partner.py",
+        "sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916",
+        "lines": [
+          41,
+          50
+        ],
+        "class_sha256": "1c0bac833f51afe9922bcfa039d3957b724b3f667305526b2af671e5ab89f623"
+      }
+    },
+    "calendar_events": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "organizer_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "title",
+          "sql_type": "character varying(300)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "description",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "starts_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "ends_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "all_day",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "tz",
+          "sql_type": "character varying(64)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "location",
+          "sql_type": "character varying(300)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "conference_url",
+          "sql_type": "text",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "visibility",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "status",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "cancel_reason",
+          "sql_type": "character varying(300)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "subject_ref",
+          "sql_type": "character varying(120)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "recurrence",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "recurrence_until",
+          "sql_type": "date",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "series_id",
+          "sql_type": "uuid",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "organizer_id"
+          ],
+          "target_table": "users",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "series_id"
+          ],
+          "target_table": "calendar_events",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "calendar_events_pkey"
+        },
+        {
+          "kind": "c",
+          "name": "ck_calendar_event_span",
+          "expression": "ends_at > starts_at"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ix_calendar_events_company_id",
+          "columns": [
+            "company_id"
+          ],
+          "unique": false,
+          "predicate": null
+        },
+        {
+          "name": "ix_calendar_events_organizer_id",
+          "columns": [
+            "organizer_id"
+          ],
+          "unique": false,
+          "predicate": null
+        },
+        {
+          "name": "ix_calendar_events_series_id",
+          "columns": [
+            "series_id"
+          ],
+          "unique": false,
+          "predicate": null
+        },
+        {
+          "name": "ix_calendar_events_span",
+          "columns": [
+            "company_id",
+            "starts_at",
+            "ends_at"
+          ],
+          "unique": false,
+          "predicate": null
+        }
+      ],
+      "source": {
+        "path": "tests/schema_gate_history_legacy_models_20261031.py",
+        "sha256": "f066910e5bf5e2e37346edc8c78693d3673868186c925e1aad67f1d816f2104e",
+        "lines": [
+          11297,
+          11380
+        ],
+        "class_sha256": "91523a8f5a4ef2ebfef74ebf7159e9dd073bdf55b57c70606df79cef33096ca1"
+      }
+    },
+    "company_roles": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "name",
+          "sql_type": "character varying(100)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "modules",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "is_system",
+          "sql_type": "boolean",
+          "not_null": true,
+          "default": "false",
+          "generated": null
+        },
+        {
+          "name": "chat_scope",
+          "sql_type": "character varying(40)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "app_roles",
+          "sql_type": "jsonb",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "CASCADE"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "company_roles_pkey"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ix_company_roles_company_id",
+          "columns": [
+            "company_id"
+          ],
+          "unique": false,
+          "predicate": null
+        }
+      ],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          392,
+          418
+        ],
+        "class_sha256": "086b9069221701bf63da79f597a623300e51e6db532c37c14bea5f393af1f47c"
+      }
+    },
+    "pulse_views": {
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "company_id",
+          "sql_type": "uuid",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "name",
+          "sql_type": "character varying(200)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "audience",
+          "sql_type": "character varying(300)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "organization_id",
+          "sql_type": "uuid",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "period",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "owner_name",
+          "sql_type": "character varying(200)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "note",
+          "sql_type": "text",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "status",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "feedback_mode",
+          "sql_type": "character varying(20)",
+          "not_null": true,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "feedback_room_id",
+          "sql_type": "uuid",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "feedback_assignee_id",
+          "sql_type": "uuid",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_by",
+          "sql_type": "character varying(200)",
+          "not_null": false,
+          "default": null,
+          "generated": null
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()",
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "f",
+          "columns": [
+            "company_id"
+          ],
+          "target_table": "companies",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "NO ACTION"
+        },
+        {
+          "kind": "f",
+          "columns": [
+            "organization_id"
+          ],
+          "target_table": "organizations",
+          "target_columns": [
+            "id"
+          ],
+          "delete": "NO ACTION"
+        },
+        {
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "name": "pulse_views_pkey"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_pulse_views_company",
+          "columns": [
+            "company_id",
+            "status"
+          ],
+          "unique": false,
+          "predicate": null
+        }
+      ],
+      "source": {
+        "path": "app/models.py",
+        "sha256": "ffd2c8a1231ca306bf5d569481d3c8e13b81e8a13ce312f8d39978da0e682682",
+        "lines": [
+          12425,
+          12488
+        ],
+        "class_sha256": "67cb69de32971c370d307b62cea283a5708c9328ab20262cfc64ed034b6509bb"
+      }
+    }
+  },
+  "profiles": {
+    "fresh": "core_prerequisites_v1.fresh_exact",
+    "prepared": "core_prerequisites_v1.prepared_root0e9b_v1"
+  },
+  "prepared_extra_indexes": {
+    "users": [
+      {
+        "name": "ix_users_phone_mobile_e164",
+        "columns": [
+          "phone_mobile_e164"
+        ],
+        "unique": false,
+        "predicate": "phone_mobile_e164 IS NOT NULL"
+      },
+      {
+        "name": "ix_users_phone_office_e164",
+        "columns": [
+          "phone_office_e164"
+        ],
+        "unique": false,
+        "predicate": "phone_office_e164 IS NOT NULL"
+      },
+      {
+        "name": "users_calendar_feed_token_uq",
+        "columns": [
+          "calendar_feed_token"
+        ],
+        "unique": true,
+        "predicate": "calendar_feed_token IS NOT NULL"
+      }
+    ],
+    "organizations": [
+      {
+        "name": "idx_organizations_company",
+        "columns": [
+          "company_id"
+        ],
+        "unique": false,
+        "predicate": null
+      }
+    ],
+    "calendar_events": [
+      {
+        "name": "ix_calendar_events_series",
+        "columns": [
+          "series_id"
+        ],
+        "unique": false,
+        "predicate": "series_id IS NOT NULL"
+      },
+      {
+        "name": "ix_calendar_events_recurring",
+        "columns": [
+          "company_id"
+        ],
+        "unique": false,
+        "predicate": "recurrence IS NOT NULL"
+      }
+    ]
+  },
+  "phone_sql": "CREATE OR REPLACE FUNCTION phone_to_e164(raw text) RETURNS varchar\nLANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $fn$\nDECLARE\n  part text;\n  d text;\nBEGIN\n  IF raw IS NULL THEN\n    RETURN NULL;\n  END IF;\n  FOREACH part IN ARRAY regexp_split_to_array(raw, '[,;/]') LOOP\n    part := regexp_replace(part, '(^|[^а-яёa-z])(доб|ext|вн).*$', '\\1', 'i');\n    d := regexp_replace(part, '[^0-9]', '', 'g');\n    IF length(d) = 11 AND left(d, 1) IN ('7', '8') THEN\n      RETURN '+7' || right(d, 10);\n    ELSIF length(d) = 10 AND position('+' IN part) = 0 THEN\n      RETURN '+7' || d;\n    ELSIF position('+' IN part) > 0 AND length(d) BETWEEN 11 AND 15 THEN\n      RETURN '+' || d;\n    END IF;\n  END LOOP;\n  RETURN NULL;\nEND\n$fn$;",
+  "phone_source": {
+    "path": "app/services/phone_e164.py",
+    "sha256": "02556ab614fe3ece60bbe4f216fec5b8eceb9b118cb976c20acc3df5cf5a8c0e"
+  },
+  "empty_core_exclusions": [
+    {
+      "catalogue": "pg_default_acl",
+      "condition": "Only namespace metadata; effective global+core defaults must equal pg_catalog.acldefault for actual creator/object kinds r,f,S,T before DDL. Not an object or privilege repair."
+    }
+  ],
+  "admin_prerequisites": [
+    "owned core schema",
+    "owned edge schema",
+    "btree_gist outside core"
+  ],
+  "calendar_owner": "existing0002only",
+  "source_pin": "0e9b923106796c9f278d6e9ef5f813eeaa91ce66"
+}

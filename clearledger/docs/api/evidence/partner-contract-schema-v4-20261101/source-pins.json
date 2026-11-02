@@ -1,0 +1,466 @@
+{
+  "base": "d71e4f3754efce7c911cc95cb46eb22707e8efbc",
+  "manifest_before_sha256": "6fa42ed6f411e493a05904c5df46b8fa0fb56fabd0d52d82750b92a15d3ed016",
+  "frozen_registry": {
+    "format": 1,
+    "revisions": [
+      {
+        "artifact_sha256": "301b88799018e0123f40a8bbbfec1415184147ba31bf43bb9432e9140ff15ab1",
+        "files": {
+          "revisions/0001_contract.json": "19450cd978b88df859aa6f4d33ad745f48fb4f0b55a17850aa875e75b66a0194",
+          "revisions/0001_product_api_budgets.sql": "98da0597f9e4d6a3d21326a310496b790753a5d9e766cfec8005d84641dd2ac9",
+          "revisions/catalog_v1.py": "ae3c42d51a7e7e37ee293b2c64f73addd421cf792b63af6bed6c36b1ed5f24f5",
+          "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+        },
+        "id": "0001_product_api_budgets",
+        "namespace": "core",
+        "ordinal": 1,
+        "parent": null,
+        "runner_format": 1,
+        "source_commit": "b55d99597ae0dbd3986e8cde0469f7e117d18177"
+      },
+      {
+        "artifact_sha256": "203ee350a47fb3e12d2e2fb6d292fc0e1a19b4cd3cd348b507551cf233cae2f0",
+        "files": {
+          "revisions/0002_calendar_contract.json": "482e1288effc7eed97eda57ea27f31501b49000090ee65aa607c6e99d98634ad",
+          "revisions/0002_calendar_protocol_sequence.sql": "28d296c60bb1fa04534b2871febf8acd4163253156e6e00871fc6e5bad9b5835",
+          "revisions/catalog_v2.py": "6d60ec4e18b5e3c66808acede434f82641d4f7701ee3867a8cbb9159b0d80dd1",
+          "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+        },
+        "id": "0002_calendar_protocol_sequence",
+        "namespace": "core",
+        "ordinal": 2,
+        "parent": "0001_product_api_budgets",
+        "runner_format": 1,
+        "source_commit": "ba9fc30be815a554cb0c646a6c75f59e17c19fb0"
+      },
+      {
+        "artifact_sha256": "c98bc5d27c6aa710618bb5d209d0ef0adfd11a6a4825dcd0831c7403e872cc3d",
+        "files": {
+          "revisions/0003_pulse_view_role_grants.sql": "cc59ec7b281db6120a81fb01dd5b9b7f1ff44c259b6b8b94993f91dbbd1e583b",
+          "revisions/0003_pulse_view_role_grants_contract.json": "d7e78791a5792c606253f74ee15eca9b70a2baeff28aa56844759e548531846c",
+          "revisions/catalog_pulse_view_role_grants_v1.py": "6b291890dcd02a8ce019e7c1e85306b445b6a3ba0c20d4d05492c33e539b9540",
+          "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+        },
+        "id": "0003_pulse_view_role_grants",
+        "namespace": "core",
+        "ordinal": 3,
+        "parent": "0002_calendar_protocol_sequence",
+        "runner_format": 1,
+        "source_commit": "875929b3885d98ace8e370a72d62a825bf76960b"
+      }
+    ]
+  },
+  "runtime": "NOT RUN",
+  "scope": "SOURCE only",
+  "worktree": "/home/mag/orca/workspaces/ledger-app/partner-contract-schema-v4-20261101",
+  "branch": "MagLook/source-implementation-task-59227",
+  "manifest_after_sha256": "36b5786d94f43c62e7075cb5d59ed0fd36d052a352cb01febe02c326e5e7d094",
+  "revision4": {
+    "artifact_sha256": "58ff7a0cf33f7fb55fa080e4efe60c1a4aece67588cf1bfe8b44bc75e92c7e31",
+    "files": {
+      "revisions/0004_partner_contract_create.sql": "1ef5de696b75f79ca58cd4c32844bb3281dcaa249d4b89e588b0e207fed02ae8",
+      "revisions/0004_partner_contract_create_contract.json": "1ced9ff25109a510bc3c9f2adabfa63537c9956fb549793a0ff5aee4e5a1ea53",
+      "revisions/catalog_partner_contract_create_v1.py": "c020c639316a672eec950d0757f1517c6096e5f522100ab97f37ee853536929d",
+      "revisions/journal_v1.sql": "c872f3746c0df17c03bb6c87db8b8bebd22713bc326fca83b43e3aa9f8dfed5a"
+    },
+    "id": "0004_partner_contract_create",
+    "namespace": "core",
+    "ordinal": 4,
+    "parent": "0003_pulse_view_role_grants",
+    "runner_format": 1,
+    "source_commit": "d71e4f3754efce7c911cc95cb46eb22707e8efbc"
+  },
+  "file_pins": {
+    "clearledger/server/app/models_partner_contracts.py": {
+      "sha256": "e1677950c28645105105795c5b65cd033f92f59f67fda50bb77c568cf1882385",
+      "bytes": 10437,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/app/database.py": {
+      "sha256": "c2c028fc528b7260c69de441e41a564595d07c23c74e4433f02fc9f04db005af",
+      "bytes": 388263,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/schema_migrations/catalog.py": {
+      "sha256": "45b069fbd664c5cc9a04c54cace3e15c64bac10cbdc65445ec6f78dc64f94465",
+      "bytes": 2520,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/schema_migrations/manifest.py": {
+      "sha256": "9e680df363a8b65473277376fcdaa0cdcf369b4d38e51b4687e188b8e84b50bc",
+      "bytes": 5377,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/schema_migrations/manifest.json": {
+      "sha256": "36b5786d94f43c62e7075cb5d59ed0fd36d052a352cb01febe02c326e5e7d094",
+      "bytes": 3306,
+      "json_decode": "OK"
+    },
+    "clearledger/server/schema_migrations/runner.py": {
+      "sha256": "be3fc2b5ff20578350fcdcd691928790b1029e2173ad203dd480ba8da5635fbe",
+      "bytes": 30748,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/schema_migrations/revisions/0004_partner_contract_create.sql": {
+      "sha256": "1ef5de696b75f79ca58cd4c32844bb3281dcaa249d4b89e588b0e207fed02ae8",
+      "bytes": 10017
+    },
+    "clearledger/server/schema_migrations/revisions/0004_partner_contract_create_contract.json": {
+      "sha256": "1ced9ff25109a510bc3c9f2adabfa63537c9956fb549793a0ff5aee4e5a1ea53",
+      "bytes": 25286,
+      "json_decode": "OK"
+    },
+    "clearledger/server/schema_migrations/revisions/catalog_partner_contract_create_v1.py": {
+      "sha256": "c020c639316a672eec950d0757f1517c6096e5f522100ab97f37ee853536929d",
+      "bytes": 16891,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/schema_migrations/tests/test_partner_contract_create_pure.py": {
+      "sha256": "310ed7e36a08768be66ef79c6c1f62afd88ba02e737683daa6f59459ce6fee7d",
+      "bytes": 8636,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/server/tests/partner_contract_schema_v4_cases.py": {
+      "sha256": "94690d88e248d58928d840254a51786295d3483d539af733a0eef9e3109c52ee",
+      "bytes": 28719,
+      "ast_parse": "OK",
+      "in_memory_compile_without_exec": "OK"
+    },
+    "clearledger/docs/api/CONTRACT_PARTNER_SCHEMA_V4_20261101.md": {
+      "sha256": "87f41ca09fc89cde651d9bc18cb169940c5718dc85181d6db6c21ee6620a5c47",
+      "bytes": 8034
+    },
+    "clearledger/docs/api/CONTRACT_PARTNER_SCHEMA_V4_HANDOFF_20261101.md": {
+      "sha256": "fe7a713c3b3549bf8d2119320754819b01a55bcee33455f1d27e57b45095e716",
+      "bytes": 6647
+    }
+  },
+  "final_head_receipt": "Orca worker_done exact HEAD; no self-referential commit SHA in tracked artifact",
+  "checks_executed": [
+    "stdlib AST parse",
+    "in-memory compile without exec",
+    "JSON decode",
+    "SHA256 artifact recomputation",
+    "old registry entries and frozen payload SHA equality",
+    "model column/CHECK vs JSON source consistency",
+    "git diff --check"
+  ],
+  "not_run": [
+    "project/helper imports",
+    "tests/collection",
+    "SQL/DB/PoC",
+    "Node/build/compiler/CI",
+    "network/SSH/Docker/install",
+    "app/server/startup"
+  ],
+  "remaining": [
+    "ROOT independent source/helper/DSN/native-world admission freeze",
+    "PG16 catalogue/default/function/trigger/rollback/cancel/unknown-COMMIT proof",
+    "ORM mapping and Core/public startup exclusion proof",
+    "native lifecycle delete/tombstone proof",
+    "domain/admin/query/HTTP/SDK/identity/audit wiring",
+    "receipt EXISTS/count+page query plans and budgets"
+  ],
+  "relevant_source_trace": {
+    "clearledger/server/schema_migrations/runner.py": {
+      "_packages": {
+        "line": 22,
+        "end_line": 28,
+        "calls": []
+      },
+      "state": {
+        "line": 71,
+        "end_line": 113,
+        "calls": [
+          "MigrationError",
+          "catalog.contract_create_prerequisites",
+          "catalog.inspect_calendar",
+          "catalog.inspect_contract_create",
+          "catalog.inspect_prerequisites",
+          "catalog.inspect_pulse",
+          "catalog.verify_budget",
+          "catalog.verify_journal",
+          "catalog.verify_unoccupied_names",
+          "identity",
+          "journal.read_verified_history",
+          "require_applied_prefix"
+        ]
+      },
+      "require_applied_prefix": {
+        "line": 116,
+        "end_line": 158,
+        "calls": [
+          "MigrationError",
+          "_packages",
+          "catalog.inspect_calendar",
+          "catalog.inspect_contract_create",
+          "catalog.inspect_prerequisites",
+          "catalog.inspect_pulse",
+          "catalog.verify_budget",
+          "catalog.verify_journal",
+          "config.validate",
+          "conn.fetch",
+          "identity",
+          "journal.validate_history",
+          "len",
+          "load_known_head",
+          "packages.values"
+        ]
+      },
+      "_apply_owned": {
+        "line": 161,
+        "end_line": 226,
+        "calls": [
+          "', '.join",
+          "MigrationError",
+          "catalog.inspect_calendar",
+          "catalog.inspect_contract_create",
+          "catalog.inspect_pulse",
+          "catalog.verify_budget",
+          "catalog.verify_calendar_cutover",
+          "catalog.verify_calendar_preserved",
+          "catalog.verify_journal",
+          "connection.execute",
+          "journal.append_applied",
+          "journal.read_verified_history",
+          "sorted",
+          "state"
+        ]
+      },
+      "execute": {
+        "line": 229,
+        "end_line": 277,
+        "calls": [
+          "MigrationError",
+          "_apply_owned",
+          "asyncio.shield",
+          "asyncio.timeout",
+          "asyncpg.connect",
+          "config.validate",
+          "connection.close",
+          "connection.fetchval",
+          "connection.transaction",
+          "execute_sequence",
+          "load",
+          "state",
+          "type"
+        ]
+      },
+      "_sequence_source": {
+        "line": 349,
+        "end_line": 368,
+        "calls": [
+          "MigrationError",
+          "_bootstrap_source",
+          "_packages",
+          "_partner_source",
+          "load",
+          "load_known_head",
+          "type"
+        ]
+      },
+      "_sequence_catalogue": {
+        "line": 371,
+        "end_line": 417,
+        "calls": [
+          "MigrationError",
+          "_packages",
+          "catalog.contract_create_prerequisites",
+          "catalog.inspect_calendar",
+          "catalog.inspect_contract_create",
+          "catalog.inspect_prerequisites",
+          "catalog.inspect_pulse",
+          "catalog.verify_budget",
+          "catalog.verify_journal",
+          "catalog.verify_unoccupied_names",
+          "conn.fetch",
+          "identity",
+          "len",
+          "load_known_head",
+          "require_applied_prefix",
+          "verifier.empty",
+          "verifier.old_partner_profile",
+          "verifier.prerequisites",
+          "verifier.profile"
+        ]
+      },
+      "execute_sequence": {
+        "line": 420,
+        "end_line": 481,
+        "calls": [
+          "MigrationError",
+          "_apply_owned",
+          "_packages",
+          "_packages(head).items",
+          "_sequence_catalogue",
+          "_sequence_source",
+          "actions.append",
+          "asyncio.create_task",
+          "asyncio.shield",
+          "asyncio.timeout",
+          "asyncpg.connect",
+          "catalog.contract_create_prerequisites",
+          "config.validate",
+          "connection.close",
+          "connection.execute",
+          "connection.fetchval",
+          "connection.get_server_pid",
+          "connection.transaction",
+          "load_known_head",
+          "require_applied_prefix",
+          "sorted",
+          "verifier.profile"
+        ]
+      }
+    },
+    "clearledger/server/app/database.py": {
+      "require_startup_schema": {
+        "line": 2244,
+        "end_line": 2263,
+        "calls": [
+          "RuntimeError",
+          "_assert_bootstrap_namespace",
+          "conn.begin",
+          "conn.execution_options",
+          "engine.connect",
+          "preflight_startup_sources",
+          "require_connection",
+          "require_pulse"
+        ]
+      },
+      "create_all": {
+        "line": 2266,
+        "end_line": 5595,
+        "calls": [
+          "(await conn.execute(_sa.text(\"SELECT 1 FROM contract_locations WHERE note = 'backfill:settlements' LIMIT 1\"))).first",
+          "(await conn.execute(_sa.text(\"SELECT 1 FROM ops_contract_terms WHERE source = 'backfill:settlements' LIMIT 1\"))).first",
+          "(await conn.execute(_sa.text(\"SELECT to_regclass('edge.item') IS NOT NULL\"))).scalar",
+          "(await conn.execute(_sa.text('SELECT DISTINCT pay_type_name FROM fuel_transactions WHERE payment_method IS NULL'))).scalars",
+          "(await conn.execute(_sa.text('SELECT DISTINCT pay_type_name FROM fuel_transactions WHERE payment_method IS NULL'))).scalars().all",
+          "Base.metadata.create_all",
+          "Base.metadata.tables.values",
+          "__import__",
+          "__import__('logging').getLogger",
+          "__import__('logging').getLogger(__name__).warning",
+          "__import__('sqlalchemy').text",
+          "_assert_bootstrap_namespace",
+          "_ensure_active_group_readiness",
+          "_json.dumps",
+          "_sa.text",
+          "_uuid.uuid4",
+          "bool",
+          "conn.begin_nested",
+          "conn.execute",
+          "conn.run_sync",
+          "engine.begin",
+          "excluded.add",
+          "excluded.update",
+          "normalize_payment_method",
+          "require_connection",
+          "require_pulse_schema",
+          "set",
+          "str",
+          "text"
+        ]
+      }
+    },
+    "clearledger/server/schema_migrations/revisions/catalog_partner_contract_create_v1.py": {
+      "prerequisites": {
+        "line": 104,
+        "end_line": 125,
+        "calls": [
+          "columns",
+          "constraint_flags",
+          "constraints",
+          "contract['prerequisites'].items",
+          "header",
+          "indexes",
+          "len",
+          "names.get",
+          "require",
+          "required.append",
+          "verify_columns",
+          "verify_index"
+        ]
+      },
+      "own_table": {
+        "line": 144,
+        "end_line": 184,
+        "calls": [
+          "acl",
+          "columns",
+          "conn.fetchrow",
+          "conn.fetchval",
+          "constraint_flags",
+          "constraints",
+          "expected.update",
+          "expression",
+          "foreign_key_triggers",
+          "indexes",
+          "len",
+          "names.get",
+          "parent['attributes'].get",
+          "require",
+          "set",
+          "spec['checks'].items",
+          "spec['foreign_keys'].items",
+          "spec['unique'].items",
+          "verify_columns",
+          "verify_index"
+        ]
+      },
+      "functions": {
+        "line": 187,
+        "end_line": 215,
+        "calls": [
+          "conn.fetch",
+          "conn.fetchval",
+          "contract['functions'].items",
+          "len",
+          "require"
+        ]
+      },
+      "inspect": {
+        "line": 218,
+        "end_line": 258,
+        "calls": [
+          "columns",
+          "conn.fetch",
+          "conn.fetchval",
+          "contract['tables'].values",
+          "function_ids.values",
+          "functions",
+          "header",
+          "headers.items",
+          "headers.values",
+          "len",
+          "list",
+          "own_table",
+          "prerequisites",
+          "require",
+          "set",
+          "verify_columns"
+        ]
+      }
+    }
+  },
+  "authored_pure_methods": [
+    "test_head4_default1_explicit3_and_frozen_artifact_ids",
+    "test_every_old_registry_prefix_loads_its_explicit_revision",
+    "test_all_successor_chain_fields_are_checked",
+    "test_tampered_sql_contract_catalog_and_checksum_refuse",
+    "test_unknown_fifth_and_foreign_fourth_refuse",
+    "test_plan4_and_plan3_have_no_environment_access",
+    "test_apply4_requires_calendar_ack_before_driver_import",
+    "test_boolean_normalization_preserves_parentheses_and_exact_strings",
+    "test_history_has_only_nullable_current_foreign_keys"
+  ]
+}

@@ -1,0 +1,4015 @@
+{
+  "assessment_scope": "Architecture/source only; decisions are plans, not completed runtime changes.",
+  "edge_assessments": [
+    {
+      "basis": "Transport DTO is constructed per station; shared STS clients stay in place.",
+      "coupling": "Pydantic request shape; caller controls progress commits and savepoints.",
+      "current_owner": "routers/fuel_router.py:NormalizeRequest",
+      "decision": "keep",
+      "id": "E01",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Domain ingest already named separately; later move whole cohesive implementation, not HTTP endpoint.",
+      "coupling": "STS/L1/flush; _run_sts_stations owns commit, rollback and begin_nested.",
+      "current_owner": "routers/fuel_router.py:ingest_fuel_shifts",
+      "decision": "extract",
+      "id": "E02",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Preserve existing delivery ingest and dedup keys in a later fuel-owned change.",
+      "coupling": "STS/L1 and caller transaction; no new common-space patch.",
+      "current_owner": "routers/fuel_router.py:ingest_fuel_deliveries",
+      "decision": "extract",
+      "id": "E03",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Existing MSTO reconciliation_proxy client and ingest function remain canonical.",
+      "coupling": "Tenant connector lookup, external read, L1 writes and flush; caller transaction.",
+      "current_owner": "routers/online_orders_router.py:ingest_online_orders",
+      "decision": "extract",
+      "id": "E04",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Later channel-runner service, preserving the current orchestrator.",
+      "coupling": "Own async session, rollback/commit, audit and fuel followup; high transaction coupling.",
+      "current_owner": "routers/channels_router.py:_run_channel_background",
+      "decision": "extract",
+      "id": "E05",
+      "scope": "common"
+    },
+    {
+      "basis": "Later cohesive chat-access extraction; retain original adapter/hook until characterized.",
+      "coupling": "Selected-company context, ticket/task ACL, participant/scope and audit side effect.",
+      "current_owner": "routers/chat_router.py:_assert_participant",
+      "decision": "extract",
+      "id": "E06",
+      "scope": "common"
+    },
+    {
+      "basis": "Later place existing async predicate with chat scope owner; retain async compatibility.",
+      "coupling": "Primary company equality only; no DB/commit in this predicate.",
+      "current_owner": "routers/chat_router.py:_is_insider",
+      "decision": "extract",
+      "id": "E07",
+      "scope": "common"
+    },
+    {
+      "basis": "Later NSI-owned extraction preserving full-card downlink semantics.",
+      "coupling": "Queue writes; bounded deleted-item retry in caller, no helper commit.",
+      "current_owner": "routers/store_router.py:_queue_nsi_delta",
+      "decision": "extract",
+      "id": "E08",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Small ISO parser but outside common-space priority.",
+      "coupling": "Pure datetime.fromisoformat; preserve empty -> None and exception behavior; caller commits.",
+      "current_owner": "routers/fuel_router.py:_parse_dt",
+      "decision": "extract",
+      "id": "E09",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Same existing NSI function as E08; never duplicate it for automatic recognition.",
+      "coupling": "Caller resolves draft/barcodes/queues then commits one transaction.",
+      "current_owner": "routers/store_router.py:_queue_nsi_delta",
+      "decision": "extract",
+      "id": "E10",
+      "scope": "fuel-only"
+    },
+    {
+      "basis": "Keep docs -> legacy plan product fallback until separate gate extraction.",
+      "coupling": "HTTPException fallback via assert_company_product; not just task visibility.",
+      "current_owner": "routers/tasks_router.py:_assert_work",
+      "decision": "keep",
+      "id": "E11",
+      "scope": "common"
+    },
+    {
+      "basis": "Rewire to existing owner, retaining local alias _is_admin; no new service.",
+      "coupling": "Membership-based admin read; caller still applies company/product constraints.",
+      "current_owner": "services/task_access.py:is_admin",
+      "decision": "extract",
+      "id": "E12",
+      "scope": "common"
+    },
+    {
+      "basis": "Batch presentation helper depends on _route_of and several reference models.",
+      "coupling": "Read projection; no independent authorization guarantee.",
+      "current_owner": "routers/tasks_router.py:_names",
+      "decision": "keep",
+      "id": "E13",
+      "scope": "common"
+    },
+    {
+      "basis": "Preserve shared-list filter independently from permission to view personal tasks.",
+      "coupling": "Pure SQL predicate, not ACL equivalence.",
+      "current_owner": "routers/tasks_router.py:_not_personal",
+      "decision": "keep",
+      "id": "E14",
+      "scope": "common"
+    },
+    {
+      "basis": "Rewire existing owner, retaining local alias _visible_to.",
+      "coupling": "SQL ACL predicate; company filter remains caller responsibility.",
+      "current_owner": "services/task_access.py:visible_to",
+      "decision": "extract",
+      "id": "E15",
+      "scope": "common"
+    },
+    {
+      "basis": "Future calendar-owned selector, preserve organizer OR attendee exactly.",
+      "coupling": "SQL predicate; caller adds company/date/company-visibility and product checks.",
+      "current_owner": "routers/work_router.py:_my_events_clause",
+      "decision": "extract",
+      "id": "E16",
+      "scope": "common"
+    },
+    {
+      "basis": "Same cohesive chat-access unit as E06; do not weaken projection ACL.",
+      "coupling": "May audit superadmin access; management catches 404 but propagates other errors.",
+      "current_owner": "routers/chat_router.py:_assert_participant",
+      "decision": "extract",
+      "id": "E17",
+      "scope": "common"
+    },
+    {
+      "basis": "Wrapper delegates to services/chat_scope.py:chat_scope_of, but management runtime compatibility tests require router hook.",
+      "coupling": "Keep fail-closed missing/denied-hook behavior and original runtime adapter.",
+      "current_owner": "routers/chat_router.py:_chat_scope",
+      "decision": "keep",
+      "id": "E18",
+      "scope": "common"
+    },
+    {
+      "basis": "Priority true extraction into existing services/jitsi.py:meeting_hosts, preserving router wrapper.",
+      "coupling": "One attendee query/fallback; no direct commit, ACL or token issuance.",
+      "current_owner": "routers/conf_router.py:ведущие_встречи",
+      "decision": "extract",
+      "id": "E19",
+      "scope": "common"
+    },
+    {
+      "basis": "Same async predicate as E07; preserve suggestion rules and mail_only exclusion.",
+      "coupling": "Company/team reads in caller; no implicit superadmin override added.",
+      "current_owner": "routers/chat_router.py:_is_insider",
+      "decision": "extract",
+      "id": "E20",
+      "scope": "common"
+    },
+    {
+      "basis": "Actual HTTP handlers and FileBody/DecisionBody/LinkBody constructors, not a module-as-function call.",
+      "coupling": "Handlers enforce membership, message/history ACL, locking, event writes and commit.",
+      "current_owner": "routers/project_workspace_router.py:attach_file/decision/link",
+      "decision": "transport-adapter",
+      "id": "E21",
+      "scope": "common"
+    },
+    {
+      "basis": "Future cohesive pulse read model, sharing all selectors with screen/desk/digest.",
+      "coupling": "Caller authorization; profile/support mapping/read queries; digest owns advisory lock, email and commit.",
+      "current_owner": "routers/pulse_router.py:pulse_day_data",
+      "decision": "extract",
+      "id": "E22",
+      "scope": "common"
+    },
+    {
+      "basis": "Same shared data function as E22; no second calculation.",
+      "coupling": "Desk catches data exceptions into empty metrics; keep output and stale semantics.",
+      "current_owner": "routers/pulse_router.py:pulse_day_data",
+      "decision": "extract",
+      "id": "E23",
+      "scope": "common"
+    },
+    {
+      "basis": "Same direct-owner rewire as E12 in work_links.",
+      "coupling": "Caller company filter and document ACL stay unchanged.",
+      "current_owner": "services/task_access.py:is_admin",
+      "decision": "extract",
+      "id": "E24",
+      "scope": "common"
+    },
+    {
+      "basis": "Same shared-list exclusion as E14, independent of task ACL.",
+      "coupling": "Used only for task branch of document/task union.",
+      "current_owner": "routers/tasks_router.py:_not_personal",
+      "decision": "keep",
+      "id": "E25",
+      "scope": "common"
+    },
+    {
+      "basis": "Same direct-owner rewire as E15 in work_links.",
+      "coupling": "Preserve task/doc union filters, parameters and ownership.",
+      "current_owner": "services/task_access.py:visible_to",
+      "decision": "extract",
+      "id": "E26",
+      "scope": "common"
+    },
+    {
+      "basis": "Guard composes _assert_view_task and _can_edit_task including oversight; not an alias.",
+      "coupling": "Preserve personal-author, involved/admin and oversight edit rules, error statuses.",
+      "current_owner": "routers/tasks_router.py:_assert_actor",
+      "decision": "keep",
+      "id": "E27",
+      "scope": "common"
+    },
+    {
+      "basis": "Rewire existing owner, retaining local alias _can_view_task.",
+      "coupling": "Company plus visibility read; explicit personal exclusion/edit actor check remains caller-owned.",
+      "current_owner": "services/task_access.py:can_view_task",
+      "decision": "extract",
+      "id": "E28",
+      "scope": "common"
+    },
+    {
+      "basis": "Later cohesive chat access/read-history owner, preserve optional cutoff.",
+      "coupling": "Caller checks active message and participation; timestamp read has no commit.",
+      "current_owner": "routers/chat_router.py:_history_from",
+      "decision": "extract",
+      "id": "E29",
+      "scope": "common"
+    }
+  ],
+  "inventory": {
+    "app_path": "clearledger/server/app",
+    "coverage": {
+      "bytes": 17118036,
+      "files": 492,
+      "parse_unknown": 0,
+      "python_parsed": 482,
+      "router_bindings": 29,
+      "router_import_sites": 20,
+      "service_import_bindings": 4748
+    },
+    "dynamic_loaders": [
+      {
+        "ast_sha256": "4d0fb7b8795b962849e6965fbeb43717ce5c5dac1019b308139fde789cad88f0",
+        "column": 28,
+        "end_line": 886,
+        "form": "__import__",
+        "guards": [],
+        "line": 886,
+        "loader_binding": "spelling candidate; rebinding/monkeypatching not evaluated",
+        "path": "clearledger/server/app/services/edge_nsi.py",
+        "reason": null,
+        "requested": "sqlalchemy",
+        "scope": [
+          "resolve_partner_draft"
+        ],
+        "source_sha256": "8739fa78f505707c69180da21ff483737686aa16775a6af221b6de9359d8232f",
+        "spelling": "__import__",
+        "status": "literal-supported"
+      },
+      {
+        "ast_sha256": "4d0fb7b8795b962849e6965fbeb43717ce5c5dac1019b308139fde789cad88f0",
+        "column": 8,
+        "end_line": 889,
+        "form": "__import__",
+        "guards": [],
+        "line": 889,
+        "loader_binding": "spelling candidate; rebinding/monkeypatching not evaluated",
+        "path": "clearledger/server/app/services/edge_nsi.py",
+        "reason": null,
+        "requested": "sqlalchemy",
+        "scope": [
+          "resolve_partner_draft"
+        ],
+        "source_sha256": "8739fa78f505707c69180da21ff483737686aa16775a6af221b6de9359d8232f",
+        "spelling": "__import__",
+        "status": "literal-supported"
+      }
+    ],
+    "edges": [
+      {
+        "ast_sha256": "08cf092313d8bbe2ffeab1f74f207ef59928cf8313f3aecb443b19313b5eceac",
+        "base": "app.routers.fuel_router",
+        "bound": "NormalizeRequest",
+        "bound_target": "app.routers.fuel_router.NormalizeRequest",
+        "calls": [
+          {
+            "ast_sha256": "d5c89665160a0288c7187a20955e40b1174c70933b2a2ba7347252a2816749d1",
+            "column": 15,
+            "end_line": 314,
+            "guards": [
+              {
+                "ast_sha256": "f44eaf8fa8a7e246de94851af6a5a392f94edc5e20328d40ca424a6629825564",
+                "branch": "body",
+                "kind": "For",
+                "line": 305
+              }
+            ],
+            "line": 310,
+            "owner": {
+              "ast_sha256": "c4907153218e03f42d10d4460e20916da9799444f3bd5c4ac760b6a5bc2f9015",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 267,
+              "guards": [],
+              "kind": "ClassDef",
+              "line": 259,
+              "module": "app.routers.fuel_router",
+              "name": "NormalizeRequest",
+              "path": "clearledger/server/app/routers/fuel_router.py",
+              "requested": "app.routers.fuel_router.NormalizeRequest",
+              "scope": [],
+              "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+            },
+            "path": "clearledger/server/app/services/channel_orchestrator.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_run_sts_stations"
+            ],
+            "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+            "spelling": "NormalizeRequest",
+            "target": "app.routers.fuel_router.NormalizeRequest"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "9adcbdcca08392058e4797f2a88ebec09e46605d66b523c00aa7c71bf25d88e5",
+            "end_line": 337,
+            "kind": "AsyncFunctionDef",
+            "line": 285,
+            "name": "_run_sts_stations",
+            "path": "clearledger/server/app/services/channel_orchestrator.py"
+          }
+        ],
+        "end_line": 292,
+        "form": "from",
+        "guards": [],
+        "id": "E01",
+        "line": 292,
+        "owner": {
+          "ast_sha256": "c4907153218e03f42d10d4460e20916da9799444f3bd5c4ac760b6a5bc2f9015",
+          "call_spellings": [],
+          "column": 0,
+          "decorators": [],
+          "end_line": 267,
+          "guards": [],
+          "kind": "ClassDef",
+          "line": 259,
+          "module": "app.routers.fuel_router",
+          "name": "NormalizeRequest",
+          "path": "clearledger/server/app/routers/fuel_router.py",
+          "requested": "app.routers.fuel_router.NormalizeRequest",
+          "scope": [],
+          "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+        },
+        "path": "clearledger/server/app/services/channel_orchestrator.py",
+        "relative_level": 0,
+        "requested": "app.routers.fuel_router.NormalizeRequest",
+        "scope": [
+          "_run_sts_stations"
+        ],
+        "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd"
+      },
+      {
+        "ast_sha256": "d91954cee7aade3c721fd7e0f1b0fa4ea4c46cdf00e0a7952ce6f32767131fcd",
+        "base": "app.routers.fuel_router",
+        "bound": "ingest_fuel_shifts",
+        "bound_target": "app.routers.fuel_router.ingest_fuel_shifts",
+        "calls": [
+          {
+            "ast_sha256": "e9a5afe09146ba45e5b436694ce29ecbb0ff9ed6b6af750afb767e5aae4f2358",
+            "column": 21,
+            "end_line": 350,
+            "guards": [],
+            "line": 348,
+            "owner": {
+              "ast_sha256": "fced5e36f576ab3ca1bf9cc832879d29b6f6f0de62e01a6e373a8c36c2392c6c",
+              "call_spellings": [
+                "DataEntry",
+                "FuelCashMovement",
+                "FuelPump",
+                "FuelReceipt",
+                "FuelShift",
+                "FuelShiftSale",
+                "FuelTank",
+                "RawBatchRecord",
+                "_density",
+                "_get_or_create_station",
+                "_int_or_none",
+                "_num_or_none",
+                "_opened",
+                "_parse_dt",
+                "_recv.get",
+                "_rest.get",
+                "base.get",
+                "build_sales_agg",
+                "chan_agg.items",
+                "ctx.fuel",
+                "db.add",
+                "db.execute",
+                "db.flush",
+                "doc.get",
+                "doc_beg.get",
+                "doc_end.get",
+                "existing.scalar_one_or_none",
+                "fact.get",
+                "float",
+                "fuel_breakdown.append",
+                "int",
+                "len",
+                "load_mapping_context",
+                "m.get",
+                "next",
+                "op.get",
+                "p.get",
+                "r.get",
+                "rel.get",
+                "report.get",
+                "round",
+                "s.get",
+                "select",
+                "shift.opened_at.date",
+                "shift_meta.get",
+                "sorted",
+                "str",
+                "sts_get_shift_report",
+                "sts_get_shifts",
+                "sum",
+                "svc.get",
+                "t.get",
+                "ttn_date.date",
+                "uuid.uuid4",
+                "water.get"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1037,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 637,
+              "module": "app.routers.fuel_router",
+              "name": "ingest_fuel_shifts",
+              "path": "clearledger/server/app/routers/fuel_router.py",
+              "requested": "app.routers.fuel_router.ingest_fuel_shifts",
+              "scope": [],
+              "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+            },
+            "path": "clearledger/server/app/services/channel_orchestrator.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_run_fuel",
+              "_ingest"
+            ],
+            "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+            "spelling": "ingest_fuel_shifts",
+            "target": "app.routers.fuel_router.ingest_fuel_shifts"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "c85315b9842e24afea99e21f07d0135dcce4483df832c6ec73e6dc915ee0db9b",
+            "end_line": 353,
+            "kind": "AsyncFunctionDef",
+            "line": 340,
+            "name": "_run_fuel",
+            "path": "clearledger/server/app/services/channel_orchestrator.py"
+          }
+        ],
+        "end_line": 345,
+        "form": "from",
+        "guards": [],
+        "id": "E02",
+        "line": 345,
+        "owner": {
+          "ast_sha256": "fced5e36f576ab3ca1bf9cc832879d29b6f6f0de62e01a6e373a8c36c2392c6c",
+          "call_spellings": [
+            "DataEntry",
+            "FuelCashMovement",
+            "FuelPump",
+            "FuelReceipt",
+            "FuelShift",
+            "FuelShiftSale",
+            "FuelTank",
+            "RawBatchRecord",
+            "_density",
+            "_get_or_create_station",
+            "_int_or_none",
+            "_num_or_none",
+            "_opened",
+            "_parse_dt",
+            "_recv.get",
+            "_rest.get",
+            "base.get",
+            "build_sales_agg",
+            "chan_agg.items",
+            "ctx.fuel",
+            "db.add",
+            "db.execute",
+            "db.flush",
+            "doc.get",
+            "doc_beg.get",
+            "doc_end.get",
+            "existing.scalar_one_or_none",
+            "fact.get",
+            "float",
+            "fuel_breakdown.append",
+            "int",
+            "len",
+            "load_mapping_context",
+            "m.get",
+            "next",
+            "op.get",
+            "p.get",
+            "r.get",
+            "rel.get",
+            "report.get",
+            "round",
+            "s.get",
+            "select",
+            "shift.opened_at.date",
+            "shift_meta.get",
+            "sorted",
+            "str",
+            "sts_get_shift_report",
+            "sts_get_shifts",
+            "sum",
+            "svc.get",
+            "t.get",
+            "ttn_date.date",
+            "uuid.uuid4",
+            "water.get"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1037,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 637,
+          "module": "app.routers.fuel_router",
+          "name": "ingest_fuel_shifts",
+          "path": "clearledger/server/app/routers/fuel_router.py",
+          "requested": "app.routers.fuel_router.ingest_fuel_shifts",
+          "scope": [],
+          "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+        },
+        "path": "clearledger/server/app/services/channel_orchestrator.py",
+        "relative_level": 0,
+        "requested": "app.routers.fuel_router.ingest_fuel_shifts",
+        "scope": [
+          "_run_fuel"
+        ],
+        "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd"
+      },
+      {
+        "ast_sha256": "c9fc6de85774f76beec24a72589eeff76178eab400e24d4731a7d43b3e1ac271",
+        "base": "app.routers.fuel_router",
+        "bound": "ingest_fuel_deliveries",
+        "bound_target": "app.routers.fuel_router.ingest_fuel_deliveries",
+        "calls": [
+          {
+            "ast_sha256": "abebcc763673290b024285da36d7ff5a9eee75c51e3e78b9552baece9afcb2b9",
+            "column": 21,
+            "end_line": 366,
+            "guards": [],
+            "line": 364,
+            "owner": {
+              "ast_sha256": "b0240c2feac3846c7dd7c30b97e88573a2bc09cb08207e11a5736298e6b5ffb3",
+              "call_spellings": [
+                "DataEntry",
+                "FuelReceipt",
+                "RawBatchRecord",
+                "_density",
+                "_get_or_create_station",
+                "_int_or_none",
+                "_num_or_none",
+                "_opened",
+                "_parse_dt",
+                "base.get",
+                "ctx.fuel",
+                "db.add",
+                "db.execute",
+                "doc.get",
+                "fact.get",
+                "float",
+                "int",
+                "len",
+                "load_mapping_context",
+                "r.get",
+                "raw_items.append",
+                "round",
+                "s.get",
+                "seen_keys.add",
+                "select",
+                "set",
+                "shift_info.get",
+                "str",
+                "sts_get_receipts",
+                "sts_get_shifts",
+                "sum",
+                "svc.get",
+                "ttn_dt.date",
+                "uuid.uuid4"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1229,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 1040,
+              "module": "app.routers.fuel_router",
+              "name": "ingest_fuel_deliveries",
+              "path": "clearledger/server/app/routers/fuel_router.py",
+              "requested": "app.routers.fuel_router.ingest_fuel_deliveries",
+              "scope": [],
+              "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+            },
+            "path": "clearledger/server/app/services/channel_orchestrator.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_run_fuel_delivery",
+              "_ingest"
+            ],
+            "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+            "spelling": "ingest_fuel_deliveries",
+            "target": "app.routers.fuel_router.ingest_fuel_deliveries"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "eaba9f081ec29a542fe64d69be9d0f71ed2e3894a4cd4e9dad6b94ab21cf11eb",
+            "end_line": 369,
+            "kind": "AsyncFunctionDef",
+            "line": 356,
+            "name": "_run_fuel_delivery",
+            "path": "clearledger/server/app/services/channel_orchestrator.py"
+          }
+        ],
+        "end_line": 361,
+        "form": "from",
+        "guards": [],
+        "id": "E03",
+        "line": 361,
+        "owner": {
+          "ast_sha256": "b0240c2feac3846c7dd7c30b97e88573a2bc09cb08207e11a5736298e6b5ffb3",
+          "call_spellings": [
+            "DataEntry",
+            "FuelReceipt",
+            "RawBatchRecord",
+            "_density",
+            "_get_or_create_station",
+            "_int_or_none",
+            "_num_or_none",
+            "_opened",
+            "_parse_dt",
+            "base.get",
+            "ctx.fuel",
+            "db.add",
+            "db.execute",
+            "doc.get",
+            "fact.get",
+            "float",
+            "int",
+            "len",
+            "load_mapping_context",
+            "r.get",
+            "raw_items.append",
+            "round",
+            "s.get",
+            "seen_keys.add",
+            "select",
+            "set",
+            "shift_info.get",
+            "str",
+            "sts_get_receipts",
+            "sts_get_shifts",
+            "sum",
+            "svc.get",
+            "ttn_dt.date",
+            "uuid.uuid4"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1229,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 1040,
+          "module": "app.routers.fuel_router",
+          "name": "ingest_fuel_deliveries",
+          "path": "clearledger/server/app/routers/fuel_router.py",
+          "requested": "app.routers.fuel_router.ingest_fuel_deliveries",
+          "scope": [],
+          "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+        },
+        "path": "clearledger/server/app/services/channel_orchestrator.py",
+        "relative_level": 0,
+        "requested": "app.routers.fuel_router.ingest_fuel_deliveries",
+        "scope": [
+          "_run_fuel_delivery"
+        ],
+        "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd"
+      },
+      {
+        "ast_sha256": "e1d41f87739ec846b68134ec39a006d08af25fef4cd2f2701ce7ed0e902833a7",
+        "base": "app.routers.online_orders_router",
+        "bound": "ingest_online_orders",
+        "bound_target": "app.routers.online_orders_router.ingest_online_orders",
+        "calls": [
+          {
+            "ast_sha256": "75159572623a4ea5af4463221c6684ca3d3062c55b3e34cf85c96da56cd0540d",
+            "column": 14,
+            "end_line": 394,
+            "guards": [],
+            "line": 392,
+            "owner": {
+              "ast_sha256": "084379f90f8bcd6cae0ae603e193c5d580261fd83cd9121547c386dd2d5d8720",
+              "call_spellings": [
+                "OnlineOrder.external_id.in_",
+                "RawBatchRecord",
+                "_build_resolvers",
+                "_company_service_point_ids",
+                "_int",
+                "_normalize",
+                "_parse_iso",
+                "asyncio.gather",
+                "data.get",
+                "db.add",
+                "db.execute",
+                "db.flush",
+                "func.coalesce",
+                "func.now",
+                "insert",
+                "isinstance",
+                "len",
+                "list",
+                "load_point",
+                "next",
+                "range",
+                "reconciliation_proxy.msto_conn_for_company",
+                "reconciliation_proxy.msto_transactions",
+                "result.extend",
+                "select",
+                "set",
+                "stmt.on_conflict_do_update",
+                "str"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 297,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 174,
+              "module": "app.routers.online_orders_router",
+              "name": "ingest_online_orders",
+              "path": "clearledger/server/app/routers/online_orders_router.py",
+              "requested": "app.routers.online_orders_router.ingest_online_orders",
+              "scope": [],
+              "source_sha256": "870b1adb728686cf596e6f26ef01d6f33087b915689536dd77e61ba44f63fd5f"
+            },
+            "path": "clearledger/server/app/services/channel_orchestrator.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_run_msto"
+            ],
+            "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd",
+            "spelling": "ingest_online_orders",
+            "target": "app.routers.online_orders_router.ingest_online_orders"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ab8434755c22ca50472fe77c5ea9f8923529e395b304beb5ef08bb6245b55ed5",
+            "end_line": 398,
+            "kind": "AsyncFunctionDef",
+            "line": 375,
+            "name": "_run_msto",
+            "path": "clearledger/server/app/services/channel_orchestrator.py"
+          }
+        ],
+        "end_line": 381,
+        "form": "from",
+        "guards": [],
+        "id": "E04",
+        "line": 381,
+        "owner": {
+          "ast_sha256": "084379f90f8bcd6cae0ae603e193c5d580261fd83cd9121547c386dd2d5d8720",
+          "call_spellings": [
+            "OnlineOrder.external_id.in_",
+            "RawBatchRecord",
+            "_build_resolvers",
+            "_company_service_point_ids",
+            "_int",
+            "_normalize",
+            "_parse_iso",
+            "asyncio.gather",
+            "data.get",
+            "db.add",
+            "db.execute",
+            "db.flush",
+            "func.coalesce",
+            "func.now",
+            "insert",
+            "isinstance",
+            "len",
+            "list",
+            "load_point",
+            "next",
+            "range",
+            "reconciliation_proxy.msto_conn_for_company",
+            "reconciliation_proxy.msto_transactions",
+            "result.extend",
+            "select",
+            "set",
+            "stmt.on_conflict_do_update",
+            "str"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 297,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 174,
+          "module": "app.routers.online_orders_router",
+          "name": "ingest_online_orders",
+          "path": "clearledger/server/app/routers/online_orders_router.py",
+          "requested": "app.routers.online_orders_router.ingest_online_orders",
+          "scope": [],
+          "source_sha256": "870b1adb728686cf596e6f26ef01d6f33087b915689536dd77e61ba44f63fd5f"
+        },
+        "path": "clearledger/server/app/services/channel_orchestrator.py",
+        "relative_level": 0,
+        "requested": "app.routers.online_orders_router.ingest_online_orders",
+        "scope": [
+          "_run_msto"
+        ],
+        "source_sha256": "1dc1f6de1c05aea18459c64a24122d07cf00983e6d5962d2578d8e4dd7c0a7bd"
+      },
+      {
+        "ast_sha256": "ef145629c7291f5f60e8166fdc3bc920a8ef3eff98403f184141d33d624b294e",
+        "base": "app.routers.channels_router",
+        "bound": "_run_channel_background",
+        "bound_target": "app.routers.channels_router._run_channel_background",
+        "calls": [
+          {
+            "ast_sha256": "bb96c3186939dd247b07bc4f3b295acc6994966b299780ebd288352cb8ed5f0b",
+            "column": 24,
+            "end_line": 123,
+            "guards": [],
+            "line": 123,
+            "owner": {
+              "ast_sha256": "89f749ac30e184e7997b70d42eaea7f9aa918ef9da8671ac0034a0fcc02b78da",
+              "call_spellings": [
+                "_loaded_total",
+                "_run_summary",
+                "async_session_factory",
+                "datetime.now",
+                "db.commit",
+                "db.get",
+                "db.rollback",
+                "followup_fuel_sales",
+                "fu.get",
+                "int",
+                "isinstance",
+                "len",
+                "log_audit",
+                "logging.getLogger",
+                "orchestrate_channel",
+                "r.get",
+                "result.get",
+                "sum",
+                "type"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 421,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 327,
+              "module": "app.routers.channels_router",
+              "name": "_run_channel_background",
+              "path": "clearledger/server/app/routers/channels_router.py",
+              "requested": "app.routers.channels_router._run_channel_background",
+              "scope": [],
+              "source_sha256": "027df4a863a9f730b45e05ed8d283acf298b6835fa6cf42786222b3b8daf91a4"
+            },
+            "path": "clearledger/server/app/services/channel_scheduler.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_launch"
+            ],
+            "source_sha256": "a587ce5031856054878e2b2b2cb32d998e8e9027512b8be544e8428ccb35ab6e",
+            "spelling": "_run_channel_background",
+            "target": "app.routers.channels_router._run_channel_background"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "7c2adebe4a7e320b620a0cd2214bb890288b45ec833a7c00ca4d315563c563f3",
+            "end_line": 123,
+            "kind": "AsyncFunctionDef",
+            "line": 103,
+            "name": "_launch",
+            "path": "clearledger/server/app/services/channel_scheduler.py"
+          }
+        ],
+        "end_line": 105,
+        "form": "from",
+        "guards": [],
+        "id": "E05",
+        "line": 105,
+        "owner": {
+          "ast_sha256": "89f749ac30e184e7997b70d42eaea7f9aa918ef9da8671ac0034a0fcc02b78da",
+          "call_spellings": [
+            "_loaded_total",
+            "_run_summary",
+            "async_session_factory",
+            "datetime.now",
+            "db.commit",
+            "db.get",
+            "db.rollback",
+            "followup_fuel_sales",
+            "fu.get",
+            "int",
+            "isinstance",
+            "len",
+            "log_audit",
+            "logging.getLogger",
+            "orchestrate_channel",
+            "r.get",
+            "result.get",
+            "sum",
+            "type"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 421,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 327,
+          "module": "app.routers.channels_router",
+          "name": "_run_channel_background",
+          "path": "clearledger/server/app/routers/channels_router.py",
+          "requested": "app.routers.channels_router._run_channel_background",
+          "scope": [],
+          "source_sha256": "027df4a863a9f730b45e05ed8d283acf298b6835fa6cf42786222b3b8daf91a4"
+        },
+        "path": "clearledger/server/app/services/channel_scheduler.py",
+        "relative_level": 0,
+        "requested": "app.routers.channels_router._run_channel_background",
+        "scope": [
+          "_launch"
+        ],
+        "source_sha256": "a587ce5031856054878e2b2b2cb32d998e8e9027512b8be544e8428ccb35ab6e"
+      },
+      {
+        "ast_sha256": "1706c7e1efac88aaee1aac5e9732ccbdc61d17bbf73097b1edd96db1dd4927ab",
+        "base": "app.routers.chat_router",
+        "bound": "_assert_participant",
+        "bound_target": "app.routers.chat_router._assert_participant",
+        "calls": [
+          {
+            "ast_sha256": "ac4bc7e2c0ec4ccc90190075d7d73f9622d3f281afaf34120f73f7847496e417",
+            "column": 14,
+            "end_line": 18,
+            "guards": [
+              {
+                "ast_sha256": "2a5ad2a2e93e0f6d30e1b0997f487f4cee53a913e6351d42a56dfa933a651390",
+                "branch": "body",
+                "kind": "If",
+                "line": 17,
+                "test_ast_sha256": "1d66f7c6770301d678923025701385b452ea71dba9c2c29a51101548a7ed25b0",
+                "test_spelling": "room"
+              }
+            ],
+            "line": 18,
+            "owner": {
+              "ast_sha256": "efee2d43bcf06f9c4c89a2d0be32211bac8b17381e3b512a6799b196c148e328",
+              "call_spellings": [
+                "HTTPException",
+                "_audit_foreign_access",
+                "_chat_scope",
+                "_company_of",
+                "assert_staff_room",
+                "assert_task_room",
+                "db.execute",
+                "db.get",
+                "select"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 226,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 186,
+              "module": "app.routers.chat_router",
+              "name": "_assert_participant",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._assert_participant",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/context_chats.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ensure_room"
+            ],
+            "source_sha256": "581a83eead04cb68b3dd8b074f943bb9b686a845272c51b296374353e35fa7bc",
+            "spelling": "_assert_participant",
+            "target": "app.routers.chat_router._assert_participant"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "e26c55ad62dbd15a795dcd6621a30cace8b0e57f31b2163245965658e44d34f7",
+            "end_line": 37,
+            "kind": "AsyncFunctionDef",
+            "line": 8,
+            "name": "ensure_room",
+            "path": "clearledger/server/app/services/context_chats.py"
+          }
+        ],
+        "end_line": 9,
+        "form": "from",
+        "guards": [],
+        "id": "E06",
+        "line": 9,
+        "owner": {
+          "ast_sha256": "efee2d43bcf06f9c4c89a2d0be32211bac8b17381e3b512a6799b196c148e328",
+          "call_spellings": [
+            "HTTPException",
+            "_audit_foreign_access",
+            "_chat_scope",
+            "_company_of",
+            "assert_staff_room",
+            "assert_task_room",
+            "db.execute",
+            "db.get",
+            "select"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 226,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 186,
+          "module": "app.routers.chat_router",
+          "name": "_assert_participant",
+          "path": "clearledger/server/app/routers/chat_router.py",
+          "requested": "app.routers.chat_router._assert_participant",
+          "scope": [],
+          "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+        },
+        "path": "clearledger/server/app/services/context_chats.py",
+        "relative_level": 0,
+        "requested": "app.routers.chat_router._assert_participant",
+        "scope": [
+          "ensure_room"
+        ],
+        "source_sha256": "581a83eead04cb68b3dd8b074f943bb9b686a845272c51b296374353e35fa7bc"
+      },
+      {
+        "ast_sha256": "1706c7e1efac88aaee1aac5e9732ccbdc61d17bbf73097b1edd96db1dd4927ab",
+        "base": "app.routers.chat_router",
+        "bound": "_is_insider",
+        "bound_target": "app.routers.chat_router._is_insider",
+        "calls": [
+          {
+            "ast_sha256": "a745de654d59ad1f6ecb1956f03bd1dcc5000144481377a2a27cac1900d17ca0",
+            "column": 44,
+            "end_line": 11,
+            "guards": [],
+            "line": 11,
+            "owner": {
+              "ast_sha256": "e7f7bb9d68fe0222caafd6b7ea6d95d16dfe7448143de52907c5cf3462777b04",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 119,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 112,
+              "module": "app.routers.chat_router",
+              "name": "_is_insider",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._is_insider",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/context_chats.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ensure_room"
+            ],
+            "source_sha256": "581a83eead04cb68b3dd8b074f943bb9b686a845272c51b296374353e35fa7bc",
+            "spelling": "_is_insider",
+            "target": "app.routers.chat_router._is_insider"
+          },
+          {
+            "ast_sha256": "a31a7a85578ec7ae223ed732a9763ffff83908a31eddc92d3478d69ecece2b69",
+            "column": 69,
+            "end_line": 25,
+            "guards": [
+              {
+                "ast_sha256": "061dccd4632730034fb129df2eac6159887a7e7747b79707d692f2f230b74613",
+                "branch": "body",
+                "kind": "For",
+                "line": 21
+              }
+            ],
+            "line": 25,
+            "owner": {
+              "ast_sha256": "e7f7bb9d68fe0222caafd6b7ea6d95d16dfe7448143de52907c5cf3462777b04",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 119,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 112,
+              "module": "app.routers.chat_router",
+              "name": "_is_insider",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._is_insider",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/context_chats.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ensure_room"
+            ],
+            "source_sha256": "581a83eead04cb68b3dd8b074f943bb9b686a845272c51b296374353e35fa7bc",
+            "spelling": "_is_insider",
+            "target": "app.routers.chat_router._is_insider"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "e26c55ad62dbd15a795dcd6621a30cace8b0e57f31b2163245965658e44d34f7",
+            "end_line": 37,
+            "kind": "AsyncFunctionDef",
+            "line": 8,
+            "name": "ensure_room",
+            "path": "clearledger/server/app/services/context_chats.py"
+          }
+        ],
+        "end_line": 9,
+        "form": "from",
+        "guards": [],
+        "id": "E07",
+        "line": 9,
+        "owner": {
+          "ast_sha256": "e7f7bb9d68fe0222caafd6b7ea6d95d16dfe7448143de52907c5cf3462777b04",
+          "call_spellings": [],
+          "column": 0,
+          "decorators": [],
+          "end_line": 119,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 112,
+          "module": "app.routers.chat_router",
+          "name": "_is_insider",
+          "path": "clearledger/server/app/routers/chat_router.py",
+          "requested": "app.routers.chat_router._is_insider",
+          "scope": [],
+          "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+        },
+        "path": "clearledger/server/app/services/context_chats.py",
+        "relative_level": 0,
+        "requested": "app.routers.chat_router._is_insider",
+        "scope": [
+          "ensure_room"
+        ],
+        "source_sha256": "581a83eead04cb68b3dd8b074f943bb9b686a845272c51b296374353e35fa7bc"
+      },
+      {
+        "ast_sha256": "508d7b1fddae67964322bf3e9f8a834db9e63460da63952e427b365c19666bf7",
+        "base": "app.routers.store_router",
+        "bound": "_queue_nsi_delta",
+        "bound_target": "app.routers.store_router._queue_nsi_delta",
+        "calls": [
+          {
+            "ast_sha256": "ae25dee443875d466101aaab4c624f283197b525538bb8003b04173f5cd996ce",
+            "column": 22,
+            "end_line": 1224,
+            "guards": [
+              {
+                "ast_sha256": "7dfb7a423c9e220c0753d91efc815a548aaf411e08e94a7bc7789e20166b49c0",
+                "branch": "body",
+                "kind": "If",
+                "line": 1220,
+                "test_ast_sha256": "edc2709972cd7fc6de9e0d046880511cc1fc3c815cacad32c1878b023d2a6adb",
+                "test_spelling": "удаление_не_доехало"
+              },
+              {
+                "ast_sha256": "4cb87871dccf85538ced1d449716f0f6629bb0e37bd1e549faacf636ad7a7aa2",
+                "branch": "body",
+                "kind": "For",
+                "line": 1222
+              },
+              {
+                "ast_sha256": "8fddc3ec804c3433bdfd5b9c08085921e2dfc58bc37d249c58ee9824ebc4b670",
+                "branch": "body",
+                "kind": "Try",
+                "line": 1223
+              }
+            ],
+            "line": 1224,
+            "owner": {
+              "ast_sha256": "9a56cf8844edef336b1eb722eef342a380b8cfaaa3821cc3995e8d2bbe2b3c32",
+              "call_spellings": [
+                "EdgeDownlink",
+                "_оценка_себестоимости",
+                "bool",
+                "db.add",
+                "db.execute",
+                "float",
+                "len",
+                "matrix.разрешить",
+                "matrix.цену_ведёт_станция",
+                "store_costs.ориентиры",
+                "str",
+                "text"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1129,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 1021,
+              "module": "app.routers.store_router",
+              "name": "_queue_nsi_delta",
+              "path": "clearledger/server/app/routers/store_router.py",
+              "requested": "app.routers.store_router._queue_nsi_delta",
+              "scope": [],
+              "source_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6"
+            },
+            "path": "clearledger/server/app/services/edge_nsi.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ingest_station_catalog"
+            ],
+            "source_sha256": "8739fa78f505707c69180da21ff483737686aa16775a6af221b6de9359d8232f",
+            "spelling": "_queue_nsi_delta",
+            "target": "app.routers.store_router._queue_nsi_delta"
+          }
+        ],
+        "column": 8,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "aebb850de1d58dbe5d6d57214829f9420837b4f485a89d4c1cc3b54fd93d08b3",
+            "end_line": 1266,
+            "kind": "AsyncFunctionDef",
+            "line": 1156,
+            "name": "ingest_station_catalog",
+            "path": "clearledger/server/app/services/edge_nsi.py"
+          }
+        ],
+        "end_line": 1221,
+        "form": "from",
+        "guards": [
+          {
+            "ast_sha256": "7dfb7a423c9e220c0753d91efc815a548aaf411e08e94a7bc7789e20166b49c0",
+            "branch": "body",
+            "kind": "If",
+            "line": 1220,
+            "test_ast_sha256": "edc2709972cd7fc6de9e0d046880511cc1fc3c815cacad32c1878b023d2a6adb",
+            "test_spelling": "удаление_не_доехало"
+          }
+        ],
+        "id": "E08",
+        "line": 1221,
+        "owner": {
+          "ast_sha256": "9a56cf8844edef336b1eb722eef342a380b8cfaaa3821cc3995e8d2bbe2b3c32",
+          "call_spellings": [
+            "EdgeDownlink",
+            "_оценка_себестоимости",
+            "bool",
+            "db.add",
+            "db.execute",
+            "float",
+            "len",
+            "matrix.разрешить",
+            "matrix.цену_ведёт_станция",
+            "store_costs.ориентиры",
+            "str",
+            "text"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1129,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 1021,
+          "module": "app.routers.store_router",
+          "name": "_queue_nsi_delta",
+          "path": "clearledger/server/app/routers/store_router.py",
+          "requested": "app.routers.store_router._queue_nsi_delta",
+          "scope": [],
+          "source_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6"
+        },
+        "path": "clearledger/server/app/services/edge_nsi.py",
+        "relative_level": 0,
+        "requested": "app.routers.store_router._queue_nsi_delta",
+        "scope": [
+          "ingest_station_catalog"
+        ],
+        "source_sha256": "8739fa78f505707c69180da21ff483737686aa16775a6af221b6de9359d8232f"
+      },
+      {
+        "ast_sha256": "f789740f41a675e80854203f7e8603ac6ea05c3bdd07212b5911666bf68dd5a8",
+        "base": "app.routers.fuel_router",
+        "bound": "_parse_dt",
+        "bound_target": "app.routers.fuel_router._parse_dt",
+        "calls": [
+          {
+            "ast_sha256": "202b54a6b144ea89235a859f401b097be01ade3ec5e249ce309548a66473dbde",
+            "column": 34,
+            "end_line": 305,
+            "guards": [
+              {
+                "ast_sha256": "503f3f94c0a7ae3c931f56f5312d13299be002da810c39ac853dc63ae90bd450",
+                "branch": "body",
+                "kind": "For",
+                "line": 251
+              },
+              {
+                "ast_sha256": "c73cf5ddcee2a9a8be1651bbf42c3aede3805b10bc34dee8b90eab742aeb5983",
+                "branch": "body",
+                "kind": "If",
+                "line": 292,
+                "test_ast_sha256": "9202b43806ebca2b3b65df3375b9eed92503e2d6bfe5f29ba42f339b2681a9cf",
+                "test_spelling": null
+              },
+              {
+                "ast_sha256": "6f064a5010da3afa4893eaec49acd23de304393b4ac5ee671fa9f3d46294e980",
+                "branch": "body",
+                "kind": "If",
+                "line": 303,
+                "test_ast_sha256": "254fcc262466f723e409cf19f818bd58e70b299b35653b336ae73588800d45d1",
+                "test_spelling": null
+              }
+            ],
+            "line": 305,
+            "owner": {
+              "ast_sha256": "c41782f62c0dbf7e1dc5b78e8c0b5c5cdcd762c3c4f7e8e29b112a5189f2bf3b",
+              "call_spellings": [
+                "datetime.fromisoformat"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 15,
+              "guards": [],
+              "kind": "FunctionDef",
+              "line": 11,
+              "module": "app.routers.fuel_router",
+              "name": "_parse_dt",
+              "path": "clearledger/server/app/routers/fuel_router.py",
+              "requested": "app.routers.fuel_router._parse_dt",
+              "scope": [],
+              "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+            },
+            "path": "clearledger/server/app/services/fuel_shift_refresh.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "refresh_shifts"
+            ],
+            "source_sha256": "0ce53113564356c331133bbede21b95ca50f0bee3d26830b675dff6c9f8897ee",
+            "spelling": "_parse_dt",
+            "target": "app.routers.fuel_router._parse_dt"
+          }
+        ],
+        "column": 16,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "3bf44a871684aaff7bb334f58f6ec5f31046a10c782604da92e46235f908c164",
+            "end_line": 317,
+            "kind": "AsyncFunctionDef",
+            "line": 200,
+            "name": "refresh_shifts",
+            "path": "clearledger/server/app/services/fuel_shift_refresh.py"
+          }
+        ],
+        "end_line": 304,
+        "form": "from",
+        "guards": [
+          {
+            "ast_sha256": "503f3f94c0a7ae3c931f56f5312d13299be002da810c39ac853dc63ae90bd450",
+            "branch": "body",
+            "kind": "For",
+            "line": 251
+          },
+          {
+            "ast_sha256": "c73cf5ddcee2a9a8be1651bbf42c3aede3805b10bc34dee8b90eab742aeb5983",
+            "branch": "body",
+            "kind": "If",
+            "line": 292,
+            "test_ast_sha256": "9202b43806ebca2b3b65df3375b9eed92503e2d6bfe5f29ba42f339b2681a9cf",
+            "test_spelling": null
+          },
+          {
+            "ast_sha256": "6f064a5010da3afa4893eaec49acd23de304393b4ac5ee671fa9f3d46294e980",
+            "branch": "body",
+            "kind": "If",
+            "line": 303,
+            "test_ast_sha256": "254fcc262466f723e409cf19f818bd58e70b299b35653b336ae73588800d45d1",
+            "test_spelling": null
+          }
+        ],
+        "id": "E09",
+        "line": 304,
+        "owner": {
+          "ast_sha256": "c41782f62c0dbf7e1dc5b78e8c0b5c5cdcd762c3c4f7e8e29b112a5189f2bf3b",
+          "call_spellings": [
+            "datetime.fromisoformat"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 15,
+          "guards": [],
+          "kind": "FunctionDef",
+          "line": 11,
+          "module": "app.routers.fuel_router",
+          "name": "_parse_dt",
+          "path": "clearledger/server/app/routers/fuel_router.py",
+          "requested": "app.routers.fuel_router._parse_dt",
+          "scope": [],
+          "source_sha256": "c6755d318ad80086ec621cdbafc8b7708780a566904b736d6363e7689afc631a"
+        },
+        "path": "clearledger/server/app/services/fuel_shift_refresh.py",
+        "relative_level": 0,
+        "requested": "app.routers.fuel_router._parse_dt",
+        "scope": [
+          "refresh_shifts"
+        ],
+        "source_sha256": "0ce53113564356c331133bbede21b95ca50f0bee3d26830b675dff6c9f8897ee"
+      },
+      {
+        "ast_sha256": "508d7b1fddae67964322bf3e9f8a834db9e63460da63952e427b365c19666bf7",
+        "base": "app.routers.store_router",
+        "bound": "_queue_nsi_delta",
+        "bound_target": "app.routers.store_router._queue_nsi_delta",
+        "calls": [
+          {
+            "ast_sha256": "c2160e8b95ea88959683194d3b15a29927650c551d95c4e58fe68d155c192177",
+            "column": 14,
+            "end_line": 227,
+            "guards": [
+              {
+                "ast_sha256": "cfef2f953afa299f6d9955cf231685b4339375746bec64aac541642518412f6e",
+                "branch": "body",
+                "kind": "If",
+                "line": 225,
+                "test_ast_sha256": "5cebbfbaec2baf300e2d3543f3af9eda24e8497d5a2340d15cee6a190c659048",
+                "test_spelling": null
+              }
+            ],
+            "line": 227,
+            "owner": {
+              "ast_sha256": "9a56cf8844edef336b1eb722eef342a380b8cfaaa3821cc3995e8d2bbe2b3c32",
+              "call_spellings": [
+                "EdgeDownlink",
+                "_оценка_себестоимости",
+                "bool",
+                "db.add",
+                "db.execute",
+                "float",
+                "len",
+                "matrix.разрешить",
+                "matrix.цену_ведёт_станция",
+                "store_costs.ориентиры",
+                "str",
+                "text"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1129,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 1021,
+              "module": "app.routers.store_router",
+              "name": "_queue_nsi_delta",
+              "path": "clearledger/server/app/routers/store_router.py",
+              "requested": "app.routers.store_router._queue_nsi_delta",
+              "scope": [],
+              "source_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6"
+            },
+            "path": "clearledger/server/app/services/item_draft_auto.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "разобрать_заявку"
+            ],
+            "source_sha256": "391382b9ed2fdb2790397ec42e52cd490aeb5477a868f73295ac0856d744f05c",
+            "spelling": "_queue_nsi_delta",
+            "target": "app.routers.store_router._queue_nsi_delta"
+          },
+          {
+            "ast_sha256": "63d0994b5be0ee3d8bcf0ee12b8d106147c3445996cdb9515b8e8de6e0605028",
+            "column": 10,
+            "end_line": 228,
+            "guards": [],
+            "line": 228,
+            "owner": {
+              "ast_sha256": "9a56cf8844edef336b1eb722eef342a380b8cfaaa3821cc3995e8d2bbe2b3c32",
+              "call_spellings": [
+                "EdgeDownlink",
+                "_оценка_себестоимости",
+                "bool",
+                "db.add",
+                "db.execute",
+                "float",
+                "len",
+                "matrix.разрешить",
+                "matrix.цену_ведёт_станция",
+                "store_costs.ориентиры",
+                "str",
+                "text"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1129,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 1021,
+              "module": "app.routers.store_router",
+              "name": "_queue_nsi_delta",
+              "path": "clearledger/server/app/routers/store_router.py",
+              "requested": "app.routers.store_router._queue_nsi_delta",
+              "scope": [],
+              "source_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6"
+            },
+            "path": "clearledger/server/app/services/item_draft_auto.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "разобрать_заявку"
+            ],
+            "source_sha256": "391382b9ed2fdb2790397ec42e52cd490aeb5477a868f73295ac0856d744f05c",
+            "spelling": "_queue_nsi_delta",
+            "target": "app.routers.store_router._queue_nsi_delta"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "645db5df23f5d5a194506ce0a054a444722459cfa42f049a63d90a9fc8a71221",
+            "end_line": 230,
+            "kind": "AsyncFunctionDef",
+            "line": 207,
+            "name": "разобрать_заявку",
+            "path": "clearledger/server/app/services/item_draft_auto.py"
+          }
+        ],
+        "end_line": 209,
+        "form": "from",
+        "guards": [],
+        "id": "E10",
+        "line": 209,
+        "owner": {
+          "ast_sha256": "9a56cf8844edef336b1eb722eef342a380b8cfaaa3821cc3995e8d2bbe2b3c32",
+          "call_spellings": [
+            "EdgeDownlink",
+            "_оценка_себестоимости",
+            "bool",
+            "db.add",
+            "db.execute",
+            "float",
+            "len",
+            "matrix.разрешить",
+            "matrix.цену_ведёт_станция",
+            "store_costs.ориентиры",
+            "str",
+            "text"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1129,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 1021,
+          "module": "app.routers.store_router",
+          "name": "_queue_nsi_delta",
+          "path": "clearledger/server/app/routers/store_router.py",
+          "requested": "app.routers.store_router._queue_nsi_delta",
+          "scope": [],
+          "source_sha256": "4da3fdb1c76e7b39d7916af6e92ed00344c8b71acf85ec9429d32482997b2ba6"
+        },
+        "path": "clearledger/server/app/services/item_draft_auto.py",
+        "relative_level": 0,
+        "requested": "app.routers.store_router._queue_nsi_delta",
+        "scope": [
+          "разобрать_заявку"
+        ],
+        "source_sha256": "391382b9ed2fdb2790397ec42e52cd490aeb5477a868f73295ac0856d744f05c"
+      },
+      {
+        "ast_sha256": "fbb12bda3d91e582d919325bcc1a69e072a5b906e5b5c0721ee4984ea9a9a2ba",
+        "base": "app.routers.tasks_router",
+        "bound": "_assert_work",
+        "bound_target": "app.routers.tasks_router._assert_work",
+        "calls": [
+          {
+            "ast_sha256": "b3790c7f8bddcd41bdefa0e97c956d068520460e65231139e9a327e22dcf832e",
+            "column": 10,
+            "end_line": 31,
+            "guards": [],
+            "line": 31,
+            "owner": {
+              "ast_sha256": "eceec9dd47f62dae258ff776e9818c10789a40613da66bd49ed635e28f7c15d6",
+              "call_spellings": [
+                "assert_company_product"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 67,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 56,
+              "module": "app.routers.tasks_router",
+              "name": "_assert_work",
+              "path": "clearledger/server/app/routers/tasks_router.py",
+              "requested": "app.routers.tasks_router._assert_work",
+              "scope": [],
+              "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "read_local"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_assert_work",
+            "target": "app.routers.tasks_router._assert_work"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ef09b55fed6ebf9176c072e14e4c85589aa380ed38d0f152dc53b21b84cd4012",
+            "end_line": 66,
+            "kind": "AsyncFunctionDef",
+            "line": 17,
+            "name": "read_local",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 30,
+        "form": "from",
+        "guards": [],
+        "id": "E11",
+        "line": 30,
+        "owner": {
+          "ast_sha256": "eceec9dd47f62dae258ff776e9818c10789a40613da66bd49ed635e28f7c15d6",
+          "call_spellings": [
+            "assert_company_product"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 67,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 56,
+          "module": "app.routers.tasks_router",
+          "name": "_assert_work",
+          "path": "clearledger/server/app/routers/tasks_router.py",
+          "requested": "app.routers.tasks_router._assert_work",
+          "scope": [],
+          "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._assert_work",
+        "scope": [
+          "read_local"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "fbb12bda3d91e582d919325bcc1a69e072a5b906e5b5c0721ee4984ea9a9a2ba",
+        "base": "app.routers.tasks_router",
+        "bound": "_is_admin",
+        "bound_target": "app.routers.tasks_router._is_admin",
+        "calls": [
+          {
+            "ast_sha256": "64a7bb39772deb66238cbde3630e52a2826c308ed404d0471631b3dd31a8a828",
+            "column": 57,
+            "end_line": 34,
+            "guards": [
+              {
+                "ast_sha256": "05536c2962f060a5d4c098800e14526430a7ad536c0752154d4d171a3c77433a",
+                "branch": "body",
+                "kind": "If",
+                "line": 32,
+                "test_ast_sha256": "53cc34e26ad92a9b3a189a4723d9150cee4db65cd7beb1ed79f5a69ab0963e2d",
+                "test_spelling": null
+              }
+            ],
+            "line": 34,
+            "owner": {
+              "ast_sha256": "f235686d9cb4eeab09028363eae69f84813b65c166f08c3eda8adc5143a40904",
+              "call_spellings": [
+                "db.get"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 16,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 12,
+              "module": "app.services.task_access",
+              "name": "is_admin",
+              "path": "clearledger/server/app/services/task_access.py",
+              "reexport_ref": {
+                "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+                "base": "app.services.task_access",
+                "bound": "_is_admin",
+                "bound_target": "app.services.task_access.is_admin",
+                "column": 0,
+                "end_line": 40,
+                "form": "from",
+                "guards": [],
+                "line": 37,
+                "path": "clearledger/server/app/routers/tasks_router.py",
+                "relative_level": 0,
+                "requested": "app.services.task_access.is_admin",
+                "scope": [],
+                "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+              },
+              "requested": "app.services.task_access.is_admin",
+              "scope": [],
+              "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "read_local"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_is_admin",
+            "target": "app.routers.tasks_router._is_admin"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ef09b55fed6ebf9176c072e14e4c85589aa380ed38d0f152dc53b21b84cd4012",
+            "end_line": 66,
+            "kind": "AsyncFunctionDef",
+            "line": 17,
+            "name": "read_local",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 30,
+        "form": "from",
+        "guards": [],
+        "id": "E12",
+        "line": 30,
+        "owner": {
+          "ast_sha256": "f235686d9cb4eeab09028363eae69f84813b65c166f08c3eda8adc5143a40904",
+          "call_spellings": [
+            "db.get"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 16,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 12,
+          "module": "app.services.task_access",
+          "name": "is_admin",
+          "path": "clearledger/server/app/services/task_access.py",
+          "reexport_ref": {
+            "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+            "base": "app.services.task_access",
+            "bound": "_is_admin",
+            "bound_target": "app.services.task_access.is_admin",
+            "column": 0,
+            "end_line": 40,
+            "form": "from",
+            "guards": [],
+            "line": 37,
+            "path": "clearledger/server/app/routers/tasks_router.py",
+            "relative_level": 0,
+            "requested": "app.services.task_access.is_admin",
+            "scope": [],
+            "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+          },
+          "requested": "app.services.task_access.is_admin",
+          "scope": [],
+          "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._is_admin",
+        "scope": [
+          "read_local"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "fbb12bda3d91e582d919325bcc1a69e072a5b906e5b5c0721ee4984ea9a9a2ba",
+        "base": "app.routers.tasks_router",
+        "bound": "_names",
+        "bound_target": "app.routers.tasks_router._names",
+        "calls": [
+          {
+            "ast_sha256": "e46fcbea9adfb2ffa8e08cd23598f85745a0f62b4885324fed51d03a09e1a712",
+            "column": 22,
+            "end_line": 41,
+            "guards": [
+              {
+                "ast_sha256": "05536c2962f060a5d4c098800e14526430a7ad536c0752154d4d171a3c77433a",
+                "branch": "body",
+                "kind": "If",
+                "line": 32,
+                "test_ast_sha256": "53cc34e26ad92a9b3a189a4723d9150cee4db65cd7beb1ed79f5a69ab0963e2d",
+                "test_spelling": null
+              }
+            ],
+            "line": 41,
+            "owner": {
+              "ast_sha256": "a01fd53bd919b6425d866c1293fa274f5fcd988c5376f9037f5ec2ae8cc86984",
+              "call_spellings": [
+                "ServiceLocation.id.in_",
+                "TaskProject.id.in_",
+                "TaskSprint.id.in_",
+                "TaskType.id.in_",
+                "TaskVersion.id.in_",
+                "User.id.in_",
+                "_route_of",
+                "db.execute",
+                "objs.get",
+                "select",
+                "sprs.get",
+                "types.get",
+                "users.get",
+                "vers.get"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 421,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 389,
+              "module": "app.routers.tasks_router",
+              "name": "_names",
+              "path": "clearledger/server/app/routers/tasks_router.py",
+              "requested": "app.routers.tasks_router._names",
+              "scope": [],
+              "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "read_local"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_names",
+            "target": "app.routers.tasks_router._names"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ef09b55fed6ebf9176c072e14e4c85589aa380ed38d0f152dc53b21b84cd4012",
+            "end_line": 66,
+            "kind": "AsyncFunctionDef",
+            "line": 17,
+            "name": "read_local",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 30,
+        "form": "from",
+        "guards": [],
+        "id": "E13",
+        "line": 30,
+        "owner": {
+          "ast_sha256": "a01fd53bd919b6425d866c1293fa274f5fcd988c5376f9037f5ec2ae8cc86984",
+          "call_spellings": [
+            "ServiceLocation.id.in_",
+            "TaskProject.id.in_",
+            "TaskSprint.id.in_",
+            "TaskType.id.in_",
+            "TaskVersion.id.in_",
+            "User.id.in_",
+            "_route_of",
+            "db.execute",
+            "objs.get",
+            "select",
+            "sprs.get",
+            "types.get",
+            "users.get",
+            "vers.get"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 421,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 389,
+          "module": "app.routers.tasks_router",
+          "name": "_names",
+          "path": "clearledger/server/app/routers/tasks_router.py",
+          "requested": "app.routers.tasks_router._names",
+          "scope": [],
+          "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._names",
+        "scope": [
+          "read_local"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "fbb12bda3d91e582d919325bcc1a69e072a5b906e5b5c0721ee4984ea9a9a2ba",
+        "base": "app.routers.tasks_router",
+        "bound": "_not_personal",
+        "bound_target": "app.routers.tasks_router._not_personal",
+        "calls": [
+          {
+            "ast_sha256": "2a09875207a2d95ba9f3e6ac15d079029ed8f560f3666b297538163552bfa9b8",
+            "column": 57,
+            "end_line": 33,
+            "guards": [
+              {
+                "ast_sha256": "05536c2962f060a5d4c098800e14526430a7ad536c0752154d4d171a3c77433a",
+                "branch": "body",
+                "kind": "If",
+                "line": 32,
+                "test_ast_sha256": "53cc34e26ad92a9b3a189a4723d9150cee4db65cd7beb1ed79f5a69ab0963e2d",
+                "test_spelling": null
+              }
+            ],
+            "line": 33,
+            "owner": {
+              "ast_sha256": "57f315989ca285e8d30b88a2654abe5305301f1b8ebcea1b375c2801dbea8024",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 537,
+              "guards": [],
+              "kind": "FunctionDef",
+              "line": 529,
+              "module": "app.routers.tasks_router",
+              "name": "_not_personal",
+              "path": "clearledger/server/app/routers/tasks_router.py",
+              "requested": "app.routers.tasks_router._not_personal",
+              "scope": [],
+              "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "read_local"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_not_personal",
+            "target": "app.routers.tasks_router._not_personal"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ef09b55fed6ebf9176c072e14e4c85589aa380ed38d0f152dc53b21b84cd4012",
+            "end_line": 66,
+            "kind": "AsyncFunctionDef",
+            "line": 17,
+            "name": "read_local",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 30,
+        "form": "from",
+        "guards": [],
+        "id": "E14",
+        "line": 30,
+        "owner": {
+          "ast_sha256": "57f315989ca285e8d30b88a2654abe5305301f1b8ebcea1b375c2801dbea8024",
+          "call_spellings": [],
+          "column": 0,
+          "decorators": [],
+          "end_line": 537,
+          "guards": [],
+          "kind": "FunctionDef",
+          "line": 529,
+          "module": "app.routers.tasks_router",
+          "name": "_not_personal",
+          "path": "clearledger/server/app/routers/tasks_router.py",
+          "requested": "app.routers.tasks_router._not_personal",
+          "scope": [],
+          "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._not_personal",
+        "scope": [
+          "read_local"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "fbb12bda3d91e582d919325bcc1a69e072a5b906e5b5c0721ee4984ea9a9a2ba",
+        "base": "app.routers.tasks_router",
+        "bound": "_visible_to",
+        "bound_target": "app.routers.tasks_router._visible_to",
+        "calls": [
+          {
+            "ast_sha256": "8ff6a6b9229cc85347237f77e8c2e90cbc18b41904404824c04156d947876ca0",
+            "column": 33,
+            "end_line": 34,
+            "guards": [
+              {
+                "ast_sha256": "05536c2962f060a5d4c098800e14526430a7ad536c0752154d4d171a3c77433a",
+                "branch": "body",
+                "kind": "If",
+                "line": 32,
+                "test_ast_sha256": "53cc34e26ad92a9b3a189a4723d9150cee4db65cd7beb1ed79f5a69ab0963e2d",
+                "test_spelling": null
+              }
+            ],
+            "line": 34,
+            "owner": {
+              "ast_sha256": "36bb9ce8b5f46f58ee582d64cd5c41c944b4528bb0eb924a2107c4db09ba4912",
+              "call_spellings": [
+                "Task.id.in_",
+                "and_",
+                "or_",
+                "select"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 31,
+              "guards": [],
+              "kind": "FunctionDef",
+              "line": 19,
+              "module": "app.services.task_access",
+              "name": "visible_to",
+              "path": "clearledger/server/app/services/task_access.py",
+              "reexport_ref": {
+                "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+                "base": "app.services.task_access",
+                "bound": "_visible_to",
+                "bound_target": "app.services.task_access.visible_to",
+                "column": 0,
+                "end_line": 40,
+                "form": "from",
+                "guards": [],
+                "line": 37,
+                "path": "clearledger/server/app/routers/tasks_router.py",
+                "relative_level": 0,
+                "requested": "app.services.task_access.visible_to",
+                "scope": [],
+                "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+              },
+              "requested": "app.services.task_access.visible_to",
+              "scope": [],
+              "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "read_local"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_visible_to",
+            "target": "app.routers.tasks_router._visible_to"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ef09b55fed6ebf9176c072e14e4c85589aa380ed38d0f152dc53b21b84cd4012",
+            "end_line": 66,
+            "kind": "AsyncFunctionDef",
+            "line": 17,
+            "name": "read_local",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 30,
+        "form": "from",
+        "guards": [],
+        "id": "E15",
+        "line": 30,
+        "owner": {
+          "ast_sha256": "36bb9ce8b5f46f58ee582d64cd5c41c944b4528bb0eb924a2107c4db09ba4912",
+          "call_spellings": [
+            "Task.id.in_",
+            "and_",
+            "or_",
+            "select"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 31,
+          "guards": [],
+          "kind": "FunctionDef",
+          "line": 19,
+          "module": "app.services.task_access",
+          "name": "visible_to",
+          "path": "clearledger/server/app/services/task_access.py",
+          "reexport_ref": {
+            "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+            "base": "app.services.task_access",
+            "bound": "_visible_to",
+            "bound_target": "app.services.task_access.visible_to",
+            "column": 0,
+            "end_line": 40,
+            "form": "from",
+            "guards": [],
+            "line": 37,
+            "path": "clearledger/server/app/routers/tasks_router.py",
+            "relative_level": 0,
+            "requested": "app.services.task_access.visible_to",
+            "scope": [],
+            "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+          },
+          "requested": "app.services.task_access.visible_to",
+          "scope": [],
+          "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._visible_to",
+        "scope": [
+          "read_local"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "ec9bc251824947b5026d470e67fda44e9473db6b27a1f8bcc478bf5668a95688",
+        "base": "app.routers.work_router",
+        "bound": "_my_events_clause",
+        "bound_target": "app.routers.work_router._my_events_clause",
+        "calls": [
+          {
+            "ast_sha256": "53718b6a6e7595c503587e89e489e4bd6a02a378a44ff33684fdc6d0d40a790b",
+            "column": 12,
+            "end_line": 53,
+            "guards": [],
+            "line": 53,
+            "owner": {
+              "ast_sha256": "158fd5d10b7dab8817f7c879bba15f4098ff817f15da4e04140a8836667b82b1",
+              "call_spellings": [
+                "CalendarEvent.id.in_",
+                "or_",
+                "select"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1125,
+              "guards": [],
+              "kind": "FunctionDef",
+              "line": 1112,
+              "module": "app.routers.work_router",
+              "name": "_my_events_clause",
+              "path": "clearledger/server/app/routers/work_router.py",
+              "requested": "app.routers.work_router._my_events_clause",
+              "scope": [],
+              "source_sha256": "cd597a0d2a5dc30c4475dc8778a226352961ff889cfb986f009cc6068c62a8c9"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "read_local"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_my_events_clause",
+            "target": "app.routers.work_router._my_events_clause"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "ef09b55fed6ebf9176c072e14e4c85589aa380ed38d0f152dc53b21b84cd4012",
+            "end_line": 66,
+            "kind": "AsyncFunctionDef",
+            "line": 17,
+            "name": "read_local",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 50,
+        "form": "from",
+        "guards": [],
+        "id": "E16",
+        "line": 50,
+        "owner": {
+          "ast_sha256": "158fd5d10b7dab8817f7c879bba15f4098ff817f15da4e04140a8836667b82b1",
+          "call_spellings": [
+            "CalendarEvent.id.in_",
+            "or_",
+            "select"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1125,
+          "guards": [],
+          "kind": "FunctionDef",
+          "line": 1112,
+          "module": "app.routers.work_router",
+          "name": "_my_events_clause",
+          "path": "clearledger/server/app/routers/work_router.py",
+          "requested": "app.routers.work_router._my_events_clause",
+          "scope": [],
+          "source_sha256": "cd597a0d2a5dc30c4475dc8778a226352961ff889cfb986f009cc6068c62a8c9"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.work_router._my_events_clause",
+        "scope": [
+          "read_local"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "1e41a9dfc22b3c83f625dc2fb88be954839ef5f7d54afdb7f5a83e903b1a8df2",
+        "base": "app.routers.chat_router",
+        "bound": "_assert_participant",
+        "bound_target": "app.routers.chat_router._assert_participant",
+        "calls": [
+          {
+            "ast_sha256": "6b1fc69f90d67ce15c3b7a7177ce3c88458cf107746efec297b24d2d8551e319",
+            "column": 29,
+            "end_line": 90,
+            "guards": [
+              {
+                "ast_sha256": "cb1ed275b2f72c6a66b808696b5607925dd390811a7ca7c3a8d5dca29df4496b",
+                "branch": "body",
+                "kind": "Try",
+                "line": 87
+              },
+              {
+                "ast_sha256": "6ff4575333d9bebf66930e6d1053f53620e70b48ead512c8df220072d01cff6b",
+                "branch": "body",
+                "kind": "AsyncFor",
+                "line": 88
+              },
+              {
+                "ast_sha256": "8c5dc81f889bbca66d1d0de2c07a6a73de6488a1009bad8a0a331a0318b1cdb9",
+                "branch": "body",
+                "kind": "Try",
+                "line": 89
+              }
+            ],
+            "line": 90,
+            "owner": {
+              "ast_sha256": "efee2d43bcf06f9c4c89a2d0be32211bac8b17381e3b512a6799b196c148e328",
+              "call_spellings": [
+                "HTTPException",
+                "_audit_foreign_access",
+                "_chat_scope",
+                "_company_of",
+                "assert_staff_room",
+                "assert_task_room",
+                "db.execute",
+                "db.get",
+                "select"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 226,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 186,
+              "module": "app.routers.chat_router",
+              "name": "_assert_participant",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._assert_participant",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_chats"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_assert_participant",
+            "target": "app.routers.chat_router._assert_participant"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "b05c93af974d173b45577afa6fb812a8b510ed6410a4b77564120b14cd827edd",
+            "end_line": 111,
+            "kind": "AsyncFunctionDef",
+            "line": 69,
+            "name": "_chats",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 71,
+        "form": "from",
+        "guards": [],
+        "id": "E17",
+        "line": 71,
+        "owner": {
+          "ast_sha256": "efee2d43bcf06f9c4c89a2d0be32211bac8b17381e3b512a6799b196c148e328",
+          "call_spellings": [
+            "HTTPException",
+            "_audit_foreign_access",
+            "_chat_scope",
+            "_company_of",
+            "assert_staff_room",
+            "assert_task_room",
+            "db.execute",
+            "db.get",
+            "select"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 226,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 186,
+          "module": "app.routers.chat_router",
+          "name": "_assert_participant",
+          "path": "clearledger/server/app/routers/chat_router.py",
+          "requested": "app.routers.chat_router._assert_participant",
+          "scope": [],
+          "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.chat_router._assert_participant",
+        "scope": [
+          "_chats"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "1e41a9dfc22b3c83f625dc2fb88be954839ef5f7d54afdb7f5a83e903b1a8df2",
+        "base": "app.routers.chat_router",
+        "bound": "_chat_scope",
+        "bound_target": "app.routers.chat_router._chat_scope",
+        "calls": [
+          {
+            "ast_sha256": "00544675e8f110c12aa9407ea8943beb2ca7f8a13ca252c6fb964571f051f60c",
+            "column": 18,
+            "end_line": 75,
+            "guards": [],
+            "line": 75,
+            "owner": {
+              "ast_sha256": "3f958253493ea5f2a297fbf2f5d2099be6bb1121a5d9da90fb90fe736c4ddeac",
+              "call_spellings": [
+                "chat_scope_of"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 306,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 300,
+              "module": "app.routers.chat_router",
+              "name": "_chat_scope",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._chat_scope",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/management_local.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_chats"
+            ],
+            "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367",
+            "spelling": "_chat_scope",
+            "target": "app.routers.chat_router._chat_scope"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "b05c93af974d173b45577afa6fb812a8b510ed6410a4b77564120b14cd827edd",
+            "end_line": 111,
+            "kind": "AsyncFunctionDef",
+            "line": 69,
+            "name": "_chats",
+            "path": "clearledger/server/app/services/management_local.py"
+          }
+        ],
+        "end_line": 71,
+        "form": "from",
+        "guards": [],
+        "id": "E18",
+        "line": 71,
+        "owner": {
+          "ast_sha256": "3f958253493ea5f2a297fbf2f5d2099be6bb1121a5d9da90fb90fe736c4ddeac",
+          "call_spellings": [
+            "chat_scope_of"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 306,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 300,
+          "module": "app.routers.chat_router",
+          "name": "_chat_scope",
+          "path": "clearledger/server/app/routers/chat_router.py",
+          "requested": "app.routers.chat_router._chat_scope",
+          "scope": [],
+          "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+        },
+        "path": "clearledger/server/app/services/management_local.py",
+        "relative_level": 0,
+        "requested": "app.routers.chat_router._chat_scope",
+        "scope": [
+          "_chats"
+        ],
+        "source_sha256": "951fd8efc9aa7eec8167f3d4f7f2cf2fa1861fdf2ab3af929f490cf60be47367"
+      },
+      {
+        "ast_sha256": "e781630b147db01a41116ff5cd62243d25561306a5032101923447fc2fc0f2b6",
+        "base": "app.routers.conf_router",
+        "bound": "ведущие_встречи",
+        "bound_target": "app.routers.conf_router.ведущие_встречи",
+        "calls": [
+          {
+            "ast_sha256": "cae1a7a9f8e97683d5c52261874f33aab7ddc7aada905382c47f2a9daf6f1e0c",
+            "column": 34,
+            "end_line": 133,
+            "guards": [
+              {
+                "ast_sha256": "f07d9a909c6ad49e04c2b7dd758df91fea61566ee7766c041495db0b2f14c602",
+                "branch": "body",
+                "kind": "If",
+                "line": 123,
+                "test_ast_sha256": "de5cca42cf2db34e4aab2d152c305c907bc85e587648522be4301e12ef6fca4e",
+                "test_spelling": null
+              },
+              {
+                "ast_sha256": "e402f657b3e5b7ef923887dd4aca1e8b7677f2c75e34777c194d532ff68d0c86",
+                "branch": "body",
+                "kind": "If",
+                "line": 128,
+                "test_ast_sha256": "0343b309cf970288a595b5003fb4ceb65aac3b21a574577aad341c31371981e0",
+                "test_spelling": "ev.conference_url"
+              }
+            ],
+            "line": 133,
+            "owner": {
+              "ast_sha256": "334f8963cb1cfeb1010467b49798c97a2a3f694361730c68f6fc65203f50fd67",
+              "call_spellings": [
+                "CalendarAttendee.is_host.is_",
+                "db.execute",
+                "select",
+                "set"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 615,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 611,
+              "module": "app.routers.conf_router",
+              "name": "ведущие_встречи",
+              "path": "clearledger/server/app/routers/conf_router.py",
+              "requested": "app.routers.conf_router.ведущие_встречи",
+              "scope": [],
+              "source_sha256": "26e23816acd0da74284e7f92b2e54f6a1d505fee1367d0d36f9d1e0d1a7e0557"
+            },
+            "path": "clearledger/server/app/services/meeting_notice.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "известить"
+            ],
+            "source_sha256": "d5d47feb6d59bbdcb69acf9432539578e14059aa0f1815f8aac9cf8d8c819119",
+            "spelling": "ведущие_встречи",
+            "target": "app.routers.conf_router.ведущие_встречи"
+          }
+        ],
+        "column": 12,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "b6112a1e0050cd34a2d5137fe0520dff2181c64239d770b2b8cfd920599eb168",
+            "end_line": 207,
+            "kind": "AsyncFunctionDef",
+            "line": 108,
+            "name": "известить",
+            "path": "clearledger/server/app/services/meeting_notice.py"
+          }
+        ],
+        "end_line": 131,
+        "form": "from",
+        "guards": [
+          {
+            "ast_sha256": "f07d9a909c6ad49e04c2b7dd758df91fea61566ee7766c041495db0b2f14c602",
+            "branch": "body",
+            "kind": "If",
+            "line": 123,
+            "test_ast_sha256": "de5cca42cf2db34e4aab2d152c305c907bc85e587648522be4301e12ef6fca4e",
+            "test_spelling": null
+          },
+          {
+            "ast_sha256": "e402f657b3e5b7ef923887dd4aca1e8b7677f2c75e34777c194d532ff68d0c86",
+            "branch": "body",
+            "kind": "If",
+            "line": 128,
+            "test_ast_sha256": "0343b309cf970288a595b5003fb4ceb65aac3b21a574577aad341c31371981e0",
+            "test_spelling": "ev.conference_url"
+          }
+        ],
+        "id": "E19",
+        "line": 131,
+        "owner": {
+          "ast_sha256": "334f8963cb1cfeb1010467b49798c97a2a3f694361730c68f6fc65203f50fd67",
+          "call_spellings": [
+            "CalendarAttendee.is_host.is_",
+            "db.execute",
+            "select",
+            "set"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 615,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 611,
+          "module": "app.routers.conf_router",
+          "name": "ведущие_встречи",
+          "path": "clearledger/server/app/routers/conf_router.py",
+          "requested": "app.routers.conf_router.ведущие_встречи",
+          "scope": [],
+          "source_sha256": "26e23816acd0da74284e7f92b2e54f6a1d505fee1367d0d36f9d1e0d1a7e0557"
+        },
+        "path": "clearledger/server/app/services/meeting_notice.py",
+        "relative_level": 0,
+        "requested": "app.routers.conf_router.ведущие_встречи",
+        "scope": [
+          "известить"
+        ],
+        "source_sha256": "d5d47feb6d59bbdcb69acf9432539578e14059aa0f1815f8aac9cf8d8c819119"
+      },
+      {
+        "ast_sha256": "1e25534fda71dc98ea013633a7fb3a8bd14fd1edf08b128be057d73e264c1d27",
+        "base": "app.routers.chat_router",
+        "bound": "_is_insider",
+        "bound_target": "app.routers.chat_router._is_insider",
+        "calls": [
+          {
+            "ast_sha256": "a31a7a85578ec7ae223ed732a9763ffff83908a31eddc92d3478d69ecece2b69",
+            "column": 46,
+            "end_line": 44,
+            "guards": [
+              {
+                "ast_sha256": "372af256e70edb30f34200fcbeb8fe083f28383cff778231ada29ac2e6ea3c13",
+                "branch": "body",
+                "kind": "For",
+                "line": 43
+              }
+            ],
+            "line": 44,
+            "owner": {
+              "ast_sha256": "e7f7bb9d68fe0222caafd6b7ea6d95d16dfe7448143de52907c5cf3462777b04",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 119,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 112,
+              "module": "app.routers.chat_router",
+              "name": "_is_insider",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._is_insider",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "resolve"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "_is_insider",
+            "target": "app.routers.chat_router._is_insider"
+          }
+        ],
+        "column": 8,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "707ef926cc48fe30082558868a3299729dbf1e81682928ce59d82f7ae2b13dcb",
+            "end_line": 88,
+            "kind": "ClassDef",
+            "line": 14,
+            "name": "ProjectsContext",
+            "path": "clearledger/server/app/services/project_work_context.py"
+          },
+          {
+            "ast_sha256": "daf9605d82bda69f9a4f6ffaebae0a3b805fd928bdae2044b89929a575e7d100",
+            "end_line": 62,
+            "kind": "AsyncFunctionDef",
+            "line": 24,
+            "name": "resolve",
+            "path": "clearledger/server/app/services/project_work_context.py"
+          }
+        ],
+        "end_line": 41,
+        "form": "from",
+        "guards": [],
+        "id": "E20",
+        "line": 41,
+        "owner": {
+          "ast_sha256": "e7f7bb9d68fe0222caafd6b7ea6d95d16dfe7448143de52907c5cf3462777b04",
+          "call_spellings": [],
+          "column": 0,
+          "decorators": [],
+          "end_line": 119,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 112,
+          "module": "app.routers.chat_router",
+          "name": "_is_insider",
+          "path": "clearledger/server/app/routers/chat_router.py",
+          "requested": "app.routers.chat_router._is_insider",
+          "scope": [],
+          "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+        },
+        "path": "clearledger/server/app/services/project_work_context.py",
+        "relative_level": 0,
+        "requested": "app.routers.chat_router._is_insider",
+        "scope": [
+          "ProjectsContext",
+          "resolve"
+        ],
+        "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a"
+      },
+      {
+        "ast_sha256": "1594e05b2a3fd1745299df3c5c5ec07eba7f46e88b3ada6c6e677ad05578f81e",
+        "base": "app.routers",
+        "bound": "projects",
+        "bound_target": "app.routers.project_workspace_router",
+        "calls": [
+          {
+            "ast_sha256": "4d9c3164d1a0d507b138187060ddae31dc78e66f7165b241af06383f518ace87",
+            "column": 25,
+            "end_line": 71,
+            "guards": [
+              {
+                "ast_sha256": "c8d4bf6e24997d19cd4522232c5f384e740c2b2aac7caf051f6e37affe109e9f",
+                "branch": "body",
+                "kind": "If",
+                "line": 70,
+                "test_ast_sha256": "7e9769e7738f6d133ea6edd7c0e5140f10bf74ac8b274d388ab8612d3f9ee32e",
+                "test_spelling": null
+              }
+            ],
+            "line": 71,
+            "owner": {
+              "ast_sha256": "f021c958b4a78eee3677ada827c83d8fd7efcca3e46403a45ffbab3465e8f9af",
+              "call_spellings": [
+                "Depends",
+                "EzsSiteDoc",
+                "HTTPException",
+                "assert_company_member",
+                "db.add",
+                "db.commit",
+                "db.scalar",
+                "ezs_site_work.log_event",
+                "owned",
+                "router.post",
+                "select",
+                "source_message",
+                "str",
+                "track_files.message_file"
+              ],
+              "column": 0,
+              "decorators": [
+                "router.post"
+              ],
+              "end_line": 254,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 237,
+              "module": "app.routers.project_workspace_router",
+              "name": "attach_file",
+              "path": "clearledger/server/app/routers/project_workspace_router.py",
+              "requested": "app.routers.project_workspace_router.attach_file",
+              "scope": [],
+              "source_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "execute"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "projects.attach_file",
+            "target": "app.routers.project_workspace_router.attach_file"
+          },
+          {
+            "ast_sha256": "99865ccb0c33612620eefd684f982aa86c448d840142d1aadfa841777e8cb0c1",
+            "column": 51,
+            "end_line": 71,
+            "guards": [
+              {
+                "ast_sha256": "c8d4bf6e24997d19cd4522232c5f384e740c2b2aac7caf051f6e37affe109e9f",
+                "branch": "body",
+                "kind": "If",
+                "line": 70,
+                "test_ast_sha256": "7e9769e7738f6d133ea6edd7c0e5140f10bf74ac8b274d388ab8612d3f9ee32e",
+                "test_spelling": null
+              }
+            ],
+            "line": 71,
+            "owner": {
+              "ast_sha256": "bd87b81196db09f29b4b8b7290f08f800cd397009c01de933a5602beef896a0c",
+              "call_spellings": [
+                "Field"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 233,
+              "guards": [],
+              "kind": "ClassDef",
+              "line": 231,
+              "module": "app.routers.project_workspace_router",
+              "name": "FileBody",
+              "path": "clearledger/server/app/routers/project_workspace_router.py",
+              "requested": "app.routers.project_workspace_router.FileBody",
+              "scope": [],
+              "source_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "execute"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "projects.FileBody",
+            "target": "app.routers.project_workspace_router.FileBody"
+          },
+          {
+            "ast_sha256": "f2ea4ffab3af449c17c6b786309ad722498c9d61cd892b2e25c4817873393f63",
+            "column": 25,
+            "end_line": 75,
+            "guards": [
+              {
+                "ast_sha256": "23497a574df99b35897d26044d47c867837ec9ac2102138b6f5683624232c503",
+                "branch": "body",
+                "kind": "If",
+                "line": 72,
+                "test_ast_sha256": "54aba0351a3482cc0b0b54e78fc57061ce0633e11e04f7378a2898c9676efba5",
+                "test_spelling": null
+              }
+            ],
+            "line": 75,
+            "owner": {
+              "ast_sha256": "0fee41c098b8ca052faf9a33bd7862f8329b72610f4f87ee5652294f753d631a",
+              "call_spellings": [
+                "Depends",
+                "HTTPException",
+                "assert_company_member",
+                "body.deadline.isoformat",
+                "body.text.strip",
+                "data.get",
+                "db.commit",
+                "db.scalar",
+                "details.update",
+                "dict",
+                "ezs_site_work.log_event",
+                "owned",
+                "project_work.project_clause",
+                "project_work.readable_entity",
+                "router.post",
+                "select",
+                "source_message",
+                "str"
+              ],
+              "column": 0,
+              "decorators": [
+                "router.post"
+              ],
+              "end_line": 218,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 191,
+              "module": "app.routers.project_workspace_router",
+              "name": "decision",
+              "path": "clearledger/server/app/routers/project_workspace_router.py",
+              "requested": "app.routers.project_workspace_router.decision",
+              "scope": [],
+              "source_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "execute"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "projects.decision",
+            "target": "app.routers.project_workspace_router.decision"
+          },
+          {
+            "ast_sha256": "2754e2969a9a60cde10fd8a36a54d6f6d6d62ea31a7856df5c63e04b76860385",
+            "column": 48,
+            "end_line": 75,
+            "guards": [
+              {
+                "ast_sha256": "23497a574df99b35897d26044d47c867837ec9ac2102138b6f5683624232c503",
+                "branch": "body",
+                "kind": "If",
+                "line": 72,
+                "test_ast_sha256": "54aba0351a3482cc0b0b54e78fc57061ce0633e11e04f7378a2898c9676efba5",
+                "test_spelling": null
+              }
+            ],
+            "line": 75,
+            "owner": {
+              "ast_sha256": "15a6a4008649585070eb039ed62ce4c17159e933c52337d1a343e003d4d215d5",
+              "call_spellings": [
+                "Field"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 187,
+              "guards": [],
+              "kind": "ClassDef",
+              "line": 182,
+              "module": "app.routers.project_workspace_router",
+              "name": "DecisionBody",
+              "path": "clearledger/server/app/routers/project_workspace_router.py",
+              "requested": "app.routers.project_workspace_router.DecisionBody",
+              "scope": [],
+              "source_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "execute"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "projects.DecisionBody",
+            "target": "app.routers.project_workspace_router.DecisionBody"
+          },
+          {
+            "ast_sha256": "eddee6e0aa6f872bb8152c0d98c03bbe8e7015b21c039180e2f332117f3360c8",
+            "column": 21,
+            "end_line": 76,
+            "guards": [],
+            "line": 76,
+            "owner": {
+              "ast_sha256": "bf75b0793be02dab7f38d0ccd8ed669c6216f855284c618297d8a6893134a011",
+              "call_spellings": [
+                "Depends",
+                "DocRelation",
+                "EzsSiteEvent.changes.contains",
+                "HTTPException",
+                "TaskEvent",
+                "assert_company_member",
+                "db.add",
+                "db.commit",
+                "db.scalar",
+                "ezs_site_work.log_event",
+                "owned",
+                "project_work.readable_entity",
+                "router.post",
+                "select",
+                "source_message",
+                "str"
+              ],
+              "column": 0,
+              "decorators": [
+                "router.post"
+              ],
+              "end_line": 138,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 110,
+              "module": "app.routers.project_workspace_router",
+              "name": "link",
+              "path": "clearledger/server/app/routers/project_workspace_router.py",
+              "requested": "app.routers.project_workspace_router.link",
+              "scope": [],
+              "source_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "execute"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "projects.link",
+            "target": "app.routers.project_workspace_router.link"
+          },
+          {
+            "ast_sha256": "b7f96a0172059c93c76bffc45dbafc6fcf880e593f79fb581446de79a3b47f87",
+            "column": 40,
+            "end_line": 76,
+            "guards": [],
+            "line": 76,
+            "owner": {
+              "ast_sha256": "fc766354f6d26cd0d42fa4b9485879a3d8a326d0c48184ac968cab00e73cbe40",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 106,
+              "guards": [],
+              "kind": "ClassDef",
+              "line": 104,
+              "module": "app.routers.project_workspace_router",
+              "name": "LinkBody",
+              "path": "clearledger/server/app/routers/project_workspace_router.py",
+              "requested": "app.routers.project_workspace_router.LinkBody",
+              "scope": [],
+              "source_sha256": "988406b60c76cb7bc051ed40627d0bb99459e6f9e2b0e628740443928986e6ea"
+            },
+            "path": "clearledger/server/app/services/project_work_context.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "ProjectsContext",
+              "execute"
+            ],
+            "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a",
+            "spelling": "projects.LinkBody",
+            "target": "app.routers.project_workspace_router.LinkBody"
+          }
+        ],
+        "column": 8,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "707ef926cc48fe30082558868a3299729dbf1e81682928ce59d82f7ae2b13dcb",
+            "end_line": 88,
+            "kind": "ClassDef",
+            "line": 14,
+            "name": "ProjectsContext",
+            "path": "clearledger/server/app/services/project_work_context.py"
+          },
+          {
+            "ast_sha256": "5eb2ec12c699b0b75c95bfe0934b2fbfdb3b88105ebf740181e2042e4b7ec8e1",
+            "end_line": 76,
+            "kind": "AsyncFunctionDef",
+            "line": 64,
+            "name": "execute",
+            "path": "clearledger/server/app/services/project_work_context.py"
+          }
+        ],
+        "end_line": 68,
+        "form": "from",
+        "guards": [],
+        "id": "E21",
+        "line": 68,
+        "owner": {
+          "kind": "module",
+          "path": "clearledger/server/app/routers/project_workspace_router.py",
+          "requested": "app.routers.project_workspace_router"
+        },
+        "path": "clearledger/server/app/services/project_work_context.py",
+        "relative_level": 0,
+        "requested": "app.routers.project_workspace_router",
+        "scope": [
+          "ProjectsContext",
+          "execute"
+        ],
+        "source_sha256": "2278df9d5df76fbdb3b3838b55c1eecc7e6b5e83344148982b10ed47b6512c5a"
+      },
+      {
+        "ast_sha256": "d85e61e42ab613236df9cc96d5d5e8a864c9a97de4c6a201d89e94b7f1b19e9b",
+        "base": "app.routers.pulse_router",
+        "bound": "pulse_day_data",
+        "bound_target": "app.routers.pulse_router.pulse_day_data",
+        "calls": [
+          {
+            "ast_sha256": "6222b3f85a9e76ccaf0e1e17cdc9d41b0b5c2231a081a04f7e3700b5c99b52e0",
+            "column": 28,
+            "end_line": 139,
+            "guards": [
+              {
+                "ast_sha256": "2f9ef195a06beac78c65961e37ce6c82af35eccd0ad496ebccd79d765a92f577",
+                "branch": "body",
+                "kind": "AsyncWith",
+                "line": 127
+              },
+              {
+                "ast_sha256": "ba707da78fbb024a32dc126cd7347dd6004d7045725aa325de891b4fecf47d33",
+                "branch": "body",
+                "kind": "Try",
+                "line": 131
+              },
+              {
+                "ast_sha256": "207c967210ee8f780d8691279dfd041b974159807ea001ac85599010258a62a2",
+                "branch": "body",
+                "kind": "For",
+                "line": 132
+              }
+            ],
+            "line": 139,
+            "owner": {
+              "ast_sha256": "110057e84e6d39b8eacd29dba853e1cdffd200846eba3ebb920e22ccbd66d8ba",
+              "call_spellings": [
+                "KPI_SCOPE.get",
+                "_TicketsZero",
+                "_access_snapshot",
+                "_cc_snapshot",
+                "_dpct",
+                "_kpi",
+                "_objects_snapshot",
+                "_ops_snapshot",
+                "_profile",
+                "_projects_snapshot",
+                "_sales_snapshot",
+                "_sources_snapshot",
+                "_stations_snapshot",
+                "_thresholds",
+                "_tickets_available",
+                "as_of.isoformat",
+                "as_of.replace",
+                "build_cards",
+                "cc.get",
+                "datetime.now",
+                "db.execute",
+                "float",
+                "kpi.append",
+                "str",
+                "sum",
+                "support_company_id",
+                "text"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1776,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 1571,
+              "module": "app.routers.pulse_router",
+              "name": "pulse_day_data",
+              "path": "clearledger/server/app/routers/pulse_router.py",
+              "requested": "app.routers.pulse_router.pulse_day_data",
+              "scope": [],
+              "source_sha256": "042c09b7e8b5be35b5f56fa5390ef0ac3ae7912cc9a1deda8c98b2e8f07edf82"
+            },
+            "path": "clearledger/server/app/services/pulse_digest.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "run_once"
+            ],
+            "source_sha256": "0b3b287b2fa34441be49807fd6725de6e30d6a9af4a83bab2d18fc5711fa7360",
+            "spelling": "pulse_day_data",
+            "target": "app.routers.pulse_router.pulse_day_data"
+          }
+        ],
+        "column": 16,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "2b8bb6078e4780a64a69dc8b2343164b91525449bded58017976f3a5c29d7ab5",
+            "end_line": 161,
+            "kind": "AsyncFunctionDef",
+            "line": 124,
+            "name": "run_once",
+            "path": "clearledger/server/app/services/pulse_digest.py"
+          }
+        ],
+        "end_line": 137,
+        "form": "from",
+        "guards": [
+          {
+            "ast_sha256": "2f9ef195a06beac78c65961e37ce6c82af35eccd0ad496ebccd79d765a92f577",
+            "branch": "body",
+            "kind": "AsyncWith",
+            "line": 127
+          },
+          {
+            "ast_sha256": "ba707da78fbb024a32dc126cd7347dd6004d7045725aa325de891b4fecf47d33",
+            "branch": "body",
+            "kind": "Try",
+            "line": 131
+          },
+          {
+            "ast_sha256": "207c967210ee8f780d8691279dfd041b974159807ea001ac85599010258a62a2",
+            "branch": "body",
+            "kind": "For",
+            "line": 132
+          }
+        ],
+        "id": "E22",
+        "line": 137,
+        "owner": {
+          "ast_sha256": "110057e84e6d39b8eacd29dba853e1cdffd200846eba3ebb920e22ccbd66d8ba",
+          "call_spellings": [
+            "KPI_SCOPE.get",
+            "_TicketsZero",
+            "_access_snapshot",
+            "_cc_snapshot",
+            "_dpct",
+            "_kpi",
+            "_objects_snapshot",
+            "_ops_snapshot",
+            "_profile",
+            "_projects_snapshot",
+            "_sales_snapshot",
+            "_sources_snapshot",
+            "_stations_snapshot",
+            "_thresholds",
+            "_tickets_available",
+            "as_of.isoformat",
+            "as_of.replace",
+            "build_cards",
+            "cc.get",
+            "datetime.now",
+            "db.execute",
+            "float",
+            "kpi.append",
+            "str",
+            "sum",
+            "support_company_id",
+            "text"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1776,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 1571,
+          "module": "app.routers.pulse_router",
+          "name": "pulse_day_data",
+          "path": "clearledger/server/app/routers/pulse_router.py",
+          "requested": "app.routers.pulse_router.pulse_day_data",
+          "scope": [],
+          "source_sha256": "042c09b7e8b5be35b5f56fa5390ef0ac3ae7912cc9a1deda8c98b2e8f07edf82"
+        },
+        "path": "clearledger/server/app/services/pulse_digest.py",
+        "relative_level": 0,
+        "requested": "app.routers.pulse_router.pulse_day_data",
+        "scope": [
+          "run_once"
+        ],
+        "source_sha256": "0b3b287b2fa34441be49807fd6725de6e30d6a9af4a83bab2d18fc5711fa7360"
+      },
+      {
+        "ast_sha256": "d85e61e42ab613236df9cc96d5d5e8a864c9a97de4c6a201d89e94b7f1b19e9b",
+        "base": "app.routers.pulse_router",
+        "bound": "pulse_day_data",
+        "bound_target": "app.routers.pulse_router.pulse_day_data",
+        "calls": [
+          {
+            "ast_sha256": "7b44dd4cde96f734b4c0f01f55b4ce06868903ae53ef4ea7c451871237817689",
+            "column": 21,
+            "end_line": 114,
+            "guards": [
+              {
+                "ast_sha256": "bce17a9468e2d172a4294ef1323a1327575ff69c448e9343fe6c9452cabe6dd2",
+                "branch": "body",
+                "kind": "Try",
+                "line": 113
+              }
+            ],
+            "line": 114,
+            "owner": {
+              "ast_sha256": "110057e84e6d39b8eacd29dba853e1cdffd200846eba3ebb920e22ccbd66d8ba",
+              "call_spellings": [
+                "KPI_SCOPE.get",
+                "_TicketsZero",
+                "_access_snapshot",
+                "_cc_snapshot",
+                "_dpct",
+                "_kpi",
+                "_objects_snapshot",
+                "_ops_snapshot",
+                "_profile",
+                "_projects_snapshot",
+                "_sales_snapshot",
+                "_sources_snapshot",
+                "_stations_snapshot",
+                "_thresholds",
+                "_tickets_available",
+                "as_of.isoformat",
+                "as_of.replace",
+                "build_cards",
+                "cc.get",
+                "datetime.now",
+                "db.execute",
+                "float",
+                "kpi.append",
+                "str",
+                "sum",
+                "support_company_id",
+                "text"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 1776,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 1571,
+              "module": "app.routers.pulse_router",
+              "name": "pulse_day_data",
+              "path": "clearledger/server/app/routers/pulse_router.py",
+              "requested": "app.routers.pulse_router.pulse_day_data",
+              "scope": [],
+              "source_sha256": "042c09b7e8b5be35b5f56fa5390ef0ac3ae7912cc9a1deda8c98b2e8f07edf82"
+            },
+            "path": "clearledger/server/app/services/space_desk.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "_pulse"
+            ],
+            "source_sha256": "19afbd94057bae108b271df977146827c5263926bd9985a846e2181c2d1f3146",
+            "spelling": "pulse_day_data",
+            "target": "app.routers.pulse_router.pulse_day_data"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "29a861ea0cae3389d0445f8ceb5d258044704360d350449dd3d75075c4bccd80",
+            "end_line": 124,
+            "kind": "AsyncFunctionDef",
+            "line": 105,
+            "name": "_pulse",
+            "path": "clearledger/server/app/services/space_desk.py"
+          }
+        ],
+        "end_line": 111,
+        "form": "from",
+        "guards": [],
+        "id": "E23",
+        "line": 111,
+        "owner": {
+          "ast_sha256": "110057e84e6d39b8eacd29dba853e1cdffd200846eba3ebb920e22ccbd66d8ba",
+          "call_spellings": [
+            "KPI_SCOPE.get",
+            "_TicketsZero",
+            "_access_snapshot",
+            "_cc_snapshot",
+            "_dpct",
+            "_kpi",
+            "_objects_snapshot",
+            "_ops_snapshot",
+            "_profile",
+            "_projects_snapshot",
+            "_sales_snapshot",
+            "_sources_snapshot",
+            "_stations_snapshot",
+            "_thresholds",
+            "_tickets_available",
+            "as_of.isoformat",
+            "as_of.replace",
+            "build_cards",
+            "cc.get",
+            "datetime.now",
+            "db.execute",
+            "float",
+            "kpi.append",
+            "str",
+            "sum",
+            "support_company_id",
+            "text"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 1776,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 1571,
+          "module": "app.routers.pulse_router",
+          "name": "pulse_day_data",
+          "path": "clearledger/server/app/routers/pulse_router.py",
+          "requested": "app.routers.pulse_router.pulse_day_data",
+          "scope": [],
+          "source_sha256": "042c09b7e8b5be35b5f56fa5390ef0ac3ae7912cc9a1deda8c98b2e8f07edf82"
+        },
+        "path": "clearledger/server/app/services/space_desk.py",
+        "relative_level": 0,
+        "requested": "app.routers.pulse_router.pulse_day_data",
+        "scope": [
+          "_pulse"
+        ],
+        "source_sha256": "19afbd94057bae108b271df977146827c5263926bd9985a846e2181c2d1f3146"
+      },
+      {
+        "ast_sha256": "307ad87f16df9d9ce49e1996810ef6a311db286f5d4421d942a721d58eaa2955",
+        "base": "app.routers.tasks_router",
+        "bound": "_is_admin",
+        "bound_target": "app.routers.tasks_router._is_admin",
+        "calls": [
+          {
+            "ast_sha256": "64a7bb39772deb66238cbde3630e52a2826c308ed404d0471631b3dd31a8a828",
+            "column": 39,
+            "end_line": 23,
+            "guards": [],
+            "line": 23,
+            "owner": {
+              "ast_sha256": "f235686d9cb4eeab09028363eae69f84813b65c166f08c3eda8adc5143a40904",
+              "call_spellings": [
+                "db.get"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 16,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 12,
+              "module": "app.services.task_access",
+              "name": "is_admin",
+              "path": "clearledger/server/app/services/task_access.py",
+              "reexport_ref": {
+                "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+                "base": "app.services.task_access",
+                "bound": "_is_admin",
+                "bound_target": "app.services.task_access.is_admin",
+                "column": 0,
+                "end_line": 40,
+                "form": "from",
+                "guards": [],
+                "line": 37,
+                "path": "clearledger/server/app/routers/tasks_router.py",
+                "relative_level": 0,
+                "requested": "app.services.task_access.is_admin",
+                "scope": [],
+                "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+              },
+              "requested": "app.services.task_access.is_admin",
+              "scope": [],
+              "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+            },
+            "path": "clearledger/server/app/services/work_links.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "visible_work"
+            ],
+            "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42",
+            "spelling": "_is_admin",
+            "target": "app.routers.tasks_router._is_admin"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "69d6712544408a440473fb61b6638d0fac5bcf6e996acc5f546d264688d84d53",
+            "end_line": 47,
+            "kind": "AsyncFunctionDef",
+            "line": 18,
+            "name": "visible_work",
+            "path": "clearledger/server/app/services/work_links.py"
+          }
+        ],
+        "end_line": 20,
+        "form": "from",
+        "guards": [],
+        "id": "E24",
+        "line": 20,
+        "owner": {
+          "ast_sha256": "f235686d9cb4eeab09028363eae69f84813b65c166f08c3eda8adc5143a40904",
+          "call_spellings": [
+            "db.get"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 16,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 12,
+          "module": "app.services.task_access",
+          "name": "is_admin",
+          "path": "clearledger/server/app/services/task_access.py",
+          "reexport_ref": {
+            "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+            "base": "app.services.task_access",
+            "bound": "_is_admin",
+            "bound_target": "app.services.task_access.is_admin",
+            "column": 0,
+            "end_line": 40,
+            "form": "from",
+            "guards": [],
+            "line": 37,
+            "path": "clearledger/server/app/routers/tasks_router.py",
+            "relative_level": 0,
+            "requested": "app.services.task_access.is_admin",
+            "scope": [],
+            "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+          },
+          "requested": "app.services.task_access.is_admin",
+          "scope": [],
+          "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+        },
+        "path": "clearledger/server/app/services/work_links.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._is_admin",
+        "scope": [
+          "visible_work"
+        ],
+        "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42"
+      },
+      {
+        "ast_sha256": "307ad87f16df9d9ce49e1996810ef6a311db286f5d4421d942a721d58eaa2955",
+        "base": "app.routers.tasks_router",
+        "bound": "_not_personal",
+        "bound_target": "app.routers.tasks_router._not_personal",
+        "calls": [
+          {
+            "ast_sha256": "2a09875207a2d95ba9f3e6ac15d079029ed8f560f3666b297538163552bfa9b8",
+            "column": 38,
+            "end_line": 28,
+            "guards": [],
+            "line": 28,
+            "owner": {
+              "ast_sha256": "57f315989ca285e8d30b88a2654abe5305301f1b8ebcea1b375c2801dbea8024",
+              "call_spellings": [],
+              "column": 0,
+              "decorators": [],
+              "end_line": 537,
+              "guards": [],
+              "kind": "FunctionDef",
+              "line": 529,
+              "module": "app.routers.tasks_router",
+              "name": "_not_personal",
+              "path": "clearledger/server/app/routers/tasks_router.py",
+              "requested": "app.routers.tasks_router._not_personal",
+              "scope": [],
+              "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+            },
+            "path": "clearledger/server/app/services/work_links.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "visible_work"
+            ],
+            "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42",
+            "spelling": "_not_personal",
+            "target": "app.routers.tasks_router._not_personal"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "69d6712544408a440473fb61b6638d0fac5bcf6e996acc5f546d264688d84d53",
+            "end_line": 47,
+            "kind": "AsyncFunctionDef",
+            "line": 18,
+            "name": "visible_work",
+            "path": "clearledger/server/app/services/work_links.py"
+          }
+        ],
+        "end_line": 20,
+        "form": "from",
+        "guards": [],
+        "id": "E25",
+        "line": 20,
+        "owner": {
+          "ast_sha256": "57f315989ca285e8d30b88a2654abe5305301f1b8ebcea1b375c2801dbea8024",
+          "call_spellings": [],
+          "column": 0,
+          "decorators": [],
+          "end_line": 537,
+          "guards": [],
+          "kind": "FunctionDef",
+          "line": 529,
+          "module": "app.routers.tasks_router",
+          "name": "_not_personal",
+          "path": "clearledger/server/app/routers/tasks_router.py",
+          "requested": "app.routers.tasks_router._not_personal",
+          "scope": [],
+          "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+        },
+        "path": "clearledger/server/app/services/work_links.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._not_personal",
+        "scope": [
+          "visible_work"
+        ],
+        "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42"
+      },
+      {
+        "ast_sha256": "307ad87f16df9d9ce49e1996810ef6a311db286f5d4421d942a721d58eaa2955",
+        "base": "app.routers.tasks_router",
+        "bound": "_visible_to",
+        "bound_target": "app.routers.tasks_router._visible_to",
+        "calls": [
+          {
+            "ast_sha256": "8ff6a6b9229cc85347237f77e8c2e90cbc18b41904404824c04156d947876ca0",
+            "column": 15,
+            "end_line": 23,
+            "guards": [],
+            "line": 23,
+            "owner": {
+              "ast_sha256": "36bb9ce8b5f46f58ee582d64cd5c41c944b4528bb0eb924a2107c4db09ba4912",
+              "call_spellings": [
+                "Task.id.in_",
+                "and_",
+                "or_",
+                "select"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 31,
+              "guards": [],
+              "kind": "FunctionDef",
+              "line": 19,
+              "module": "app.services.task_access",
+              "name": "visible_to",
+              "path": "clearledger/server/app/services/task_access.py",
+              "reexport_ref": {
+                "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+                "base": "app.services.task_access",
+                "bound": "_visible_to",
+                "bound_target": "app.services.task_access.visible_to",
+                "column": 0,
+                "end_line": 40,
+                "form": "from",
+                "guards": [],
+                "line": 37,
+                "path": "clearledger/server/app/routers/tasks_router.py",
+                "relative_level": 0,
+                "requested": "app.services.task_access.visible_to",
+                "scope": [],
+                "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+              },
+              "requested": "app.services.task_access.visible_to",
+              "scope": [],
+              "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+            },
+            "path": "clearledger/server/app/services/work_links.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "visible_work"
+            ],
+            "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42",
+            "spelling": "_visible_to",
+            "target": "app.routers.tasks_router._visible_to"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "69d6712544408a440473fb61b6638d0fac5bcf6e996acc5f546d264688d84d53",
+            "end_line": 47,
+            "kind": "AsyncFunctionDef",
+            "line": 18,
+            "name": "visible_work",
+            "path": "clearledger/server/app/services/work_links.py"
+          }
+        ],
+        "end_line": 20,
+        "form": "from",
+        "guards": [],
+        "id": "E26",
+        "line": 20,
+        "owner": {
+          "ast_sha256": "36bb9ce8b5f46f58ee582d64cd5c41c944b4528bb0eb924a2107c4db09ba4912",
+          "call_spellings": [
+            "Task.id.in_",
+            "and_",
+            "or_",
+            "select"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 31,
+          "guards": [],
+          "kind": "FunctionDef",
+          "line": 19,
+          "module": "app.services.task_access",
+          "name": "visible_to",
+          "path": "clearledger/server/app/services/task_access.py",
+          "reexport_ref": {
+            "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+            "base": "app.services.task_access",
+            "bound": "_visible_to",
+            "bound_target": "app.services.task_access.visible_to",
+            "column": 0,
+            "end_line": 40,
+            "form": "from",
+            "guards": [],
+            "line": 37,
+            "path": "clearledger/server/app/routers/tasks_router.py",
+            "relative_level": 0,
+            "requested": "app.services.task_access.visible_to",
+            "scope": [],
+            "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+          },
+          "requested": "app.services.task_access.visible_to",
+          "scope": [],
+          "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+        },
+        "path": "clearledger/server/app/services/work_links.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._visible_to",
+        "scope": [
+          "visible_work"
+        ],
+        "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42"
+      },
+      {
+        "ast_sha256": "abcb25428163070bdfdb9847e25942826118487a1b989b371a347f28d00a874c",
+        "base": "app.routers.tasks_router",
+        "bound": "_assert_actor",
+        "bound_target": "app.routers.tasks_router._assert_actor",
+        "calls": [
+          {
+            "ast_sha256": "cb925fe159ee95cba11d03754b9fbbd0e65f5b1a49859e40e62af3c82ccaa585",
+            "column": 18,
+            "end_line": 64,
+            "guards": [
+              {
+                "ast_sha256": "17f437e56bccaf1eff7f584cfc1d292f154e1f223e3be579f56a44cbfee56aec",
+                "branch": "orelse",
+                "kind": "If",
+                "line": 58,
+                "test_ast_sha256": "1b801a4d409bac24a0517c29898ec594bec4ffd654e2e700d64ac2dc61742d62",
+                "test_spelling": null
+              },
+              {
+                "ast_sha256": "5f2a917e1ad463f458a725bf3395ddcef5d1c15ecc935b1f82933d257685532e",
+                "branch": "body",
+                "kind": "If",
+                "line": 63,
+                "test_ast_sha256": "e76e0581ee4c9c9141ff7bf34f47261fd56cdeaf84dec644735788f27ff6d665",
+                "test_spelling": "edit"
+              }
+            ],
+            "line": 64,
+            "owner": {
+              "ast_sha256": "d44b5fbd37d9ada1010cedc596abad9f150c2f89cf09a7b5a8645eabb85ae6b8",
+              "call_spellings": [
+                "HTTPException",
+                "_assert_view_task",
+                "_can_edit_task"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 611,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 608,
+              "module": "app.routers.tasks_router",
+              "name": "_assert_actor",
+              "path": "clearledger/server/app/routers/tasks_router.py",
+              "requested": "app.routers.tasks_router._assert_actor",
+              "scope": [],
+              "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+            },
+            "path": "clearledger/server/app/services/work_links.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "readable_entity"
+            ],
+            "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42",
+            "spelling": "_assert_actor",
+            "target": "app.routers.tasks_router._assert_actor"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "c9c24328ac07a82845adfd4b47b8c94da9856770516ce19b3ad1b6a6d930b348",
+            "end_line": 65,
+            "kind": "AsyncFunctionDef",
+            "line": 50,
+            "name": "readable_entity",
+            "path": "clearledger/server/app/services/work_links.py"
+          }
+        ],
+        "end_line": 52,
+        "form": "from",
+        "guards": [],
+        "id": "E27",
+        "line": 52,
+        "owner": {
+          "ast_sha256": "d44b5fbd37d9ada1010cedc596abad9f150c2f89cf09a7b5a8645eabb85ae6b8",
+          "call_spellings": [
+            "HTTPException",
+            "_assert_view_task",
+            "_can_edit_task"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 611,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 608,
+          "module": "app.routers.tasks_router",
+          "name": "_assert_actor",
+          "path": "clearledger/server/app/routers/tasks_router.py",
+          "requested": "app.routers.tasks_router._assert_actor",
+          "scope": [],
+          "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+        },
+        "path": "clearledger/server/app/services/work_links.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._assert_actor",
+        "scope": [
+          "readable_entity"
+        ],
+        "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42"
+      },
+      {
+        "ast_sha256": "abcb25428163070bdfdb9847e25942826118487a1b989b371a347f28d00a874c",
+        "base": "app.routers.tasks_router",
+        "bound": "_can_view_task",
+        "bound_target": "app.routers.tasks_router._can_view_task",
+        "calls": [
+          {
+            "ast_sha256": "08d2a4684e758e22b4d88127d93c1a78fa8c86a9bdbf60486ef639108958ed70",
+            "column": 53,
+            "end_line": 61,
+            "guards": [
+              {
+                "ast_sha256": "17f437e56bccaf1eff7f584cfc1d292f154e1f223e3be579f56a44cbfee56aec",
+                "branch": "orelse",
+                "kind": "If",
+                "line": 58,
+                "test_ast_sha256": "1b801a4d409bac24a0517c29898ec594bec4ffd654e2e700d64ac2dc61742d62",
+                "test_spelling": null
+              }
+            ],
+            "line": 61,
+            "owner": {
+              "ast_sha256": "d45e22e588ede31dec205d42600e58bbb116d90c1f73bb14ad2b3fb13eeb710b",
+              "call_spellings": [
+                "db.scalar",
+                "is_admin",
+                "select",
+                "visible_to"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 40,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 34,
+              "module": "app.services.task_access",
+              "name": "can_view_task",
+              "path": "clearledger/server/app/services/task_access.py",
+              "reexport_ref": {
+                "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+                "base": "app.services.task_access",
+                "bound": "_can_view_task",
+                "bound_target": "app.services.task_access.can_view_task",
+                "column": 0,
+                "end_line": 40,
+                "form": "from",
+                "guards": [],
+                "line": 37,
+                "path": "clearledger/server/app/routers/tasks_router.py",
+                "relative_level": 0,
+                "requested": "app.services.task_access.can_view_task",
+                "scope": [],
+                "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+              },
+              "requested": "app.services.task_access.can_view_task",
+              "scope": [],
+              "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+            },
+            "path": "clearledger/server/app/services/work_links.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "readable_entity"
+            ],
+            "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42",
+            "spelling": "_can_view_task",
+            "target": "app.routers.tasks_router._can_view_task"
+          }
+        ],
+        "column": 4,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "c9c24328ac07a82845adfd4b47b8c94da9856770516ce19b3ad1b6a6d930b348",
+            "end_line": 65,
+            "kind": "AsyncFunctionDef",
+            "line": 50,
+            "name": "readable_entity",
+            "path": "clearledger/server/app/services/work_links.py"
+          }
+        ],
+        "end_line": 52,
+        "form": "from",
+        "guards": [],
+        "id": "E28",
+        "line": 52,
+        "owner": {
+          "ast_sha256": "d45e22e588ede31dec205d42600e58bbb116d90c1f73bb14ad2b3fb13eeb710b",
+          "call_spellings": [
+            "db.scalar",
+            "is_admin",
+            "select",
+            "visible_to"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 40,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 34,
+          "module": "app.services.task_access",
+          "name": "can_view_task",
+          "path": "clearledger/server/app/services/task_access.py",
+          "reexport_ref": {
+            "ast_sha256": "c14bf1463f3eae94550cac758a5f47a2fb56592753cdbecbb9dfa56c8f602b9f",
+            "base": "app.services.task_access",
+            "bound": "_can_view_task",
+            "bound_target": "app.services.task_access.can_view_task",
+            "column": 0,
+            "end_line": 40,
+            "form": "from",
+            "guards": [],
+            "line": 37,
+            "path": "clearledger/server/app/routers/tasks_router.py",
+            "relative_level": 0,
+            "requested": "app.services.task_access.can_view_task",
+            "scope": [],
+            "source_sha256": "42a9341fdd4b6c7aa24c6c9792bedadf27b0a08eb1bd9a0425a94feccbdeb758"
+          },
+          "requested": "app.services.task_access.can_view_task",
+          "scope": [],
+          "source_sha256": "9daed89b788051015ab927043a2d1a34429cf88170ec63ebd8b269a613375f53"
+        },
+        "path": "clearledger/server/app/services/work_links.py",
+        "relative_level": 0,
+        "requested": "app.routers.tasks_router._can_view_task",
+        "scope": [
+          "readable_entity"
+        ],
+        "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42"
+      },
+      {
+        "ast_sha256": "26bdaa1ffdf6d6034c412964277b07b00dbddd4b4baf6fc0776bd8cd07c76264",
+        "base": "app.routers.chat_router",
+        "bound": "_history_from",
+        "bound_target": "app.routers.chat_router._history_from",
+        "calls": [
+          {
+            "ast_sha256": "8a5062bbfa4ae44a1443a3a97a7940eab9469116f3024d737928623dcfc6e514",
+            "column": 26,
+            "end_line": 84,
+            "guards": [
+              {
+                "ast_sha256": "20e7695b0320ec0ad38a27f1afdc9c44e2a13bc3696b186ba9e130b30d9ae3bb",
+                "branch": "body",
+                "kind": "For",
+                "line": 73
+              },
+              {
+                "ast_sha256": "7b0497d2faf0a9034715082b2a0c901f2b6ec1cf691a1085dbbbcce5103a5862",
+                "branch": "body",
+                "kind": "If",
+                "line": 81,
+                "test_ast_sha256": "ee673e1cc767aae38f294efc02995ff046161e247b3cf506484b984a37c6a99d",
+                "test_spelling": null
+              }
+            ],
+            "line": 84,
+            "owner": {
+              "ast_sha256": "c1e0b23c09686c56615b24752ee181cdf43e8550128502f8d2787fd98fa43179",
+              "call_spellings": [
+                "db.execute",
+                "select"
+              ],
+              "column": 0,
+              "decorators": [],
+              "end_line": 252,
+              "guards": [],
+              "kind": "AsyncFunctionDef",
+              "line": 241,
+              "module": "app.routers.chat_router",
+              "name": "_history_from",
+              "path": "clearledger/server/app/routers/chat_router.py",
+              "requested": "app.routers.chat_router._history_from",
+              "scope": [],
+              "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+            },
+            "path": "clearledger/server/app/services/work_links.py",
+            "possible_shadowing": false,
+            "resolution": "source-spelling-only",
+            "scope": [
+              "origin"
+            ],
+            "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42",
+            "spelling": "_history_from",
+            "target": "app.routers.chat_router._history_from"
+          }
+        ],
+        "column": 12,
+        "enclosing_definitions": [
+          {
+            "ast_sha256": "afc0ab77edc108753267b7682317a5855129cfc9ec5da644cbc37ff0c7ba1f05",
+            "end_line": 87,
+            "kind": "AsyncFunctionDef",
+            "line": 68,
+            "name": "origin",
+            "path": "clearledger/server/app/services/work_links.py"
+          }
+        ],
+        "end_line": 83,
+        "form": "from",
+        "guards": [
+          {
+            "ast_sha256": "20e7695b0320ec0ad38a27f1afdc9c44e2a13bc3696b186ba9e130b30d9ae3bb",
+            "branch": "body",
+            "kind": "For",
+            "line": 73
+          },
+          {
+            "ast_sha256": "7b0497d2faf0a9034715082b2a0c901f2b6ec1cf691a1085dbbbcce5103a5862",
+            "branch": "body",
+            "kind": "If",
+            "line": 81,
+            "test_ast_sha256": "ee673e1cc767aae38f294efc02995ff046161e247b3cf506484b984a37c6a99d",
+            "test_spelling": null
+          }
+        ],
+        "id": "E29",
+        "line": 83,
+        "owner": {
+          "ast_sha256": "c1e0b23c09686c56615b24752ee181cdf43e8550128502f8d2787fd98fa43179",
+          "call_spellings": [
+            "db.execute",
+            "select"
+          ],
+          "column": 0,
+          "decorators": [],
+          "end_line": 252,
+          "guards": [],
+          "kind": "AsyncFunctionDef",
+          "line": 241,
+          "module": "app.routers.chat_router",
+          "name": "_history_from",
+          "path": "clearledger/server/app/routers/chat_router.py",
+          "requested": "app.routers.chat_router._history_from",
+          "scope": [],
+          "source_sha256": "f202c863046d8a84e8e52a3d4db5a1903535c98d3d396cc110515b1a793a17c6"
+        },
+        "path": "clearledger/server/app/services/work_links.py",
+        "relative_level": 0,
+        "requested": "app.routers.chat_router._history_from",
+        "scope": [
+          "origin"
+        ],
+        "source_sha256": "bd904e27c941f655ca01f5c5c7fb024cd1ef30290265e17a03889e623cfbca42"
+      }
+    ],
+    "git_pin": "d70581b4c98d5a523badf0220c9d2990de4844d8",
+    "limitations": [
+      "No application execution, imports, ORM, DB or network.",
+      "Calls are syntactic spelling candidates, not runtime/reaching-definition edges.",
+      "Guards retained, never evaluated; no automatic TYPE_CHECKING exemption.",
+      "Arbitrary computed loaders, assignment aliases, getattr, exec and monkeypatching are not resolved.",
+      "Owner call spellings include nested bodies, are not transitive effects."
+    ],
+    "manifest_sha256": "59fbdcab550bcedbf691422ecd53afd646500e0159b2838c863771ea061548b9",
+    "parse_unknowns": [],
+    "parse_warnings": [
+      {
+        "path": "clearledger/server/app/services/books_links.py",
+        "warnings": [
+          {
+            "kind": "SyntaxWarning",
+            "line": 144
+          }
+        ]
+      }
+    ],
+    "schema": "service-router-boundaries-v1"
+  },
+  "priority_patch": "P1: E19 meeting_hosts -> existing services/jitsi.py",
+  "second_patch": "P2: E12/E15/E24/E26/E28 -> existing services/task_access.py"
+}

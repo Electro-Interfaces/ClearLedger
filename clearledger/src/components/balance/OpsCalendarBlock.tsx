@@ -39,8 +39,8 @@ export function OpsCalendarBlock() {
   if (q.isError || !q.data || q.data.buckets.length === 0) {
     return (
       <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">
-        Ближайших сроков нет. Либо всё собрано, либо ожидания ещё не развёрнуты —
-        откройте «Закрытие месяца», шкала периодов развернёт их сама.
+        Ближайших сроков нет. Если расчёт ещё не подготовлен, нажмите «Обновить расчёт»
+        в «Закрытии месяца». Если действие недоступно, обратитесь к сотруднику с доступом.
       </CardContent></Card>
     )
   }

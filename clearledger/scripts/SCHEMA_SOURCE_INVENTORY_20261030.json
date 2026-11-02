@@ -1,0 +1,946 @@
+{
+  "app_python_files_scanned": 478,
+  "count_unit": "SQL-looking string literal AST nodes excluding docstrings; not SQL statements or execution counts",
+  "database": {
+    "calls": [
+      {
+        "line": 52,
+        "method": "begin"
+      },
+      {
+        "line": 53,
+        "method": "execute"
+      },
+      {
+        "line": 988,
+        "method": "begin"
+      },
+      {
+        "line": 989,
+        "method": "execute"
+      },
+      {
+        "line": 990,
+        "method": "begin"
+      },
+      {
+        "line": 991,
+        "method": "execute"
+      },
+      {
+        "line": 2236,
+        "method": "begin"
+      },
+      {
+        "line": 2240,
+        "method": "execute"
+      },
+      {
+        "line": 2244,
+        "method": "begin"
+      },
+      {
+        "line": 2248,
+        "method": "execute"
+      },
+      {
+        "line": 2251,
+        "method": "execute"
+      },
+      {
+        "line": 2257,
+        "method": "execute"
+      },
+      {
+        "line": 2263,
+        "method": "execute"
+      },
+      {
+        "line": 2269,
+        "method": "execute"
+      },
+      {
+        "line": 2275,
+        "method": "execute"
+      },
+      {
+        "line": 2281,
+        "method": "execute"
+      },
+      {
+        "line": 2881,
+        "method": "execute"
+      },
+      {
+        "line": 2905,
+        "method": "execute"
+      },
+      {
+        "line": 2915,
+        "method": "execute"
+      },
+      {
+        "line": 2960,
+        "method": "execute"
+      },
+      {
+        "line": 2967,
+        "method": "execute"
+      },
+      {
+        "line": 2986,
+        "method": "execute"
+      },
+      {
+        "line": 2999,
+        "method": "execute"
+      },
+      {
+        "line": 3008,
+        "method": "execute"
+      },
+      {
+        "line": 3033,
+        "method": "execute"
+      },
+      {
+        "line": 3055,
+        "method": "execute"
+      },
+      {
+        "line": 3092,
+        "method": "begin_nested"
+      },
+      {
+        "line": 3093,
+        "method": "execute"
+      },
+      {
+        "line": 3159,
+        "method": "execute"
+      },
+      {
+        "line": 3165,
+        "method": "execute"
+      },
+      {
+        "line": 3172,
+        "method": "execute"
+      },
+      {
+        "line": 3237,
+        "method": "execute"
+      },
+      {
+        "line": 3244,
+        "method": "execute"
+      },
+      {
+        "line": 3273,
+        "method": "execute"
+      },
+      {
+        "line": 3307,
+        "method": "execute"
+      },
+      {
+        "line": 3369,
+        "method": "execute"
+      },
+      {
+        "line": 3389,
+        "method": "execute"
+      },
+      {
+        "line": 3424,
+        "method": "execute"
+      },
+      {
+        "line": 3478,
+        "method": "execute"
+      },
+      {
+        "line": 3501,
+        "method": "execute"
+      },
+      {
+        "line": 3518,
+        "method": "execute"
+      },
+      {
+        "line": 3595,
+        "method": "execute"
+      },
+      {
+        "line": 3614,
+        "method": "execute"
+      },
+      {
+        "line": 3623,
+        "method": "execute"
+      },
+      {
+        "line": 3626,
+        "method": "execute"
+      },
+      {
+        "line": 3643,
+        "method": "execute"
+      },
+      {
+        "line": 3648,
+        "method": "execute"
+      },
+      {
+        "line": 3701,
+        "method": "execute"
+      },
+      {
+        "line": 3711,
+        "method": "execute"
+      },
+      {
+        "line": 3714,
+        "method": "execute"
+      },
+      {
+        "line": 3733,
+        "method": "execute"
+      },
+      {
+        "line": 3736,
+        "method": "execute"
+      },
+      {
+        "line": 3781,
+        "method": "execute"
+      },
+      {
+        "line": 3786,
+        "method": "execute"
+      },
+      {
+        "line": 3792,
+        "method": "execute"
+      },
+      {
+        "line": 3795,
+        "method": "execute"
+      },
+      {
+        "line": 3798,
+        "method": "execute"
+      },
+      {
+        "line": 3801,
+        "method": "execute"
+      },
+      {
+        "line": 3804,
+        "method": "execute"
+      },
+      {
+        "line": 3810,
+        "method": "execute"
+      },
+      {
+        "line": 3813,
+        "method": "execute"
+      },
+      {
+        "line": 3839,
+        "method": "execute"
+      },
+      {
+        "line": 3844,
+        "method": "execute"
+      },
+      {
+        "line": 3850,
+        "method": "execute"
+      },
+      {
+        "line": 3856,
+        "method": "execute"
+      },
+      {
+        "line": 3862,
+        "method": "execute"
+      },
+      {
+        "line": 3867,
+        "method": "execute"
+      },
+      {
+        "line": 3871,
+        "method": "execute"
+      },
+      {
+        "line": 3875,
+        "method": "execute"
+      },
+      {
+        "line": 3879,
+        "method": "execute"
+      },
+      {
+        "line": 3887,
+        "method": "execute"
+      },
+      {
+        "line": 3893,
+        "method": "execute"
+      },
+      {
+        "line": 3897,
+        "method": "execute"
+      },
+      {
+        "line": 3901,
+        "method": "execute"
+      },
+      {
+        "line": 3905,
+        "method": "execute"
+      },
+      {
+        "line": 3910,
+        "method": "execute"
+      },
+      {
+        "line": 3916,
+        "method": "execute"
+      },
+      {
+        "line": 3923,
+        "method": "execute"
+      },
+      {
+        "line": 3932,
+        "method": "execute"
+      },
+      {
+        "line": 3940,
+        "method": "execute"
+      },
+      {
+        "line": 3965,
+        "method": "execute"
+      },
+      {
+        "line": 3981,
+        "method": "execute"
+      },
+      {
+        "line": 3984,
+        "method": "execute"
+      },
+      {
+        "line": 3999,
+        "method": "execute"
+      },
+      {
+        "line": 4025,
+        "method": "execute"
+      },
+      {
+        "line": 4039,
+        "method": "execute"
+      },
+      {
+        "line": 4051,
+        "method": "execute"
+      },
+      {
+        "line": 4070,
+        "method": "execute"
+      },
+      {
+        "line": 4083,
+        "method": "execute"
+      },
+      {
+        "line": 4086,
+        "method": "execute"
+      },
+      {
+        "line": 4093,
+        "method": "execute"
+      },
+      {
+        "line": 4112,
+        "method": "execute"
+      },
+      {
+        "line": 4116,
+        "method": "execute"
+      },
+      {
+        "line": 4122,
+        "method": "execute"
+      },
+      {
+        "line": 4256,
+        "method": "execute"
+      },
+      {
+        "line": 4263,
+        "method": "execute"
+      },
+      {
+        "line": 4270,
+        "method": "execute"
+      },
+      {
+        "line": 4294,
+        "method": "execute"
+      },
+      {
+        "line": 4303,
+        "method": "execute"
+      },
+      {
+        "line": 4738,
+        "method": "execute"
+      },
+      {
+        "line": 4762,
+        "method": "execute"
+      },
+      {
+        "line": 4777,
+        "method": "execute"
+      },
+      {
+        "line": 4813,
+        "method": "execute"
+      },
+      {
+        "line": 4823,
+        "method": "execute"
+      },
+      {
+        "line": 4830,
+        "method": "execute"
+      },
+      {
+        "line": 4850,
+        "method": "execute"
+      },
+      {
+        "line": 4876,
+        "method": "execute"
+      },
+      {
+        "line": 4910,
+        "method": "execute"
+      },
+      {
+        "line": 4925,
+        "method": "execute"
+      },
+      {
+        "line": 4934,
+        "method": "execute"
+      },
+      {
+        "line": 4949,
+        "method": "execute"
+      },
+      {
+        "line": 4956,
+        "method": "execute"
+      },
+      {
+        "line": 4970,
+        "method": "execute"
+      },
+      {
+        "line": 4984,
+        "method": "execute"
+      },
+      {
+        "line": 5007,
+        "method": "execute"
+      },
+      {
+        "line": 5037,
+        "method": "execute"
+      },
+      {
+        "line": 5053,
+        "method": "execute"
+      },
+      {
+        "line": 5065,
+        "method": "execute"
+      },
+      {
+        "line": 5074,
+        "method": "execute"
+      },
+      {
+        "line": 5087,
+        "method": "execute"
+      },
+      {
+        "line": 5097,
+        "method": "execute"
+      },
+      {
+        "line": 5105,
+        "method": "execute"
+      },
+      {
+        "line": 5114,
+        "method": "execute"
+      },
+      {
+        "line": 5123,
+        "method": "execute"
+      },
+      {
+        "line": 5134,
+        "method": "execute"
+      },
+      {
+        "line": 5147,
+        "method": "execute"
+      },
+      {
+        "line": 5162,
+        "method": "execute"
+      },
+      {
+        "line": 5163,
+        "method": "execute"
+      },
+      {
+        "line": 5165,
+        "method": "execute"
+      },
+      {
+        "line": 5183,
+        "method": "execute"
+      },
+      {
+        "line": 5207,
+        "method": "execute"
+      },
+      {
+        "line": 5225,
+        "method": "execute"
+      },
+      {
+        "line": 5242,
+        "method": "execute"
+      },
+      {
+        "line": 5259,
+        "method": "execute"
+      },
+      {
+        "line": 5272,
+        "method": "execute"
+      },
+      {
+        "line": 5287,
+        "method": "execute"
+      },
+      {
+        "line": 5298,
+        "method": "execute"
+      },
+      {
+        "line": 5306,
+        "method": "execute"
+      },
+      {
+        "line": 5329,
+        "method": "execute"
+      },
+      {
+        "line": 5335,
+        "method": "execute"
+      },
+      {
+        "line": 5347,
+        "method": "execute"
+      },
+      {
+        "line": 5362,
+        "method": "execute"
+      },
+      {
+        "line": 5373,
+        "method": "execute"
+      },
+      {
+        "line": 5489,
+        "method": "execute"
+      },
+      {
+        "line": 5508,
+        "method": "execute"
+      },
+      {
+        "line": 5525,
+        "method": "execute"
+      },
+      {
+        "line": 5529,
+        "method": "execute"
+      },
+      {
+        "line": 5538,
+        "method": "execute"
+      }
+    ],
+    "ddl_literal_nodes": 1114,
+    "dml_literal_nodes": 80,
+    "named_ddl_blocks": [
+      {
+        "ddl_literal_nodes": 3,
+        "end_line": 69,
+        "expression": "Tuple",
+        "line": 63,
+        "symbol": "MARKET_NEWS_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 10,
+        "end_line": 84,
+        "expression": "Tuple",
+        "line": 71,
+        "symbol": "CONF_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 9,
+        "end_line": 109,
+        "expression": "Tuple",
+        "line": 90,
+        "symbol": "VOICE_CORE_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 72,
+        "end_line": 534,
+        "expression": "Tuple",
+        "line": 111,
+        "symbol": "STORE_RECEIPT_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 30,
+        "end_line": 704,
+        "expression": "Tuple",
+        "line": 537,
+        "symbol": "ACCOUNTING_EGRESS_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 11,
+        "end_line": 973,
+        "expression": "Tuple",
+        "line": 707,
+        "symbol": "BUSINESS_SHIFT_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 0,
+        "end_line": 979,
+        "expression": "Call",
+        "line": 975,
+        "symbol": "ACTIVE_GROUP_COLLISION_REPORT_DDL"
+      },
+      {
+        "ddl_literal_nodes": 1,
+        "end_line": 984,
+        "expression": "Call",
+        "line": 980,
+        "symbol": "ACTIVE_GROUP_READINESS_DDL"
+      },
+      {
+        "ddl_literal_nodes": 9,
+        "end_line": 1132,
+        "expression": "Tuple",
+        "line": 1002,
+        "symbol": "SKU_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 1,
+        "end_line": 1237,
+        "expression": "Tuple",
+        "line": 1159,
+        "symbol": "MARK_GROUP_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 4,
+        "end_line": 1369,
+        "expression": "Tuple",
+        "line": 1256,
+        "symbol": "COMPANY_SCOPE_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 1,
+        "end_line": 1438,
+        "expression": "Tuple",
+        "line": 1388,
+        "symbol": "CASH_SECTION_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 4,
+        "end_line": 1479,
+        "expression": "Tuple",
+        "line": 1440,
+        "symbol": "LOCAL_BARCODE_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 7,
+        "end_line": 1529,
+        "expression": "Tuple",
+        "line": 1482,
+        "symbol": "RECIPE_TIER_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 2,
+        "end_line": 1593,
+        "expression": "Tuple",
+        "line": 1532,
+        "symbol": "MATRIX_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 1,
+        "end_line": 1642,
+        "expression": "Tuple",
+        "line": 1605,
+        "symbol": "VALIDATE_CONSTRAINTS_DDL"
+      },
+      {
+        "ddl_literal_nodes": 1,
+        "end_line": 1693,
+        "expression": "Tuple",
+        "line": 1657,
+        "symbol": "MONEY_NUMERIC_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 3,
+        "end_line": 1759,
+        "expression": "Tuple",
+        "line": 1701,
+        "symbol": "MODEL_DRIFT_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 2,
+        "end_line": 1812,
+        "expression": "Tuple",
+        "line": 1769,
+        "symbol": "COUNTERPARTY_INN_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 35,
+        "end_line": 2187,
+        "expression": "Tuple",
+        "line": 1815,
+        "symbol": "ACCOUNTING_REVISION_MIGRATION_DDL"
+      },
+      {
+        "ddl_literal_nodes": 4,
+        "end_line": 2203,
+        "expression": "Tuple",
+        "line": 2190,
+        "symbol": "TASK_ASSIGNMENT_MIGRATION_DDL"
+      }
+    ]
+  },
+  "ddl_literal_nodes": 1150,
+  "pins": [
+    {
+      "blob": "b8558bed04c6a3bfb9cca58883a2b698106392d4",
+      "lines": 50,
+      "path": "clearledger/server/alembic.ini",
+      "sha256": "2cc53c2e70aa85d734fd955d90c2c4c4027f1496f99f44b4bab6ddacf1bae758"
+    },
+    {
+      "blob": "eb6c557c41e568d945119adbc99ded0131636055",
+      "lines": 115,
+      "path": "clearledger/server/alembic/env.py",
+      "sha256": "65936a2e28a8e47793699f5aa4706a0bc22ec569c2412fa545859f7d6155b473"
+    },
+    {
+      "blob": "94548e281b116124df015de21864617ce5c53f60",
+      "lines": 23,
+      "path": "clearledger/server/alembic/versions/20261025_01_baseline.py",
+      "sha256": "7b07ddcc71aac8919513211fbab802089fa9bcbfef3a8429635365299168c88b"
+    },
+    {
+      "blob": "1dce096449a0a567304b38e2addf5654b9f9f4c0",
+      "lines": 5551,
+      "path": "clearledger/server/app/database.py",
+      "sha256": "be856862b369d89da8c7993fd974b70481260f37f07b7ca5a6d20db6ac077c3c"
+    },
+    {
+      "blob": "c825a0b2cb6a9d566ca7040d40e3df20b94d9cb8",
+      "lines": 863,
+      "path": "clearledger/server/app/main.py",
+      "sha256": "6311430edbdc2f642f18698e5e841e2807d53ec95f5cc25e7b7990962b8e1a17"
+    },
+    {
+      "blob": "a15774861492af92567f545e5b5b9426468512df",
+      "lines": 14434,
+      "path": "clearledger/server/app/models.py",
+      "sha256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee"
+    },
+    {
+      "blob": "338875e2b778ce11a28295ac537b2fd9cbd027d2",
+      "lines": 17,
+      "path": "clearledger/server/app/models_docs_portal.py",
+      "sha256": "57bce6f84b8992503e2069bc3b6f7a91be830adc1312269e7742309a19087c64"
+    },
+    {
+      "blob": "c28d9cdfa2b49b07ca150c8fa013e7bda940e1d3",
+      "lines": 180,
+      "path": "clearledger/server/app/models_partner.py",
+      "sha256": "51695adcc2784279fa00a0b2cccd99f181ee0a51cbf6232b8499adc0a7ada916"
+    },
+    {
+      "blob": "0f8028f841df67594e0e8d558d7a203d306a9f16",
+      "lines": 29,
+      "path": "clearledger/server/app/models_product_budget.py",
+      "sha256": "ea09966027934d4455770c6fdddc62d6d3ccd943f8923d47e3f1a3c7153de864"
+    },
+    {
+      "blob": "e9265bcbb8d30cd9bcfc83889569f9ce482b6e6e",
+      "lines": 3646,
+      "path": "clearledger/server/app/routers/perimeter_router.py",
+      "sha256": "566769d8af2f093a0bc19c1c27335bc17cc8a924eaa2e8fefae9779e7b723318"
+    },
+    {
+      "blob": "556229a6b34fb46928a45010fd3997a97e9a2f0c",
+      "lines": 648,
+      "path": "clearledger/server/app/services/app_registry.py",
+      "sha256": "f8eea104f0c096521cc937b6367ebca30ddea485e6b271a59e37f60359346af5"
+    },
+    {
+      "blob": "51b57755ad73ee0bd9562fa3e981b4d6281f31f5",
+      "lines": 117,
+      "path": "clearledger/server/app/services/phone_e164.py",
+      "sha256": "02556ab614fe3ece60bbe4f216fec5b8eceb9b118cb976c20acc3df5cf5a8c0e"
+    },
+    {
+      "blob": "da8c09aac63da1c3ba13bad0512fc6f00b17a9c3",
+      "lines": 705,
+      "path": "clearledger/server/tests/test_partner_schema_compatibility.py",
+      "sha256": "9e43e83d14e5a18755f4508854a671bad3c81afa1312eb33a69ef8465e9991ec"
+    },
+    {
+      "blob": "ea70191a89e6feb5a947f6fd9a6195a9a863afc8",
+      "lines": 430,
+      "path": "clearledger/server/tests/test_schema_namespace_ownership.py",
+      "sha256": "6aae402d3b571039146f8f1215f5a18eb431795ea69c0d012247a1cfcd176021"
+    }
+  ],
+  "schema_source_files": 9,
+  "schema_sources": [
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 64,
+      "ddl_literal_nodes": 1114,
+      "ddl_owners": {
+        "<module constants>": 210,
+        "create_all": 904
+      },
+      "dml_literal_nodes": 80,
+      "path": "clearledger/server/app/database.py",
+      "sha256": "be856862b369d89da8c7993fd974b70481260f37f07b7ca5a6d20db6ac077c3c"
+    },
+    {
+      "create_all_lines": [
+        143
+      ],
+      "ddl_first_line": 200,
+      "ddl_literal_nodes": 1,
+      "ddl_owners": {
+        "_prepare_database_once": 1
+      },
+      "dml_literal_nodes": 3,
+      "path": "clearledger/server/app/main.py",
+      "sha256": "6311430edbdc2f642f18698e5e841e2807d53ec95f5cc25e7b7990962b8e1a17"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 61,
+      "ddl_literal_nodes": 20,
+      "ddl_owners": {
+        "ensure_perimeter_schema": 20
+      },
+      "dml_literal_nodes": 0,
+      "path": "clearledger/server/app/routers/perimeter_router.py",
+      "sha256": "566769d8af2f093a0bc19c1c27335bc17cc8a924eaa2e8fefae9779e7b723318"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 97,
+      "ddl_literal_nodes": 2,
+      "ddl_owners": {
+        "_ensure_table": 2
+      },
+      "dml_literal_nodes": 2,
+      "path": "clearledger/server/app/services/analytics_cache.py",
+      "sha256": "5aab7525e9be422cfe19a357a739b60b2119ed7657627cf7be2d8a28e57d2986"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 300,
+      "ddl_literal_nodes": 1,
+      "ddl_owners": {
+        "seed_apps": 1
+      },
+      "dml_literal_nodes": 0,
+      "path": "clearledger/server/app/services/app_registry.py",
+      "sha256": "f8eea104f0c096521cc937b6367ebca30ddea485e6b271a59e37f60359346af5"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 26,
+      "ddl_literal_nodes": 2,
+      "ddl_owners": {
+        "<module constants>": 1,
+        "ensure_mart": 1
+      },
+      "dml_literal_nodes": 2,
+      "path": "clearledger/server/app/services/charge_mart.py",
+      "sha256": "c96ecc0ff6dc5ca5bf4a49de17ac4a21489af08cb0abab21f23234ab4ccc6c72"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 97,
+      "ddl_literal_nodes": 2,
+      "ddl_owners": {
+        "_ensure_presence_table": 2
+      },
+      "dml_literal_nodes": 6,
+      "path": "clearledger/server/app/services/chat_ws.py",
+      "sha256": "e714938f6386c7d72c600af1f46cf5ede770f4edf63356941794aeac88554aa4"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 25,
+      "ddl_literal_nodes": 7,
+      "ddl_owners": {
+        "<module constants>": 7
+      },
+      "dml_literal_nodes": 5,
+      "path": "clearledger/server/app/services/edge_moves.py",
+      "sha256": "36d28e99df1002c25621205adb22f3016530b0bfe1e330dd9806218af149f068"
+    },
+    {
+      "create_all_lines": [],
+      "ddl_first_line": 32,
+      "ddl_literal_nodes": 1,
+      "ddl_owners": {
+        "<module constants>": 1
+      },
+      "dml_literal_nodes": 0,
+      "path": "clearledger/server/app/services/phone_e164.py",
+      "sha256": "02556ab614fe3ece60bbe4f216fec5b8eceb9b118cb976c20acc3df5cf5a8c0e"
+    }
+  ],
+  "scope": "tracked server/app Python AST; fixed source pins; no imports/DB",
+  "source_commit": "ccfcd653f5cc01490bbf8571f9e89eae4a230ead"
+}

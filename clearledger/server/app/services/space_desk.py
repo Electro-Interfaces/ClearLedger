@@ -108,7 +108,7 @@ async def _pulse(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
     Считает ТЕМ ЖЕ кодом, что и экран дня: второй набор правил разошёлся бы с
     первым за неделю, и плитка начала бы врать про то, что за ней.
     """
-    from app.routers.pulse_router import pulse_day_data
+    from app.services.pulse_day import pulse_day_data
 
     try:
         data = await pulse_day_data(db, str(cid))

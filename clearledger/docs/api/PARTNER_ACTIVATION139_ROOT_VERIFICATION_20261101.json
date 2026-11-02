@@ -1,0 +1,796 @@
+{
+  "rootAcceptance": {
+    "status": "ROOT_ACCEPTED_INDEPENDENT_ORIGINAL_ACTIVATION139_ONLY",
+    "source": "823d336c99a5986cb8ebe06ccb5a6943fe885f02",
+    "dispatch": "ctx_831c65851c8d",
+    "task": "task_04169f916f98",
+    "workerDone": "msg_91179b72aa6b",
+    "reviewMDsha": "2bc727351756cc7319a036738bd455b1976cd855406a74f93de2267a4552ae1a",
+    "reviewJSONsha": "73f2e344f1b274aa71d68b7a71a3e90cbff74283f43a3464ba791414993d167b",
+    "publicRawHashesReverified": 45,
+    "cases": 139,
+    "defs": 27,
+    "phases": 417,
+    "unitCases": 37,
+    "nativePGCases": 102,
+    "DPLIncluded": false,
+    "old51NotTransferred": true,
+    "currentCode": "production unchanged since823; later6b onlycanonicalOPTIONSdocs",
+    "performance": "not benchmark or M15 candidate acceptance",
+    "fullCurrentCI": false,
+    "all31Open": true
+  },
+  "independentReview": {
+    "verdict": "PASS_ORIGINAL_ACTIVATION139_TARGETED_FAMILY",
+    "materialFindings": [],
+    "immutableRoot": "823d336c99a5986cb8ebe06ccb5a6943fe885f02",
+    "reviewerRuntime": 0,
+    "series": {
+      "a": {
+        "verdict": "PASS_EXACT_WORLD",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation139a-823d336c-fullnative-pg-20261101-5e6365057620",
+        "cases": 55,
+        "originalDefinitions": 13,
+        "phases": 165,
+        "phaseCounts": {
+          "setup": 55,
+          "call": 55,
+          "teardown": 55
+        },
+        "eachUniqueIDOneSetupCallTeardown": true,
+        "allPhasesPassedNoErrors": true,
+        "phaseResultProgressExactIncludingDuration": true,
+        "collectedExactlyOwnSourceExpansion": true,
+        "collectedIDsSHA256": "c4cf7c7332b39bed8a467e9f85dee5449792589a80f6db11100ee39face4ea4e",
+        "exitCode": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "denied": [],
+        "poolErrors": [],
+        "secondsIncludingBootstrap": 152.88636859785765,
+        "pytestSeconds": 124.9,
+        "ordinaryRole": {
+          "db": "api_activation139a_823d336c_test_20261101",
+          "usr": "clearledger",
+          "dboid": 16385,
+          "owner": 16384,
+          "roid": 16384,
+          "rolsuper": false,
+          "rolcreatedb": false,
+          "rolcreaterole": false,
+          "rolreplication": false,
+          "rolbypassrls": false,
+          "version": 160015
+        },
+        "all577GitSnapshotManifestMatch": true,
+        "exactSourceFS": true,
+        "controller": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation139a-823d336c-fullnative-pg-root-20261101.py",
+          "sha256": "d6d30e250c6828fdd8ed11f3c510e86ad66fa130f575a05e3ae53598965f09df",
+          "embeddedRunnerSHA256": "b78bc0a127a6f337e15100f4d20594b313e64a9a0b89e15b66892090c889d59a",
+          "matchesPreparation": true,
+          "hardSeconds": 420,
+          "hostSeconds": 450
+        },
+        "schema": {
+          "matchesCommonCountsAndIndependentChecks": true
+        },
+        "lifespanOrSeedCalled": false,
+        "ownPGConnects": 6,
+        "passiveSQL": {
+          "events": 53675,
+          "perTestShapes": 1263,
+          "sumExecutionsMatch": true,
+          "noParametersCaptured": true,
+          "observerErrors": []
+        },
+        "cleanup": {
+          "actualFactory": {
+            "status": "PASS_PROFILE_FACTORY_CLEANUP",
+            "before": {
+              "checkedout": 0,
+              "checkedin": 1
+            },
+            "after": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "loopAlive": true,
+            "syntheticKeyOnly": true
+          },
+          "appPool": {
+            "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+            "before": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "after": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "loopAlive": true,
+            "poolErrors": []
+          },
+          "PG": {
+            "clients": 0,
+            "locks": 0
+          },
+          "owned": [
+            {
+              "kind": "postgres",
+              "removed": true,
+              "exit": 0,
+              "running": false,
+              "OOM": false,
+              "network": "none",
+              "ports": {},
+              "startedAt": "2026-11-01T12:58:07.816233782Z"
+            },
+            {
+              "kind": "python",
+              "removed": true,
+              "exit": 0,
+              "running": false,
+              "OOM": false,
+              "network": "container:c440999de4f2049ab80645c2375e1026d82fd49f4991aca61bb9c6f00a11c4ad",
+              "ports": {},
+              "startedAt": "2026-11-01T12:58:11.476719921Z"
+            }
+          ],
+          "all25ControllerOperationsExitZeroReaped": true,
+          "foreignSafeProjectionEntries": 41,
+          "foreignSafeBeforeAfterBytesEqual": true
+        },
+        "publicHashes": {
+          "source-manifest.json": "3c4fd4ad0e5c79ae97e47e1c9e33887ec09c7a01ebf59513dd5a99e236966957",
+          "driver-manifest.json": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+          "execution.json": "1750eb58f31bb99857de5ca84781939ed102e12dc675d49ae6cdf2594efac712",
+          "role-identity-before-imports.json": "a44c0369939e678b536b8eec72b854a5859a3ea68435d80e117e9d79c0e84e4b",
+          "database-after.json": "2ad0513260f927e09cf4f0741bb1c11fb8d7e45c5c5a3dfdc6ba5f94e630a965",
+          "foreign-before.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+          "foreign-after.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+          "python.stdout": "e9233cc4d3e0ff02491053119a4ef2d2048de9a4c80cbb17ffbe5d66891f0f10",
+          "python.stderr": "70f4d7ad367f4b18335855f3c01fb3b75e3a18da47d3443a3dacfba2b412ca14",
+          "evidence/actual-sql-classes.json": "86a589734a95447dc4f0cd47643f9d3f127787e45eb632732639da3634677f7d",
+          "evidence/full-native-bootstrap.json": "5c8df7e478e286aa5a18096695c447f6484dd5514147d9bab1b0ebff7684d3b7",
+          "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+          "evidence/profile-factory-cleanup.json": "05bd61b9c84d1322db9ee8c37baaa35f635584882c1291263bd91df68e0b1a05",
+          "evidence/progress.jsonl": "82521397210e14e3808a864c9d758c684193b6611ca1676ab2f61bf1b0910836",
+          "evidence/result.json": "6a30d5a19ad9c0eae6315b27c0d32d6b75eb5492d9208346bccaee7ac9a03799"
+        }
+      },
+      "b": {
+        "verdict": "PASS_EXACT_WORLD",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation139b-823d336c-fullnative-pg-20261101-840399e63e61",
+        "cases": 41,
+        "originalDefinitions": 10,
+        "phases": 123,
+        "phaseCounts": {
+          "setup": 41,
+          "call": 41,
+          "teardown": 41
+        },
+        "eachUniqueIDOneSetupCallTeardown": true,
+        "allPhasesPassedNoErrors": true,
+        "phaseResultProgressExactIncludingDuration": true,
+        "collectedExactlyOwnSourceExpansion": true,
+        "collectedIDsSHA256": "76538661a147df3d1ee1cac405528e1ca2095e637cdb535e727ed2bf04d48fd7",
+        "exitCode": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "denied": [],
+        "poolErrors": [],
+        "secondsIncludingBootstrap": 188.5995362251997,
+        "pytestSeconds": 160.13,
+        "ordinaryRole": {
+          "db": "api_activation139b_823d336c_test_20261101",
+          "usr": "clearledger",
+          "dboid": 16385,
+          "owner": 16384,
+          "roid": 16384,
+          "rolsuper": false,
+          "rolcreatedb": false,
+          "rolcreaterole": false,
+          "rolreplication": false,
+          "rolbypassrls": false,
+          "version": 160015
+        },
+        "all577GitSnapshotManifestMatch": true,
+        "exactSourceFS": true,
+        "controller": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation139b-823d336c-fullnative-pg-root-20261101.py",
+          "sha256": "460c9053232573c2e210626bcee7052e1176edb42f8aeebc380d1cfb647cbd8f",
+          "embeddedRunnerSHA256": "dfd3ca1f501438cccc1a57144d8bd396d9cd198780334b0b8e6310ef49f58881",
+          "matchesPreparation": true,
+          "hardSeconds": 420,
+          "hostSeconds": 450
+        },
+        "schema": {
+          "matchesCommonCountsAndIndependentChecks": true
+        },
+        "lifespanOrSeedCalled": false,
+        "ownPGConnects": 10,
+        "passiveSQL": {
+          "events": 55454,
+          "perTestShapes": 2779,
+          "sumExecutionsMatch": true,
+          "noParametersCaptured": true,
+          "observerErrors": []
+        },
+        "cleanup": {
+          "actualFactory": {
+            "status": "PASS_PROFILE_FACTORY_CLEANUP",
+            "before": {
+              "checkedout": 0,
+              "checkedin": 3
+            },
+            "after": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "loopAlive": true,
+            "syntheticKeyOnly": true
+          },
+          "appPool": {
+            "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+            "before": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "after": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "loopAlive": true,
+            "poolErrors": []
+          },
+          "PG": {
+            "clients": 0,
+            "locks": 0
+          },
+          "owned": [
+            {
+              "kind": "postgres",
+              "removed": true,
+              "exit": 0,
+              "running": false,
+              "OOM": false,
+              "network": "none",
+              "ports": {},
+              "startedAt": "2026-11-01T13:02:33.201453356Z"
+            },
+            {
+              "kind": "python",
+              "removed": true,
+              "exit": 0,
+              "running": false,
+              "OOM": false,
+              "network": "container:1031bd7c33a8ddc5625aeff4b20f1490d0fcc4fff008d19ec37f0052543a375b",
+              "ports": {},
+              "startedAt": "2026-11-01T13:02:37.022172905Z"
+            }
+          ],
+          "all25ControllerOperationsExitZeroReaped": true,
+          "foreignSafeProjectionEntries": 41,
+          "foreignSafeBeforeAfterBytesEqual": true
+        },
+        "publicHashes": {
+          "source-manifest.json": "3c4fd4ad0e5c79ae97e47e1c9e33887ec09c7a01ebf59513dd5a99e236966957",
+          "driver-manifest.json": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+          "execution.json": "39466666aea33fa41b6fad2b0bec57cce2a51079ae12bd1538e58ad1efb9e5fd",
+          "role-identity-before-imports.json": "db76fc3a4e6ac0c62583582c6415f40961db7b26e2e641e0b9279d32adf5fba6",
+          "database-after.json": "2ad0513260f927e09cf4f0741bb1c11fb8d7e45c5c5a3dfdc6ba5f94e630a965",
+          "foreign-before.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+          "foreign-after.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+          "python.stdout": "62dc272ec32ffaafac15ce83fba937f51e25ab61ac1b7e12115d402e817b0687",
+          "python.stderr": "70f4d7ad367f4b18335855f3c01fb3b75e3a18da47d3443a3dacfba2b412ca14",
+          "evidence/actual-sql-classes.json": "c1143a4ee948ed80a477f29866db0a9896d3b05c811fe91fdb86432e0743347c",
+          "evidence/full-native-bootstrap.json": "62517455bd7f97f1e342daf5f0fa6d189bca73b09ff170d396f2a08a6e2f5612",
+          "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+          "evidence/profile-factory-cleanup.json": "a2245ef81bc44f95eaafe538190fb8207beb30f7c8c53d2a1b2114edaa4e244f",
+          "evidence/progress.jsonl": "faa94ee46cfbe58c8ded5b1baf054a275bd98aa73d3b742b5291073b7f9edb0d",
+          "evidence/result.json": "e2cd13ca1e5a3d6d013aeee0fb53e427bcfe506e23dd553ec769b3a66e097be3"
+        }
+      },
+      "c": {
+        "verdict": "PASS_EXACT_WORLD",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation139c-823d336c-fullnative-pg-20261101-33faaea1d70a",
+        "cases": 43,
+        "originalDefinitions": 4,
+        "phases": 129,
+        "phaseCounts": {
+          "setup": 43,
+          "call": 43,
+          "teardown": 43
+        },
+        "eachUniqueIDOneSetupCallTeardown": true,
+        "allPhasesPassedNoErrors": true,
+        "phaseResultProgressExactIncludingDuration": true,
+        "collectedExactlyOwnSourceExpansion": true,
+        "collectedIDsSHA256": "8a7e86fb79a1b2e3873e5c68a2a536a5e2ac79dc703a37dd60ffce6485563b5d",
+        "exitCode": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "denied": [],
+        "poolErrors": [],
+        "secondsIncludingBootstrap": 124.71858047414571,
+        "pytestSeconds": 96.47,
+        "ordinaryRole": {
+          "db": "api_activation139c_823d336c_test_20261101",
+          "usr": "clearledger",
+          "dboid": 16385,
+          "owner": 16384,
+          "roid": 16384,
+          "rolsuper": false,
+          "rolcreatedb": false,
+          "rolcreaterole": false,
+          "rolreplication": false,
+          "rolbypassrls": false,
+          "version": 160015
+        },
+        "all577GitSnapshotManifestMatch": true,
+        "exactSourceFS": true,
+        "controller": {
+          "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/activation139c-823d336c-fullnative-pg-root-20261101.py",
+          "sha256": "3b30633ae682bd3810404d4b3dd8cb8adb7395d2cdbc925944f210feb96feb03",
+          "embeddedRunnerSHA256": "5c51908a8308ccbb041c9ab5ca29a08261b860d773c56f8d2663beb2ef149b5a",
+          "matchesPreparation": true,
+          "hardSeconds": 420,
+          "hostSeconds": 450
+        },
+        "schema": {
+          "matchesCommonCountsAndIndependentChecks": true
+        },
+        "lifespanOrSeedCalled": false,
+        "ownPGConnects": 6,
+        "passiveSQL": {
+          "events": 20076,
+          "perTestShapes": 3019,
+          "sumExecutionsMatch": true,
+          "noParametersCaptured": true,
+          "observerErrors": []
+        },
+        "cleanup": {
+          "actualFactory": {
+            "status": "PASS_PROFILE_FACTORY_CLEANUP",
+            "before": {
+              "checkedout": 0,
+              "checkedin": 1
+            },
+            "after": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "loopAlive": true,
+            "syntheticKeyOnly": true
+          },
+          "appPool": {
+            "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+            "before": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "after": {
+              "checkedout": 0,
+              "checkedin": 0
+            },
+            "loopAlive": true,
+            "poolErrors": []
+          },
+          "PG": {
+            "clients": 0,
+            "locks": 0
+          },
+          "owned": [
+            {
+              "kind": "postgres",
+              "removed": true,
+              "exit": 0,
+              "running": false,
+              "OOM": false,
+              "network": "none",
+              "ports": {},
+              "startedAt": "2026-11-01T13:07:46.069648101Z"
+            },
+            {
+              "kind": "python",
+              "removed": true,
+              "exit": 0,
+              "running": false,
+              "OOM": false,
+              "network": "container:2b915207efbf8fa0418791f01955d3b8d387c395bd7e6317903039ebdf2ce7c7",
+              "ports": {},
+              "startedAt": "2026-11-01T13:07:49.715441466Z"
+            }
+          ],
+          "all25ControllerOperationsExitZeroReaped": true,
+          "foreignSafeProjectionEntries": 41,
+          "foreignSafeBeforeAfterBytesEqual": true
+        },
+        "publicHashes": {
+          "source-manifest.json": "3c4fd4ad0e5c79ae97e47e1c9e33887ec09c7a01ebf59513dd5a99e236966957",
+          "driver-manifest.json": "4f86778d597dcdeb568407e138be63147d17bead9d90eb08633720048a5e87ae",
+          "execution.json": "51da3adc4cd0675908333c4e3112e9ab81fce6332787fd4db489d8791c73138d",
+          "role-identity-before-imports.json": "a10a21320c4c0aa50dacd900debd514bb20f8f0c7642605a43a4f35047f58600",
+          "database-after.json": "2ad0513260f927e09cf4f0741bb1c11fb8d7e45c5c5a3dfdc6ba5f94e630a965",
+          "foreign-before.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+          "foreign-after.json": "9ffe8229bed97f75f088e3cb6a1785d04c2e8a480c3e56c738f2f74e18b3dbdf",
+          "python.stdout": "70817d8ffd83eec33a776a2de8339458deae8ce58538b75c5674b9525fd64ca9",
+          "python.stderr": "70f4d7ad367f4b18335855f3c01fb3b75e3a18da47d3443a3dacfba2b412ca14",
+          "evidence/actual-sql-classes.json": "04b7ea48e4f22f8e24a2f6303a8b7e60a8dcf295f6e21de2f5f795289db8d5f8",
+          "evidence/full-native-bootstrap.json": "5c8df7e478e286aa5a18096695c447f6484dd5514147d9bab1b0ebff7684d3b7",
+          "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8",
+          "evidence/profile-factory-cleanup.json": "05bd61b9c84d1322db9ee8c37baaa35f635584882c1291263bd91df68e0b1a05",
+          "evidence/progress.jsonl": "2a2e595c400cf2c7e33ed9172ae14878e4a0d20005b45e56704d6ba497c0d85d",
+          "evidence/result.json": "f6381a74f57e1e67a6ae17d02004f582a15b04f432ef0328475630b04c6d6062"
+        }
+      }
+    },
+    "originalMatrix": {
+      "cases": 139,
+      "definitions": 27,
+      "phases": 417,
+      "unit": {
+        "definitions": 8,
+        "cases": 37
+      },
+      "nativePG": {
+        "definitions": 19,
+        "cases": 102
+      },
+      "DPLIncluded": false,
+      "pairwiseIDsAndDefinitionsDisjoint": true,
+      "fullExpectedIDsEqualRAWUnion": true,
+      "missingIDs": [],
+      "extraIDs": [],
+      "duplicates": [],
+      "expectedAndObservedSortedIDsSHA256": "4304fd3749a06e06f94b712b24e2e59849bbfe9d05899bffce158571e5ad9e57",
+      "sourceInventory": {
+        "test_all_activation_fields_are_required_and_not_nullable": [
+          "unit",
+          22,
+          3,
+          "a"
+        ],
+        "test_generation_is_strict_positive_bigint": [
+          "unit",
+          33,
+          7,
+          "a"
+        ],
+        "test_flags_are_exact_booleans": [
+          "unit",
+          40,
+          14,
+          "a"
+        ],
+        "test_activation_has_no_child_or_authority_input": [
+          "unit",
+          46,
+          6,
+          "a"
+        ],
+        "test_forged_construct_and_copy_are_revalidated": [
+          "unit",
+          53,
+          4,
+          "a"
+        ],
+        "test_exact_dto_type_and_instance_fields_cannot_be_forged": [
+          "unit",
+          61,
+          1,
+          "a"
+        ],
+        "test_source_exact_private_composition_one_b_and_no_children_dml": [
+          "unit",
+          75,
+          1,
+          "a"
+        ],
+        "test_source_activation_only_gate_stage_and_whole_root_completion": [
+          "unit",
+          96,
+          1,
+          "a"
+        ],
+        "test_enable_same_flags_disable_and_new_cas_rollback_keep_children_and_counts": [
+          "PG",
+          153,
+          1,
+          "a"
+        ],
+        "test_real_native_nonadmin_invalid_bearer_and_closed_gate": [
+          "PG",
+          169,
+          1,
+          "a"
+        ],
+        "test_missing_cas_overflow_and_revoked_enable_denied": [
+          "PG",
+          180,
+          4,
+          "a"
+        ],
+        "test_true_requires_corresponding_principal_and_nonempty_legal_selection": [
+          "PG",
+          202,
+          11,
+          "a"
+        ],
+        "test_one_original_b_exact_x_keys_full_closure_and_physical_parent_union": [
+          "PG",
+          230,
+          1,
+          "a"
+        ],
+        "test_actual_last_wait_rechecks_current_native_and_full_member_pointers": [
+          "PG",
+          502,
+          20,
+          "b"
+        ],
+        "test_actual_flush_flags_audit_and_public_auth_failure_roll_back_whole_root": [
+          "PG",
+          571,
+          5,
+          "b"
+        ],
+        "test_concurrent_activation_replace_revoke_are_one_winner_stale_409": [
+          "PG",
+          607,
+          3,
+          "b"
+        ],
+        "test_unknown_commit_ack_requires_fresh_current_auth_readback_and_new_cas": [
+          "PG",
+          620,
+          1,
+          "b"
+        ],
+        "test_cancel_during_actual_typed_wait_does_not_mutate": [
+          "PG",
+          641,
+          1,
+          "b"
+        ],
+        "test_structural_activation_never_restores_actual_external_oauth_or_post_authority": [
+          "PG",
+          668,
+          3,
+          "b"
+        ],
+        "test_exact_type_purpose_and_subclass_rejection_on_actual_native_session": [
+          "PG",
+          744,
+          1,
+          "b"
+        ],
+        "test_internal_service_leaves_original_root_completion_to_actual_caller": [
+          "PG",
+          770,
+          2,
+          "b"
+        ],
+        "test_empty_actual_member_rows_keep_explicit_parent_boundary": [
+          "PG",
+          797,
+          1,
+          "b"
+        ],
+        "test_external_committed_graph_drift_during_real_b_wait_never_expands_plan": [
+          "PG",
+          818,
+          4,
+          "b"
+        ],
+        "test_full_graph_foreign_owner_corruption_is_denied_before_b": [
+          "PG",
+          859,
+          3,
+          "c"
+        ],
+        "test_canonical_only_foreign_installation_location_denied_before_b": [
+          "PG",
+          965,
+          4,
+          "c"
+        ],
+        "test_each_foreign_typed_canonical_item_denied_in_every_mode_before_b": [
+          "PG",
+          984,
+          30,
+          "c"
+        ],
+        "test_local_canonical_extras_keep_literal_unrequested_opaque_ids_and_full_union": [
+          "PG",
+          1002,
+          6,
+          "c"
+        ]
+      },
+      "expansionMethod": "Own stdlib AST/literal_eval/itertools only: all27 test definitions, reversed parametrize dimensions, scalar labels including unary -1, tuple arguments flattened, object arg-index labels. Exact expected139 node-ID set equals3 RAW collections; no pytest/import/collection/extracted execution.",
+      "sequentialEvidence": {
+        "progressMonotonicBounds": {
+          "a": [
+            7326786.9971053,
+            7326911.830399501
+          ],
+          "b": [
+            7327052.797791463,
+            7327212.871141198
+          ],
+          "c": [
+            7327365.53830814,
+            7327461.95880858
+          ]
+        },
+        "AEndsBeforeBStartsAndBEndsBeforeCStarts": true,
+        "priorOwnedIDsAbsentFromNextForeignBefore": true
+      },
+      "inventoryColumns": [
+        "fileKey",
+        "line",
+        "variants",
+        "world"
+      ]
+    },
+    "source": {
+      "snapshotFiles": 577,
+      "counts": {
+        "app": 527,
+        "schema_migrations": 34,
+        "tests": 16
+      },
+      "all577BytesMatchGit823AndManifestEachWorld": true,
+      "allThreeSourceManifestsAndSnapshotBytesEqual": true,
+      "exactFilesystemEachWorld": true,
+      "criticalSHA256": {
+        "app/services/partner_contract_activation.py": "6b97c9e6c5420af95587b85947c26295b95d82941ada2bc1c6f5912e648ad9a5",
+        "app/services/partner_identity.py": "0968c41deac1955095c9a80ba4542d0ccd074f68699c29c788cbfab11772ac90",
+        "app/services/partner_contract_profiles.py": "6fdc93816c6ba7af22b97dc6c1e8e1bc91f1563cec1c0672e82e17a11c23abef",
+        "app/services/contract_write_locks.py": "a1d544fcace1080629a29b42701861a04f0286f7d8ba5a133d0df446eb331c54",
+        "app/auth.py": "0020fc52525e16c9a701598a871d72d67af25683690debe153b1995ed0c1b889",
+        "app/routers/partner_admin_router.py": "8d7e9324e1a82a716cb96632f389d2ebedd40dfe4b7f798b4b81d8437afb2494",
+        "app/schemas_partner.py": "2f9c10a92d960b25ff3bbd74a4990e583cadfaba118570236b325baf8ab02580",
+        "tests/test_partner_contract_activation.py": "2e5f9a31ed4cc3653b3f2c0d2df5e23479baa4f38e169cc32aad3fd0facb1219",
+        "tests/test_partner_contract_activation_pg.py": "2e7b3bc77db9b1340840519b502f798bdd92bc9fcb0be2bb4ea07c9fcaadd795",
+        "tests/partner_contract_issuer_fixture.py": "274b1451b1af107b384e2f2dd9aa44d32f6787027789bfefd13359dc5c8c15f0"
+      },
+      "admission": {
+        "author": "8e1dbd5034972bc3344d2b6e46fb12b6f17d8b13",
+        "base": "b41ba2da0dadaf991df4bdf6e954224752182ca4",
+        "peerSourceReview": {
+          "path": "/home/mag/orca/workspaces/ecosystem-deploy/parallel-ownership-audit-20261031/docs/api/execution-20261029/parallel-ownership-audit-20261031/activation-139-source-admission-20261101/review",
+          "MDsha256": "2fc41e34d4e83fef8760148eff5477544b68cb1dc6d4a05be1bf5ccdf68c9c6b",
+          "JSONsha256": "5cec2eb12a451b93d50a424a7763fe89bf28698083f6c941e959ece9ab35b18e"
+        },
+        "RootPGBytesEqualReviewedAuthor": true,
+        "exactFourHunks9Insert9Delete": true,
+        "onlyFourOf51TopNodesChanged": true,
+        "wholePGByteInverseEqualsBase": true,
+        "oldPGsha256": "57d2b25225901d6c3b4206de3dd1c2e97c16fb9796e04099219ca4db57b219ce",
+        "newPGsha256": "2e7b3bc77db9b1340840519b502f798bdd92bc9fcb0be2bb4ea07c9fcaadd795",
+        "protectedObserverUnchangedRawSHA256": "a8728f7ce65add67f172502c9c9ecfeef43eafed75b0cd46a77988e11073323a",
+        "protectedObserverUnchangedASTSHA256": "ab0f8194e2b011dddfcd0a260fada2fb071751e580935af9a06f25e86ecdfe6d",
+        "Root6fTo823ProductionSchemaDeltaZero": true,
+        "fourFixes": "B1/B4 mapping basenames replace false core-prefix markers. B2/B3 awaited list replaces tuple(async-generator); same5/13 queries/predicates/order/snapshots, no bypass.",
+        "docsOnlyFollowup": "6b896bfffb334c0b74c7f29c1fe6c4331cfd1c46 differs from823 only by two OPTIONS verification docs, no app/schema/activation test/fixture change."
+      },
+      "inventoryPaths": {
+        "unit": "tests/test_partner_contract_activation.py",
+        "PG": "tests/test_partner_contract_activation_pg.py"
+      }
+    },
+    "composition": {
+      "controllerRefs": "Controllers18-57 pins/69-77 role/85-98 isolation/104-132 cleanup. Runners12-24 audit/89-241 schema/254-285 fixture alias/292-341 capture+cleanup.",
+      "factoryAlias": "Runner254-280 activation_admin_factory creates one actual AsyncEngine pool_size8/max_overflow0/READ COMMITTED and async_sessionmaker(expire_on_commit=False). Partner fixture282-285 depends on it and yields SAME sessionmaker. Each factory() creates independent clean actual Sessions; alias is no auth/SQL/Session substitute.",
+      "concurrentConnections": "T488-497 actual pg_blocking_pids+ungranted pg_locks while blocker/request wait; observer is third Session. B pool checkedin3, capacity8 not8 observed. Early empty PID-box comparison alone proves nothing.",
+      "nativeAndAuthlib": "World40-125 actual own native claims/get_db factory; issuer original Authlib token/consent/PKCE. Structural3 proves actual eligibility then committed disable; no positive auth/B/SQL/provider substitute.",
+      "schemaAndDriver": "Each world:independent341 registry/341→347 native catalogue; validated ordinary ownerPK/FK+enabled4RI/FK. Ordinary role OID owner match/all elevated flagsfalse. PG16.15/SQLA2.0.36/psycopg3.2.3/Python3.13.7. Original bootstrap, no schema adapter.",
+      "noLifespanSeedServer": "app.main/seed imported, no lifespan/seed entry; in-process ASGI/no HTTP server. Audit denies bind/process/foreignnetwork, only ownPGloopback; denied[] all, isolated namespaces/ports{}.",
+      "dependencyBoundary": "Pinned helper/library bytes outside allowed inputs not reopened; public driver/version/source checks only.",
+      "protectedObserver": "Frozen T230-485:finite compiled grammar, exact mapped tables/schema/current params; originalSession/root/Connection/capability/typedplan; protected PUT1ProfileUPDATE+1AuditINSERT/fullCP-Org-Loc→Member union; deadcap denied. No universal detector.",
+      "productionGuardPins": "Unchanged activation64-158 wholeclosure;160-185 wait/parentorder;247-264 CAS/flags/audit/flush/checks;268-281 rootowner. Exact purpose/lifetime/weakregistry, no child/business write or authority issuance.",
+      "nativeSchemaExpectedCounts": {
+        "prefix3": {
+          "models": 341,
+          "tables": 341,
+          "columns": 4675,
+          "FK": 790,
+          "RI": 3160,
+          "exactIndependentSourceRegistryAndTableUniverse": true,
+          "ordinaryOwnerValidatedKeysEnabled4RIperFK": true
+        },
+        "prefix4": {
+          "models": 341,
+          "tables": 347,
+          "columns": 4720,
+          "FK": 803,
+          "RI": 3212,
+          "exactIndependentSourceRegistryAndTableUniverse": true,
+          "ordinaryOwnerValidatedKeysEnabled4RIperFK": true
+        }
+      },
+      "fixtureAlias": "Runner254-280 actual engine8/maxoverflow0/READ COMMITTED/sessionmaker(expire_on_commit=False). Partner alias282-285 yields SAME factory; every factory() creates a real independent Session, no auth/SQL stand-in."
+    },
+    "SourceAndRAWSemantics": {
+      "A55": "37strict unit+18PG:DTO/forgery/type/purpose, sameflags/newCAS/disable, stale/missing/overflow/revoke,nonadmin/bearer/gate,11legal-principal conditions, protectedoriginalB/Connection/twoDML/fullparentunion.",
+      "B20LastWait": "T502-567:actual PIDs/pg_blocking_pids/ungranted locks before release;20phase×change. Token/admin/Member UPDATEs are SAME REQUEST ROOT after proven wait; gate is process-level. Rollback removes request-owned changes, not externally committed revocations; actual B/auth delegates.",
+      "B5AfterFlush": "T571-603:actualgen2/flags/oneaudit before fault/cancel/token/admin/gate loss; BaseException rollback and independent fresh state. Cancellation asserted, no success conversion.",
+      "BConcurrencyACK": "T607-638:3real contenders one200/one409;gen2/oneaudit. LostACK awaits originalCOMMIT first; fresh authenticatedGET seesgen2/oldCAS409/newCASdisable200. Laterrollback cannot undo priorcommit.",
+      "BCancelCallerLifetime": "T641-664 proven typedwait then CancelledError/unchangedstate;T744-766 exacttype/purpose refusal;T770-794 caller owns same root/commitvsrollback/uncommittedflush invisible;T797-814 emptyMember boundary.",
+      "B4ExternalCommit": "T818-855:separate blocker commits home/Role/MemberCP/child drift during typedBwait;request409/oneoriginalplan/noexpansion,own flags/audit untouched. External committed drift is NOT rolled back by request.",
+      "B3StructuralNotOAuth": "T668-741:real bearer eligible→committed App/grant/both disable→activation enable succeeds but verifier/POST401 persist. Whole5queryOAuth/children/business unchanged except activationaudit; no authority issuance.",
+      "C43": "T8593 foreign Role/profile-ref/MemberCP owner cases denied beforeB. T9654 canonical-only foreign install location combinations; T98430 = FIVE kinds(objects/equipment/counterparties/contracts/documents)×ALL/EMPTY/SET×(true,true)/(false,false): actual native auth reached once,409 beforeB/no advisory/row locks/DML/no foreign owner/Org/kind traversal, unchanged13-query both-tenant SQL snapshot. T10026 local modes×all_locations keep literal32 whitespace nativeID unrequested by profile, full canonical union locked beforeMember,1B/gen2/flags/current children+counts unchanged and one audit. ModeEMPTY disables flags but not structural/raw closure guards."
+    },
+    "passiveSQLScope": "CALL captures include setup mutations performed inside tests, blocker/observer polling, GET/readbacks, actual same-root negative writes/externally committed edits and retries with new CAS. Counts are attempted emitted statements, not latency/query budget, clean production load or exactly2DML across entire suite.",
+    "preparation": {
+      "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/activation139-three-worlds-native-preparation-20261101.json",
+      "sha256": "b6a2322c36ae5141a1c720b1ae5f57e5965dec965c8c4d0d44015e5f614bf6cf",
+      "boundsAndExactSelectedDefinitionsMatchSourceAndControllers": true,
+      "preparedStatusIsNotRuntimeAcceptance": true
+    },
+    "RootSummary": {
+      "path": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/full-api-continuation-20261030/activation139-full-native-root-observation-20261101.json",
+      "sha256": "140a85402f846a04bd81d8585e93d0e534bf5b97aac59c31b4665ead5dc351a1",
+      "resultExecutionHashesAndCountsVerifiedAgainstEachRAW": true
+    },
+    "limits": [
+      "PASS only complete ORIGINAL activation139 component at823, with37unit+102nativePG, noDPL count",
+      "Three independent sequential worlds, not one joint wholeAPI/CI run",
+      "Accepted51 onb41, OPTIONS75, SDK17 and separately checked DPL are not substituted or added to139",
+      "No M15/benchmark/performance/deploy/production flags acceptance",
+      "Foreign equality proves safe container projection only, not all foreign DB integrity",
+      "Warnings retained: async fixture deprecation, intentional forgedDTO serializer warning inA, SyntaxWarnings",
+      "Full M00-M19+11 OPEN; no global completion percentage"
+    ],
+    "executionFloor": "Reviewer only FS/read-only Git/stdlib AST/hash/JSON/literal data and memory compile without exec; no project/test/helper/library imports or calls, pytest/collection/SQL/PG/Docker/SSH/Node/network/browser/install/workers/source change/commit/push. No control/env/DSN/privateRAW. C read only after Root frozen notification. Only new REVIEW.md/json written."
+  },
+  "optimizedCompositionLimitedAcceptance20261101": {
+    "source": "2d1b6454350515e546a8da26e9abc24af302e568",
+    "status": "INDEPENDENT_LIMITED_FUNCTIONAL139_ACCEPTED_B_C_GLOBAL_FAIL_PRESERVED",
+    "cases": 139,
+    "definitions": 27,
+    "phases": 417,
+    "unit": 37,
+    "nativePG": 102,
+    "reviewMDsha256": "64527e566590710b693810297ab45a025d4ab6cdb1522ad8cc708870c32c5277",
+    "reviewJSONsha256": "7790373c1e7fd0dd713b421eef450788befa6e478f8bf4710a4fa02bb79499a0",
+    "pinsReverifiedByRoot": 59,
+    "worlds": [
+      {
+        "label": "a",
+        "cases": 55,
+        "phases": 165,
+        "seconds": 148.0502140056342,
+        "pytestExit": 0
+      },
+      {
+        "label": "b",
+        "cases": 41,
+        "phases": 123,
+        "seconds": 191.95413346588612,
+        "pytestExit": 0
+      },
+      {
+        "label": "c",
+        "cases": 43,
+        "phases": 129,
+        "seconds": 123.55731648672372,
+        "pytestExit": 0
+      }
+    ],
+    "hostOutcomes": [
+      0,
+      1,
+      1
+    ],
+    "foreign": "A47→47exact;B47→45removed2/common45unchanged;C43→43removed2+added2/common41unchanged;causeUNKNOWN. StrictGLOBALFAIL retainedforB/C. Ownedresourcesremovedandpoolsclientslocks0 inallworlds.",
+    "limits": "OriginalassertionsandSourcebound,nofullHTTPbody/SQLparameter/chronologicaltrace;nonjointCI. HostexitRoottoolobservationsnotseparateFSargvreceipts. Old823PASSnottransferred.",
+    "currentUserScope": "ONLYRusHydro-requiredmethods; closespreviousauthorizedregressionpackage, allhistorical20+11notcurrentcompletiongate."
+  }
+}

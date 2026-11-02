@@ -62,7 +62,7 @@ def _file_priority(v: DocVersion) -> tuple:
 
 
 async def space_documents(db: AsyncSession, cid: uuid.UUID, user: User) -> list[dict]:
-    from app.routers.docs_router import _readable_doc_clause  # без цикла импортов
+    from app.services.doc_access import _readable_doc_clause
     from app.services.ezs_project import DOC_LABELS
 
     out: list[dict] = []

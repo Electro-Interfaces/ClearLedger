@@ -5,7 +5,7 @@ import type { TechConnectionView } from './techConnectionView'
  * Раздел «Управленческий» → группа «Площадки» (energy/РусГидро): девелоперский
  * пайплайн развития сети. НЕ путать с /equipment (склад железа).
  */
-import { get, post, patch, put, del, upload } from './apiClient'
+import { get, post, patch, put, del, upload, downloadFile, captureApiContextGuard } from './apiClient'
 import { downloadAttachment } from '@/lib/authFiles'
 
 /**
@@ -209,6 +209,8 @@ export interface SiteDetail extends SiteRow {
   // графы чек-листа согласования: экономика этапа 3, условия площадки, контакты
   inputPriceKwth: number | null
   smrCost: number | null
+  dismantleLocationIds: string[]
+  decommissionedOn: string | null
   longTermContract: boolean | null
   // условия аренды и площадки (предложения отдела развития 09.10.2026)
   contractKind: string | null
@@ -399,7 +401,12 @@ export async function getSiteMembers(companyId: string): Promise<SiteMember[]> {
 export async function patchSite(
   companyId: string, id: string, payload: Record<string, unknown>,
 ): Promise<{ changed: string[]; site: SiteDetail }> {
-  return patch(`/api/sites/${id}?company_id=${companyId}`, payload)
+  const guard = captureApiContextGuard()
+  try {
+    const result = await patch<{ changed: string[]; site: SiteDetail }>(`/api/sites/${id}?company_id=${companyId}`, payload)
+    guard()
+    return result
+  } catch (error) { guard(); throw error }
 }
 
 /** Перевод по воронке. Незакрытый гейт не блокирует — возвращается в `missing`. */
@@ -1011,29 +1018,14 @@ export async function getPhaseDurations(companyId: string): Promise<PhaseDuratio
  * копия качания блоба, и они разъезжаются по мелочам (имя файла, обработка 401).
  */
 export async function exportXlsx(companyId: string, report: string, fileName?: string,
-  params?: Record<string, string | number | boolean | undefined>): Promise<void> {
-  const { getToken } = await import('./apiClient')
-  const token = getToken()
-  const base = import.meta.env.VITE_API_URL ?? ''
+  params?: Record<string, string | number | boolean | undefined>, options?: { signal?: AbortSignal }): Promise<void> {
   // Отбор экрана едет в выгрузку теми же параметрами, что и в список: иначе файл
   // содержит все проекты, а на экране — отфильтрованные (замечание Ступина 29.09.2026).
   const qs = new URLSearchParams({ company_id: companyId })
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v !== undefined && v !== '' && v !== false) qs.set(k, String(v === true ? 1 : v))
   }
-  const res = await fetch(`${base}/api/sites/export/${report}?${qs}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName ?? `${report}.xlsx`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  return downloadFile(`/api/sites/export/${report}?${qs}`, fileName ?? `${report}.xlsx`, options)
 }
 
 /** Выгрузка портфеля в xlsx — то, что уходит на совещание. */

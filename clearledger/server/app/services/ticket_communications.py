@@ -116,39 +116,56 @@ async def recipient_allowed(db, room, user_id):
     except HTTPException:
         return False
 
+def delivery_room_reference(channel, payload):
+    """Shared parser; legacy opaque references still have an early no-DB allow."""
+    raw = channel[5:] if channel.startswith("chat:") else payload.get("roomId")
+    recognized = channel.startswith("chat:") or str(payload.get("type", "")).startswith("chat:")
+    if not raw:
+        return recognized, None
+    try:
+        return recognized, uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return recognized, None
+
+
+async def delivery_allowed_in_session(db, channel, payload, user_id):
+    """Original authoritative task/ticket/history gate on an owned DB scope."""
+    from app.models import ChatRoom
+    recognized, room_id = delivery_room_reference(channel, payload)
+    if not recognized or room_id is None:
+        return True
+    try:
+        room = await db.get(ChatRoom, room_id)
+        if room is None or not await recipient_allowed(db, room, user_id):
+            return False
+        if is_ticket_room(room):
+            from app.models import ChatMessage
+            since = await db.scalar(select(ChatParticipant.history_from).where(
+                ChatParticipant.room_id == room.id, ChatParticipant.user_id == uuid.UUID(str(user_id))))
+            if since is not None:
+                ids = [payload.get("replyTo")]
+                if payload.get("type") in ("chat:message", "chat:edit", "message:edited"):
+                    ids.append(payload.get("id"))
+                pinned = payload.get("pinnedMessage")
+                if isinstance(pinned,dict):
+                    ids.append(pinned.get("id"))
+                for message_id in filter(None,ids):
+                    message = await db.get(ChatMessage,uuid.UUID(str(message_id)))
+                    if message is not None and message.created_at < since:
+                        return False
+        return True
+    except (ValueError, TypeError, HTTPException):
+        return False
+
+
 async def delivery_allowed(channel, payload, user_id):
     """Тот же gate для межпроцессного WS и персональных mention previews."""
     from app.database import async_session_factory
-    from app.models import ChatRoom
-    rid = channel[5:] if channel.startswith("chat:") else payload.get("roomId")
-    if not channel.startswith("chat:") and not str(payload.get("type", "")).startswith("chat:"):
-        return True
-    if not rid:
-        return True
-    try:
-        room_id = uuid.UUID(str(rid))
-    except (ValueError, TypeError):
-        return True  # opaque internal non-room channels; REST/subscribe accept UUID only
+    recognized, room_id = delivery_room_reference(channel, payload)
+    if not recognized or room_id is None:
+        return True  # preserve all original no-session/check-out early returns
     try:
         async with async_session_factory() as db:
-            room = await db.get(ChatRoom, room_id)
-            if room is None or not await recipient_allowed(db, room, user_id):
-                return False
-            if is_ticket_room(room):
-                from app.models import ChatMessage
-                since = await db.scalar(select(ChatParticipant.history_from).where(
-                    ChatParticipant.room_id == room.id, ChatParticipant.user_id == uuid.UUID(str(user_id))))
-                if since is not None:
-                    ids = [payload.get("replyTo")]
-                    if payload.get("type") in ("chat:message", "chat:edit", "message:edited"):
-                        ids.append(payload.get("id"))
-                    pinned = payload.get("pinnedMessage")
-                    if isinstance(pinned,dict):
-                        ids.append(pinned.get("id"))
-                    for message_id in filter(None,ids):
-                        message = await db.get(ChatMessage,uuid.UUID(str(message_id)))
-                        if message is not None and message.created_at < since:
-                            return False
-            return True
+            return await delivery_allowed_in_session(db, channel, payload, user_id)
     except (ValueError, TypeError, HTTPException):
         return False

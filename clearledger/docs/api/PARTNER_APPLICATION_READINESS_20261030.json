@@ -1,0 +1,2861 @@
+{
+  "schemaVersion": 1,
+  "kind": "partner-application-readiness-source-analysis",
+  "date": "2026-10-30",
+  "sourceRevision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+  "deployContextRevision": "dde050c8a4a952f3785a44f5650f19a1bd9d7f58",
+  "scope": "Два первых партнёрских приложения РусГидро; только применимые вызовы, без повторного аудита 1703 операций.",
+  "verdict": "source_analysis_complete; candidate_default_off; not_product_ready; not_full_modernization",
+  "statuses": [
+    "exists_external",
+    "current_native_only",
+    "missing",
+    "needs_product_choice"
+  ],
+  "statusSemantics": {
+    "exists_external": "implemented curated/protocol code, not release enabled",
+    "current_native_only": "existing native Core route cannot be used with partner access token",
+    "missing": "no needed public representation/operation in curated set",
+    "needs_product_choice": "product requirement unresolved, no permission to invent business workflow"
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/v1/objects",
+      "operationId": "listObjects",
+      "domain": "objects",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "objects:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "O",
+      "callableOwner": "app.product_api.app.create_product_api.objects",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.listObjects",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/objects/{objectId}",
+      "operationId": "getObject",
+      "domain": "objects",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "objects:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "O",
+      "callableOwner": "app.product_api.app.create_product_api.object_detail",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.getObject",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/objects/{objectId}/monitoring",
+      "operationId": "getObjectMonitoring",
+      "domain": "monitoring",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "objects:read",
+        "monitoring:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "M",
+      "callableOwner": "app.product_api.app.create_product_api.object_monitoring",
+      "delegation": "app.product_api.monitoring.detail",
+      "sourceRefs": [
+        "route.getObjectMonitoring",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "monitoring"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/equipment",
+      "operationId": "listEquipment",
+      "domain": "equipment",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "equipment:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "E",
+      "callableOwner": "app.product_api.app.create_product_api.equipment",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.listEquipment",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/equipment/{equipmentId}",
+      "operationId": "getEquipment",
+      "domain": "equipment",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "equipment:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "E",
+      "callableOwner": "app.product_api.app.create_product_api.equipment_detail",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.getEquipment",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/counterparties",
+      "operationId": "listCounterparties",
+      "domain": "counterparties",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "counterparties:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "P",
+      "callableOwner": "app.product_api.app.create_product_api.counterparties",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.listCounterparties",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/counterparties/{counterpartyId}",
+      "operationId": "getCounterparty",
+      "domain": "counterparties",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "counterparties:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "P",
+      "callableOwner": "app.product_api.app.create_product_api.counterparty_detail",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.getCounterparty",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/contracts",
+      "operationId": "listContracts",
+      "domain": "contracts",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "contracts:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "C",
+      "callableOwner": "app.product_api.app.create_product_api.contracts",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.listContracts",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/contracts/{contractId}",
+      "operationId": "getContract",
+      "domain": "contracts",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "contracts:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ],
+      "ceiling": "C",
+      "callableOwner": "app.product_api.app.create_product_api.contract_detail",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.getContract",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents",
+      "operationId": "listDocuments",
+      "domain": "documents",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "documents:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access"
+      ],
+      "ceiling": "D",
+      "callableOwner": "app.product_api.app.create_product_api.documents",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.listDocuments",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "document_policy"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents/{docId}",
+      "operationId": "getDocument",
+      "domain": "documents",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "documents:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access"
+      ],
+      "ceiling": "D",
+      "callableOwner": "app.product_api.app.create_product_api.document_detail",
+      "delegation": "app.product_api.queries.Query",
+      "sourceRefs": [
+        "route.getDocument",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "document_policy"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents/{docId}/versions/{versionId}/content",
+      "operationId": "downloadDocumentVersion",
+      "domain": "documents",
+      "status": "exists_external",
+      "availability": "candidate_default_off",
+      "scopes": [
+        "documents:read",
+        "documents.files:download"
+      ],
+      "tokenClasses": [
+        "partner_user_access"
+      ],
+      "ceiling": "D",
+      "callableOwner": "app.product_api.app.create_product_api.document_content",
+      "delegation": "app.product_api.files.content",
+      "sourceRefs": [
+        "route.downloadDocumentVersion",
+        "api._policy",
+        "access.resolve"
+      ],
+      "proofRefs": [
+        "main",
+        "document_policy"
+      ],
+      "runtimeAtSnapshot": "not_run"
+    }
+  ],
+  "routeCounts": {
+    "total": 12,
+    "userOrService": 9,
+    "userOnlyDocuments": 3,
+    "domains": 6
+  },
+  "ceilings": {
+    "T": "Verified token tenant only; live client/install/grant/family/member/scopes and independent typed resource grant; ALL/SET/EMPTY; request selectors cannot widen tenant; user object ceiling intersects installation ceiling; own organization intersection; even admin does not widen partner grants.",
+    "O": "T + objects grant + current member object ceiling + own-org location-scoped ContractLocation relation. No ev_charging/is_test/closed population filter in current Query.conditions.",
+    "E": "T + equipment grant + kind=station + current_location_id inside member/installation ceiling + own-org relation. objectId requires separate visible objects grant/scope, otherwise null.",
+    "C": "T + contracts grant + organization_id if constrained; restricted object ceiling requires scope_type=locations and at least one matching ContractLocation. counterpartyId requires independently visible counterparties, otherwise null.",
+    "P": "T + counterparties grant + is_group=false; limited object/own-org context requires compatible Contract through contract_domain. No object grant implicitly opens counterparties.",
+    "D": "T + documents grant + delegated current User + docs module/role + native readable document ACL + object/own-org predicates. Content also download scope, native download ACL and company→doc→version→SourceFile chain; shared task/chat/conf/store bytes conservatively denied.",
+    "M": "O + objects:read AND monitoring:read + Company.profile_id=energy before sessions aggregation; object-specific observed boundary; current catalog with historical session cutoff, no finance/tickets/PII."
+  },
+  "actions": [
+    {
+      "id": "login",
+      "title": "Вход сотрудника, consent и токен",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "exists_external",
+      "externalOperations": [],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "oauth.authorize",
+        "oauth.approve",
+        "oauth.token",
+        "identity.eligible_scopes",
+        "identity.verify_access"
+      ],
+      "proofRefs": [
+        "main"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": null,
+      "protocolOperations": [
+        {
+          "method": "GET",
+          "path": "/api/oauth2/authorize",
+          "operationId": null,
+          "operationIdStatus": "protocol endpoint outside curated product operationId registry",
+          "scopes": [
+            "openid",
+            "requested business scopes"
+          ],
+          "tokenClasses": [
+            "Core login/consent; no product token yet"
+          ],
+          "ceiling": "registered client exact redirect+PKCE; company/installation selected at consent, current eligible_scopes",
+          "callableOwner": "app.routers.partner_oauth_router.authorize",
+          "sourceRefs": [
+            "oauth.authorize"
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/oauth2/token",
+          "operationId": null,
+          "operationIdStatus": "protocol endpoint outside curated product operationId registry",
+          "scopes": [
+            "consented user scopes OR separately approved machine scopes"
+          ],
+          "tokenClasses": [
+            "authorization_code+S256 verifier OR client_secret_basic+explicit machine grant_id"
+          ],
+          "ceiling": "live client/install/grant/member/current resource ceilings; no request-side company widening",
+          "callableOwner": "app.routers.partner_oauth_router.token",
+          "sourceRefs": [
+            "oauth.token"
+          ]
+        }
+      ],
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    },
+    {
+      "id": "select",
+      "title": "Выбор разрешённых точек обслуживания и станционного оборудования",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "exists_external",
+      "externalOperations": [
+        {
+          "method": "GET",
+          "path": "/api/v1/objects",
+          "operationId": "listObjects",
+          "scopes": [
+            "objects:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "O",
+          "callableOwner": "app.product_api.app.create_product_api.objects"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/objects/{objectId}",
+          "operationId": "getObject",
+          "scopes": [
+            "objects:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "O",
+          "callableOwner": "app.product_api.app.create_product_api.object_detail"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/equipment",
+          "operationId": "listEquipment",
+          "scopes": [
+            "equipment:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "E",
+          "callableOwner": "app.product_api.app.create_product_api.equipment"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/equipment/{equipmentId}",
+          "operationId": "getEquipment",
+          "scopes": [
+            "equipment:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "E",
+          "callableOwner": "app.product_api.app.create_product_api.equipment_detail"
+        }
+      ],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "query.Query.conditions",
+        "dto.Object",
+        "dto.Equipment"
+      ],
+      "proofRefs": [
+        "product",
+        "main"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": null,
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    },
+    {
+      "id": "find",
+      "title": "Поиск контрагента и договора",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "exists_external",
+      "externalOperations": [
+        {
+          "method": "GET",
+          "path": "/api/v1/counterparties",
+          "operationId": "listCounterparties",
+          "scopes": [
+            "counterparties:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "P",
+          "callableOwner": "app.product_api.app.create_product_api.counterparties"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/counterparties/{counterpartyId}",
+          "operationId": "getCounterparty",
+          "scopes": [
+            "counterparties:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "P",
+          "callableOwner": "app.product_api.app.create_product_api.counterparty_detail"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/contracts",
+          "operationId": "listContracts",
+          "scopes": [
+            "contracts:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "C",
+          "callableOwner": "app.product_api.app.create_product_api.contracts"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/contracts/{contractId}",
+          "operationId": "getContract",
+          "scopes": [
+            "contracts:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "C",
+          "callableOwner": "app.product_api.app.create_product_api.contract_detail"
+        }
+      ],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "search",
+        "query.Query.listing",
+        "dto.Contract"
+      ],
+      "proofRefs": [
+        "product"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": null,
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    },
+    {
+      "id": "contract_objects",
+      "title": "Прочитать адресную связь договора с объектом",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "GET",
+          "path": "/api/references/contracts/{item_id}/locations",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native assert_company_member; not a partner grant boundary",
+          "callableOwner": "app.routers.references_router.get_contract_locations",
+          "sourceRefs": [
+            "native.get_contract_locations"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "dto.Contract",
+        "query.Query.project",
+        "models.ContractLocation"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": null,
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "document_contract",
+      "title": "Найти именно бумаги выбранного договора",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "missing",
+      "externalOperations": [],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "dto.Document",
+        "dto.Contract",
+        "usage.contract_usage"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Нужна явная безопасная проекция связи contract→DocCard; поиск по названию или тому же counterparty не доказывает связь.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "documents",
+      "title": "Чтение доступных карточек, текущих версий и разрешённых байтов",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "exists_external",
+      "externalOperations": [
+        {
+          "method": "GET",
+          "path": "/api/v1/documents",
+          "operationId": "listDocuments",
+          "scopes": [
+            "documents:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access"
+          ],
+          "ceiling": "D",
+          "callableOwner": "app.product_api.app.create_product_api.documents"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/documents/{docId}",
+          "operationId": "getDocument",
+          "scopes": [
+            "documents:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access"
+          ],
+          "ceiling": "D",
+          "callableOwner": "app.product_api.app.create_product_api.document_detail"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/documents/{docId}/versions/{versionId}/content",
+          "operationId": "downloadDocumentVersion",
+          "scopes": [
+            "documents:read",
+            "documents.files:download"
+          ],
+          "tokenClasses": [
+            "partner_user_access"
+          ],
+          "ceiling": "D",
+          "callableOwner": "app.product_api.app.create_product_api.document_content"
+        }
+      ],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "files.content",
+        "docpolicy._readable_doc_clause",
+        "docpolicy.authorize_docs_file_download"
+      ],
+      "proofRefs": [
+        "document_policy",
+        "main"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": null,
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    },
+    {
+      "id": "monitoring",
+      "title": "Статус и зарядные агрегаты выбранного объекта",
+      "applications": [
+        "operations_monitoring"
+      ],
+      "status": "exists_external",
+      "externalOperations": [
+        {
+          "method": "GET",
+          "path": "/api/v1/objects/{objectId}/monitoring",
+          "operationId": "getObjectMonitoring",
+          "scopes": [
+            "objects:read",
+            "monitoring:read"
+          ],
+          "tokenClasses": [
+            "partner_user_access",
+            "partner_machine_access"
+          ],
+          "ceiling": "M",
+          "callableOwner": "app.product_api.app.create_product_api.object_monitoring"
+        }
+      ],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "monitor.detail",
+        "metrics.visit_summary",
+        "metrics.monitor_context"
+      ],
+      "proofRefs": [
+        "monitoring",
+        "main"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": null,
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    },
+    {
+      "id": "create_contract",
+      "title": "Создать паспорт договора (предлагаемый сценарий)",
+      "applications": [
+        "lease_power"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "POST",
+          "path": "/api/references/contracts",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "assert_company_member + same-company parties/type; native User only; transaction caller/get_db",
+          "callableOwner": "app.routers.references_router.create_contract → app.services.native_contract_commands.create_native_contract",
+          "sourceRefs": [
+            "native.create_contract"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "nativecase.create_native_contract",
+        "schema.ContractCreate",
+        "models.Contract"
+      ],
+      "proofRefs": [
+        "native_create"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Первый write и смысл draft не утверждены; Contract не имеет draft status DocCard.",
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    },
+    {
+      "id": "update_contract",
+      "title": "Исправить паспорт/очистить реквизит (предлагаемый сценарий)",
+      "applications": [
+        "lease_power"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "PATCH",
+          "path": "/api/references/contracts/{item_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native member + lock/reload + existing manual/null policy; not partner scope",
+          "callableOwner": "app.routers.references_router.update_contract",
+          "sourceRefs": [
+            "native.update_contract"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "schema.ContractUpdate",
+        "native.update_contract"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Allowlisted editable fields, revision/conflict и расширенный null-intent согласовать отдельно.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "create_update_party",
+      "title": "Создать/исправить контрагента (предлагаемый сценарий)",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "POST",
+          "path": "/api/references/counterparties",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native company membership and identity uniqueness",
+          "callableOwner": "app.routers.references_router.create_counterparty",
+          "sourceRefs": [
+            "native.create_counterparty"
+          ],
+          "partnerCallable": false
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/references/counterparties/{item_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native owned row + unique identity/manual fields",
+          "callableOwner": "app.routers.references_router.update_counterparty",
+          "sourceRefs": [
+            "native.update_counterparty"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "parties.create_imported_counterparty",
+        "parties.add_imported_counterparty_alias"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Native и import commands не дают партнёру полномочий заводить общую карточку.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "link_write",
+      "title": "Привязать/отвязать объект, сменить охват (предлагаемый сценарий)",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "PUT",
+          "path": "/api/references/contracts/{item_id}/scope",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native member; contract company and matching location company; no partner principal",
+          "callableOwner": "app.routers.references_router.set_contract_scope",
+          "sourceRefs": [
+            "native.set_contract_scope"
+          ],
+          "partnerCallable": false
+        },
+        {
+          "method": "POST",
+          "path": "/api/references/contracts/{item_id}/locations/{loc_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native member + same-company location; company contract conflicts",
+          "callableOwner": "app.routers.references_router.link_contract_location",
+          "sourceRefs": [
+            "native.link_contract_location"
+          ],
+          "partnerCallable": false
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/references/contracts/{item_id}/locations/{loc_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native member; last removal makes unassigned",
+          "callableOwner": "app.routers.references_router.unlink_contract_location",
+          "sourceRefs": [
+            "native.unlink_contract_location"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "models.ContractLocation"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Изменение охвата влияет на доступ; не добавлять в create автоматически.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "create_doc",
+      "title": "Создать бумагу и загрузить версию/скан (предлагаемый сценарий)",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "POST",
+          "path": "/api/docs",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "assert_company_product docs + reference validation; author User; router commits",
+          "callableOwner": "app.routers.docs_router.create_doc",
+          "sourceRefs": [
+            "docs.create_doc"
+          ],
+          "partnerCallable": false
+        },
+        {
+          "method": "POST",
+          "path": "/api/docs/{doc_id}/versions",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "docs product + edit ACL pre/post row lock + lifecycle/approval/retention guards; router commits",
+          "callableOwner": "app.routers.docs_router.upload_version",
+          "sourceRefs": [
+            "docs.upload_version"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "writer.put",
+        "writer._file_rollback",
+        "docpolicy._can_doc"
+      ],
+      "proofRefs": [
+        "document_policy"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Выбрать kind/роль файла, лимиты, retention и набор документов; document writer не является готовым partner upload use case.",
+      "evidenceAssessment": "accepted policy/file-writer subsets only; not a complete external create/upload workflow and not current snapshot runtime acceptance"
+    },
+    {
+      "id": "approve",
+      "title": "Отправить/решить согласование (предлагаемый сценарий)",
+      "applications": [
+        "lease_power"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "POST",
+          "path": "/api/docs/{doc_id}/approval/start",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native docs action ACL and route; actual User; native transaction owner",
+          "callableOwner": "app.routers.docs_router.approval_start → app.services.doc_approvals.start",
+          "sourceRefs": [
+            "docs.approval_start"
+          ],
+          "partnerCallable": false
+        },
+        {
+          "method": "POST",
+          "path": "/api/docs/approvals/{approval_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "native decision actor/deputy and round snapshot",
+          "callableOwner": "app.routers.docs_router.approval_decide → app.services.doc_approvals.decide",
+          "sourceRefs": [
+            "docs.approval_decide"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "docflow.start",
+        "docflow.decide"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Согласование DocCard не означает изменение Contract или исполнение процесса Support; роли/маршрут не выбраны.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "ops_write",
+      "title": "Осмотр/обслуживание станции и условия начисления (предлагаемый сценарий)",
+      "applications": [
+        "operations_monitoring"
+      ],
+      "status": "current_native_only",
+      "externalOperations": [],
+      "nativeOperations": [
+        {
+          "method": "POST",
+          "path": "/api/ops/station-check/{location_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "route assert_company_member; helper same-company location; native router commit; no partner grant policy",
+          "callableOwner": "app.routers.ops_router.post_station_check → app.services.station_check.add_check",
+          "sourceRefs": [
+            "ops.post_station_check"
+          ],
+          "partnerCallable": false
+        },
+        {
+          "method": "PUT",
+          "path": "/api/ops/station-upkeep/{location_id}",
+          "operationId": null,
+          "operationIdStatus": "no_explicit_stable_curated_operationId; auto-generated native identifier not asserted",
+          "scopes": [],
+          "scopeStatus": "not partner OAuth; native auth dependencies only",
+          "tokenClasses": [
+            "core_user_session"
+          ],
+          "ceiling": "route assert_company_member; helper unit company/current_location; native router commit; no partner grant policy",
+          "callableOwner": "app.routers.ops_router.put_station_upkeep → app.services.station_upkeep.set_upkeep",
+          "sourceRefs": [
+            "ops.put_station_upkeep"
+          ],
+          "partnerCallable": false
+        }
+      ],
+      "sourceRefs": [
+        "checks.add_check",
+        "upkeep.set_upkeep",
+        "upkeep._единица",
+        "ops.post_ops_term",
+        "ops.patch_ops_term"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Нужны отдельные цели инженера/экономиста; мониторинг не даёт write/финансовые права.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "tickets",
+      "title": "Заявка на ремонт/расширенный онлайн-мониторинг",
+      "applications": [
+        "operations_monitoring"
+      ],
+      "status": "needs_product_choice",
+      "externalOperations": [],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "ops.get_ops_tickets",
+        "ops.get_network_state",
+        "canon.economy"
+      ],
+      "proofRefs": [],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "Требуются ли tickets, alerts, EVSE/connector/live OCPP или достаточно текущего статуса и сессионных агрегатов? Public curated endpoints отсутствуют; Support owner отдельно.",
+      "evidenceAssessment": "source_only_or_proposed; no action-level actual accepted execution proof asserted"
+    },
+    {
+      "id": "revoke",
+      "title": "Изменить/отозвать доступ сотрудника или установки",
+      "applications": [
+        "lease_power",
+        "operations_monitoring"
+      ],
+      "status": "exists_external",
+      "externalOperations": [],
+      "nativeOperations": [],
+      "sourceRefs": [
+        "identity.live_grant",
+        "access.resolve",
+        "oauth.revoke",
+        "admin.revoke_grant",
+        "admin.revoke_installation",
+        "admin.revoke_credential"
+      ],
+      "proofRefs": [
+        "main"
+      ],
+      "runtimeAtSnapshot": "not_run",
+      "productChoice": "OAuth revoke доступен клиенту; изменение membership/scopes/resources и административный отзыв принадлежат Core admin, не public business CRUD.",
+      "protocolOperations": [
+        {
+          "method": "POST",
+          "path": "/api/oauth2/revoke",
+          "operationId": null,
+          "operationIdStatus": "protocol endpoint outside curated product operationId registry",
+          "scopes": [],
+          "tokenClasses": [
+            "OAuth client/token revocation protocol, not business user write"
+          ],
+          "ceiling": "canonical Authlib revocation for authenticated/requesting registered client; no administrative membership edit",
+          "callableOwner": "app.routers.partner_oauth_router.revoke",
+          "sourceRefs": [
+            "oauth.revoke"
+          ]
+        }
+      ],
+      "evidenceAssessment": "accepted_report_subset; inspect proofRefs for original source/run boundaries; not a current snapshot acceptance"
+    }
+  ],
+  "launchBlockingGaps": [
+    {
+      "id": "G1",
+      "priority": 1,
+      "title": "Связь договор→объект и доказуемая принадлежность бумаги договору",
+      "blocks": "Сквозной выбор площадка→договор→бумага в обоих приложениях",
+      "actions": [
+        "contract_objects",
+        "document_contract"
+      ],
+      "next": "Ограниченный read-only пакет Contract→objects ниже; связь с бумагами отдельным пакетом"
+    },
+    {
+      "id": "G2",
+      "priority": 2,
+      "title": "Недостаточная предметная проекция договора аренды/электроснабжения",
+      "blocks": "Автоматический отбор вида договора, собственной организации, сроков/условий; Contract DTO содержит только паспортный минимум",
+      "actions": [
+        "find"
+      ],
+      "next": "Согласовать business allowlist; не раскрывать raw/attrs, не отбирать по свободному title как по юридическому виду"
+    },
+    {
+      "id": "G3",
+      "priority": 3,
+      "title": "Нет партнёрских create/update/link/upload/approve",
+      "blocks": "Самостоятельное ведение договора партнёром, если оно выбрано целью запуска",
+      "actions": [
+        "create_contract",
+        "update_contract",
+        "create_update_party",
+        "link_write",
+        "create_doc",
+        "approve"
+      ],
+      "next": "Сначала выбрать первый write/actor/draft; затем отдельный policy+shared-usecase пакет без включения flags"
+    },
+    {
+      "id": "G4",
+      "priority": 4,
+      "title": "Мониторинг ограничен servicePoint/current station и сессионными агрегатами",
+      "blocks": "Пилот с площадками site/EVSE/connector, live alarms, ремонтными заявками или хозяйственными расчётами",
+      "actions": [
+        "select",
+        "monitoring",
+        "ops_write",
+        "tickets"
+      ],
+      "next": "Утвердить минимальную цель; не требовать всю модернизацию для read-only мониторинга"
+    },
+    {
+      "id": "G5",
+      "priority": 5,
+      "title": "Нет принятого реального пилота двух приложений на выбранном release",
+      "blocks": "Внешний запуск даже минимального read-only варианта",
+      "actions": [
+        "login",
+        "revoke"
+      ],
+      "next": "Подтвердить точный образ/spec/flags, onboarding ordinary employees, callback/CORS/BFF, negative ACL/revocation и договорённость о доступных файлах; отдельный owner, не запускалось здесь"
+    }
+  ],
+  "nextImplementationPackage": {
+    "id": "NEXT-R1",
+    "kind": "design_only_no_authorization_to_enable",
+    "recommendation": "First implement read-only contract→objects; first required write is not confirmed.",
+    "operation": {
+      "method": "GET",
+      "path": "/api/v1/contracts/{contractId}/objects",
+      "operationId": "listContractObjects",
+      "status": "proposed_not_implemented",
+      "scopes": [
+        "contracts:read",
+        "objects:read"
+      ],
+      "tokenClasses": [
+        "partner_user_access",
+        "partner_machine_access"
+      ]
+    },
+    "actor": "Same verified partner user or independently approved machine principal as current contracts/objects reads. No Core User fabrication.",
+    "requestAllowlist": {
+      "path": [
+        "contractId"
+      ],
+      "query": [
+        "pageSize",
+        "cursor"
+      ],
+      "body": []
+    },
+    "responseAllowlist": [
+      "contractId",
+      "scopeType",
+      "items[].objectId",
+      "total",
+      "nextCursor"
+    ],
+    "reuse": [
+      "Query.detail(contracts, contractId)",
+      "Query.conditions(objects)",
+      "Query.binding/encode_cursor/decode_cursor with relation-specific resource and contract binding"
+    ],
+    "admission": "Existing route policy validates contracts resource; new bounded dependency must explicitly validate BOTH resource grants and scopes before any domain/detail/association SQL. Missing/EMPTY objects grant cannot be converted to empty success.",
+    "relationPredicate": "ContractLocation.company_id == token.company and contract_id == authorized Contract.id; ServiceLocation company and independently authorized objects conditions; distinct objects before count/limit; only explicit associations for scope_type=locations.",
+    "invariants": [
+      "Do not call native HTTP handler or contract_usage traversal.",
+      "Do not expand scope_type=company to all objects.",
+      "For company/unassigned return empty explicit associations with unchanged scopeType; do not infer absence of legal applicability.",
+      "No commit, flush, lock, materialization, new grants or hidden counts.",
+      "Existing 12 routes/native handlers/auth and caller transaction ownership remain behavior-compatible."
+    ],
+    "idempotency": "GET repeat has no business side effects; live data may change. No Idempotency-Key/creationKey.",
+    "conflict": "Cursor bound to contract ID, independent contracts+objects grants, tenant, actor/client/install/grant and current ceilings. Mismatch => safe400. No optimistic-write409; concurrent relation changes are live pagination, not snapshot.",
+    "nullIntent": "No writable nullable fields. Omitted cursor => first page; cursor=null as string => invalid400; unknown query or body fields rejected; null cannot clear a relation. Empty list does not distinguish no associations from all associations filtered out.",
+    "acceptance": [
+      "Real HTTP/SQL synthetic matrix for two companies, two own organizations, restricted ordinary employee, machine and admin; ALL/SET/EMPTY for both grants separately.",
+      "Missing either OAuth scope =>403 before domain list; empty resource grant =>403; hidden/missing contract =>404; hidden association omitted without hidden count.",
+      "Own-org/object ceiling shrink invalidates cursor and next call; revoke member/grant/installation/credential denies next call.",
+      "Equal created_at pagination stable tie breaker, no duplicates across unchanged dataset; foreign/mismatched ContractLocation company cannot leak.",
+      "No business rows/files changed in independent before/after fingerprint; auth/budget state accounted separately.",
+      "Existing native location read behavior unchanged; no new calls from services to routers.",
+      "Canonical 13-operation design after implementation: 10 user/service +3 userdocs; browser projection only CodePKCE; official codegen refreshed and freshness/consumer checked. Until then current actual remains12/9+3."
+    ],
+    "negativeACLMatrix": [
+      {
+        "case": "no bearer/Core/ID/docs cookie",
+        "expected": "401"
+      },
+      {
+        "case": "missing contracts:read OR objects:read",
+        "expected": "403"
+      },
+      {
+        "case": "contracts EMPTY OR objects EMPTY",
+        "expected": "403 before relationship query"
+      },
+      {
+        "case": "contracts SET excludes requested/foreign contract",
+        "expected": "404"
+      },
+      {
+        "case": "objects SET or employee object ceiling excludes linked object",
+        "expected": "200 omit object; total counts only visible"
+      },
+      {
+        "case": "own organization mismatch/foreign referenced organization",
+        "expected": "403 for invalid context or404 contract outside valid context"
+      },
+      {
+        "case": "machine with approved grants",
+        "expected": "200 within independent ceilings; never documents"
+      },
+      {
+        "case": "admin with narrow partner SET",
+        "expected": "no widening"
+      },
+      {
+        "case": "cursor other contract/tenant/grants/filters or changed ceiling",
+        "expected": "400 safe problem"
+      },
+      {
+        "case": "company/unassigned contract with unrestricted authorized context",
+        "expected": "200 empty items; no implicit all locations"
+      },
+      {
+        "case": "revoked/disabled membership or grant/client/install/credential",
+        "expected": "next call denied by live verifier"
+      },
+      {
+        "case": "flags disabled",
+        "expected": "503 before data query"
+      }
+    ],
+    "excluded": [
+      "Contract write",
+      "Counterparty CRUD",
+      "DocCard create/upload",
+      "Contract↔DocCard projection",
+      "Approvals/terms/payment/financial writes",
+      "Object lifecycle/EVSE/connectors",
+      "Activation/deploy/real pilot"
+    ]
+  },
+  "controlPlane": {
+    "userFlow": [
+      {
+        "method": "GET",
+        "path": "/api/oauth2/authorize",
+        "operationId": null,
+        "owner": "app.routers.partner_oauth_router.authorize",
+        "ref": "oauth.authorize"
+      },
+      {
+        "method": "POST",
+        "path": "/api/oauth2/token",
+        "operationId": null,
+        "owner": "app.routers.partner_oauth_router.token",
+        "ref": "oauth.token"
+      },
+      {
+        "method": "POST",
+        "path": "/api/oauth2/revoke",
+        "operationId": null,
+        "owner": "app.routers.partner_oauth_router.revoke",
+        "ref": "oauth.revoke"
+      }
+    ],
+    "operationIdSemantics": "OAuth protocol endpoints outside curated product operationId registry; no invented stable operationId",
+    "grantScopes": "identity.eligible_scopes ∩ client ∩ installation ∩ consent/grant; tenant chosen in consent, business data always verified token tenant",
+    "machine": "client_credentials+explicit grant_id+client_secret_basic; no user/docs identity, no refresh/ID token",
+    "admin": "Core session admin operations, never partner business API: DELETE /api/developer/grants/{grant_id}; DELETE /api/developer/installations/{installation_id}; DELETE /api/developer/clients/{client_id}/credentials/{credential_id}",
+    "docs": "GET /api/developer/docs/openapi.server.json canonical two schemes; /openapi.json browser projection one; independent docs session/role not API access"
+  },
+  "acceptedProofs": {
+    "product": {
+      "refs": [
+        "report.oldread",
+        "report.status"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "e3bb61a9 (initial child); 28f6b7e2 (integrated identity/product/portal)",
+      "observation": "147 initial product/contracts PASS; later 296 integrated PASS; different frozen sets, not a final HEAD run"
+    },
+    "monitoring": {
+      "refs": [
+        "report.monitorproof"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "9a4a5aee + c0f94af2",
+      "observation": "Actual synthetic HTTP/SQL scope, time/visit, machine/user and revoke acceptance described in pinned report"
+    },
+    "main": {
+      "refs": [
+        "report.mainproof"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "79daf4c6a8d8e149fea912012fd4f1847351af34 (affected-only)",
+      "observation": "Baseline 7: 5 PASS/2 FAIL; corrective 3 PASS; ordinary employee, docs-role positive/negative, machine and live revoke covered across separate runs; not one green full8"
+    },
+    "native_create": {
+      "refs": [
+        "report.nativeproof"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "1cd272c6",
+      "observation": "59 PASS (55 new/4 old), real native HTTP/SQL and caller rollback; no partner write policy"
+    },
+    "import_create": {
+      "refs": [
+        "report.importproof"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "92620919",
+      "observation": "First 69: 68 PASS/1 oracle FAIL; corrected affected 35 PASS; no combined green69"
+    },
+    "document_policy": {
+      "refs": [
+        "report.policyproof",
+        "report.docproof",
+        "report.fileproof"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "per-report frozen sources; original policy base 5ce5779b",
+      "observation": "222 policy, later 8 read-equivalence author cases accepted by artifact proof; 119 writer/archive and 2 photo HTTP cases in separate accepted reports"
+    },
+    "codegen": {
+      "refs": [
+        "report.codegen",
+        "report.profiles",
+        "report.status"
+      ],
+      "status": "accepted_report_only",
+      "sourcePin": "e94427bf (original type slice); a5e1a0ad (service profile base)",
+      "observation": "6 generation/parity/drift/negative checks and types/consumer checks reported; current snapshot not regenerated by this worker"
+    }
+  },
+  "sourceRefs": {
+    "api.create_product_api": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api",
+      "line": 92,
+      "endLine": 203,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "1e400c86feae55340b420ace03911392eb61ad4e28d154a32e9f18e870e9a5fa"
+    },
+    "api._policy": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "_policy",
+      "line": 82,
+      "endLine": 89,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "333da9ddbce2dc389c69888dd4f19e941e29b4aa79c0a7d791184e4b0f1d7b45"
+    },
+    "api.curated_openapi": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "curated_openapi",
+      "line": 362,
+      "endLine": 446,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "3c2b7740a0cb6bcfdb94f936211f7ec2f369241eaf5c0fc66e3859d4f7faaaf5"
+    },
+    "api.public_client_openapi": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "public_client_openapi",
+      "line": 449,
+      "endLine": 476,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "e34626b26e39f4d555761cb1db09404e0e7e203258f2fb69e121811fab521858"
+    },
+    "api.query_dependency": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "query_dependency",
+      "line": 76,
+      "endLine": 79,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "f758548b372f630414f32e3c1ba33a0d411ba575e50bcfc13bd74ea0e5b6a648"
+    },
+    "query.Query.contract_domain": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.contract_domain",
+      "line": 46,
+      "endLine": 57,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "e4a249241bc45564be6e045e3a71f5cb94f306960d75aa5ea20816e6f23a978b"
+    },
+    "query.Query.organization_location": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.organization_location",
+      "line": 59,
+      "endLine": 65,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "ee84ca8168b831070b5e5a42c6c25269cc4050d91c96be08dd1709ab9d940292"
+    },
+    "query.Query.conditions": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.conditions",
+      "line": 67,
+      "endLine": 98,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "e38334f50fdcb942fb91f847591b763530b1b4957abef0903bbd3bf9650f2d39"
+    },
+    "query.Query.listing": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.listing",
+      "line": 135,
+      "endLine": 158,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "238c75e0ed5be53398147d6dcc476e7ec24bfaeabb92b05418d8bc99577cbb50"
+    },
+    "query.Query.detail": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.detail",
+      "line": 160,
+      "endLine": 168,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "4447865e22a84abe5cb20bf62626fa37fb3c5db4f8136bcc3ca462e00e7669ee"
+    },
+    "query.Query.project": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.project",
+      "line": 179,
+      "endLine": 211,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "3c06e8dad29a2c634969397a02c41c57fc1d5ab9b183416362e52ff87801b5fb"
+    },
+    "query.Query.visible_links": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.visible_links",
+      "line": 170,
+      "endLine": 177,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "71b4cf2fb1555f1f1b2e053e1bbfd3714f0f3b5919ce26bbf404b459c4852bf0"
+    },
+    "query.Query.binding": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "Query.binding",
+      "line": 100,
+      "endLine": 111,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046",
+      "astSHA256": "cab1e7095de2e9a67be0ff43b09a9eb45608cee7a65a2eb2da2d0a7c591cab4d"
+    },
+    "access.resolve": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/access.py",
+      "symbol": "resolve",
+      "line": 67,
+      "endLine": 150,
+      "blobSHA": "b1bcb6228d5d0af3432a62d067296fb9650969e0",
+      "fileSHA256": "9edd931485539ffd23e696c4a37efad2e1060d1f69f434ce6b592ea1b1f85ebc",
+      "astSHA256": "5ffe0289c9dc9c2224aaac1f0c528f386000d978113850ea9c1e49eaa1df3688"
+    },
+    "access.scope_of": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/access.py",
+      "symbol": "scope_of",
+      "line": 28,
+      "endLine": 42,
+      "blobSHA": "b1bcb6228d5d0af3432a62d067296fb9650969e0",
+      "fileSHA256": "9edd931485539ffd23e696c4a37efad2e1060d1f69f434ce6b592ea1b1f85ebc",
+      "astSHA256": "65c51f15805fdb6befe7578f5dece812675eb1fc3f7b0022c700723c467892a2"
+    },
+    "access.configured_verifier": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/access.py",
+      "symbol": "configured_verifier",
+      "line": 45,
+      "endLine": 54,
+      "blobSHA": "b1bcb6228d5d0af3432a62d067296fb9650969e0",
+      "fileSHA256": "9edd931485539ffd23e696c4a37efad2e1060d1f69f434ce6b592ea1b1f85ebc",
+      "astSHA256": "55d302e604de60675513da9dce2ae7fc5ba74e816b2ce3ba33df30b7abf534df"
+    },
+    "monitor.detail": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/monitoring.py",
+      "symbol": "detail",
+      "line": 20,
+      "endLine": 40,
+      "blobSHA": "de83a383e7cb7b854c160f970e34a53f3dabe933",
+      "fileSHA256": "9810a3a6b9b24c7d4424676194968d98bd28f9c589e2a12efe6420efd8bda3eb",
+      "astSHA256": "365ce90f6a3306b2698fa64b4a0f4e3a649b07475bf222e4e7c80ba09134c84a"
+    },
+    "metrics.monitor_context": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "symbol": "monitor_context",
+      "line": 22,
+      "endLine": 34,
+      "blobSHA": "422eee6a04ff01cb0ca4800598d2116d1834664f",
+      "fileSHA256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625",
+      "astSHA256": "3ed70ee7aa370b63027ee45d06a109fe85be714c47808a6738786b2dddc8010f"
+    },
+    "metrics.session_boundary": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "symbol": "session_boundary",
+      "line": 85,
+      "endLine": 91,
+      "blobSHA": "422eee6a04ff01cb0ca4800598d2116d1834664f",
+      "fileSHA256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625",
+      "astSHA256": "b291cfe0749a994ea8527251966e12bf7e7afcbf28dd5633e4cbf7b32fd1fcf5"
+    },
+    "metrics.session_summary": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "symbol": "session_summary",
+      "line": 94,
+      "endLine": 101,
+      "blobSHA": "422eee6a04ff01cb0ca4800598d2116d1834664f",
+      "fileSHA256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625",
+      "astSHA256": "3c01c91ba9d81b2565cda28da7692fc466f2d8c6a9429c9ead9f2e76bf62eea6"
+    },
+    "metrics.visit_summary": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/ops_monitor_context.py",
+      "symbol": "visit_summary",
+      "line": 51,
+      "endLine": 74,
+      "blobSHA": "422eee6a04ff01cb0ca4800598d2116d1834664f",
+      "fileSHA256": "385201248f5f4711266034342a0eef8b552b22ece4f0abc05b5445df8cce8625",
+      "astSHA256": "4eb20e1e1647c35551df42441b81ad73f931a9087316a9f94caf03392c81107f"
+    },
+    "files.content": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/files.py",
+      "symbol": "content",
+      "line": 39,
+      "endLine": 84,
+      "blobSHA": "7bff6141305a5a6ca8403670704bcb1ff9a80dc7",
+      "fileSHA256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958",
+      "astSHA256": "59afa7637f14570effd39af756faf7f80d5baab85a438560d2eb5c93615398c6"
+    },
+    "files._open_beneath": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/files.py",
+      "symbol": "_open_beneath",
+      "line": 16,
+      "endLine": 36,
+      "blobSHA": "7bff6141305a5a6ca8403670704bcb1ff9a80dc7",
+      "fileSHA256": "c8ba2492de431c316bfa3659fc9e6e8187f7c24058483d9fdfb766bf306af958",
+      "astSHA256": "305db09716cedf8018852351abcb317dcb215f3abaab442ff7ad0074b8aa6ea0"
+    },
+    "identity.eligible_scopes": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "eligible_scopes",
+      "line": 200,
+      "endLine": 230,
+      "blobSHA": "87ad62e90567ba48e19bbf1b5986a552dc32eaac",
+      "fileSHA256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f",
+      "astSHA256": "b18bb9f20aafd72ea149e92892cab2af6fa6780d9a86f26ded4ed48856852fe4"
+    },
+    "identity.live_grant": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "live_grant",
+      "line": 304,
+      "endLine": 358,
+      "blobSHA": "87ad62e90567ba48e19bbf1b5986a552dc32eaac",
+      "fileSHA256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f",
+      "astSHA256": "f1cf7254343f359bfb475816b47f7cc7f5f5c8ed2004109906b57cc88c32025a"
+    },
+    "identity.verify_access": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "verify_access",
+      "line": 698,
+      "endLine": 736,
+      "blobSHA": "87ad62e90567ba48e19bbf1b5986a552dc32eaac",
+      "fileSHA256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f",
+      "astSHA256": "2f842930cd57821e6882a8c570e87156bb536bf2b1bfdcdbe08ea314dd5d2eac"
+    },
+    "identity.verify_partner_access_token": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "verify_partner_access_token",
+      "line": 739,
+      "endLine": 755,
+      "blobSHA": "87ad62e90567ba48e19bbf1b5986a552dc32eaac",
+      "fileSHA256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f",
+      "astSHA256": "807e3305d5a1e52be49ffe37ad079ea8042aa0861c4d291e4612be769777800b"
+    },
+    "identity.resource_scopes": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "resource_scopes",
+      "line": 270,
+      "endLine": 301,
+      "blobSHA": "87ad62e90567ba48e19bbf1b5986a552dc32eaac",
+      "fileSHA256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f",
+      "astSHA256": "f532d1e2219e6529bf00c0b2e572f961c1544ef1468ad65e77bfea7d48335978"
+    },
+    "native.create_contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "create_contract",
+      "line": 824,
+      "endLine": 835,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "bea74127beca91095c7b613d6b4256ca4e97aac65ec2b0982bfdc9892dffcf28"
+    },
+    "native.update_contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "update_contract",
+      "line": 838,
+      "endLine": 920,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "0eb574c3a4b7465ccf1047c8eeff5e565517b19f674ba2ab3ea3b8efa729cce1"
+    },
+    "native.create_counterparty": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "create_counterparty",
+      "line": 277,
+      "endLine": 305,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "3d2bc4ed3c65f54767780446d25221c7df51f4e156d8a3eccaccf9994fac23cd"
+    },
+    "native.update_counterparty": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "update_counterparty",
+      "line": 308,
+      "endLine": 359,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "98e98f458d3ebb061b95081ba71b5fa48f49adaab8f5f9ff85973c8bf0b475a9"
+    },
+    "native.get_contract_locations": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "get_contract_locations",
+      "line": 1209,
+      "endLine": 1227,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "5638014941a653dd15615ac39c5f8890115b09bcd7428764797ca12c195139a0"
+    },
+    "native.set_contract_scope": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "set_contract_scope",
+      "line": 1119,
+      "endLine": 1156,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "2aa6d0d514ab4b05e801e8a93dc0948bca75dd942ce2447be02f767896f73820"
+    },
+    "native.link_contract_location": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "link_contract_location",
+      "line": 1159,
+      "endLine": 1184,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "d5ea8cb08c6bbb359586e651372b265f72ecd679b0d383b86a1768ccd3899f8b"
+    },
+    "native.unlink_contract_location": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "unlink_contract_location",
+      "line": 1187,
+      "endLine": 1206,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "25b3d24ef3afb0d61b6f181eee02e5f202e6b080edb74826297f6ea8c442b522"
+    },
+    "native.get_contract_links": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "get_contract_links",
+      "line": 1016,
+      "endLine": 1023,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "24a7c4a48a05475680c94c7b6a4c4907e6dc94eb00f3c555c772dcb04065856f"
+    },
+    "native.get_contract_usage": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/references_router.py",
+      "symbol": "get_contract_usage",
+      "line": 1094,
+      "endLine": 1102,
+      "blobSHA": "a106bb1ff89560f52f89b92563f1f068bb117365",
+      "fileSHA256": "6e360e5c8347e34563933c6a8cef1be4eadf6c7f38825ddaa395bf1f74651db3",
+      "astSHA256": "56ba1b5a69ffc162efe6f9ef37941fd5bcc8d2494a71351ca5abb7ddc034c19c"
+    },
+    "nativecase.create_native_contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/native_contract_commands.py",
+      "symbol": "create_native_contract",
+      "line": 23,
+      "endLine": 79,
+      "blobSHA": "e6abcc8158bb02ab7588f434b44c707169b567b5",
+      "fileSHA256": "36216c6598133a4c707d1deff8ff64a7b0576b7280e7bf2cc88eeda09c095ad4",
+      "astSHA256": "f5d691cfba94f29010cbdfacfefbf14ac1454420dd49c778071fb3a57651e76d"
+    },
+    "importcase.create_imported_contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/contract_commands.py",
+      "symbol": "create_imported_contract",
+      "line": 15,
+      "endLine": 35,
+      "blobSHA": "8efcd9ec771dbc0e1017b8eb5f87799daf913a5b",
+      "fileSHA256": "bb1fefc9f3a8fa0024c7354f463a17ccc70cb16a8b89f81ff92cc65fda998a6d",
+      "astSHA256": "d28aa09ae0a9f5d908b9f3e0b7e24aa9df178836c835329b6bbd83f914cfa1d4"
+    },
+    "parties.create_imported_counterparty": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/counterparty_commands.py",
+      "symbol": "create_imported_counterparty",
+      "line": 17,
+      "endLine": 40,
+      "blobSHA": "b75657fdd18d4c534352c060783371f15492de3e",
+      "fileSHA256": "4c32d672a356427d1b54a4a5c9761a94a62ed4aee76ad2b3cb67873037c1a0f1",
+      "astSHA256": "db53fc767f2d2b4767dfbc5bb9f1a39d0b2c9523441ec20b2730d3b87ec49658"
+    },
+    "parties.add_imported_counterparty_alias": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/counterparty_commands.py",
+      "symbol": "add_imported_counterparty_alias",
+      "line": 43,
+      "endLine": 46,
+      "blobSHA": "b75657fdd18d4c534352c060783371f15492de3e",
+      "fileSHA256": "4c32d672a356427d1b54a4a5c9761a94a62ed4aee76ad2b3cb67873037c1a0f1",
+      "astSHA256": "028ec6dadacfd9b87f4e5341d55e3b961811201b7125b1143584d15c247db477"
+    },
+    "usage.contract_usage": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/contract_usage.py",
+      "symbol": "contract_usage",
+      "line": 120,
+      "endLine": 131,
+      "blobSHA": "dbe2d5cc105f69a0ad2e5019d7f2286e0378c352",
+      "fileSHA256": "9f504f2150af86b9e33b238e1c69bd806f16fab492a368a30d1169d911cbcda7",
+      "astSHA256": "9b6b46c27122dc1c7ce71d2657609cff90e8134693fed39ddfd94e5af5c4bd8f"
+    },
+    "usage.usage_by_contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/contract_usage.py",
+      "symbol": "usage_by_contract",
+      "line": 134,
+      "endLine": 153,
+      "blobSHA": "dbe2d5cc105f69a0ad2e5019d7f2286e0378c352",
+      "fileSHA256": "9f504f2150af86b9e33b238e1c69bd806f16fab492a368a30d1169d911cbcda7",
+      "astSHA256": "fdc94fb46ce46b1e97b349b3040e1422acedbf1f224416cdc8d208d7fa168c76"
+    },
+    "docs.create_doc": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "symbol": "create_doc",
+      "line": 2210,
+      "endLine": 2284,
+      "blobSHA": "fd7f872b6532216bd817cf83e1b0157ad10ac863",
+      "fileSHA256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "astSHA256": "038291845bce551fdf5f066597667cc28876fc6029cf9dd3fa842cb7b5b72b45"
+    },
+    "docs.upload_version": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "symbol": "upload_version",
+      "line": 5342,
+      "endLine": 5439,
+      "blobSHA": "fd7f872b6532216bd817cf83e1b0157ad10ac863",
+      "fileSHA256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "astSHA256": "05b1a02da5fa6e4f9c565c4d9eaa42e1d717f51229337bc5755c89abfe6321f4"
+    },
+    "docs.approval_start": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "symbol": "approval_start",
+      "line": 2726,
+      "endLine": 2768,
+      "blobSHA": "fd7f872b6532216bd817cf83e1b0157ad10ac863",
+      "fileSHA256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "astSHA256": "39cb51f3536e130ab3df82c7a1d48c0c3b2c1417e43f5e665f49b339c2ca440a"
+    },
+    "docs.approval_decide": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "symbol": "approval_decide",
+      "line": 2803,
+      "endLine": 2854,
+      "blobSHA": "fd7f872b6532216bd817cf83e1b0157ad10ac863",
+      "fileSHA256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "astSHA256": "1261d6c24a0b5a7e6acf014a8a5f88733d9131fe8c135b79d11f528a2d1df355"
+    },
+    "docs.update_access_policy": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/docs_router.py",
+      "symbol": "update_access_policy",
+      "line": 1359,
+      "endLine": 1414,
+      "blobSHA": "fd7f872b6532216bd817cf83e1b0157ad10ac863",
+      "fileSHA256": "3b7418d3270775462c4ec24b0dbdc45c58683becfab65e5620a4c4349b5e2a24",
+      "astSHA256": "5297d9cdb6680f97499ceea629772a644b01f1aabf6a4f38b55fc6b26c60c43a"
+    },
+    "docpolicy._readable_doc_clause": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/doc_access.py",
+      "symbol": "_readable_doc_clause",
+      "line": 389,
+      "endLine": 459,
+      "blobSHA": "122ef365a54aa6466dbbbed1da5cdbc62baf43a2",
+      "fileSHA256": "b2f8c364edf7fd84474faf7b49b3e6a4a64c4148123cb9610c2e5a36dfe3fcbd",
+      "astSHA256": "272d7d4014b511f4da23ffb79d03096ab0db9655374caac0dbc4bd05753b62a4"
+    },
+    "docpolicy._can_doc": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/doc_access.py",
+      "symbol": "_can_doc",
+      "line": 133,
+      "endLine": 258,
+      "blobSHA": "122ef365a54aa6466dbbbed1da5cdbc62baf43a2",
+      "fileSHA256": "b2f8c364edf7fd84474faf7b49b3e6a4a64c4148123cb9610c2e5a36dfe3fcbd",
+      "astSHA256": "6a607011925d3341d9874097ef255f1b002721f41684d6e6b2dbb3a6bf2d6c97"
+    },
+    "docpolicy.authorize_docs_file_download": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/doc_access.py",
+      "symbol": "authorize_docs_file_download",
+      "line": 528,
+      "endLine": 565,
+      "blobSHA": "122ef365a54aa6466dbbbed1da5cdbc62baf43a2",
+      "fileSHA256": "b2f8c364edf7fd84474faf7b49b3e6a4a64c4148123cb9610c2e5a36dfe3fcbd",
+      "astSHA256": "e3b57379b25b0a1923cfdd6be3f4373a4edb864efc86faa2d7ed7b4f93f1388d"
+    },
+    "docflow.start": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/doc_approvals.py",
+      "symbol": "start",
+      "line": 416,
+      "endLine": 487,
+      "blobSHA": "98db6f0dc203e61da79559aaf6361c0d71b62216",
+      "fileSHA256": "01952021e056ec80a5a7449e67d489225b7cc7463e96cd6199557656f4a8ecac",
+      "astSHA256": "8c5ac157d15f963232425723b5ab976de9b9d410769c291a23c75725d864a041"
+    },
+    "docflow.decide": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/doc_approvals.py",
+      "symbol": "decide",
+      "line": 525,
+      "endLine": 655,
+      "blobSHA": "98db6f0dc203e61da79559aaf6361c0d71b62216",
+      "fileSHA256": "01952021e056ec80a5a7449e67d489225b7cc7463e96cd6199557656f4a8ecac",
+      "astSHA256": "ac97fbb10f86e3bae0052cd5fa410849a4adabd4ed09d45dd287738fc8a96449"
+    },
+    "writer.put": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/file_store.py",
+      "symbol": "put",
+      "line": 125,
+      "endLine": 147,
+      "blobSHA": "4aa23deedfdcea45604ed91f8dd72eef3d76823e",
+      "fileSHA256": "855195da737b18076a5834eab5bd395ca9f2997b7d4c729fe087a4fec59fde51",
+      "astSHA256": "aa79aa05aa4d2ade8b0dd72ecb1007ebbc014b831a8b7c6efd11e690d6fd6d97"
+    },
+    "writer._file_rollback": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/file_store.py",
+      "symbol": "_file_rollback",
+      "line": 77,
+      "endLine": 83,
+      "blobSHA": "4aa23deedfdcea45604ed91f8dd72eef3d76823e",
+      "fileSHA256": "855195da737b18076a5834eab5bd395ca9f2997b7d4c729fe087a4fec59fde51",
+      "astSHA256": "bc14ac0b6120cd2619fa8c6972b3064826f1f912cd2eb9c3217b739f8280533b"
+    },
+    "writer._file_before_commit": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/file_store.py",
+      "symbol": "_file_before_commit",
+      "line": 58,
+      "endLine": 67,
+      "blobSHA": "4aa23deedfdcea45604ed91f8dd72eef3d76823e",
+      "fileSHA256": "855195da737b18076a5834eab5bd395ca9f2997b7d4c729fe087a4fec59fde51",
+      "astSHA256": "18d97ab5582dbf9295b136254783ea7d7ec94e0388f303d280222454611b5b1b"
+    },
+    "writer._file_transaction_end": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/file_store.py",
+      "symbol": "_file_transaction_end",
+      "line": 86,
+      "endLine": 108,
+      "blobSHA": "4aa23deedfdcea45604ed91f8dd72eef3d76823e",
+      "fileSHA256": "855195da737b18076a5834eab5bd395ca9f2997b7d4c729fe087a4fec59fde51",
+      "astSHA256": "b09a2f5d324cb21d1c50b61623bed0727e3b0440dc899ac1d9f366f9090bb04a"
+    },
+    "checks.add_check": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/station_check.py",
+      "symbol": "add_check",
+      "line": 124,
+      "endLine": 152,
+      "blobSHA": "34db760c5a965f2bc3f1d17b392405e727411dfd",
+      "fileSHA256": "19f6d9086a42e7e1b06372a56b4e05734aafdc27872f49c73a9b953e98b764a3",
+      "astSHA256": "9c08c337a2484c227873516e107b2b0866f78d3394754115ac71241444e6a7f0"
+    },
+    "upkeep.set_upkeep": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/station_upkeep.py",
+      "symbol": "set_upkeep",
+      "line": 151,
+      "endLine": 184,
+      "blobSHA": "d940ec153992bafcfbba873cf897af7c5849a1c0",
+      "fileSHA256": "b02626dba1c48d31cc6c705766828864ef5b0084c12e3ab7c378ce3be14c8cfc",
+      "astSHA256": "ffd575889531dafc542e2558cee93da359602b25288da9675d4ab3462e44ac7b"
+    },
+    "upkeep._единица": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/station_upkeep.py",
+      "symbol": "_единица",
+      "line": 118,
+      "endLine": 125,
+      "blobSHA": "d940ec153992bafcfbba873cf897af7c5849a1c0",
+      "fileSHA256": "b02626dba1c48d31cc6c705766828864ef5b0084c12e3ab7c378ce3be14c8cfc",
+      "astSHA256": "7088a54b8e63132ac5cd6c33abf41ded8bc6606a4289c946be6ef885db00105b"
+    },
+    "oauth.authorize": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "symbol": "authorize",
+      "line": 103,
+      "endLine": 128,
+      "blobSHA": "ebf0bf230ea761adb024eef9470e025aca9976ff",
+      "fileSHA256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3",
+      "astSHA256": "f3af6f6a680f3a77545949c3288136125146d9bd074bd23d8d1448ead8481a1b"
+    },
+    "oauth.token": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "symbol": "token",
+      "line": 131,
+      "endLine": 141,
+      "blobSHA": "ebf0bf230ea761adb024eef9470e025aca9976ff",
+      "fileSHA256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3",
+      "astSHA256": "ed303669ea088464fe317e513755be45078d5397ce664e426d065abf1282c708"
+    },
+    "oauth.revoke": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "symbol": "revoke",
+      "line": 144,
+      "endLine": 152,
+      "blobSHA": "ebf0bf230ea761adb024eef9470e025aca9976ff",
+      "fileSHA256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3",
+      "astSHA256": "9c332827abf3e68d7541d21ca07b4d69f78cc7c055d81b28e094c49e682f9cad"
+    },
+    "oauth.approve": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_oauth_router.py",
+      "symbol": "approve",
+      "line": 239,
+      "endLine": 282,
+      "blobSHA": "ebf0bf230ea761adb024eef9470e025aca9976ff",
+      "fileSHA256": "49221651c7b2b8366e4a38f44067e6b386eb561974090993e54cfcca1b561ca3",
+      "astSHA256": "49c97dae019d8b5e9078fcf76eb50bc111a6835cfa084f87ef051f65b6cb4313"
+    },
+    "admin.approve_installation": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_admin_router.py",
+      "symbol": "approve_installation",
+      "line": 103,
+      "endLine": 153,
+      "blobSHA": "7a00d950bb9ba7007f459b5220cd997221d8b5c2",
+      "fileSHA256": "9f414995519be27cafcf5f332ba9c22873a02aa002bcd3044f5fa37afcedf261",
+      "astSHA256": "5a5e286396179a58636c741a733c3caba67bf58223f261418587b7855ee9af14"
+    },
+    "admin.machine_grant": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_admin_router.py",
+      "symbol": "machine_grant",
+      "line": 173,
+      "endLine": 188,
+      "blobSHA": "7a00d950bb9ba7007f459b5220cd997221d8b5c2",
+      "fileSHA256": "9f414995519be27cafcf5f332ba9c22873a02aa002bcd3044f5fa37afcedf261",
+      "astSHA256": "7fb30a15e6dcd6bf39fade2443917d50e5121a12f3bac65ab691d9ffec9fde04"
+    },
+    "admin.revoke_installation": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_admin_router.py",
+      "symbol": "revoke_installation",
+      "line": 165,
+      "endLine": 170,
+      "blobSHA": "7a00d950bb9ba7007f459b5220cd997221d8b5c2",
+      "fileSHA256": "9f414995519be27cafcf5f332ba9c22873a02aa002bcd3044f5fa37afcedf261",
+      "astSHA256": "f7585ded03bb117a04e5baa3e9caf1d1810488b30e2ec04aa9c23e5526dc2c97"
+    },
+    "admin.revoke_grant": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_admin_router.py",
+      "symbol": "revoke_grant",
+      "line": 191,
+      "endLine": 201,
+      "blobSHA": "7a00d950bb9ba7007f459b5220cd997221d8b5c2",
+      "fileSHA256": "9f414995519be27cafcf5f332ba9c22873a02aa002bcd3044f5fa37afcedf261",
+      "astSHA256": "b2d0706f7ade277497b789802d2e6cdfef605096b63e0d48beedfa5a5e088580"
+    },
+    "admin.revoke_credential": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/partner_admin_router.py",
+      "symbol": "revoke_credential",
+      "line": 91,
+      "endLine": 100,
+      "blobSHA": "7a00d950bb9ba7007f459b5220cd997221d8b5c2",
+      "fileSHA256": "9f414995519be27cafcf5f332ba9c22873a02aa002bcd3044f5fa37afcedf261",
+      "astSHA256": "1e05bb775592648080087b99f0fbea1096bd3e73acc36c0d24b05fe11e23bdf1"
+    },
+    "ops.get_network_state": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "symbol": "get_network_state",
+      "line": 53,
+      "endLine": 73,
+      "blobSHA": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "fileSHA256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "astSHA256": "50e8453bb54762914a2cad35ee579f6b0444818de1fa7ad4018717187f1010ac"
+    },
+    "ops.get_ops_tickets": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "symbol": "get_ops_tickets",
+      "line": 76,
+      "endLine": 97,
+      "blobSHA": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "fileSHA256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "astSHA256": "72cb2b6c1d33d399af0eccd3f1682b92ce110d2fbb4d93f42b54ff769109d9c6"
+    },
+    "ops.post_station_check": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "symbol": "post_station_check",
+      "line": 352,
+      "endLine": 393,
+      "blobSHA": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "fileSHA256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "astSHA256": "fbb2f2aa9763db29356103ed80c47295e600a947a5f22fc61b18fea3c8085658"
+    },
+    "ops.put_station_upkeep": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "symbol": "put_station_upkeep",
+      "line": 423,
+      "endLine": 444,
+      "blobSHA": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "fileSHA256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "astSHA256": "310fb1c89e8531341168a382def1f595d7129a5e9d93aeb4c0b59498a4d5f29a"
+    },
+    "ops.post_ops_term": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "symbol": "post_ops_term",
+      "line": 690,
+      "endLine": 705,
+      "blobSHA": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "fileSHA256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "astSHA256": "152f6d5ee69936ee7b22a14ffd6795573846ed5337288617a4d07a2c63483a93"
+    },
+    "ops.patch_ops_term": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/ops_router.py",
+      "symbol": "patch_ops_term",
+      "line": 708,
+      "endLine": 731,
+      "blobSHA": "27c3798cce43fb606051d597dd197f9879152ee9",
+      "fileSHA256": "bcb05da80d20bc09d05a5435581f61d3c8b4e02aece629789ab159da353d547d",
+      "astSHA256": "41ba8d76db06a432cfb0c81d71a0de8dc2be6e01785cd6a45b40cd2119f38605"
+    },
+    "dto.Object": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "Object",
+      "line": 110,
+      "endLine": 119,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "ea8530565b77d9465023b32ffe3d78f94d073f5720c5fa21984db2e7f5341aed"
+    },
+    "dto.Equipment": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "Equipment",
+      "line": 122,
+      "endLine": 130,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "42bb141476d387be919cbd2fbad7bcaca40d8c7cf30446cc66f2839dc87fab71"
+    },
+    "dto.Contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "Contract",
+      "line": 140,
+      "endLine": 147,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "d6181d379966e1523f40767bfedeeac7907b3b87c143edb6d81fbd94e87723f7"
+    },
+    "dto.Document": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "Document",
+      "line": 150,
+      "endLine": 158,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "c925aa1d38806ceffb89281c0d00139393dd9e280ccb55f2c82167a7704c5810"
+    },
+    "dto.DocumentDetail": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "DocumentDetail",
+      "line": 170,
+      "endLine": 172,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "c16f8ec66a09308a59c411ef65dc947769a654aff06eae575b50af0c8da724e1"
+    },
+    "dto.ListQuery": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "ListQuery",
+      "line": 20,
+      "endLine": 54,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "e58757a987bfb2f30bda136f655ac96706693962fb8783a60d9ed473ee07f1a6"
+    },
+    "dto.MonitoringQuery": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/dto.py",
+      "symbol": "MonitoringQuery",
+      "line": 61,
+      "endLine": 69,
+      "blobSHA": "bc0e3a69fd9ab7d483a7bb0ca4eb362f6c1775c2",
+      "fileSHA256": "a2e15d5fe718c5e2e762fd61d90f9b0ebce8df0a4608f54d2abea47882a12b80",
+      "astSHA256": "4872dcfb60af95c751192a553dcba616ece7367f3cf15c939d1de92e31689039"
+    },
+    "schema.ContractCreate": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/schemas.py",
+      "symbol": "ContractCreate",
+      "line": 876,
+      "endLine": 906,
+      "blobSHA": "a3a51bf0b99109b645899a53259f45edf8a5eb03",
+      "fileSHA256": "561493cfd444ad27f0ee673fb3dd96156d891966451bcd7345e609bcb31cbe7d",
+      "astSHA256": "0a3ff128f76d44a0377b06f4f48d90d24d8942c4d90f5fde3f1866dfb29248ec"
+    },
+    "schema.ContractUpdate": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/schemas.py",
+      "symbol": "ContractUpdate",
+      "line": 909,
+      "endLine": 937,
+      "blobSHA": "a3a51bf0b99109b645899a53259f45edf8a5eb03",
+      "fileSHA256": "561493cfd444ad27f0ee673fb3dd96156d891966451bcd7345e609bcb31cbe7d",
+      "astSHA256": "2d12c16a085a17d75cd25b9d54ca647cb52c1694726216352ce3f37e76366b02"
+    },
+    "models.Contract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/models.py",
+      "symbol": "Contract",
+      "line": 1346,
+      "endLine": 1455,
+      "blobSHA": "a15774861492af92567f545e5b5b9426468512df",
+      "fileSHA256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "astSHA256": "3b55b84de7e7b9a063a5288431cc97a33a0ac0617b48f44f39bf7a79056a07bb"
+    },
+    "models.ContractLocation": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/models.py",
+      "symbol": "ContractLocation",
+      "line": 1490,
+      "endLine": 1515,
+      "blobSHA": "a15774861492af92567f545e5b5b9426468512df",
+      "fileSHA256": "06bfb7c6f7bce8ac345dbcbe23ee642e932ec2a9341673b20a1205c4f3206fee",
+      "astSHA256": "5c1ec8805309b10ebf828e6fc572324c89ac21bd820785df45dc1c0b44d6e3e7"
+    },
+    "config": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/config.py",
+      "symbol": "<file>",
+      "line": 55,
+      "endLine": 88,
+      "blobSHA": "30737e55974ab1084652a0577cf11116a03c1246",
+      "fileSHA256": "90c5da106f20fe90e31c899a88018ef741e6b3207a555fedbd58bafaa61780e8"
+    },
+    "main": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/main.py",
+      "symbol": "<file>",
+      "line": 490,
+      "endLine": 510,
+      "blobSHA": "a19f2de12fe7c57851568c5f1c2bf97f34d09e31",
+      "fileSHA256": "8a4f76e9ef8fe4c27418d8617b5d98b18d75ffbae2e6bbd24ac2994e9b488637"
+    },
+    "portal": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/routers/docs_portal_router.py",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 156,
+      "blobSHA": "dc04a315b82b054113ae7fd9d3869ff72cd05dab",
+      "fileSHA256": "1c73b96b371de984a1e748de7fe2fe99a16f1098eececa958c1278cc7dd6d86b"
+    },
+    "identity.catalog": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/services/partner_identity.py",
+      "symbol": "<file>",
+      "line": 45,
+      "endLine": 60,
+      "blobSHA": "87ad62e90567ba48e19bbf1b5986a552dc32eaac",
+      "fileSHA256": "9fe9679f48bbe6b6254e7dd50aafd94dfe31b96457abc5c8dcd8f6773b93225f"
+    },
+    "search": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/queries.py",
+      "symbol": "<file>",
+      "line": 19,
+      "endLine": 21,
+      "blobSHA": "f071b14d5024229705476a7c88861e1d2916f747",
+      "fileSHA256": "1f53491a8e8321ae02ddb991d873836b25e7011ec4071f71cc9540dd9ddab046"
+    },
+    "report.status": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/IMPLEMENTATION_STATUS.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 660,
+      "blobSHA": "92d2c677be8e6c9ecd878dc00b0197a15bb6754b",
+      "fileSHA256": "c004b091565fb860abeacf753f6bdb588b008e836c94d55f2e093324e9a0e0ad"
+    },
+    "report.runtime": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/RUNTIME_API_INVENTORY_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 166,
+      "blobSHA": "b1a00664e91087431ff2472f2a07b2cfd88235f5",
+      "fileSHA256": "a607018fd626db1330423cedf66f026dbafcf2045906eaffca1b4d3d5954cf9d"
+    },
+    "report.objects": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/OBJECT_LIFECYCLE_WRITERS_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 401,
+      "blobSHA": "70340b82eab4d445067414d17b3b87b3ce74ffa0",
+      "fileSHA256": "54cddf1779731119b0d0364a24048efb4129bf6dc77f3d20fc9c989bc629457e"
+    },
+    "report.contractmap": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/CONTRACT_WRITER_INVENTORY_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 349,
+      "blobSHA": "f4ebaed12e991c8756768c81165613118f1ab436",
+      "fileSHA256": "1a263fd7c885acd480eb6d1c8670d39abb8bd504f8652f4d16e2d2d730d1e32d"
+    },
+    "report.nativeproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/NATIVE_CONTRACT_CREATE_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 276,
+      "blobSHA": "10a36d1e48ea6a4903899d4a28467f44867680e7",
+      "fileSHA256": "cee05f2c84a2b498152c0c8799d2fbe27bcb4db21de4daf36f6dfb8dcd3e3fe4"
+    },
+    "report.importproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/CONTRACT_IMPORT_CREATE_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 249,
+      "blobSHA": "cd9935c547cedec886d1927a250e73eeb073d9bb",
+      "fileSHA256": "9f205116966e2efae48a02f7520e0060b136e10e535d79bffc7a0a0232e6dfb7"
+    },
+    "report.partyproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/corporate-counterparty-commands-20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 156,
+      "blobSHA": "370cfe413327aba1a33f58ef431ebb963ecfe5f1",
+      "fileSHA256": "aacdc248a284f634c19f4d0fe822a05d17ecf211c4a8dce49af32009f56fa40a"
+    },
+    "report.docproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/DOCUMENT_READ_ACL_EQUIVALENCE_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 309,
+      "blobSHA": "f517c486408af8757d86b983dbc01a2f774951fd",
+      "fileSHA256": "9a9255073b4763fbeb28e76b694bee3fff0ec0d0cceba3b75b9aa0f8e4ec0aee"
+    },
+    "report.policyproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/doc-access-policy-20261029.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 108,
+      "blobSHA": "2ae2ae80a6ee9fc4ef42b8b2442c6bef27f3152a",
+      "fileSHA256": "975446a16db2f58f50124759753cb78b9e543314b79797780a1d506428ba3d2e"
+    },
+    "report.fileproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/FILE_STORE_REFACTOR.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 159,
+      "blobSHA": "1e18ad5152eb1b17ac6528440343dfd6dd0d5705",
+      "fileSHA256": "2b04d4af4e6b93cd76e2dbe6f77a44c631f42f5f3f20ad904b43ba139d8228e1"
+    },
+    "report.monitorproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/object-monitoring-20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 149,
+      "blobSHA": "4aebbf91e31be59931f20c70b2c75739bbe3ce17",
+      "fileSHA256": "4ec6f8a9cf6bf32310be23d755853e784017524e528cde04241953647142c494"
+    },
+    "report.mainproof": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/PARTNER_MAIN_COMPOSITION_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 321,
+      "blobSHA": "29aa587ec11d72cbf45904d129d7fc76cc2f209a",
+      "fileSHA256": "6d4c6d28d9b575ab61c9e7e5b38b72f5f598f1e823d8a580a7893b4c2edb1501"
+    },
+    "report.pilots": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/PARTNER_SYNTHETIC_PILOTS.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 211,
+      "blobSHA": "5a22bb926b7ee5ff167d273ce947996a38adf2fa",
+      "fileSHA256": "81888114022e92020bcb74dedba6e5e5bd3d84890ced069efba9d58aa2815efb"
+    },
+    "report.quickstart": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/PARTNER_QUICKSTART.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 151,
+      "blobSHA": "9b5de304e6aa86ddd4a5a3ece36b93f19bcc2c0a",
+      "fileSHA256": "fc149c59cea83ee746a16867aff1f1b2455a1d30f39400bddfd6398033dc56bc"
+    },
+    "report.codegen": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/PARTNER_SDK_TYPES.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 179,
+      "blobSHA": "bd8981081e618e9f58ae7ba3e3642c4a623be25b",
+      "fileSHA256": "de5a7763c6455deacf69d36f60193d65fe0554df4bad9854e7c7f3e64bc60c7c"
+    },
+    "report.profiles": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/service-openapi-20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 133,
+      "blobSHA": "e19e78fff160c6a02c44c758d4da5f0db13bdf6b",
+      "fileSHA256": "c6650aa3a6ce5c6e91cc52c3d6e0d59189489e3397ea5765a91303e595bfbb62"
+    },
+    "report.oldread": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/product-read-api-20261029.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 166,
+      "blobSHA": "361651da6dcb2706bea466807cd0ae83acacabbd",
+      "fileSHA256": "a0a546d25f8c79858f19549228fc229342651428ff5794659001aeaf86f7c2e2"
+    },
+    "report.consumers": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/docs/api/API_CONSUMER_INVENTORY_20261030.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 177,
+      "blobSHA": "0e328fdb21aa1fbce4b2a8e6b7e2b0793e2d2b8a",
+      "fileSHA256": "ed491deb6a891758f5feaf14e644c5e835058de3dab99ed5212ef513f1f1b9f9"
+    },
+    "tool.types": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/src/generated/partner-api.d.ts",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 2842,
+      "blobSHA": "9ab003c7cb23bc735f3cbc634cca25b893cb5f03",
+      "fileSHA256": "e324b7caeebc75997bb966116929b31d462edc7708ce14cb782fdf56f4e41203"
+    },
+    "tool.exporter": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/scripts/export-partner-openapi.py",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 104,
+      "blobSHA": "5d07f7a11c929a3be60261fd27cdead16a06beb8",
+      "fileSHA256": "3145218bfd6eeb804f824259e09bf0e42116777ce01ef31a50d885376ed8615d"
+    },
+    "tool.generator": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/tools/partner-api-types/generate.mjs",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 114,
+      "blobSHA": "c624f75ead72b6e2eb57aed1a9915452617cdd72",
+      "fileSHA256": "1103495a96455c79eb68918f3a3826621ee94f5309c17b23cdc6efd1f9c010d5"
+    },
+    "canon.plan": {
+      "repository": "ecosystem-deploy",
+      "revision": "dde050c8a4a952f3785a44f5650f19a1bd9d7f58",
+      "path": "docs/API-MODERNIZATION-PLAN.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 238,
+      "blobSHA": "1f387218188f6970490c0a15793ae24b5815b49b",
+      "fileSHA256": "2f0ce3f319b1bbeff98905f2921514b5b722c1c65d4c7c13ca8b344f9e888352"
+    },
+    "canon.status": {
+      "repository": "ecosystem-deploy",
+      "revision": "dde050c8a4a952f3785a44f5650f19a1bd9d7f58",
+      "path": "docs/api/execution-20261029/STATUS.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 600,
+      "blobSHA": "df78d86aed7a7e19fcbd67decedb1d8e5854442c",
+      "fileSHA256": "7bf06a7b7759fce33c52ea477a4953b9cd75036e3c0bc72f55c1eefd4216eb72"
+    },
+    "canon.objects": {
+      "repository": "ecosystem-deploy",
+      "revision": "dde050c8a4a952f3785a44f5650f19a1bd9d7f58",
+      "path": "docs/OBJECTS.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 847,
+      "blobSHA": "b55fa218d65f14e758699e8aac3090da8ab7df8e",
+      "fileSHA256": "7f8a820c7b931a7f1c804593ffce792f0a97f46d31bc0affbb4b21e4a00b2422"
+    },
+    "canon.economy": {
+      "repository": "ecosystem-deploy",
+      "revision": "dde050c8a4a952f3785a44f5650f19a1bd9d7f58",
+      "path": "docs/OPS-ECONOMY.md",
+      "symbol": "<file>",
+      "line": 1,
+      "endLine": 99,
+      "blobSHA": "d8915005f4c9ea6f0bf63ba4d78234dd1e9893f7",
+      "fileSHA256": "9eb61b04a7957e9c8c9a4d0b75cdafd56c475bb66abe0011f49b299f549c43f1"
+    },
+    "route.listObjects": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.objects",
+      "line": 137,
+      "endLine": 139,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "a46e6fa613c347e43d70eeca7f6abd0d908c04f6fd39d443a0d928c28e48c914"
+    },
+    "route.getObject": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.object_detail",
+      "line": 141,
+      "endLine": 143,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "1e50471f944ccdba576c3ab66d5a63c242a51ea62eb5dea3434e2628862006e4"
+    },
+    "route.getObjectMonitoring": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.object_monitoring",
+      "line": 145,
+      "endLine": 153,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "3979baed65988987e2f8e8de8bad87d2bfef13d82c7f39500bd419a4bee11306"
+    },
+    "route.listEquipment": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.equipment",
+      "line": 155,
+      "endLine": 157,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "8107f3cdc137dddeed6922cbba089557a012bccbfac9ba40966e3d9fd2d1fa3f"
+    },
+    "route.getEquipment": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.equipment_detail",
+      "line": 159,
+      "endLine": 161,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "90f82cdb64f35b36dd7193d26ceaea222c2f48078da8fcd99b58cfd0fff34bb4"
+    },
+    "route.listCounterparties": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.counterparties",
+      "line": 163,
+      "endLine": 165,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "e319c593ec10dbfd5e9f2c85dfd91e07282a2151982797e39dc99c1f294db031"
+    },
+    "route.getCounterparty": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.counterparty_detail",
+      "line": 167,
+      "endLine": 169,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "b38e88cb7696a0dd5796e4d9b5bd6de72108c4157e60435ea459e44fd78c79f6"
+    },
+    "route.listContracts": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.contracts",
+      "line": 171,
+      "endLine": 173,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "1ce3333db58a7a69a74397ad22718dd5b8078201f57a37fd6489b18f28649945"
+    },
+    "route.getContract": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.contract_detail",
+      "line": 175,
+      "endLine": 177,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "d4d9c188abc5525d36dc4e57d902a7a6c6b6f25672b2adfeb1600999449127f6"
+    },
+    "route.listDocuments": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.documents",
+      "line": 179,
+      "endLine": 181,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "765f2a659beba23add4b816cf07b94b55aacdf5034ccaae113e9f2632f8baded"
+    },
+    "route.getDocument": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.document_detail",
+      "line": 183,
+      "endLine": 194,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "a073873809fc04c62bf785a0a381f610778ef2bb9f734ab0378e348a3ba31a1c"
+    },
+    "route.downloadDocumentVersion": {
+      "repository": "Ledger/app",
+      "revision": "07f12c6575cbb397e9945c7f9efda724445615c2",
+      "path": "clearledger/server/app/product_api/app.py",
+      "symbol": "create_product_api.document_content",
+      "line": 196,
+      "endLine": 200,
+      "blobSHA": "17fe2e15ce3e8d831746799db12a8681478a7459",
+      "fileSHA256": "ad0b92f412a1d93ff83ee7fe572b811f365875f77d1ba5de253ad24f8dbc9d27",
+      "astSHA256": "586829a289a62b1f2742e2c262d4007b974635ef19c2c14f6f251913c6d7ca64"
+    }
+  },
+  "performed": [
+    "Read-only source/AST analysis of the12 actual route declarations and applicable calls",
+    "Git blob byte equality for every cited source/document at explicit snapshot",
+    "No application imports/pytest collect/execution/SQL/network API; no regeneration of runtime/spec/types"
+  ],
+  "notRun": [
+    "Application imports, app/unit/SQL tests or collectors",
+    "Container/dependency/install/build/venv/main/lifespan",
+    "Swagger/OIDC/browser/HTTP production/sandbox or real partner pilot",
+    "Current generated type freshness/exporter execution; current whole1703 runtime registry regeneration"
+  ],
+  "publicSafety": "Only source symbols/hashes, accepted public report references and fictional examples; no operational data/credentials copied from domain canon."
+}

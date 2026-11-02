@@ -1,0 +1,29 @@
+{
+  "status": "PASS_ROOT_TERM_SCOPE_NATIVE23",
+  "sourceCommit": "2c0b7078f132938aff0152d805733ee2396848c9",
+  "authorCommit": "749738c32fbf8fe87e7abd05f27ace28306a452a",
+  "baseCommit": "24af3535565381d46f9e51c2841c2feb80b1c8f3",
+  "onlyOwnerChangedNodes": [
+    "ExpandCtx.scope",
+    "_plan_expectations"
+  ],
+  "otherOwnerASTEqual": true,
+  "cases": 23,
+  "testDefinitions": 4,
+  "passedPhases": 69,
+  "secondsIncludingBootstrap": 33.198063475079834,
+  "sqlEventsInTestCalls": 564,
+  "sqlShapes": 330,
+  "clients": 0,
+  "locks": 0,
+  "poolsClosedOnTestLoop": true,
+  "ownedRemoved": true,
+  "foreignProjectionUnchanged": true,
+  "notCovered": [
+    "HTTP routes",
+    "new Site writers",
+    "new schema/scopes",
+    "full CI",
+    "deployment"
+  ]
+}

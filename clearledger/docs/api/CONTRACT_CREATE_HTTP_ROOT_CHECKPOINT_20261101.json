@@ -1,0 +1,277 @@
+{
+  "status": "PROGRESS_COMPONENTS_ONLY_NO_RELEASE_GO",
+  "asOfUTC": "2026-11-01T07:39:37.715849+00:00",
+  "objective": "Все M00–M19 и 11 сквозных требований; исходный объём сохранён",
+  "sourceIntegrated": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+  "commits": {
+    "strictPhysicalMultiBindTestOnly": "91ed34904f2f4905ab14b43ea5c25ede911a74be",
+    "externalHTTPPOSTexact14": "8cda12d98f7b39d265dba7231993b03d99c41f21"
+  },
+  "POST": {
+    "method": "POST",
+    "path": "/api/v1/contracts",
+    "operationId": "createContract",
+    "manifest": {
+      "version": "1.1.0",
+      "GET": 15,
+      "POST": 1
+    },
+    "scope": "contracts:create",
+    "principalKinds": [
+      "user",
+      "confidential_machine"
+    ],
+    "responses": {
+      "created": 201,
+      "replayed": 200
+    },
+    "readResources": "EMPTY creates no read grant; fullSQLreference/currentauthority checks remain mandatory",
+    "atomicParts": [
+      "contract",
+      "contract locations",
+      "success intent",
+      "intent locations",
+      "audit"
+    ],
+    "featureFlags": "default false; admin PUT does not activate",
+    "SDK": "generator manifest16 authored; generatedSDK/types/consumers NOTREFRESHED"
+  },
+  "initial17": {
+    "status": "HTTP_INITIAL17_NOT_ACCEPTED_SWAGGER_SCHEMA_MISMATCH",
+    "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+    "artifact": ".artifacts/http-post-initial17-fullnative-pg-20261101-025a7105380d",
+    "hostSession": 19239,
+    "hostExit": 1,
+    "hostReaped": true,
+    "cases": 17,
+    "diagnosticPass": 16,
+    "unit13DiagnosticPass": true,
+    "officialGenuineMultiBindPGDiagnosticPass": true,
+    "actualHTTPUserMachineCREATEDiagnosticPass": 2,
+    "schemaFailure": "post.requestBody.application/json.schema != canonical ContractCreateBody.model_json_schema minus $defs",
+    "seconds": 61.093904806301,
+    "hashes": {
+      "evidence/result.json": "ada4ca045288bf8cdfbe55beb4b89f65fbbebb2c3d9c0d5000630927b48ca86d",
+      "execution.json": "841139a7821f4d3c3e3dc04590d0fac4859b5582cc4e15e436fa01cc7c59de52",
+      "source-manifest.json": "6ccb8100c8a3d437e31758cf0912736c2955eb77dddf5ad101638fcc9ec641e1"
+    },
+    "cleanup": {
+      "pool": {
+        "status": "PASS_SAME_TEST_LOOP_POOL_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "poolErrors": []
+      },
+      "factory": {
+        "status": "PASS_ROOT_ISSUER_FACTORY_CLEANUP",
+        "before": {
+          "checkedout": 0,
+          "checkedin": 2
+        },
+        "after": {
+          "checkedout": 0,
+          "checkedin": 0
+        },
+        "loopAlive": true,
+        "fullNativeSchema": true,
+        "positiveAuthMock": false
+      },
+      "PG": {
+        "clients": 0,
+        "locks": 0
+      },
+      "all2OwnedRemoved": true,
+      "foreign41safeSame": true
+    },
+    "limits": "Whole17 NOTPASS; no58HTTP/full122/CI/GO. ScopeProofRoleactualunchanged; nextschemaactualdiagnosticmustinspectdiff beforetest/prodfix"
+  },
+  "schemaDiagnostic": {
+    "actualDifference": "/properties/comment/default ABSENT vs canonical null",
+    "runtime": false,
+    "databaseOrNetwork": false
+  },
+  "fault6": {
+    "status": "ACTUAL_FAIL_PRESERVED_NOT_ACCEPTED",
+    "at": "2026-11-01T07:30:55.252587+00:00",
+    "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+    "host": "43991 EXIT1/reaped",
+    "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/http-post-fault6-8cda12d9-fullnative-pg-20261101-fa6e07805473",
+    "calls": 6,
+    "diagnosticPass": 1,
+    "failure": 5,
+    "errors": 0,
+    "skip": 0,
+    "seconds": 86.12778364587575,
+    "findings": [
+      "denial/serialization/commit reachactualSQLconsumer and pass unchangedfivecounts/noactiveSession thenFAIL only fixtureclosed marker skipped on exception",
+      "syntheticinnerCancelledError DIDNOTRAISE dueBaseHTTPMiddleware responsepath",
+      "actualHTTPtaskcancellation timeout5 expired beforeafter-fiveparts ready, observedactualsuccessfulconsumerruns5.9–6.3s; cancellationtargetnotreached/notPASS",
+      "unknowncommit/newroot samekey/currentauthorization replay diagnosticPASS"
+    ],
+    "cleanup": "actualPG0/0 factoryglobal0/0 noERROR normal2ownedremoved foreign41safeprojectionequal",
+    "pins": {
+      "execution.json": "4e8a84527013880d3f15ee3a53be428c5c9482a6ba137e45bddd1900f186e696",
+      "evidence/result.json": "096dd71538e8a7d408da890c5ef15c60581b7dd3629feafcecda8b5ccfd04ce3",
+      "evidence/progress.jsonl": "aa4c53ec6319fa5df07a4a1e92ecaf6d559a6b52e3156cd8425a54a67070d170",
+      "source-manifest.json": "6ccb8100c8a3d437e31758cf0912736c2955eb77dddf5ad101638fcc9ec641e1",
+      "evidence/full-native-bootstrap.json": "f2f35ac21940c2504365953b9d2655739ec07b0e44d666c272a41e343eefb79a",
+      "evidence/issuer-factory-cleanup.json": "671fc6b1c5330662dc272144fddc766acb4e6c2bc8f192ec14d866be023e717f",
+      "evidence/pool-cleanup.json": "7cdab1289817318650542415149663bf318028b62f12722c8279c0de86ec9af8"
+    },
+    "limits": "Separatefailed6 notgreenHTTP58; noacceptanceofproductioncancellation/close untilcorrectedSource/newactualruntime"
+  },
+  "profile95Accepted": {
+    "status": "ROOT_ACCEPTED_RECORDED_PROFILE95_CDB_SOURCE_RAW_WITH_LIMITATIONS",
+    "at": "2026-11-01T07:37:16.949896+00:00",
+    "source": "cdb65361f3207f82283c88da8b431625a5b1804c",
+    "runtime": {
+      "cases": 95,
+      "defs": 26,
+      "phases": 285,
+      "seconds": 58.59216340165585,
+      "host": "63641 EXIT0/reaped Rootobserved; notindependentlyreattestedbyreviewer"
+    },
+    "review": {
+      "md": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/profile95-gorg-root-raw-review-20261101/REVIEW.md",
+      "mdSHA256": "981a6e574015059d5a72f5099d826812d44fe5776b05fc42ce4f72beafb7b2c3",
+      "json": "/home/mag/orca/workspaces/ledger-app/native-auth-root-raw-review-20261101/.artifacts/profile95-gorg-root-raw-review-20261101/REVIEW.json",
+      "jsonSHA256": "727cbef874ac7ccdef05746c8903290fcf1385dafda21b7ef0a786ba8563ff2f",
+      "originalTask": "task_297ebcee7d6c",
+      "originalDispatch": "ctx_5d37a4d9d7be",
+      "correctionTask": "task_ae0ccf54dbca",
+      "correctionDispatch": "ctx_eae167ccf753",
+      "verdict": "ACCEPT_RECORDED_PROFILE95_CDB_SOURCE_RAW_WITH_LIMITATIONS"
+    },
+    "scope": {
+      "accepted": "Recorded Profile GET/PUT closed administration component on cdb65361, actual in-process ASGI/native JWT/original B/fullnative bootstrap, with listed attestation limits.",
+      "excluded": [
+        "own runtime pass",
+        "partner HTTP POST CREATE",
+        "creator/issuer suite",
+        "SQL122",
+        "whole API",
+        "full CI",
+        "current combinedSource",
+        "deployment",
+        "overall GO",
+        "app.main lifespan/seed"
+      ]
+    },
+    "limitations": [
+      {
+        "id": "EVIDENCE-01",
+        "severity": "medium",
+        "blockingForRecordedComponentVerdict": false,
+        "kind": "independent-attestation-limit",
+        "description": "Public source manifest reconstructed AFTER execution; private identity and mounted runner intentionally unread. Controller actually validates source hashes before/after; external files do not independently disclose numeric RoleOID/DBOID/role flags or host63641 PTY exit. Receipt records hostExit0/reaped, execution records exited containers and reaped helper commands.",
+        "scope": "Historical cdb65361 Profile95 record only; no prelaunch public attestation claimed."
+      },
+      {
+        "id": "ORACLE-01",
+        "severity": "low",
+        "blockingForRecordedComponentVerdict": false,
+        "kind": "test-oracle-limit",
+        "description": "Typed-discovery drift test proves actual PG block, HTTP409 and unchanged audit count; final assertion does not independently compare every parent/child snapshot for each drift. Other flush/cancellation tests check complete row counts.",
+        "source": "tests/test_partner_contract_profile_pg.py:270-313"
+      },
+      {
+        "id": "SCOPE-01",
+        "severity": "informational",
+        "blockingForRecordedComponentVerdict": false,
+        "kind": "mandatory-scope-fence",
+        "description": "Root8cda adds POST and changes routing/context/product access/CREATE authority and corrects a separate issuer PG multibind test to prove two actual roots/PIDs. Issuer test absent from Profile95 frozen test package. No transfer of cdb PASS to current combinedSource/SQL122/fullAPI/CI/overallGO."
+      }
+    ],
+    "physicalFK": [
+      790,
+      803
+    ],
+    "uniqueNormalizedFKEdges": [
+      789,
+      802
+    ],
+    "notes": "Root readfulloriginalMD andcorrectedallchangedsections; source559pins andevidencechecks accepted. Numeric FK correction distinguishedduplicatephysicalconstraint, no prodchange/reruntime. Reviewerlifecycle releasebeforeACKnext."
+  },
+  "SQL122": {
+    "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+    "status": "RUNNING_SERIAL_REMAINING_SLICES",
+    "completed": [
+      {
+        "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-0-20-8cda12d9-fullnative-pg-20261101-02dc381d20b4",
+        "bounds": [
+          0,
+          20
+        ],
+        "cases": 20,
+        "definitions": 6,
+        "phases": 60,
+        "seconds": 102.02016712725163,
+        "hostChildExit": 0,
+        "hostChildReaped": true,
+        "cleanup": "PG/pools0/0; normal2ownedremoved; foreignsafeprojectionequal",
+        "hashes": {
+          "execution.json": "573033d3eab7b4e6dd698d9e3c6e28b3206e14277652dd41ba7a9ed29ec1d1df",
+          "evidence/result.json": "9d29fa7398369a0c8bd17929d10228603b8fb38f0f1a7df7219db750660e8be3",
+          "evidence/slice-collection.json": "fe5b52c400462c77104a66abbed244e9fd545539735b27397f05b0f7ef493869",
+          "source-manifest.json": "1c846f2f8240fd6077359dc28eff3a7a50a865ae2f6a997ec48a0696eb4f83db"
+        }
+      },
+      {
+        "source": "8cda12d98f7b39d265dba7231993b03d99c41f21",
+        "artifact": "/home/mag/orca/workspaces/ledger-app/api-modernization-integration-20261029/.artifacts/sql-issuer-pg-slice-20-40-8cda12d9-fullnative-pg-20261101-25a5d7a527be",
+        "bounds": [
+          20,
+          40
+        ],
+        "cases": 20,
+        "definitions": 4,
+        "phases": 60,
+        "seconds": 148.344980253838,
+        "hostChildExit": 0,
+        "hostChildReaped": true,
+        "cleanup": "PG/pools0/0; normal2ownedremoved; foreignsafeprojectionequal",
+        "hashes": {
+          "execution.json": "25b659bdc5899adce13c716e571571d8f3c3c16d96496788ec3978df3ce64ec6",
+          "evidence/result.json": "c3dc144ea6e97db2c9b1d9561c6c50fa068b87b787d70e45bb2120097911c619",
+          "evidence/slice-collection.json": "b1cb39e7524aefe80884aeb1763d8fc1b0fdfbd2c8941b5d20fa7b7a0e2be17c",
+          "source-manifest.json": "1c846f2f8240fd6077359dc28eff3a7a50a865ae2f6a997ec48a0696eb4f83db"
+        }
+      }
+    ],
+    "currentAtCheckpoint": "pg-slice-40-60-8cda12d9",
+    "full122Accepted": false,
+    "prior3942": "60PASS3separate20series; fourth20 19diagnosticPASS1wrongphysicalmultibindtestFAIL; later42NOTSTARTED. True2connection/root/PID testfixed production0delta, diagnosticPASS infailedinitial17."
+  },
+  "followup": {
+    "schemaCode": "b8ce04764f35914898d6e769adf713f1f8876db4",
+    "metadataTestCode": "92b425fbff8ad235c5b4c845c97b8f9014440bf6",
+    "status": "SOURCE_REVIEW_PENDING_NOT_INTEGRATED_NOT_RUNTIME_ACCEPTED",
+    "owner": "DXsoleauthor +freshindependentSourceReviewer",
+    "staticHTTPDefinitions": 27,
+    "staticHTTPVariants": 70,
+    "authSQLChange": false
+  },
+  "nativeRegister": {
+    "peerCode": "bfb01aeb1afe6e5ee7be5b9c85693e68053343d4",
+    "status": "SOURCE_REVIEW_PENDING_NOT_INTEGRATED_NOTRUN",
+    "exactFiles": 11,
+    "newDefinitions": 33,
+    "newStaticVariants": 89,
+    "historicalCase84NotTransferred": true
+  },
+  "limits": [
+    "Component results do not attest combinedcurrentSource/fullCI",
+    "OID/host63641 attestation and reconstructedafterrunpublicmanifest explicitly retained inreview",
+    "Typeddrift narroweroracle retained",
+    "FullSQL122/currentHTTP70/nativeRegister/options/activation/SDK/recipientACL/remainingdomains/pilot OPEN",
+    "No merge/deploy/application server/lifespan/seed; disposable native PG only"
+  ]
+}

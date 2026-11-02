@@ -40,7 +40,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.reference_identity import lock_manual_creation
+from app.services.contract_commands import create_imported_contract
 from app.services.reference_overrides import apply_import_values
+from app.services.counterparty_commands import (
+    add_imported_counterparty_alias, create_imported_counterparty,
+)
 from app.services.reference_identity import (
     ContractIndex, CounterpartyIndex, id_key, json_ids, name_key,
     organization_for_import, require_organization,
@@ -435,19 +439,14 @@ class L2Cache:
             return None
         cp = self.counterparties.resolve(_clean_cp_name(raw_name), inn)
         if cp is None:
-            cp = Counterparty(
-                company_id=company_id, inn=_s(inn)[:20], name=_clean_cp_name(raw_name)[:500],
-                type=_cp_type(raw_name), aliases=[alias] if alias else [], kind="external",
-                raw={"referenceIdentity": {"name": _clean_cp_name(raw_name), "inn": _s(inn)}},
+            cp = await create_imported_counterparty(
+                db, company_id, self.counterparties, name=_clean_cp_name(raw_name),
+                inn=_s(inn), cp_type=_cp_type(raw_name), alias=alias,
             )
-            db.add(cp)
-            await db.flush()
-            self.counterparties.add(cp)
             if res is not None:
                 res["counterparties"] = res.get("counterparties", 0) + 1
         else:
-            if alias and alias not in (cp.aliases or []):
-                apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + [alias]))})
+            add_imported_counterparty_alias(cp, alias)
         return cp
 
     async def contract(self, db: AsyncSession, company_id, cp: Counterparty,
@@ -461,16 +460,13 @@ class L2Cache:
             # реестра оставались вне договорного контура (settlement.contract_id пустой).
             # Заводим «б/н» — основание видно в `basis`, номер проставляется вручную.
             num = str(number)[:100] if number else "б/н"
-            contract = Contract(
-                company_id=company_id, number=num, date=cdate or "",
+            contract = await create_imported_contract(
+                db, company_id, self.contracts, number=num, date=cdate or "",
                 counterparty_id=str(cp.id), organization_id=require_organization(self.org_id),
                 type=ctype, kind="СПоставщиком", basis=basis, scope_type="locations",
                 raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": ctype,
                                            "number": num, "date": cdate or ""}},
             )
-            db.add(contract)
-            await db.flush()
-            self.contracts.add(contract)
             res["contracts"] = res.get("contracts", 0) + 1
         if contract is not None and loc is not None:
             key = (id_key(contract.id), id_key(loc.id))

@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "core_partner_prerequisites_v1",
+  "files": {
+    "core_partner_prerequisites_v1.contract.json": "1ee6337b7f97e4c874c7a582b8fb9e6475dfe0249467f4b345cbc99a94e206b4",
+    "core_prerequisites_v1.sql": "3dab85f4430b177168d111e7952ed79122eb802ed0988c5f1b24b14563190942",
+    "core_prerequisites_v1.contract.json": "5af1123d5bd784d21269062b7af9973a19711d06e6b0cb5ebb484b4b6ff200fa",
+    "core_prerequisites.py": "be58ba1ff9c6592e838f3103b266e3875fa9e6b6872ff9a1da093320dc2f2f62"
+  }
+}

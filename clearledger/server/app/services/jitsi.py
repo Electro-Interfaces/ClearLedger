@@ -59,6 +59,17 @@ def event_room(ev) -> str:
     return room_for(f"event:{ev.series_id or ev.id}")
 
 
+async def meeting_hosts(db, ev) -> set:
+    """Ведущие встречи: отмеченные участники, а не отмечен никто — организатор."""
+    from sqlalchemy import select
+
+    from app.models import CalendarAttendee
+
+    отмечены = set((await db.execute(select(CalendarAttendee.user_id).where(
+        CalendarAttendee.event_id == ev.id, CalendarAttendee.is_host.is_(True)))).scalars())
+    return отмечены or {ev.organizer_id}
+
+
 async def share_series_url(db, ev) -> None:
     """Раздать ссылку комнаты повторениям серии, у которых ссылки ещё нет.
 
@@ -66,15 +77,9 @@ async def share_series_url(db, ev) -> None:
     созданы без неё — и в «Конференциях» не появляются. Чужие ссылки (Zoom,
     вписанные руками) не трогаем.
     """
-    from sqlalchemy import or_, update
+    from app.services import calendar_protocol
 
-    from app.models import CalendarEvent
-
-    корень = ev.series_id or ev.id
-    await db.execute(update(CalendarEvent).where(
-        or_(CalendarEvent.id == корень, CalendarEvent.series_id == корень),
-        CalendarEvent.conference_url.is_(None),
-        CalendarEvent.status != "cancelled").values(conference_url=ev.conference_url))
+    await calendar_protocol.share_series_url(db, ev)
 
 
 def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: int = 4, ttl_seconds: int | None = None) -> str | None:
