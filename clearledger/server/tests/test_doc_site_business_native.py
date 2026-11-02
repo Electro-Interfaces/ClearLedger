@@ -94,7 +94,7 @@ async def predecessor_rows(pg):
     await sql(pg, """INSERT INTO core.counterparties(id,company_id,name,type,aliases,is_group)
         VALUES (:id,:cid,'Synthetic legacy counterparty','ЮЛ','{}',false)""", id=CP, cid=A)
     await sql(pg, """INSERT INTO core.contracts(id,company_id,number,date,valid_until,counterparty_id,organization_id,type)
-        VALUES (:id,:cid,'Synthetic legacy','historic invalid date','also historic',:cp,:org,'Synthetic')""",
+        VALUES (:id,:cid,'Synthetic legacy','legacy bad date','also historic',:cp,:org,'Synthetic')""",
         id=CONTRACT, cid=A, cp=CP, org=ORG)
     await sql(pg, """INSERT INTO core.ops_cost_items(code,label,sort_order,is_active)
         VALUES ('p1d_legacy','Synthetic legacy',100,true)""")
@@ -194,7 +194,7 @@ async def test_doc_site_business_native(doc_site_pg, case):
         await predecessor_rows(pg)
         before = await pg.connection.fetch("SELECT id,date,valid_until FROM core.contracts ORDER BY id")
         terms = await pg.connection.fetch("SELECT id,scope_type,location_id FROM core.ops_contract_terms ORDER BY id")
-        assert len(before) == 1 and before[0]["date"] == "historic invalid date"
+        assert len(before) == 1 and before[0]["date"] == "legacy bad date"
         assert len(terms) == 2 and {r["scope_type"] for r in terms} == {"unsupported", "site"}
         await execute_sequence(pg.config, target_revision=DOC_SITE_BUSINESS_ID, legacy_sent_before=2000000000)
         assert before == await pg.connection.fetch("SELECT id,date,valid_until FROM core.contracts ORDER BY id")
